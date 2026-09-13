@@ -130,29 +130,48 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (84 tests):**
+**Built and passing (137 tests):**
 
-- `@boothly/sdk` — the boundary, with the host-compatibility checker.
+*Platform*
+- `@boothly/sdk` — the boundary, with a host-compatibility checker.
 - `@boothly/platform` — module loader (bundled + remote resolvers), hash-verified
   immutable bundle cache, per-module storage, session handling.
-- **Core** — catalogue, sales events with helper scoping, and the sync outbox.
-- **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery.
-- `@boothly/server-core` — gateway, ZollTool's multi-tenant auth ported verbatim,
-  entitlements, module registry, central per-account gating.
-- **Six modules** — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.
-- **Runtime delivery** — modules build to ES bundles and publish to the store;
-  the shell resolves host deps through an import map so there is one Vue.
+- **Core** — catalogue with variants and photos, sales events, per-event stock,
+  recorded sales, discount rules, backup/restore, CSV export.
+- **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery, and
+  per-op isolation so one bad payload cannot strand a device.
+- `@boothly/server-core` — gateway, multi-tenant auth, entitlements, module
+  registry, httpOnly refresh cookies.
+
+*Selling*
+- Cart with variants, automatic discount rules and a manual override.
+- Receipts, printed to a thermal printer or through the browser.
+- History with per-currency totals, reverts and CSV export.
+- Cash up: expected vs counted, with a signed difference.
+- Charging in a local currency while the books stay in the base one.
+
+*Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.
+
+*Deployment* — multi-stage Dockerfile, compose, `deploy.sh` that backs up before
+restarting, `/health`, and the gateway serving the built shell.
 
 **Not built:**
 
-- **Android shell** — deferred deliberately. Costs the four terminal providers
-  that need native plugins (myPOS GO2/Carbon/Glass, SumUp) until it lands;
-  manual, bridge and Carbon-remote work on the web today.
-- **Billing** — deferred. The per-account enabled-modules list is the seam it
-  attaches to.
+- **Android shell** — deferred. Costs the four terminal providers that need
+  native plugins (myPOS GO2/Carbon/Glass, SumUp) until it lands; manual, bridge
+  and Carbon-remote work on the web today.
+- **Billing** — deferred. The per-account enabled-modules list is its seam.
+- Smaller carry-overs from ZollTool: customer display mode, QR scanning, price
+  comparison, PIN lock, cost tracking and PDF reports.
 
 The twenty-point security baseline is tracked in [SECURITY.md](./SECURITY.md),
-with each control pointing at where it is enforced. Two items remain open and
-both are genuinely not-yet-needed rather than skipped: **file upload limits**
-(no upload route exists yet) and **response schemas**, which would make response
-trimming structural instead of a convention each route follows.
+with each control pointing at where it is enforced. Two items remain open, both
+genuinely not-yet-needed: **file upload limits** (product images are stored
+locally and never uploaded) and **response schemas**, which would make response
+trimming structural rather than a per-route convention.
+
+## A note on verification
+
+`declare module '*.vue'` means a missing component still typechecks. The build
+is the gate for component wiring, not `tsc` — `npm run build -w @boothly/web`
+is part of CI for that reason.

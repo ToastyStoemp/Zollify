@@ -6,8 +6,8 @@ import {
   transactionsToCsv,
   currentAccount,
   getSalesEvent,
-  pendingConfirm,
   recentTransactions,
+  shellConfirm,
   revertTransaction,
   totalsFor,
   visibleEvents,
@@ -63,18 +63,11 @@ function toggle(id: string): void {
 
 async function revert(id: string, total: number, currency: string): Promise<void> {
   error.value = null;
-  const ok = await new Promise<boolean>((resolve) => {
-    pendingConfirm.current = {
-      title: 'Revert this sale',
-      message:
-        `Revert ${currency} ${total.toFixed(2)}? The sale stays in the history marked as ` +
-        'reverted — a till record is never deleted.',
-      resolve(answer) {
-        pendingConfirm.current = null;
-        resolve(answer);
-      },
-    };
-  });
+  const ok = await shellConfirm(
+    `Revert ${currency} ${total.toFixed(2)}? The sale stays in the history marked as ` +
+      'reverted — a till record is never deleted.',
+    'Revert this sale',
+  );
   if (!ok) return;
 
   try {
@@ -88,17 +81,19 @@ async function revert(id: string, total: number, currency: string): Promise<void
 <template>
   <section class="history">
     <header>
-      <h1>History</h1>
+      <div class="lead">
+        <h1>History</h1>
+        <label class="scope">
+          <span>Event</span>
+          <select v-model="scope">
+            <option value="all">All events</option>
+            <option v-for="event in visibleEvents" :key="event.id" :value="event.id">
+              {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
+            </option>
+          </select>
+        </label>
+      </div>
       <button type="button" :disabled="!filtered.length" @click="exportCsv">Export CSV</button>
-      <label class="scope">
-        <span>Event</span>
-        <select v-model="scope">
-          <option value="all">All events</option>
-          <option v-for="event in visibleEvents" :key="event.id" :value="event.id">
-            {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
-          </option>
-        </select>
-      </label>
     </header>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -122,7 +117,8 @@ async function revert(id: string, total: number, currency: string): Promise<void
 
     <ul v-else class="txs">
       <li v-for="tx in filtered" :key="tx.id" :class="{ reverted: tx.revertedAt }">
-        <button type="button" class="row" @click="toggle(tx.id)">
+        <button type="button" class="row" :aria-expanded="expanded.has(tx.id)" @click="toggle(tx.id)">
+          <span class="chev" aria-hidden="true">{{ expanded.has(tx.id) ? '▾' : '▸' }}</span>
           <span class="when">{{ when(tx.timestamp) }}</span>
           <span class="event">{{ eventName(tx.eventId) }}</span>
           <span class="method">{{ tx.method }}</span>
@@ -146,6 +142,7 @@ async function revert(id: string, total: number, currency: string): Promise<void
           <button
             v-if="canRevert && !tx.revertedAt"
             type="button"
+            class="danger"
             @click="revert(tx.id, tx.total, tx.currency)"
           >
             Revert sale
@@ -160,6 +157,7 @@ async function revert(id: string, total: number, currency: string): Promise<void
 .history { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
+.lead { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
@@ -172,7 +170,8 @@ h1 { margin: 0; font-size: 1.35rem; }
 .txs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 .txs li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); overflow: hidden; }
 .txs li.reverted .row { opacity: .6; }
-.row { display: grid; grid-template-columns: 12rem 1fr 5rem 7rem auto; gap: .75rem; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: .6rem .85rem; font-size: .9rem; }
+.row { display: grid; grid-template-columns: 1rem 12rem 1fr 5rem 7rem auto; gap: .75rem; align-items: center; width: 100%; text-align: left; border: 0; border-radius: 0; background: transparent; padding: .6rem .85rem; font-size: .9rem; }
+.chev { color: var(--zfy-faint); font-size: .8rem; }
 .row:hover { background: var(--zfy-surface-2, #e9edf1); }
 .when { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .amount { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -182,5 +181,5 @@ h1 { margin: 0; font-size: 1.35rem; }
 .items li { display: flex; justify-content: space-between; }
 .line { font-variant-numeric: tabular-nums; }
 .ref { margin: 0; font-size: .78rem; color: var(--zfy-muted, #5a6472); display: flex; gap: .75rem; flex-wrap: wrap; }
-@media (max-width: 760px) { .row { grid-template-columns: 1fr auto; } .event, .method { display: none; } }
+@media (max-width: 760px) { .row { grid-template-columns: 1rem 1fr auto; } .event, .method { display: none; } }
 </style>

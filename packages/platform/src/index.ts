@@ -47,6 +47,7 @@ export { createModuleHost, type ModuleHost, type HostServices } from './sdk-host
 export {
   applyLogin,
   clearSession,
+  signOut,
   authFetch,
   refreshAccessToken,
   configureApiBase,
@@ -57,5 +58,5 @@ export {
   isAuthenticated,
   type LoginResult,
 } from './session';
-export { createShellUi, toasts, pendingConfirm, type Toast, type ConfirmRequest } from './shell-ui';
+export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';
 export * from './core';

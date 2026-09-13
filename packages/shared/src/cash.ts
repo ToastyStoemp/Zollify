@@ -16,6 +16,28 @@ export const CURRENCY_BILLS: Record<string, number[]> = {
 
 const FALLBACK_BILLS = [5, 10, 20, 50, 100, 200];
 
+/** Coins in circulation per currency, for counting a cash box. */
+export const CURRENCY_COINS: Record<string, number[]> = {
+  CHF: [0.05, 0.1, 0.2, 0.5, 1, 2, 5],
+  EUR: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2],
+  USD: [0.01, 0.05, 0.1, 0.25, 0.5, 1],
+  GBP: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2],
+  SGD: [0.05, 0.1, 0.2, 0.5, 1],
+  JPY: [1, 5, 10, 50, 100, 500],
+  AUD: [0.05, 0.1, 0.2, 0.5, 1, 2],
+  CAD: [0.05, 0.1, 0.25, 1, 2],
+  DKK: [0.5, 1, 2, 5, 10, 20],
+  NOK: [1, 5, 10, 20],
+  SEK: [1, 2, 5, 10],
+  HKD: [0.1, 0.2, 0.5, 1, 2, 5, 10],
+};
+
+/** Every denomination for a currency, largest first — the order a box is counted in. */
+export function denominationsFor(currency: string): number[] {
+  const all = [...(CURRENCY_BILLS[currency] ?? FALLBACK_BILLS), ...(CURRENCY_COINS[currency] ?? [])];
+  return all.sort((a, b) => b - a);
+}
+
 /** Up to 4 plausible cash amounts above the total (1-, 2-, then 3-bill sums). */
 export function cashShortcutAmounts(total: number, currency: string): number[] {
   const bills = CURRENCY_BILLS[currency] || FALLBACK_BILLS;

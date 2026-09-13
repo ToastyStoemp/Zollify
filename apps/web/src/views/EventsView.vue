@@ -7,6 +7,7 @@ import {
   currentAccount,
   deleteSalesEvent,
   setActiveEvent,
+  shellConfirm,
   upsertSalesEvent,
   visibleEvents,
 } from '@zollify/platform';
@@ -70,9 +71,15 @@ async function activate(id: string): Promise<void> {
   }
 }
 
-async function remove(id: string): Promise<void> {
+async function remove(event: SalesEvent): Promise<void> {
+  const ok = await shellConfirm(
+    `Remove "${event.name}"? Its sales stay in History, but claims and customs details for it are dropped.`,
+    'Remove this event',
+  );
+  if (!ok) return;
+  error.value = null;
   try {
-    await deleteSalesEvent(id);
+    await deleteSalesEvent(event.id);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not remove that event.';
   }
@@ -83,7 +90,7 @@ async function remove(id: string): Promise<void> {
   <section class="events">
     <header>
       <h1>Events</h1>
-      <button v-if="canEdit" type="button" @click="editing = blank()">New event</button>
+      <button v-if="canEdit" type="button" class="primary" @click="editing = blank()">New event</button>
     </header>
 
     <p v-if="isHelper" class="scoped">
@@ -126,7 +133,7 @@ async function remove(id: string): Promise<void> {
       </fieldset>
       <div class="actions">
         <button type="button" @click="editing = null">Cancel</button>
-        <button type="submit">Save</button>
+        <button type="submit" class="primary">Save</button>
       </div>
     </form>
 
@@ -148,11 +155,11 @@ async function remove(id: string): Promise<void> {
         </div>
         <div class="row-actions">
           <span v-if="activeEventId === event.id" class="badge">Active</span>
-          <button type="button" @click="activate(event.id)">
+          <button type="button" :class="{ primary: activeEventId !== event.id }" @click="activate(event.id)">
             {{ activeEventId === event.id ? 'Stand down' : 'Make active' }}
           </button>
           <button v-if="canEdit" type="button" @click="editing = { ...event }">Edit</button>
-          <button v-if="canEdit" type="button" @click="remove(event.id)">Remove</button>
+          <button v-if="canEdit" type="button" class="danger" @click="remove(event)">Remove</button>
         </div>
       </li>
     </ul>
@@ -173,10 +180,10 @@ label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; 
 .local legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .75rem 1rem; background: var(--zfy-surface, #fff); }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .75rem 1rem; background: var(--zfy-surface, #fff); }
 .list li.active { border-color: var(--zfy-accent, #0e7c66); }
 .meta { display: flex; flex-direction: column; gap: .1rem; }
 .when { font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
-.row-actions { display: flex; align-items: center; gap: .4rem; }
+.row-actions { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .badge { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-radius: 999px; padding: .15rem .5rem; }
 </style>

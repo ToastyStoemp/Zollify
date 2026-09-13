@@ -1,4 +1,5 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
+import { clearSdk, setSdk } from './runtime';
 
 /**
  * Customs — Swiss customs paperwork for a booth crossing a border.
@@ -18,6 +19,7 @@ export default defineModule({
   minRole: 'admin',
 
   setup(sdk: Sdk) {
+    setSdk(sdk);
     sdk.routes.addAll([
       {
         path: '',
@@ -43,5 +45,9 @@ export default defineModule({
     });
 
     sdk.log.info('customs module ready');
+  },
+
+  teardown() {
+    clearSdk();
   },
 });

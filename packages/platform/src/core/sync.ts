@@ -1,4 +1,4 @@
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
 import type {
   EventStock,
   Product,
@@ -14,7 +14,7 @@ import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { authFetch } from '../session';
 import { deviceFlavor, deviceId, deviceName } from './device';
-import { markSynced, refreshPendingCount, unsyncedOps } from './outbox';
+import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
@@ -313,11 +313,27 @@ export async function syncNow(): Promise<SyncResult> {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let pushSoon: ReturnType<typeof setTimeout> | null = null;
+let stopWatchingOutbox: (() => void) | null = null;
 
-/** Starts periodic sync, plus an immediate attempt whenever the network returns. */
+/** How long to let a burst of edits settle before pushing them as one batch. */
+const PUSH_DEBOUNCE_MS = 1_500;
+
+/**
+ * Starts periodic sync, plus an immediate attempt whenever the network
+ * returns, plus a push shortly after anything is queued — a sale on one
+ * register should be on the other within seconds, not at the next tick.
+ */
 export function startAutoSync(intervalMs = 60_000): void {
   stopAutoSync();
   timer = setInterval(() => void syncNow(), intervalMs);
+  stopWatchingOutbox = watch(pendingCount, (count) => {
+    if (count === 0 || pushSoon) return;
+    pushSoon = setTimeout(() => {
+      pushSoon = null;
+      void syncNow();
+    }, PUSH_DEBOUNCE_MS);
+  });
   if (typeof window !== 'undefined') {
     window.addEventListener('online', onOnline);
   }
@@ -331,5 +347,9 @@ function onOnline(): void {
 export function stopAutoSync(): void {
   if (timer) clearInterval(timer);
   timer = null;
+  if (pushSoon) clearTimeout(pushSoon);
+  pushSoon = null;
+  stopWatchingOutbox?.();
+  stopWatchingOutbox = null;
   if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
 }

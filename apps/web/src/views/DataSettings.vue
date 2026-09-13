@@ -5,8 +5,8 @@ import {
   backupFilename,
   createBackup,
   inspectBackup,
-  pendingConfirm,
   restoreBackup,
+  shellConfirm,
   syncNow,
   type BackupSummary,
 } from '@zollify/platform';
@@ -77,18 +77,12 @@ async function confirmRestore(): Promise<void> {
   if (!pending.value) return;
   const { summary, raw } = pending.value;
 
-  const ok = await new Promise<boolean>((resolve) => {
-    pendingConfirm.current = {
-      title: 'Restore this backup',
-      message: summary.sameAccount
-        ? 'Rows from the backup are merged into this account. Anything newer here is kept.'
-        : `This backup came from "${summary.accountName}", not this account. Restore it anyway?`,
-      resolve(answer) {
-        pendingConfirm.current = null;
-        resolve(answer);
-      },
-    };
-  });
+  const ok = await shellConfirm(
+    summary.sameAccount
+      ? 'Rows from the backup are merged into this account. Anything newer here is kept.'
+      : `This backup came from "${summary.accountName}", not this account. Restore it anyway?`,
+    'Restore this backup',
+  );
   if (!ok) return;
 
   busy.value = 'restore';
@@ -120,7 +114,7 @@ async function confirmRestore(): Promise<void> {
     <p v-if="status" class="ok" role="status">{{ status }}</p>
 
     <div class="actions">
-      <button type="button" :disabled="busy !== null" @click="exportBackup">
+      <button type="button" class="primary" :disabled="busy !== null" @click="exportBackup">
         {{ busy === 'export' ? 'Exporting…' : 'Export a backup' }}
       </button>
 
@@ -148,7 +142,7 @@ async function confirmRestore(): Promise<void> {
       </ul>
       <div class="row">
         <button type="button" @click="pending = null">Cancel</button>
-        <button type="button" :disabled="busy !== null" @click="confirmRestore">
+        <button type="button" class="primary" :disabled="busy !== null" @click="confirmRestore">
           {{ busy === 'restore' ? 'Restoring…' : 'Restore' }}
         </button>
       </div>

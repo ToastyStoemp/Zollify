@@ -97,6 +97,20 @@ export function clearSession(): void {
   setAccount(null);
 }
 
+/**
+ * Ends the session on this device. The server revokes the refresh token and
+ * clears its cookie; the local state is dropped regardless, so signing out
+ * always works even with no connection — the token then dies of expiry.
+ */
+export async function signOut(): Promise<void> {
+  try {
+    await fetch(`${apiBase}/auth/logout`, { method: 'POST', credentials: 'same-origin' });
+  } catch {
+    // Offline: the cookie stays until it expires, which is the honest outcome.
+  }
+  clearSession();
+}
+
 // ── API base ────────────────────────────────────────────────────────────────
 
 let apiBase = '/api';

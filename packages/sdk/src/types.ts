@@ -120,6 +120,12 @@ export interface SaleEvent {
   payment: {
     provider: string;
     approved: boolean;
+    /**
+     * How the money actually moved. A terminal provider is always card; a
+     * manual sale says which, because an external terminal the app never
+     * talks to is still a card sale and must not land in the cash count.
+     */
+    method?: 'cash' | 'card';
     txRef?: string;
     cardBrand?: string;
   };

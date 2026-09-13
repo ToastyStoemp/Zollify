@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import {
   addLine,
   appliedDiscounts,
@@ -67,10 +67,7 @@ function remaining(productId: string, variantId: string | null = ''): number | n
 function wouldExceed(productId: string, variantId: string | null = ''): boolean {
   const left = remaining(productId, variantId);
   if (left === null) return false;
-  const inCart = cart.lines
-    .filter((l) => l.productId === productId && (l.variantId ?? '') === (variantId ?? ''))
-    .reduce((n, l) => n + l.qty, 0);
-  return inCart >= left;
+  return inCart(productId, variantId) >= left;
 }
 
 onMounted(async () => {
@@ -93,6 +90,39 @@ onMounted(async () => {
 
 /** A product with variants needs one chosen before it can be added. */
 const choosing = ref<Product | null>(null);
+const firstOption = ref<HTMLButtonElement[] | null>(null);
+
+// Focus goes to the first size so a keyboard or scanner-driven till can pick
+// with Enter, and Escape backs out like any dialog.
+watch(choosing, async (product) => {
+  if (!product) return;
+  await nextTick();
+  firstOption.value?.[0]?.focus();
+});
+
+function onPickerKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') choosing.value = null;
+}
+
+/** Units of this item already on the ticket. */
+function inCart(productId: string, variantId: string | null = ''): number {
+  return cart.lines
+    .filter((l) => l.productId === productId && (l.variantId ?? '') === (variantId ?? ''))
+    .reduce((n, l) => n + l.qty, 0);
+}
+
+function bump(lineId: string, current: number, by: number): void {
+  const next = current + by;
+  if (next <= 0) removeLine(lineId);
+  else setQty(lineId, next);
+}
+
+/**
+ * Manual means no terminal is wired in — the money still moved, by cash or by
+ * a card reader the app never talks to. Which one matters at cash-up, so the
+ * seller says. A wired terminal is always card.
+ */
+const asksMethod = computed(() => providerId.value === 'manual');
 
 function tap(product: Product): void {
   const variants = (product.variants ?? []).filter((v) => !v.unlisted);
@@ -159,10 +189,10 @@ function clearCustomDiscount(): void {
   setCustomDiscount(null);
 }
 
-async function take(): Promise<void> {
+async function take(method?: 'cash' | 'card'): Promise<void> {
   message.value = null;
   const saleId = crypto.randomUUID();
-  const outcome = await checkout(providerId.value, saleId);
+  const outcome = await checkout(providerId.value, saleId, method);
   failed.value = !outcome.approved;
   lastSaleId.value = outcome.approved ? saleId : null;
   message.value = outcome.approved
@@ -190,12 +220,13 @@ function openReceipt(): void {
       <p class="count">{{ itemCount }} item{{ itemCount === 1 ? '' : 's' }}</p>
     </header>
 
-    <div v-if="choosing" class="variant-picker" role="dialog" aria-modal="true">
-      <div class="sheet">
-        <h2>{{ choosing.title }}</h2>
+    <div v-if="choosing" class="variant-picker" @click.self="choosing = null" @keydown="onPickerKey">
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="variant-title">
+        <h2 id="variant-title">{{ choosing.title }}</h2>
         <div class="options">
           <button
             v-for="variant in (choosing.variants ?? []).filter((v) => !v.unlisted)"
+            ref="firstOption"
             :key="variant.id"
             type="button"
             @click="addVariant(choosing, variant)"
@@ -223,7 +254,14 @@ function openReceipt(): void {
           {{ search ? 'Nothing matches that search.' : 'No products for sale yet — add some in Catalog.' }}
         </p>
         <div v-else class="grid">
-          <button v-for="product in products" :key="product.id" type="button" class="tile" @click="tap(product)">
+          <button
+            v-for="product in products"
+            :key="product.id"
+            type="button"
+            :class="['tile', { picked: inCart(product.id) > 0 }]"
+            @click="tap(product)"
+          >
+            <span v-if="inCart(product.id) > 0" class="picked-count" aria-label="in the cart">{{ inCart(product.id) }}</span>
             <ProductThumb :image-id="product.imageId" :alt="product.title" :size="44" />
             <span class="title">{{ product.title }}</span>
             <span
@@ -246,16 +284,12 @@ function openReceipt(): void {
         <ul v-else class="lines">
           <li v-for="line in cart.lines" :key="line.lineId">
             <span class="name">{{ line.name }}</span>
-            <input
-              class="qty"
-              type="number"
-              min="1"
-              :value="line.qty"
-              :aria-label="`Quantity for ${line.name}`"
-              @input="setQty(line.lineId, Number(($event.target as HTMLInputElement).value))"
-            />
+            <span class="stepper">
+              <button type="button" :aria-label="`One fewer ${line.name}`" @click="bump(line.lineId, line.qty, -1)">−</button>
+              <span class="qty">{{ line.qty }}</span>
+              <button type="button" :aria-label="`One more ${line.name}`" @click="bump(line.lineId, line.qty, 1)">+</button>
+            </span>
             <span class="linetotal">{{ (line.unitPrice * line.qty).toFixed(2) }}</span>
-            <button type="button" :aria-label="`Remove ${line.name}`" @click="removeLine(line.lineId)">×</button>
           </li>
         </ul>
 
@@ -296,8 +330,16 @@ function openReceipt(): void {
             <span>{{ baseTotal.toFixed(2) }}</span>
           </p>
           <div class="actions">
-            <button type="button" :disabled="isEmpty || cart.busy" @click="clear">Clear</button>
-            <button type="button" :disabled="isEmpty || cart.busy" @click="take">
+            <button type="button" class="quiet" :disabled="isEmpty || cart.busy" @click="clear">Clear</button>
+            <template v-if="asksMethod">
+              <button type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take('cash')">
+                {{ cart.busy ? 'Recording…' : 'Cash' }}
+              </button>
+              <button type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take('card')">
+                {{ cart.busy ? 'Recording…' : 'Card' }}
+              </button>
+            </template>
+            <button v-else type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take()">
               {{ cart.busy ? 'Taking payment…' : 'Take payment' }}
             </button>
           </div>
@@ -318,9 +360,11 @@ h1 { font-size: 1.35rem; margin: 0; }
 .event, .count, .empty { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
 .layout { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: start; }
 .picker { display: flex; flex-direction: column; gap: .75rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .5rem; }
-.tile { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .7rem .8rem; text-align: left; min-height: 4.2rem; }
-.tile .title { font-weight: 600; font-size: .9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: .6rem; }
+.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .8rem .9rem; text-align: left; min-height: 6rem; }
+.tile.picked { border-color: var(--zfy-accent, #0e7c66); box-shadow: inset 0 0 0 1px var(--zfy-accent, #0e7c66); }
+.picked-count { position: absolute; top: .5rem; right: .5rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: #fff; background: var(--zfy-accent, #0e7c66); font-variant-numeric: tabular-nums; }
+.tile .title { font-weight: 600; font-size: 1rem; line-height: 1.25; }
 .tile .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .left { font-size: .72rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 /* Advisory, never a block: if someone is standing there with cash, the stock
@@ -328,8 +372,10 @@ h1 { font-size: 1.35rem; margin: 0; }
 .left.none { color: var(--zfy-danger, #c6512f); font-weight: 600; }
 .ticket { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.lines li { display: grid; grid-template-columns: 1fr 3.5rem 4.5rem auto; gap: .5rem; align-items: center; font-size: .9rem; }
-.qty { width: 100%; }
+.lines li { display: grid; grid-template-columns: 1fr auto 4.5rem; gap: .5rem; align-items: center; font-size: .9rem; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; overflow: hidden; }
+.stepper button { min-width: 2.5rem; min-height: 2.5rem; padding: 0; border: 0; border-radius: 0; font-size: 1.1rem; }
+.stepper .qty { min-width: 2rem; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
 .linetotal { text-align: right; font-variant-numeric: tabular-nums; }
 .discount { display: flex; gap: .4rem; align-items: center; }
 .discount input { width: 6rem; }
@@ -340,12 +386,13 @@ h1 { font-size: 1.35rem; margin: 0; }
 .checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .75rem; }
 .total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
+.pay { flex: 1; min-height: 3rem; font-size: 1rem; }
 .receipt-link { align-self: flex-end; }
 .variant-picker { position: fixed; inset: 0; background: rgba(20,26,34,.45); display: grid; place-items: center; padding: 1rem; z-index: 10; }
 .sheet { background: var(--zfy-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
 .sheet h2 { margin: 0; font-size: 1.05rem; }
 .options { display: grid; gap: .4rem; }
-.options button { display: flex; justify-content: space-between; padding: .7rem .9rem; font-size: .95rem; }
+.options button { display: flex; justify-content: space-between; align-items: center; min-height: 3rem; padding: .7rem .9rem; font-size: 1rem; }
 .options .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .cancel { align-self: flex-end; }
 .result { margin: 0; font-size: .875rem; color: var(--zfy-accent-ink, #0a5a4a); }

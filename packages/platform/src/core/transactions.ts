@@ -74,7 +74,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
   }));
 
   const leg: PaymentLeg = {
-    kind: sale.payment.provider === 'manual' ? 'cash' : 'card',
+    kind: sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card'),
     amount: sale.total,
     provider: sale.payment.provider,
     txRef: sale.payment.txRef,

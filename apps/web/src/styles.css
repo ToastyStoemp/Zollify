@@ -1,36 +1,63 @@
 /*
- * Shell-level styling only. Everything reusable belongs in @zollify/ui so the
- * Zollify visual identity can be applied as a token change later rather than a
- * component rewrite.
+ * Shell-level styling. Colour and type come from the --zfy-* tokens declared in
+ * @zollify/ui/tokens.css; nothing here names a colour directly, so a palette
+ * change is a token change.
  */
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: var(--zfy-font, system-ui, -apple-system, "Segoe UI", sans-serif);
-  background: var(--zfy-bg, #f1f4f6);
-  color: var(--zfy-ink, #141a22);
+  font-family: var(--zfy-font);
+  background: var(--zfy-bg);
+  color: var(--zfy-ink);
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
-:focus-visible { outline: 2px solid var(--zfy-accent, #0e7c66); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--zfy-accent); outline-offset: 2px; }
 
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0s !important; animation-duration: 0s !important; }
+}
+
+/* ── Buttons ─────────────────────────────────────────────────
+ * Three weights. The default is quiet so a screen full of them stays calm; the
+ * one action a screen exists for is `.primary`, and anything that destroys data
+ * is `.danger` so it can never be mistaken for the safe choice next to it. */
 button {
   font: inherit;
-  padding: .45rem .9rem;
+  font-weight: 500;
+  min-height: 2.5rem;
+  padding: .45rem .95rem;
   border-radius: 8px;
-  border: 1px solid var(--zfy-line, #d6dde4);
-  background: var(--zfy-surface, #fff);
+  border: 1px solid var(--zfy-line);
+  background: var(--zfy-surface);
   color: inherit;
   cursor: pointer;
+  transition: background .12s, border-color .12s;
 }
+button:hover:not(:disabled) { background: var(--zfy-surface-2); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 
+button.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: #fff; }
+button.primary:hover:not(:disabled) { background: var(--zfy-accent-ink); border-color: var(--zfy-accent-ink); }
+button.danger { color: var(--zfy-danger); }
+button.danger:hover:not(:disabled) { background: var(--zfy-signal-soft); border-color: var(--zfy-danger); }
+button.quiet { border-color: transparent; background: transparent; }
+button.quiet:hover:not(:disabled) { background: var(--zfy-surface-2); }
+
+/* ── Fields ──────────────────────────────────────────────────── */
 input, select, textarea {
   font: inherit;
-  padding: .4rem .55rem;
+  min-height: 2.5rem;
+  padding: .4rem .6rem;
   border-radius: 8px;
-  border: 1px solid var(--zfy-line, #d6dde4);
-  background: var(--zfy-surface, #fff);
+  border: 1px solid var(--zfy-line);
+  background: var(--zfy-surface);
   color: inherit;
 }
+input[type='checkbox'], input[type='radio'] { min-height: 0; accent-color: var(--zfy-accent); width: 1.05rem; height: 1.05rem; }
+input[type='file'] { border: 0; padding: 0; background: none; }
+
+/* Wide things scroll inside themselves; the page never scrolls sideways. */
+.table-scroll { overflow-x: auto; }

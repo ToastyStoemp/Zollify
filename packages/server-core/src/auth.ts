@@ -350,6 +350,19 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     });
   });
 
+  /**
+   * Ends this device's session. Revokes the refresh token server-side so a
+   * copied cookie is dead too; the cookie adapter clears the browser's copy.
+   * Always 200: a token that is already gone is the outcome we want.
+   */
+  app.post('/api/auth/logout', REFRESH_RATE_LIMIT, async (req) => {
+    const token = (req.body as { refreshToken?: string } | undefined)?.refreshToken;
+    if (typeof token === 'string' && token.length > 0) {
+      db.prepare('DELETE FROM refresh_tokens WHERE tokenHash = ?').run(sha256(token));
+    }
+    return { ok: true };
+  });
+
   // ── Two-factor auth (TOTP authenticator) ───────────────────────────────────
   app.get('/api/2fa/status', { preHandler: app.authenticate }, async (req) => {
     const claims = req.user as JwtClaims;
@@ -361,7 +374,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const u = db.prepare('SELECT email FROM users WHERE id = ?').get(claims.sub) as { email: string };
     const secret = generateSecret();
     db.prepare('UPDATE users SET totpSecret = ?, totpEnabled = 0 WHERE id = ?').run(box.encrypt(secret), claims.sub);
-    return { secret, otpauth: otpauthUri({ secret, account: u.email, issuer: 'ZollTool' }) };
+    return { secret, otpauth: otpauthUri({ secret, account: u.email, issuer: 'Zollify' }) };
   });
   app.post('/api/2fa/enable', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;

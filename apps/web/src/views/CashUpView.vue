@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { CURRENCY_BILLS, fmtPrice, round2 } from '@zollify/shared';
+import { CURRENCY_COINS, denominationsFor, fmtPrice, round2 } from '@zollify/shared';
 import {
   activeEventId,
   recentTransactions,
@@ -26,11 +26,11 @@ const sales = computed(() =>
 
 const currency = computed(() => sales.value[0]?.currency ?? 'CHF');
 
-/** Denominations for the event's currency, largest first. */
-const denominations = computed(() => {
-  const bills = CURRENCY_BILLS[currency.value] ?? CURRENCY_BILLS.CHF ?? [];
-  return [...bills].sort((a, b) => b - a);
-});
+/** Notes and coins for the event's currency, largest first. */
+const denominations = computed(() => denominationsFor(currency.value));
+
+/** Nothing typed yet: the difference is not a finding, just arithmetic. */
+const hasCounted = computed(() => counted.value.size > 0 || float.value > 0);
 
 const takings = computed(() => {
   let cash = 0;
@@ -75,6 +75,10 @@ function setCount(value: number, qty: number): void {
 
 function label(value: number): string {
   return value < 1 ? `${Math.round(value * 100)}c` : String(value);
+}
+
+function isCoin(value: number): boolean {
+  return CURRENCY_COINS[currency.value]?.includes(value) ?? false;
 }
 </script>
 
@@ -125,7 +129,7 @@ function label(value: number): string {
         </label>
 
         <div class="denoms">
-          <label v-for="value in denominations" :key="value">
+          <label v-for="value in denominations" :key="value" :class="{ coin: isCoin(value) }">
             <span>{{ label(value) }}</span>
             <input
               type="number"
@@ -147,7 +151,8 @@ function label(value: number): string {
           <dt>Difference</dt>
           <!-- Shown signed, never as an absolute: over and short are different
                problems and reading them the same way hides one of them. -->
-          <dd :class="{ bad: variance !== 0, good: variance === 0 }">
+          <dd v-if="!hasCounted" class="pending">Count the box to compare.</dd>
+          <dd v-else :class="{ bad: variance !== 0, good: variance === 0 }">
             {{ variance > 0 ? '+' : '' }}{{ fmtPrice(variance, currency) }}
             <template v-if="variance === 0"> · balanced</template>
             <template v-else-if="variance > 0"> · over</template>
@@ -174,8 +179,11 @@ h2 { margin: 0; font-size: 1.05rem; }
 .count { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
 .float { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
 .float input { width: 8rem; }
-.denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .4rem; }
+.denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: .4rem; }
 .denoms label { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
+.denoms label > span { min-width: 2.4rem; font-variant-numeric: tabular-nums; }
+.denoms label.coin > span { color: var(--zfy-muted); }
+.pending { color: var(--zfy-muted); font-weight: 400; }
 .denoms input { width: 100%; text-align: right; }
 .result { display: grid; grid-template-columns: 8rem 1fr; gap: .3rem 1rem; margin: 0; border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .75rem; font-variant-numeric: tabular-nums; }
 .result dt { color: var(--zfy-muted, #5a6472); font-size: .875rem; }

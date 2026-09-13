@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch, type Component } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { currentAccount } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
@@ -64,18 +65,23 @@ const panels = computed<Panel[]>(() => {
   return [...core, ...fromModules];
 });
 
-const selected = shallowRef<string | null>(null);
+const route = useRoute();
+const router = useRouter();
 
-watch(
-  panels,
-  (list) => {
-    // Keep the current selection when a module loads or unloads; only fall back
-    // when what was selected has actually gone.
-    if (selected.value && list.some((p) => p.id === selected.value)) return;
-    selected.value = list[0]?.id ?? null;
-  },
-  { immediate: true },
-);
+/**
+ * The open panel lives in the URL (`#/settings?panel=core.team`) so a reload
+ * lands on the same panel and the back button steps between them, and so a
+ * module can link straight to its own settings.
+ */
+const selected = computed<string | null>(() => {
+  const wanted = typeof route.query.panel === 'string' ? route.query.panel : null;
+  if (wanted && panels.value.some((p) => p.id === wanted)) return wanted;
+  return panels.value[0]?.id ?? null;
+});
+
+function select(id: string): void {
+  void router.push({ name: 'settings', query: { panel: id } });
+}
 
 const activePanel = computed(() => panels.value.find((p) => p.id === selected.value) ?? null);
 const activeComponent = shallowRef<Component | null>(null);
@@ -112,7 +118,8 @@ const groups = computed(() => [
             :key="panel.id"
             type="button"
             :class="{ active: panel.id === selected }"
-            @click="selected = panel.id"
+            :aria-current="panel.id === selected ? 'page' : undefined"
+            @click="select(panel.id)"
           >
             {{ panel.label }}
           </button>
@@ -133,7 +140,11 @@ h1 { margin: 0; font-size: 1.35rem; }
 nav { display: flex; flex-direction: column; gap: .2rem; }
 .group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint, #8a94a2); }
 .group:first-child { margin-top: 0; }
-nav button { text-align: left; border-color: transparent; background: transparent; }
+nav button { text-align: left; border-color: transparent; background: transparent; justify-content: flex-start; }
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
-@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+@media (max-width: 720px) {
+  .layout { grid-template-columns: 1fr; }
+  nav { flex-direction: row; flex-wrap: wrap; gap: .3rem; }
+  .group { width: 100%; margin: .4rem 0 0; }
+}
 </style>

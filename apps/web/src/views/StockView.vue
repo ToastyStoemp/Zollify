@@ -131,7 +131,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
 
       <p v-if="!stock.length" class="empty">No products yet — add some in Catalog.</p>
 
-      <table v-else>
+      <div v-else class="table-scroll"><table>
         <thead>
           <tr>
             <th>Item</th>
@@ -164,7 +164,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
             <td class="num" :class="{ bad: row.free < 0 }">{{ row.free }}</td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
     </template>
 
     <!-- ── Claims for one event ─────────────────────────────────────────── -->
@@ -188,7 +188,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
       <p v-if="!eventId" class="empty">Pick an event to plan what it takes.</p>
       <p v-else-if="!claims.length" class="empty">No products yet — add some in Catalog.</p>
 
-      <table v-else>
+      <div v-else class="table-scroll"><table>
         <thead>
           <tr>
             <th>Item</th>
@@ -232,7 +232,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
             </td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
     </template>
   </section>
 </template>
@@ -253,7 +253,7 @@ h1 { margin: 0; font-size: 1.35rem; }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
 .totals .sub, .source .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }

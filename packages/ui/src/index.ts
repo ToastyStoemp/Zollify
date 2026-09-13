@@ -1,11 +1,9 @@
 /**
  * @zollify/ui — the shared visual layer.
  *
- * Tokens are carried over from ZollDesign so the platform is unblocked, and the
- * Zollify visual identity becomes a token-level change rather than a component
- * rewrite. Components must read `--zfy-*` (aliased to the inherited `--zui-*`
- * values in tokens.css) and never hard-code a colour — that is the whole
- * mechanism by which a restyle stays cheap.
+ * Components read `--zfy-*` tokens from tokens.css and never hard-code a
+ * colour — that is the whole mechanism by which a restyle stays a token
+ * change rather than a component rewrite.
  */
 
 export const UI_TOKEN_PREFIX = '--zfy-';

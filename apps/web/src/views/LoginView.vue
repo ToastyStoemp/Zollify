@@ -80,7 +80,7 @@ async function submit(): Promise<void> {
 
       <label>
         <span>Email</span>
-        <input v-model="email" type="email" autocomplete="username" required />
+        <input v-model="email" type="email" autocomplete="username" autofocus required />
       </label>
 
       <label>
@@ -93,7 +93,7 @@ async function submit(): Promise<void> {
         <input v-model="totp" inputmode="numeric" autocomplete="one-time-code" maxlength="8" />
       </label>
 
-      <button type="submit" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+      <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
   </div>

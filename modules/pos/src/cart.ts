@@ -174,7 +174,11 @@ export interface CheckoutOutcome {
  * module. The cart is only cleared after the event is emitted, so a subscriber
  * that throws cannot leave a paid-for basket silently discarded.
  */
-export async function checkout(providerId: string, saleId: string): Promise<CheckoutOutcome> {
+export async function checkout(
+  providerId: string,
+  saleId: string,
+  method?: 'cash' | 'card',
+): Promise<CheckoutOutcome> {
   if (isEmpty.value) return { approved: false, error: 'The cart is empty.' };
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
 
@@ -224,6 +228,7 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
       payment: {
         provider: result.provider,
         approved: true,
+        method,
         txRef: result.txRef,
         cardBrand: result.cardBrand,
       },

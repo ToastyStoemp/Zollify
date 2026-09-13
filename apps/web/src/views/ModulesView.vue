@@ -97,7 +97,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
           <p v-if="mod.description" class="desc">{{ mod.description }}</p>
           <p v-if="mod.requires?.length" class="requires">Needs: {{ mod.requires.join(', ') }}</p>
         </div>
-        <button type="button" :disabled="busy === mod.moduleId" @click="toggle(mod)">
+        <button type="button" :class="mod.enabled ? 'quiet' : 'primary'" :disabled="busy === mod.moduleId" @click="toggle(mod)">
           {{ busy === mod.moduleId ? 'Working…' : mod.enabled ? 'Switch off' : 'Switch on' }}
         </button>
       </li>

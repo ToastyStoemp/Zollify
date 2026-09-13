@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { Product, Variant } from '@zollify/shared';
-import { allProducts, deleteProduct, saveProductImage, upsertProduct } from '@zollify/platform';
+import {
+  allProducts,
+  currentAccount,
+  deleteProduct,
+  saveProductImage,
+  shellConfirm,
+  upsertProduct,
+} from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
-import { currentAccount } from '@zollify/platform';
 
 const account = currentAccount;
 const query = ref('');
@@ -103,6 +109,11 @@ async function save(): Promise<void> {
 }
 
 async function remove(product: Product): Promise<void> {
+  const ok = await shellConfirm(
+    `Remove "${product.title}" from the catalogue? Past sales of it stay in History.`,
+    'Remove this product',
+  );
+  if (!ok) return;
   error.value = null;
   try {
     await deleteProduct(product.id);
@@ -118,7 +129,7 @@ async function remove(product: Product): Promise<void> {
       <h1>Catalog</h1>
       <div class="tools">
         <input v-model="query" type="search" placeholder="Search title or SKU" aria-label="Search catalog" />
-        <button v-if="canEdit" type="button" @click="startNew">New product</button>
+        <button v-if="canEdit" type="button" class="primary" @click="startNew">New product</button>
       </div>
     </header>
 
@@ -129,11 +140,18 @@ async function remove(product: Product): Promise<void> {
       <div class="grid">
         <label><span>Title</span><input v-model="editing.title" type="text" required /></label>
         <label><span>SKU</span><input v-model="editing.sku" type="text" /></label>
-        <label><span>Price</span><input v-model.number="editing.price" type="number" step="0.01" min="0" /></label>
-        <label><span>Weight (g)</span><input v-model.number="editing.weightG" type="number" min="0" /></label>
-        <label><span>Tariff no.</span><input v-model="editing.tariffNo" type="text" /></label>
-        <label><span>Origin country</span><input v-model="editing.originCountry" type="text" maxlength="2" /></label>
+        <label><span>Price</span><input v-model.number="editing.price" type="number" step="0.01" min="0" inputmode="decimal" /></label>
       </div>
+
+      <details class="customs" :open="Boolean(editing.tariffNo || editing.weightG || editing.originCountry)">
+        <summary>Customs details</summary>
+        <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
+        <div class="grid">
+          <label><span>Weight (g)</span><input v-model.number="editing.weightG" type="number" min="0" inputmode="numeric" /></label>
+          <label><span>Tariff no.</span><input v-model="editing.tariffNo" type="text" inputmode="numeric" /></label>
+          <label><span>Origin country</span><input v-model="editing.originCountry" type="text" maxlength="2" placeholder="CH" /></label>
+        </div>
+      </details>
       <label class="image">
         <span>Photo</span>
         <div class="image-row">
@@ -158,7 +176,7 @@ async function remove(product: Product): Promise<void> {
             placeholder="Price"
             aria-label="Variant price"
           />
-          <button type="button" @click="removeVariant(i)">Remove</button>
+          <button type="button" class="quiet" :aria-label="`Remove variant ${variant.name || i + 1}`" @click="removeVariant(i)">Remove</button>
         </div>
         <button type="button" @click="addVariant">Add variant</button>
       </fieldset>
@@ -169,7 +187,7 @@ async function remove(product: Product): Promise<void> {
       </div>
       <div class="actions">
         <button type="button" @click="editing = null">Cancel</button>
-        <button type="submit">Save</button>
+        <button type="submit" class="primary">Save</button>
       </div>
     </form>
 
@@ -177,7 +195,8 @@ async function remove(product: Product): Promise<void> {
       {{ query ? 'Nothing matches that search.' : 'No products yet.' }}
     </p>
 
-    <table v-else>
+    <div v-else class="table-scroll">
+    <table>
       <thead>
         <tr><th>Title</th><th>SKU</th><th class="num">Price</th><th>Status</th><th v-if="canEdit"></th></tr>
       </thead>
@@ -192,11 +211,12 @@ async function remove(product: Product): Promise<void> {
           <td>{{ product.forSale ? 'For sale' : 'Not for sale' }}{{ product.unlisted ? ' · unlisted' : '' }}</td>
           <td v-if="canEdit" class="row-actions">
             <button type="button" @click="editing = { ...product }">Edit</button>
-            <button type="button" @click="remove(product)">Remove</button>
+            <button type="button" class="danger" @click="remove(product)">Remove</button>
           </td>
         </tr>
       </tbody>
     </table>
+    </div>
   </section>
 </template>
 
@@ -213,6 +233,8 @@ h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .toggles { display: flex; gap: 1rem; }
+.customs { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.customs summary { cursor: pointer; font-size: .875rem; font-weight: 600; }
 .variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
 .variants legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
 .variant { display: grid; grid-template-columns: 1fr 1fr 7rem auto; gap: .4rem; width: 100%; }
@@ -222,7 +244,7 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .title-cell { display: flex; align-items: center; gap: .6rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
+th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .mono { font-family: ui-monospace, monospace; font-size: .82rem; }

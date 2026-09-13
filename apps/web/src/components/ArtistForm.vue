@@ -15,7 +15,7 @@ const name = defineModel<string>('name', { default: '' });
   <div class="artist">
     <label v-if="props.canRename" class="wide">
       <span>Booth name</span>
-      <input v-model="name" type="text" placeholder="Wolf's Art Booth" autocomplete="organization" required />
+      <input v-model="name" type="text" placeholder="Phuong Ninjin" autocomplete="organization" required />
       <small>Shown in the sidebar and to everyone you invite.</small>
     </label>
 

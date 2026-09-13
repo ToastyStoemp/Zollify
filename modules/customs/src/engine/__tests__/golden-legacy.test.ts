@@ -148,7 +148,7 @@ function richState(): CustomsState {
       eventDateStart: '2026-05-14',
       eventDateEnd: '2026-05-16',
       eventLocation: 'Basel',
-      companyCode: 'GUG',
+      companyCode: 'PN',
       documentNumber: 2,
       venueName: 'Messe Basel',
       venueStreet: 'Messeplatz 10',

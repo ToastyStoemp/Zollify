@@ -23,7 +23,7 @@ const store = process.env.ZOLLIFY_MODULE_STORE
   ? resolve(process.env.ZOLLIFY_MODULE_STORE)
   : join(root, 'apps', 'server', 'modules-store');
 
-const MODULES = ['pos', 'customs', 'price-cards', 'sourcing', 'migration', 'shopify-sync'];
+const MODULES = ['pos', 'customs', 'price-cards', 'sourcing', 'migration', 'shopify-sync', 'public-events'];
 const viteBin = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
 /**

@@ -35,6 +35,7 @@ modules/
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
+  public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   migration/      single-use ZollTool backup importer
 apps/
   web/            the shell (first target)
@@ -155,7 +156,15 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
   sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
-*Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.
+*Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
+events.
+
+*Public events* (the ZollEvents port) publishes at `/p/public-events/<slug>`:
+the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ics`
+(subscribable calendar) and `/instagram.txt` (bio text). Rendered on the gateway
+from the account's op-log, so it updates whenever an event is edited. Public
+module halves mount under `/p/` with no session; the module resolves the account
+from the slug and refuses unless the module is enabled for it.
 
 *Deployment* — multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting, `/health`, and the gateway serving the built shell.

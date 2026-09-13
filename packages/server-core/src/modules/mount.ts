@@ -21,6 +21,16 @@ export interface ModuleContext {
   identity(req: FastifyRequest): RequestIdentity;
 }
 
+/**
+ * What a module's public half receives. No identity: nobody is signed in. The
+ * module resolves which account a request is for from its own data (a slug, a
+ * token) and must check `isEnabled` before serving anything for it.
+ */
+export interface PublicModuleContext {
+  db: Database.Database;
+  isEnabled(accountId: string): boolean;
+}
+
 export interface ServerModule {
   id: string;
   /** Minimum role for every route in this module. Per-route checks may narrow further. */
@@ -28,6 +38,13 @@ export interface ServerModule {
   /** Called once at boot to create tables this module owns. */
   migrate?(db: Database.Database): void;
   routes: (ctx: ModuleContext) => FastifyPluginAsync;
+  /**
+   * Unauthenticated routes, mounted under `/p/<id>`. For the few modules that
+   * publish something to the open web — an events page, a calendar feed.
+   * Responses here may be embedded cross-origin, so the gateway relaxes the
+   * resource-isolation headers for this prefix only.
+   */
+  publicRoutes?: (ctx: PublicModuleContext) => FastifyPluginAsync;
 }
 
 const RANK: Record<Role, number> = { member: 0, admin: 1, owner: 2 };
@@ -80,6 +97,31 @@ export function mountServerModules(
         await scope.register(mod.routes({ db, identity }));
       },
       { prefix: `/m/${mod.id}` },
+    );
+  }
+}
+
+/**
+ * Mounts each module's public half under `/p/<id>`, outside authentication.
+ *
+ * Isolation headers are loosened here, once: a Shopify page must be able to
+ * load `/p/public-events/<slug>/embed.js` and fetch its JSON, which the
+ * app-wide `same-origin` resource policy and closed CORS would refuse. Nothing
+ * under `/p/` carries a session, so the wider exposure costs nothing.
+ */
+export function mountPublicModules(app: FastifyInstance, db: Database.Database, modules: ServerModule[]): void {
+  for (const mod of modules) {
+    if (!mod.publicRoutes) continue;
+    const ctx: PublicModuleContext = { db, isEnabled: (accountId) => isEnabled(db, accountId, mod.id) };
+    void app.register(
+      async (scope) => {
+        scope.addHook('onSend', async (_req, reply) => {
+          reply.header('cross-origin-resource-policy', 'cross-origin');
+          reply.header('access-control-allow-origin', '*');
+        });
+        await scope.register(mod.publicRoutes!(ctx));
+      },
+      { prefix: `/p/${mod.id}` },
     );
   }
 }

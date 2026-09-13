@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-core';
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
+import { publicEventsServerModule } from './modules/public-events';
 import { taxServerModule } from './modules/tax';
 
 loadDotEnv();
@@ -48,6 +49,7 @@ async function main(): Promise<void> {
   const serverModules: ServerModule[] = [
     taxServerModule,
     sourcingServerModule,
+    publicEventsServerModule,
     shopifyServerModule(jwtSecret),
   ];
 

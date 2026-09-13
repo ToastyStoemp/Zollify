@@ -29,6 +29,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),
   'shopify-sync': () => import('@zollify/shopify-sync'),
+  'public-events': () => import('@zollify/public-events'),
 };
 
 export const contributions = new ContributionRegistry();

@@ -5,3 +5,5 @@ export * from './protocol';
 export * from './money';
 export * from './currencies';
 export * from './cash';
+export * from './flags';
+export * from './public-events';

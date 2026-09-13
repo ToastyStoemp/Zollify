@@ -10,7 +10,7 @@ import { openDb } from './db';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
 import { listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
-import { mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
+import { mountPublicModules, mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
 import { registerStatic } from './static';
@@ -196,6 +196,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     },
     { prefix: '/api' },
   );
+
+  // Public halves: no session, resolved by the module from a slug or token.
+  mountPublicModules(app, db, opts.serverModules);
 
   app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 

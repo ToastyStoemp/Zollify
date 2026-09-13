@@ -7,6 +7,7 @@ import type {
   SalesEvent,
   ServerOp,
   Transaction,
+  DiscountRule,
 } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -16,6 +17,7 @@ import { markSynced, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
+import { loadDiscounts } from './discounts';
 
 /**
  * Offline-first sync.
@@ -80,81 +82,113 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
   const db = openCoreDb(requireAccountId());
   let applied = 0;
 
-  await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, async () => {
+  await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, db.discounts, async () => {
     for (const op of ops) {
-      switch (op.type) {
-        case 'product.upsert': {
-          const incoming = op.payload as Product;
-          const existing = await db.products.get(incoming.id);
-          if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
-            await db.products.put(incoming);
-            applied++;
-          }
-          break;
-        }
-        case 'product.delete': {
-          const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
-          const existing = await db.products.get(id);
-          if (existing) {
-            await db.products.put({ ...existing, deletedAt, updatedAt: deletedAt });
-            applied++;
-          }
-          break;
-        }
-        case 'event.upsert': {
-          const incoming = op.payload as SalesEvent;
-          const existing = await db.events.get(incoming.id);
-          if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
-            await db.events.put(incoming);
-            applied++;
-          }
-          break;
-        }
-        case 'tx.create': {
-          const incoming = op.payload as Transaction;
-          // Sales are immutable once made; first write wins and a replayed op
-          // is a no-op rather than a duplicate row.
-          if (!(await db.transactions.get(incoming.id))) {
-            await db.transactions.put(incoming);
-            applied++;
-          }
-          break;
-        }
-        case 'tx.revert': {
-          const { id, revertedAt, revertedBy } = op.payload as {
-            id: string;
-            revertedAt: number;
-            revertedBy: string;
-          };
-          const existing = await db.transactions.get(id);
-          if (existing && !existing.revertedAt) {
-            await db.transactions.put({ ...existing, revertedAt, revertedBy });
-            applied++;
-          }
-          break;
-        }
-        case 'stock.set': {
-          const incoming = op.payload as EventStock;
-          const key: [string, string, string] = [
-            incoming.eventId,
-            incoming.productId,
-            incoming.variantId ?? '',
-          ];
-          const existing = await db.eventStock.get(key);
-          if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
-            await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
-            applied++;
-          }
-          break;
-        }
-        default:
-          // Unknown to this build — skip rather than fail the whole batch.
-          break;
+      try {
+        applied += await applyOne(db, op);
+      } catch (err) {
+        // One malformed op must not poison the whole pull. A peer on a newer
+        // build can emit a payload this one cannot read, and refusing every
+        // other change because of it would strand the device.
+        console.warn(`[boothly] skipped a bad ${op.type} op`, err);
       }
     }
   });
 
   return applied;
+}
+
+/** Applies a single op. Returns 1 when it changed something, 0 when superseded. */
+async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promise<number> {
+  switch (op.type) {
+    case 'product.upsert': {
+      const incoming = op.payload as Product;
+      const existing = await db.products.get(incoming.id);
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.products.put(incoming);
+        return 1;
+      }
+      return 0;
+    }
+    case 'product.delete': {
+      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
+      const existing = await db.products.get(id);
+      if (existing) {
+        await db.products.put({ ...existing, deletedAt, updatedAt: deletedAt });
+        return 1;
+      }
+      return 0;
+    }
+    case 'event.upsert': {
+      const incoming = op.payload as SalesEvent;
+      const existing = await db.events.get(incoming.id);
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.events.put(incoming);
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.create': {
+      const incoming = op.payload as Transaction;
+      // Sales are immutable once made; first write wins and a replayed op
+      // is a no-op rather than a duplicate row.
+      if (!(await db.transactions.get(incoming.id))) {
+        await db.transactions.put(incoming);
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.revert': {
+      const { id, revertedAt, revertedBy } = op.payload as {
+        id: string;
+        revertedAt: number;
+        revertedBy: string;
+      };
+      const existing = await db.transactions.get(id);
+      if (existing && !existing.revertedAt) {
+        await db.transactions.put({ ...existing, revertedAt, revertedBy });
+        return 1;
+      }
+      return 0;
+    }
+    case 'discount.upsert': {
+      const incoming = op.payload as DiscountRule & { updatedAt?: number };
+      const existing = (await db.discounts.get(incoming.id)) as
+        | (DiscountRule & { updatedAt?: number })
+        | undefined;
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.discounts.put(incoming);
+        return 1;
+      }
+      return 0;
+    }
+    case 'discount.delete': {
+      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
+      const existing = await db.discounts.get(id);
+      if (existing) {
+        await db.discounts.put({ ...existing, deletedAt, updatedAt: deletedAt } as never);
+        return 1;
+      }
+      return 0;
+    }
+    case 'stock.set': {
+      const incoming = op.payload as EventStock;
+      const key: [string, string, string] = [
+        incoming.eventId,
+        incoming.productId,
+        incoming.variantId ?? '',
+      ];
+      const existing = await db.eventStock.get(key);
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
+        return 1;
+      }
+      return 0;
+    }
+    default:
+      // Unknown to this build — skip rather than fail the whole batch.
+      return 0;
+  }
 }
 
 async function push(): Promise<number> {
@@ -226,7 +260,9 @@ export async function syncNow(): Promise<SyncResult> {
       const pulled = await pull();
 
       // Reload the in-memory stores so the UI reflects what just arrived.
-      if (pulled > 0) await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions()]);
+      if (pulled > 0) {
+        await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts()]);
+      }
       await refreshPendingCount();
 
       lastSyncAt.value = Date.now();

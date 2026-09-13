@@ -71,3 +71,14 @@ export {
   type BackupSummary,
   type RestoreResult,
 } from './backup';
+export {
+  loadDiscounts,
+  discountsLoaded,
+  allDiscounts,
+  activeDiscounts,
+  getDiscount,
+  upsertDiscount,
+  deleteDiscount,
+  replaceDiscounts,
+  resetDiscountCache,
+} from './discounts';

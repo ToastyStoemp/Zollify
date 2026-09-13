@@ -117,7 +117,7 @@ describe('sync', () => {
     pullResponses = [
       {
         ops: [
-          { opId: 'd'.repeat(16), deviceId: 'other', ts: 1, serverSeq: 1, type: 'discount.upsert', payload: {} },
+          { opId: 'd'.repeat(16), deviceId: 'other', ts: 1, serverSeq: 1, type: 'image.meta', payload: {} },
           { opId: 'e'.repeat(16), deviceId: 'other', ts: 1, serverSeq: 2, type: 'product.upsert', payload: product('p9', 'Kept', 100) },
         ],
         latestSeq: 2,
@@ -127,7 +127,26 @@ describe('sync', () => {
     const result = await sync.syncNow();
 
     expect(result.ok).toBe(true);
-    expect(openCoreDb(account.accountId).products.get('p9')).resolves.toBeDefined();
+    await expect(openCoreDb(account.accountId).products.get('p9')).resolves.toBeDefined();
+  });
+
+  it('keeps applying the batch when one known op has a malformed payload', async () => {
+    // A peer on a newer build can send a payload this one cannot read. That is
+    // a reason to skip the op, not to strand the device on an old cursor.
+    pullResponses = [
+      {
+        ops: [
+          { opId: 'f'.repeat(16), deviceId: 'other', ts: 1, serverSeq: 1, type: 'product.upsert', payload: { nonsense: true } },
+          { opId: 'g'.repeat(16), deviceId: 'other', ts: 1, serverSeq: 2, type: 'product.upsert', payload: product('p8', 'Survived', 100) },
+        ],
+        latestSeq: 2,
+      },
+    ];
+
+    const result = await sync.syncNow();
+
+    expect(result.ok).toBe(true);
+    await expect(openCoreDb(account.accountId).products.get('p8')).resolves.toBeDefined();
   });
 
   it('advances the cursor so the next pull asks only for what is new', async () => {

@@ -28,6 +28,13 @@ const corePanels: Panel[] = [
     component: () => import('./DataSettings.vue'),
   },
   {
+    id: 'core.discounts',
+    label: 'Discounts',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./DiscountSettings.vue'),
+  },
+  {
     id: 'core.team',
     label: 'Team',
     group: 'Core',

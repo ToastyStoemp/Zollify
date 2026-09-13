@@ -27,6 +27,7 @@ export type {
   StoreSchema,
   CatalogApi,
   SalesEventApi,
+  DiscountApi,
   DataApi,
   Logger,
   ToastOptions,

@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { EventStock, Product, SalesEvent } from '@boothly/shared';
+import type { DiscountRule, EventStock, Product, SalesEvent } from '@boothly/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -182,9 +182,23 @@ export interface SalesEventApi {
   setStock(entry: EventStock): Promise<void>;
 }
 
+/**
+ * Discount rules, stored by core because they reference products and must
+ * survive POS being switched off. Modules compute with them; core owns them.
+ */
+export interface DiscountApi {
+  list(): DiscountRule[];
+  /** Only rules that should be applied at checkout. */
+  active(): DiscountRule[];
+  get(id: string): DiscountRule | undefined;
+  upsert(rule: DiscountRule): Promise<void>;
+  remove(id: string): Promise<void>;
+}
+
 export interface DataApi {
   products: CatalogApi;
   events: SalesEventApi;
+  discounts: DiscountApi;
 }
 
 export interface Logger {

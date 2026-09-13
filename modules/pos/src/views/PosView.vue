@@ -1,6 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { addLine, cart, checkout, clear, isEmpty, itemCount, removeLine, setQty, total } from '../cart';
+import {
+  addLine,
+  appliedDiscounts,
+  cart,
+  checkout,
+  clear,
+  discountTotal,
+  isEmpty,
+  itemCount,
+  removeLine,
+  setCustomDiscount,
+  setQty,
+  subtotal,
+  total,
+} from '../cart';
 import { sdk } from '../runtime';
 
 const providerId = ref('manual');
@@ -41,7 +55,33 @@ function add(productId: string): void {
     qty: 1,
     unitPrice: product.price,
     taxRate: product.vatRate ?? null,
+    type: product.type,
   });
+}
+
+const discountInput = ref('');
+const discountKind = ref<'amount' | 'percent'>('amount');
+
+/**
+ * A manual discount on top of any rules — the "do me a deal" case that every
+ * booth needs and no rule can anticipate.
+ */
+function applyCustomDiscount(): void {
+  const value = Number(discountInput.value);
+  if (!Number.isFinite(value) || value <= 0) {
+    setCustomDiscount(null);
+    return;
+  }
+  setCustomDiscount({
+    type: discountKind.value,
+    value,
+    name: discountKind.value === 'percent' ? `${value}% off` : 'Discount',
+  });
+}
+
+function clearCustomDiscount(): void {
+  discountInput.value = '';
+  setCustomDiscount(null);
 }
 
 async function take(): Promise<void> {
@@ -101,6 +141,36 @@ async function take(): Promise<void> {
         </ul>
 
         <footer class="checkout">
+          <div class="discount">
+            <label>
+              <span class="sr">Discount amount</span>
+              <input
+                v-model="discountInput"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Discount"
+                @input="applyCustomDiscount"
+              />
+            </label>
+            <select v-model="discountKind" aria-label="Discount kind" @change="applyCustomDiscount">
+              <option value="amount">{{ cart.currency }}</option>
+              <option value="percent">%</option>
+            </select>
+            <button v-if="cart.custom" type="button" @click="clearCustomDiscount">Clear</button>
+          </div>
+
+          <p v-if="discountTotal > 0" class="line-sub">
+            <span>Subtotal</span> <span>{{ subtotal.toFixed(2) }}</span>
+          </p>
+          <p v-for="applied in appliedDiscounts" :key="applied.rule.id" class="line-sub discount-line">
+            <span>{{ applied.rule.name }}</span> <span>−{{ applied.amount.toFixed(2) }}</span>
+          </p>
+          <p v-if="cart.custom" class="line-sub discount-line">
+            <span>Manual discount</span>
+            <span>−{{ (discountTotal - appliedDiscounts.reduce((s, a) => s + a.amount, 0)).toFixed(2) }}</span>
+          </p>
+
           <p class="total"><span>Total</span> <strong>{{ cart.currency }} {{ total.toFixed(2) }}</strong></p>
           <div class="actions">
             <button type="button" :disabled="isEmpty || cart.busy" @click="clear">Clear</button>
@@ -131,6 +201,12 @@ h1 { font-size: 1.35rem; margin: 0; }
 .lines li { display: grid; grid-template-columns: 1fr 3.5rem 4.5rem auto; gap: .5rem; align-items: center; font-size: .9rem; }
 .qty { width: 100%; }
 .linetotal { text-align: right; font-variant-numeric: tabular-nums; }
+.discount { display: flex; gap: .4rem; align-items: center; }
+.discount input { width: 6rem; }
+.discount select { width: 4.5rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.line-sub { display: flex; justify-content: space-between; margin: 0; font-size: .82rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.discount-line { color: var(--bly-accent-ink, #0a5a4a); }
 .checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--bly-line, #d6dde4); padding-top: .75rem; }
 .total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }

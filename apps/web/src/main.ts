@@ -4,6 +4,7 @@ import {
   getAccount,
   loadCatalog,
   loadSalesEvents,
+  loadDiscounts,
   loadTransactions,
   refreshAccessToken,
   refreshPendingCount,
@@ -34,6 +35,7 @@ async function start(): Promise<void> {
       loadCatalog().catch((err) => console.error('[boothly] catalog load failed', err)),
       loadSalesEvents().catch((err) => console.error('[boothly] events load failed', err)),
       loadTransactions().catch((err) => console.error('[boothly] history load failed', err)),
+      loadDiscounts().catch((err) => console.error('[boothly] discounts load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
   }

@@ -1,10 +1,22 @@
 import { computed, reactive } from 'vue';
 import type { SaleEvent, SaleLine } from '@boothly/sdk';
+import { round2 } from '@boothly/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
+import {
+  computeCartTotals,
+  distributeTotal,
+  type CartLine as DiscountCartLine,
+  type CustomDiscount,
+} from './discounts';
 
 export interface CartLine extends SaleLine {
   lineId: string;
+  /** Variant key, or null for the product itself. */
+  variantId: string | null;
+  variantLabel: string | null;
+  /** Product.type — some discount rules target a whole type rather than ids. */
+  type?: string;
 }
 
 interface CartState {
@@ -12,6 +24,8 @@ interface CartState {
   currency: string;
   eventId: string | null;
   busy: boolean;
+  /** A one-off discount the seller applies by hand, on top of any rules. */
+  custom: CustomDiscount | null;
 }
 
 export const cart = reactive<CartState>({
@@ -19,26 +33,62 @@ export const cart = reactive<CartState>({
   currency: 'CHF',
   eventId: null,
   busy: false,
+  custom: null,
 });
 
 /**
- * Totals are computed in integer minor units and converted back once.
+ * Lines in the shape the discount engine expects.
+ *
+ * Line totals are computed in integer minor units and converted back once.
  * Accumulating floats across a basket is how a till ends up a rappen out on a
  * long receipt, and that difference is exactly what gets noticed at cash-up.
  */
-export const totalMinor = computed(() =>
-  cart.lines.reduce((sum, line) => sum + Math.round(line.unitPrice * 100) * line.qty, 0),
+const discountLines = computed<DiscountCartLine[]>(() =>
+  cart.lines.map((line) => ({
+    pid: line.productId,
+    vid: line.variantId,
+    title: line.name,
+    variantLabel: line.variantLabel,
+    type: line.type,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+  })),
 );
 
-export const total = computed(() => totalMinor.value / 100);
+/**
+ * Subtotal, rule discounts, manual discount and the amount actually owed.
+ *
+ * Rules come from core through the SDK, so a rule edited in Settings applies at
+ * the next keystroke without POS holding its own copy.
+ */
+export const totals = computed(() =>
+  computeCartTotals(discountLines.value, sdk().data.discounts.active(), cart.custom),
+);
+
+export const subtotal = computed(() => totals.value.subtotal);
+export const discountTotal = computed(
+  () => round2(totals.value.ruleDiscountTotal + totals.value.customDiscountAmount),
+);
+export const total = computed(() => totals.value.grandTotal);
+export const appliedDiscounts = computed(() => totals.value.ruleDiscounts);
+
 export const itemCount = computed(() => cart.lines.reduce((n, l) => n + l.qty, 0));
 export const isEmpty = computed(() => cart.lines.length === 0);
 
 let lineSeq = 0;
 
-export function addLine(line: Omit<SaleLine, 'taxRate'> & { taxRate?: number | null }): void {
+export function addLine(
+  line: Omit<SaleLine, 'taxRate'> & {
+    taxRate?: number | null;
+    variantId?: string | null;
+    variantLabel?: string | null;
+    type?: string;
+  },
+): void {
+  const variantId = line.variantId ?? null;
   const existing = cart.lines.find(
-    (l) => l.productId === line.productId && l.unitPrice === line.unitPrice,
+    (l) => l.productId === line.productId && l.variantId === variantId && l.unitPrice === line.unitPrice,
   );
   if (existing) {
     existing.qty += line.qty;
@@ -46,6 +96,8 @@ export function addLine(line: Omit<SaleLine, 'taxRate'> & { taxRate?: number | n
   }
   cart.lines.push({
     ...line,
+    variantId,
+    variantLabel: line.variantLabel ?? null,
     taxRate: line.taxRate ?? null,
     lineId: `l${++lineSeq}`,
   });
@@ -66,8 +118,13 @@ export function removeLine(lineId: string): void {
   if (i >= 0) cart.lines.splice(i, 1);
 }
 
+export function setCustomDiscount(discount: CustomDiscount | null): void {
+  cart.custom = discount;
+}
+
 export function clear(): void {
   cart.lines.length = 0;
+  cart.custom = null;
 }
 
 export interface CheckoutOutcome {
@@ -81,19 +138,24 @@ export interface CheckoutOutcome {
  * sale.
  *
  * The `sale` event is the entire contract between POS and anything that cares
- * about revenue — Tax subscribes to it and never imports this module. The cart
- * is only cleared after the event is emitted, so a subscriber that throws
- * cannot leave a paid-for basket silently discarded.
+ * about revenue — core records it, Tax books it, and neither imports this
+ * module. The cart is only cleared after the event is emitted, so a subscriber
+ * that throws cannot leave a paid-for basket silently discarded.
  */
 export async function checkout(providerId: string, saleId: string): Promise<CheckoutOutcome> {
   if (isEmpty.value) return { approved: false, error: 'The cart is empty.' };
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
 
+  const charged = total.value;
+  if (charged <= 0) {
+    return { approved: false, error: 'The total is zero — nothing to charge.' };
+  }
+
   cart.busy = true;
   try {
     const provider = getProvider(providerId as never);
     const result = await provider.startPayment({
-      amount: total.value,
+      amount: charged,
       currency: cart.currency,
       reference: saleId,
     });
@@ -102,13 +164,26 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
       return { approved: false, error: result.error ?? 'The payment was declined.' };
     }
 
+    // Discounts are spread proportionally across the lines so the recorded
+    // line totals add up to what was actually paid. Without this a discounted
+    // basket reconciles to the wrong number line by line.
+    const priced = distributeTotal(
+      cart.lines.map((line) => ({
+        ...line,
+        lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+      })),
+      charged,
+    );
+
     const sale: SaleEvent = {
       saleId,
       eventId: cart.eventId,
       at: Date.now(),
       currency: cart.currency,
-      total: total.value,
-      lines: cart.lines.map(({ lineId: _lineId, ...line }) => line),
+      total: charged,
+      lines: priced.map(
+        ({ lineId: _l, variantId: _v, variantLabel: _vl, type: _t, lineTotal: _lt, ...line }) => line,
+      ),
       payment: {
         provider: result.provider,
         approved: true,

@@ -1,0 +1,143 @@
+import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
+
+/**
+ * Reads a ZollTool v2 backup.
+ *
+ * Deliberately narrow: this imports business data into a freshly created
+ * account, and nothing else. Users, API keys and integration config are
+ * re-entered by hand, so none of that is parsed here and none of it can be
+ * carried over by accident.
+ */
+
+export interface ZollToolBackup {
+  version: 2;
+  exportedAt: string;
+  events: SalesEvent[];
+  products: Product[];
+  eventStock: EventStock[];
+  transactions: Transaction[];
+  discounts: DiscountRule[];
+  images?: { id: string; productId: string; updatedAt: number }[];
+}
+
+export interface ImportPlan {
+  events: SalesEvent[];
+  products: Product[];
+  eventStock: EventStock[];
+  /** Rows the file contained but this importer does not bring across. */
+  skipped: { what: string; count: number; why: string }[];
+  warnings: string[];
+}
+
+export class BackupParseError extends Error {}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asArray<T>(value: unknown, what: string, warnings: string[]): T[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) {
+    warnings.push(`"${what}" was not a list and has been ignored.`);
+    return [];
+  }
+  return value as T[];
+}
+
+/**
+ * Parses and validates a backup, returning what would be written.
+ *
+ * Nothing is imported here — the caller shows this plan first. Importing into
+ * a live catalogue without seeing the counts is how someone discovers they
+ * picked the wrong file after it has already run.
+ */
+export function planImport(raw: unknown): ImportPlan {
+  if (!isRecord(raw)) {
+    throw new BackupParseError('That file is not a ZollTool backup.');
+  }
+  if (raw.version !== 2) {
+    throw new BackupParseError(
+      `This importer reads ZollTool backup version 2; the file says version ${String(raw.version ?? 'unknown')}.`,
+    );
+  }
+
+  const warnings: string[] = [];
+  const products = asArray<Product>(raw.products, 'products', warnings).filter((p) => {
+    if (typeof p?.id === 'string' && typeof p?.title === 'string') return true;
+    warnings.push('A product without an id or title was skipped.');
+    return false;
+  });
+
+  const events = asArray<SalesEvent>(raw.events, 'events', warnings).filter((e) => {
+    if (typeof e?.id === 'string' && typeof e?.name === 'string') return true;
+    warnings.push('An event without an id or name was skipped.');
+    return false;
+  });
+
+  const knownEvents = new Set(events.map((e) => e.id));
+  const knownProducts = new Set(products.map((p) => p.id));
+
+  const stock = asArray<EventStock>(raw.eventStock, 'eventStock', warnings).filter((s) => {
+    // Orphaned stock would be invisible and unfixable in the UI, so it is
+    // dropped with a count rather than imported silently.
+    const ok = knownEvents.has(s?.eventId) && knownProducts.has(s?.productId);
+    return ok;
+  });
+
+  const orphanStock = asArray<EventStock>(raw.eventStock, 'eventStock', []).length - stock.length;
+  if (orphanStock > 0) {
+    warnings.push(`${orphanStock} stock row(s) referenced a missing event or product and were dropped.`);
+  }
+
+  const skipped: ImportPlan['skipped'] = [];
+  const transactions = asArray<Transaction>(raw.transactions, 'transactions', []);
+  if (transactions.length) {
+    skipped.push({
+      what: 'Past transactions',
+      count: transactions.length,
+      why: 'Sales history stays in ZollTool. Importing it would double-count revenue if both systems are live.',
+    });
+  }
+  const discounts = asArray<DiscountRule>(raw.discounts, 'discounts', []);
+  if (discounts.length) {
+    skipped.push({
+      what: 'Discount rules',
+      count: discounts.length,
+      why: 'Not modelled in Boothly yet — re-create them once discounts land.',
+    });
+  }
+  const images = asArray(raw.images, 'images', []);
+  if (images.length) {
+    skipped.push({
+      what: 'Product images',
+      count: images.length,
+      why: 'Image blobs are not in the JSON backup, only their metadata.',
+    });
+  }
+
+  const liveEvents = dropDeleted(events);
+  const liveProducts = dropDeleted(products);
+  const deletedCount = events.length - liveEvents.length + (products.length - liveProducts.length);
+  if (deletedCount > 0) {
+    warnings.push(`${deletedCount} row(s) already deleted in ZollTool were not imported.`);
+  }
+
+  return {
+    events: liveEvents,
+    products: liveProducts,
+    eventStock: stock.map((s) => ({ ...s, variantId: s.variantId ?? '' })),
+    skipped,
+    warnings,
+  };
+}
+
+/**
+ * Rows already deleted in ZollTool are not carried over.
+ *
+ * Dropping them is the only correct move: keeping the tombstone would import a
+ * row that exists purely to be invisible, and clearing the marker instead would
+ * resurrect something the user had deliberately removed.
+ */
+export function dropDeleted<T extends { deletedAt?: number }>(rows: T[]): T[] {
+  return rows.filter((r) => !r.deletedAt);
+}

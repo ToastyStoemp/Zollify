@@ -154,6 +154,14 @@ export interface CatalogApi {
   list(): Product[];
   forSale(): Product[];
   get(id: string): Product | undefined;
+
+  /**
+   * Writes go through core rather than into a module's own tables, so the sync
+   * outbox records them and every device converges. A module that stored
+   * products itself would be invisible to sync.
+   */
+  upsert(product: Product): Promise<void>;
+  remove(id: string): Promise<void>;
 }
 
 export interface SalesEventApi {
@@ -168,6 +176,10 @@ export interface SalesEventApi {
   active(): SalesEvent | null;
   setActive(id: string | null): Promise<void>;
   stock(eventId: string): Promise<EventStock[]>;
+
+  upsert(event: SalesEvent): Promise<void>;
+  remove(id: string): Promise<void>;
+  setStock(entry: EventStock): Promise<void>;
 }
 
 export interface DataApi {

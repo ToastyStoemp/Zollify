@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { buildGateway, loadDotEnv, type ServerModule } from '@boothly/server-core';
+import { sourcingServerModule } from './modules/sourcing';
 import { taxServerModule } from './modules/tax';
 
 loadDotEnv();
@@ -13,7 +14,7 @@ loadDotEnv();
  * security proposition. They are gated per account instead — see
  * `mountServerModules`.
  */
-const SERVER_MODULES: ServerModule[] = [taxServerModule];
+const SERVER_MODULES: ServerModule[] = [taxServerModule, sourcingServerModule];
 
 /** What a brand-new account starts with, so it isn't an empty shell. */
 const DEFAULT_MODULES = ['pos', 'customs'];

@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@boothly/customs": "*",
+    "@boothly/migration": "*",
     "@boothly/platform": "*",
     "@boothly/pos": "*",
+    "@boothly/price-cards": "*",
     "@boothly/sdk": "*",
+    "@boothly/sourcing": "*",
     "@boothly/ui": "*",
     "dexie": "^4.2.0",
     "vue": "^3.5.0",

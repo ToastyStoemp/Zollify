@@ -16,12 +16,21 @@ import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
-import { allProducts, forSaleProducts, getProduct } from './core/catalog';
+import {
+  allProducts,
+  deleteProduct,
+  forSaleProducts,
+  getProduct,
+  upsertProduct,
+} from './core/catalog';
 import {
   activeEvent,
+  deleteSalesEvent,
   getSalesEvent,
   setActiveEvent,
+  setStock,
   stockForEvent,
+  upsertSalesEvent,
   visibleEvents,
 } from './core/sales-events';
 
@@ -93,6 +102,8 @@ const coreData: import('@boothly/sdk').DataApi = {
     list: () => [...allProducts.value],
     forSale: () => [...forSaleProducts.value],
     get: (id) => getProduct(id),
+    upsert: (product) => upsertProduct(product),
+    remove: (id) => deleteProduct(id),
   },
   events: {
     list: () => [...visibleEvents.value],
@@ -100,6 +111,9 @@ const coreData: import('@boothly/sdk').DataApi = {
     active: () => activeEvent.value,
     setActive: (id) => setActiveEvent(id),
     stock: (eventId) => stockForEvent(eventId),
+    upsert: (event) => upsertSalesEvent(event),
+    remove: (id) => deleteSalesEvent(id),
+    setStock: (entry) => setStock(entry),
   },
 };
 

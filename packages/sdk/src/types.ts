@@ -50,10 +50,19 @@ export interface RouteDef {
   title?: string;
 }
 
+/**
+ * Where a nav entry sits in the sidebar. Groups are named by the job someone is
+ * doing, not by which package the screen came from — a seller looking for the
+ * till should not need to know it is a module.
+ */
+export type NavGroup = 'selling' | 'stock' | 'events' | 'suppliers' | 'account';
+
 export interface NavItem {
   /** Route name registered via `routes.add`. */
   routeName: string;
   label: string;
+  /** Sidebar group. Omitted entries land under "Add-ons". */
+  group?: NavGroup;
   /** Lucide icon name, resolved by the shell so modules ship no icon payload. */
   icon?: string;
   /** Lower sorts earlier. Core items occupy 0–99; modules should use 100+. */

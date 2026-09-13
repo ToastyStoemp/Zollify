@@ -29,7 +29,7 @@ export default defineModule({
       component: () => import('./views/SourcingView.vue'),
     });
 
-    sdk.nav.add({ routeName: 'index', label: 'Sourcing', icon: 'package', order: 130 });
+    sdk.nav.add({ routeName: 'index', group: 'suppliers', label: 'Sourcing', icon: 'package', order: 130 });
 
     sdk.settings.panel({
       id: 'suppliers',

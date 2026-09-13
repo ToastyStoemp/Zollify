@@ -28,7 +28,7 @@ export default defineModule({
       component: () => import('./views/ShopifyView.vue'),
     });
 
-    sdk.nav.add({ routeName: 'index', label: 'Shopify', icon: 'shopping-bag', order: 150 });
+    sdk.nav.add({ routeName: 'index', group: 'stock', label: 'Shopify', icon: 'shopping-bag', order: 150 });
 
     sdk.settings.panel({
       id: 'connection',

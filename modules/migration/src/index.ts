@@ -27,7 +27,7 @@ export default defineModule({
       title: 'Import from ZollTool',
       component: () => import('./views/ImportView.vue'),
     });
-    sdk.nav.add({ routeName: 'index', label: 'Import', icon: 'upload', order: 800 });
+    sdk.nav.add({ routeName: 'index', group: 'account', label: 'Import', icon: 'upload', order: 800 });
     sdk.log.info('migration module ready — remember to switch it off once the import is done');
   },
 

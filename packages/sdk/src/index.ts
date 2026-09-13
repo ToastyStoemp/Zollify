@@ -14,6 +14,7 @@ export type {
   ComponentLoader,
   RouteDef,
   NavItem,
+  NavGroup,
   SettingsPanel,
   SaleLine,
   SaleEvent,

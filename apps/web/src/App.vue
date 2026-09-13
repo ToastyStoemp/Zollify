@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
+import { useRoute } from 'vue-router';
+import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
   currentAccount,
   pendingCount,
@@ -13,25 +15,81 @@ import { contributions, loader } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 
 const account = currentAccount;
+const route = useRoute();
 
-/** Core nav first, then whatever the loaded modules contributed, by order. */
-const coreNav: { routeName: string; label: string; order: number; minRole?: 'owner' | 'admin' }[] = [
-  { routeName: 'home', label: 'Home', order: 0 },
-  { routeName: 'events', label: 'Events', order: 10 },
-  { routeName: 'catalog', label: 'Catalog', order: 20 },
-  { routeName: 'stock', label: 'Inventory', order: 25 },
-  { routeName: 'history', label: 'History', order: 30 },
-  { routeName: 'cashup', label: 'Cash up', order: 35, minRole: 'admin' },
-  { routeName: 'settings', label: 'Settings', order: 900 },
+type Group = NavGroup | 'addons';
+interface Entry { routeName: string; label: string; group: Group; order: number; minRole?: Role }
+
+/**
+ * The sidebar is arranged by what someone is doing, not by where a screen
+ * lives in the code. A module's screen sits next to the core screens for the
+ * same job; the seller never sees the word "module".
+ */
+const GROUPS: { id: Group; label: string }[] = [
+  { id: 'selling', label: 'Selling' },
+  { id: 'stock', label: 'Stock' },
+  { id: 'events', label: 'Events' },
+  { id: 'suppliers', label: 'Suppliers' },
+  { id: 'addons', label: 'Add-ons' },
+  { id: 'account', label: 'Account' },
 ];
 
-const moduleNav = computed(() =>
-  account.value ? contributions.navFor(account.value.role) : [],
-);
+const coreNav: Entry[] = [
+  { routeName: 'history', label: 'History', group: 'selling', order: 110 },
+  { routeName: 'cashup', label: 'Cash up', group: 'selling', order: 115, minRole: 'admin' },
+  { routeName: 'catalog', label: 'Catalog', group: 'stock', order: 20 },
+  { routeName: 'stock', label: 'Inventory', group: 'stock', order: 25 },
+  { routeName: 'events', label: 'Events', group: 'events', order: 10 },
+  { routeName: 'modules', label: 'Modules', group: 'account', order: 890, minRole: 'admin' },
+  { routeName: 'settings', label: 'Settings', group: 'account', order: 900 },
+];
 
-const isAdmin = computed(
-  () => account.value?.role === 'owner' || account.value?.role === 'admin',
-);
+const groups = computed(() => {
+  const acct = account.value;
+  if (!acct) return [];
+  const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
+  const theirs: Entry[] = contributions.navFor(acct.role).map((item) => ({
+    routeName: item.routeName,
+    label: item.label,
+    group: item.group ?? 'addons',
+    order: item.order ?? 100,
+  }));
+  const all = [...mine, ...theirs].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+  return GROUPS.map((g) => ({ ...g, items: all.filter((e) => e.group === g.id) })).filter(
+    (g) => g.items.length > 0,
+  );
+});
+
+/**
+ * Which groups are folded. Persisted per browser so the sidebar opens the way
+ * it was left; the group holding the current screen is always shown open so
+ * the active item can never be hidden.
+ */
+const COLLAPSED_KEY = 'zollify.nav.collapsed';
+const collapsed = ref<Set<string>>(new Set());
+try {
+  const raw = localStorage.getItem(COLLAPSED_KEY);
+  if (raw) collapsed.value = new Set(JSON.parse(raw) as string[]);
+} catch {
+  // Storage unavailable: groups simply start open.
+}
+
+function isOpen(group: { id: string; items: Entry[] }): boolean {
+  if (group.items.some((e) => e.routeName === route.name)) return true;
+  return !collapsed.value.has(group.id);
+}
+
+function toggle(id: string): void {
+  const next = new Set(collapsed.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  collapsed.value = next;
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+  } catch {
+    // Not worth surfacing; the sidebar still works for this session.
+  }
+}
 
 /**
  * One label that cannot contradict itself: queued work is named as such, and
@@ -66,21 +124,25 @@ async function leave(): Promise<void> {
       <div class="brand">Zollify<span>.</span></div>
 
       <nav aria-label="Main">
-        <template v-for="item in coreNav" :key="item.routeName">
-          <router-link
-            v-if="!item.minRole || isAdmin"
-            :to="{ name: item.routeName }"
+        <router-link :to="{ name: 'home' }" class="item">Home</router-link>
+
+        <section v-for="group in groups" :key="group.id" :class="['group', { closed: !isOpen(group) }]">
+          <button
+            type="button"
+            class="quiet head"
+            :aria-expanded="isOpen(group)"
+            :aria-controls="`nav-${group.id}`"
+            @click="toggle(group.id)"
           >
-            {{ item.label }}
-          </router-link>
-        </template>
-        <router-link v-if="isAdmin" :to="{ name: 'modules' }">Modules</router-link>
-
-        <span v-if="moduleNav.length" class="rule" role="separator"></span>
-
-        <router-link v-for="item in moduleNav" :key="item.routeName" :to="{ name: item.routeName }">
-          {{ item.label }}
-        </router-link>
+            <span>{{ group.label }}</span>
+            <span class="chev" aria-hidden="true">▾</span>
+          </button>
+          <div :id="`nav-${group.id}`" class="items">
+            <router-link v-for="item in group.items" :key="item.routeName" :to="{ name: item.routeName }" class="item">
+              {{ item.label }}
+            </router-link>
+          </div>
+        </section>
       </nav>
 
       <div class="tail">
@@ -125,14 +187,25 @@ async function leave(): Promise<void> {
 .sidebar {
   display: flex; flex-direction: column; gap: 1rem; padding: 1rem;
   background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
+  position: sticky; top: 0; height: 100vh;
 }
 .brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; }
 .brand span { color: var(--zfy-accent); }
-nav { display: flex; flex-direction: column; gap: .15rem; }
-nav a { padding: .55rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; }
-nav a:hover { background: var(--zfy-surface-2); }
-nav a.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
-.rule { border-top: 1px solid var(--zfy-line); margin: .5rem 0; }
+nav { display: flex; flex-direction: column; gap: .15rem; overflow-y: auto; }
+.item { display: block; padding: .5rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; }
+.item:hover { background: var(--zfy-surface-2); }
+.item.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
+.group { display: flex; flex-direction: column; gap: .1rem; margin-top: .5rem; }
+.head {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  min-height: 1.75rem; padding: .2rem .6rem; font-size: .7rem; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint);
+}
+.head:hover:not(:disabled) { color: var(--zfy-muted); background: transparent; }
+.chev { font-size: .75rem; transition: transform .15s; }
+.closed .chev { transform: rotate(-90deg); }
+.items { display: flex; flex-direction: column; gap: .1rem; }
+.closed .items { display: none; }
 .tail { margin-top: auto; display: flex; flex-direction: column; gap: .75rem; }
 .sync { display: flex; align-items: center; gap: .45rem; font-size: .8rem; justify-content: flex-start; }
 .sync .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-accent); flex: none; }
@@ -157,7 +230,7 @@ nav a.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-
     display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
     align-items: center; gap: .5rem .75rem; padding: .6rem .75rem;
     border-right: 0; border-bottom: 1px solid var(--zfy-line);
-    position: sticky; top: 0; z-index: 5;
+    height: auto; z-index: 5;
   }
   .brand { font-size: 1.1rem; }
   nav {
@@ -166,8 +239,11 @@ nav a.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-
     margin: 0 -.75rem; padding: 0 .75rem;
   }
   nav::-webkit-scrollbar { display: none; }
-  nav a { white-space: nowrap; padding: .5rem .7rem; }
-  .rule { border-top: 0; border-left: 1px solid var(--zfy-line); margin: .25rem .25rem; }
+  .item { white-space: nowrap; padding: .5rem .7rem; }
+  .group { flex-direction: row; margin: 0; }
+  .head { display: none; }
+  .items, .closed .items { display: flex; flex-direction: row; gap: .25rem; }
+  .group::before { content: ''; border-left: 1px solid var(--zfy-line); margin: .35rem .2rem; }
   .tail { margin: 0; flex-direction: row; align-items: center; justify-content: flex-end; gap: .5rem; }
   .sync { min-height: 2rem; padding: .25rem .6rem; }
   .who .name, .who .role { display: none; }

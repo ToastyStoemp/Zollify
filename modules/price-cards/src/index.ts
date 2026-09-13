@@ -25,7 +25,7 @@ export default defineModule({
       title: 'Price cards',
       component: () => import('./views/PriceCardsView.vue'),
     });
-    sdk.nav.add({ routeName: 'index', label: 'Price cards', icon: 'tag', order: 140 });
+    sdk.nav.add({ routeName: 'index', group: 'stock', label: 'Price cards', icon: 'tag', order: 140 });
     sdk.log.info('price-cards module ready');
   },
 

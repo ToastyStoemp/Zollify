@@ -36,7 +36,7 @@ export default defineModule({
       },
     ]);
 
-    sdk.nav.add({ routeName: 'index', label: 'Sell', icon: 'shopping-cart', order: 100 });
+    sdk.nav.add({ routeName: 'index', group: 'selling', label: 'Sell', icon: 'shopping-cart', order: 100 });
 
     sdk.settings.panel({
       id: 'receipts',

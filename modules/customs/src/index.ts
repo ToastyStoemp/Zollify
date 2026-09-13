@@ -35,7 +35,7 @@ export default defineModule({
       },
     ]);
 
-    sdk.nav.add({ routeName: 'index', label: 'Customs', icon: 'file-text', order: 120 });
+    sdk.nav.add({ routeName: 'index', group: 'events', label: 'Customs', icon: 'file-text', order: 120 });
 
     sdk.settings.panel({
       id: 'declarant',

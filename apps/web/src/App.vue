@@ -22,7 +22,9 @@ const isAdmin = computed(
 </script>
 
 <template>
-  <div class="shell">
+  <!-- Signed out there is no sidebar, so the shell must not keep reserving its
+       column — otherwise the login card is squeezed into a 15rem track. -->
+  <div :class="['shell', { 'shell--bare': !account }]">
     <aside v-if="account" class="sidebar">
       <div class="brand">Boothly<span>.</span></div>
 
@@ -62,6 +64,8 @@ const isAdmin = computed(
 
 <style scoped>
 .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
+.shell--bare { grid-template-columns: 1fr; }
+.shell--bare .content { padding: 0; display: grid; }
 .sidebar {
   display: flex; flex-direction: column; gap: 1rem; padding: 1rem;
   background: var(--bly-surface, #fff); border-right: 1px solid var(--bly-line, #d6dde4);

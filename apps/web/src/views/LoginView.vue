@@ -81,7 +81,7 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-.login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+.login { display: grid; place-items: center; padding: 1rem; }
 form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--bly-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--bly-line, #d6dde4); }
 h1 { margin: 0 0 .5rem; font-size: 1.5rem; letter-spacing: -.02em; }
 h1 span { color: var(--bly-accent, #0e7c66); }

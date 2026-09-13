@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "boothly-web-5180",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "-w", "@boothly/web"],
+      "port": 5180
+    }
+  ]
+}

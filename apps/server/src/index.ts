@@ -40,6 +40,7 @@ function flag(name: string, fallback: boolean): boolean {
 async function main(): Promise<void> {
   const dataDir = resolve(process.env.BOOTHLY_DATA_DIR ?? './data');
   const moduleStoreDir = resolve(process.env.BOOTHLY_MODULE_STORE ?? './modules-store');
+  const webDistDir = process.env.BOOTHLY_WEB_DIST ? resolve(process.env.BOOTHLY_WEB_DIST) : undefined;
   const jwtSecret = required('BOOTHLY_JWT_SECRET');
 
   // Shopify derives its credential-encryption key from the same secret, so it
@@ -53,6 +54,7 @@ async function main(): Promise<void> {
   const app = await buildGateway({
     dataDir,
     moduleStoreDir,
+    webDistDir,
     jwtSecret,
     serverModules,
     defaultModules: DEFAULT_MODULES,
@@ -69,7 +71,7 @@ async function main(): Promise<void> {
   const host = process.env.HOST ?? '0.0.0.0';
 
   await app.listen({ port, host });
-  app.log.info({ port, host, dataDir, moduleStoreDir }, 'Boothly gateway listening');
+  app.log.info({ port, host, dataDir, moduleStoreDir, webDistDir }, 'Boothly gateway listening');
 }
 
 main().catch((err) => {

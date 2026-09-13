@@ -42,3 +42,4 @@ export { registerModuleRoutes } from './routes/modules';
 export { registerRefreshCookie, REFRESH_COOKIE, type RefreshCookieOptions } from './refresh-cookie';
 export { loadDotEnv } from './env';
 export { makeSecretBox, type SecretBox } from './secretbox';
+export { registerStatic, type StaticOptions } from './static';

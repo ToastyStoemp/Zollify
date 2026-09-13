@@ -13,6 +13,7 @@ import { loadModuleStore } from './modules/registry';
 import { mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
+import { registerStatic } from './static';
 import { registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerAdminRoutes } from './routes/admin';
@@ -23,6 +24,11 @@ export interface GatewayOptions {
   jwtSecret: string;
   /** Directory holding published client module bundles. */
   moduleStoreDir: string;
+  /**
+   * Built web app to serve. Omitted in development, where Vite serves the app
+   * and proxies the API here.
+   */
+  webDistDir?: string;
   /** Server halves compiled into this deploy. */
   serverModules: ServerModule[];
   /** Modules a new account starts with. */
@@ -190,6 +196,16 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   );
 
   app.decorate('boothly', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+
+  /**
+   * Liveness probe. Deliberately unauthenticated and free of detail: a load
+   * balancer needs to know the process is up, and anyone else learns nothing
+   * about the deployment from it.
+   */
+  app.get('/health', async () => ({ ok: true }));
+
+  // Registered last so its not-found handler does not shadow API routes.
+  if (opts.webDistDir) await registerStatic(app, { webDistDir: opts.webDistDir });
 
   return app;
 }

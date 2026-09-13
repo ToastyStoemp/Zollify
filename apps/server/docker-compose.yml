@@ -1,0 +1,38 @@
+# Run from the repo root:
+#   docker compose -f apps/server/docker-compose.yml up -d --build
+#
+# Secrets come from apps/server/.env, which is gitignored. The `:?` defaults
+# make a missing secret a startup failure rather than a server that quietly
+# runs with no signing key.
+services:
+  boothly:
+    container_name: boothly
+    build:
+      context: ../..
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - '8787:8787'
+    volumes:
+      # Named volume rather than a bind mount: the container runs unprivileged,
+      # and a host directory would land root-owned on first start.
+      - boothly-data:/data
+    environment:
+      BOOTHLY_JWT_SECRET: ${BOOTHLY_JWT_SECRET:?set BOOTHLY_JWT_SECRET in apps/server/.env}
+      OWNER_EMAIL: ${OWNER_EMAIL:-}
+      OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      # Terminated by the reverse proxy in front, which sets x-forwarded-proto.
+      BOOTHLY_REQUIRE_HTTPS: ${BOOTHLY_REQUIRE_HTTPS:-1}
+      BOOTHLY_TRUST_PROXY: ${BOOTHLY_TRUST_PROXY:-1}
+      BOOTHLY_ALLOWED_ORIGINS: ${BOOTHLY_ALLOWED_ORIGINS:-}
+      REGISTRATION_OPEN: ${REGISTRATION_OPEN:-0}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped
+    # Bounded so a crash loop cannot fill the disk with logs mid-convention.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
+volumes:
+  boothly-data:

@@ -9,7 +9,13 @@
  * bridge do, and the booth can still sell.
  */
 
-export type NativePluginName = 'MyPos' | 'CarbonPayment' | 'GlassPayment' | 'SumUp' | 'DisplayLink';
+export type NativePluginName =
+  | 'MyPos'
+  | 'CarbonPayment'
+  | 'GlassPayment'
+  | 'SumUp'
+  | 'DisplayLink'
+  | 'ThermalPrinter';
 
 interface CapacitorGlobal {
   Capacitor?: {
@@ -65,3 +71,5 @@ export const CarbonPayment = plugin<any>('CarbonPayment');
 export const GlassPayment = plugin<any>('GlassPayment');
 export const SumUp = plugin<any>('SumUp');
 export const DisplayLink = plugin<any>('DisplayLink');
+/** Receipt printing. Absent on the web, where receipts print through the browser. */
+export const ThermalPrinter = plugin<any>('ThermalPrinter');

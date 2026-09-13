@@ -28,6 +28,7 @@ export type {
   CatalogApi,
   SalesEventApi,
   DiscountApi,
+  TransactionApi,
   DataApi,
   Logger,
   ToastOptions,

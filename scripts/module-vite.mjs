@@ -11,7 +11,7 @@ import vue from '@vitejs/plugin-vue';
  * fails at import time with a bare-specifier error, which is easy to misread as
  * a broken bundle.
  */
-export const HOST_EXTERNALS = ['vue', 'dexie', '@boothly/sdk', '@boothly/ui'];
+export const HOST_EXTERNALS = ['vue', 'dexie', '@boothly/sdk', '@boothly/ui', '@boothly/shared'];
 
 /**
  * Folds the module's CSS into its JS bundle.

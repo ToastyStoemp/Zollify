@@ -62,6 +62,9 @@ export function connectRouter(router: Router): void {
         path: route.fullPath,
         name: route.name,
         component: route.component as never,
+        // Route params arrive as props, so a module component declares what it
+        // needs instead of reaching for useRoute() and coercing strings.
+        props: true,
         meta: { moduleId: route.moduleId, minRole: route.minRole, title: route.title },
       });
     },

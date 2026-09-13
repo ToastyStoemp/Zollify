@@ -23,6 +23,7 @@ import {
   getProduct,
   upsertProduct,
 } from './core/catalog';
+import { getTransaction, recentTransactions, totalsFor } from './core/transactions';
 import {
   activeDiscounts,
   allDiscounts,
@@ -121,6 +122,11 @@ const coreData: import('@boothly/sdk').DataApi = {
     upsert: (event) => upsertSalesEvent(event),
     remove: (id) => deleteSalesEvent(id),
     setStock: (entry) => setStock(entry),
+  },
+  transactions: {
+    recent: () => [...recentTransactions.value],
+    get: (id) => getTransaction(id),
+    totals: (eventId) => totalsFor(eventId),
   },
   discounts: {
     list: () => [...allDiscounts.value],

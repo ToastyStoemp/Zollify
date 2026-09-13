@@ -39,6 +39,14 @@ export default defineModule({
     sdk.nav.add({ routeName: 'index', label: 'Sell', icon: 'shopping-cart', order: 100 });
 
     sdk.settings.panel({
+      id: 'receipts',
+      label: 'Receipts',
+      component: () => import('./views/ReceiptSettings.vue'),
+      minRole: 'admin',
+      order: 101,
+    });
+
+    sdk.settings.panel({
       id: 'payments',
       label: 'Payments',
       component: () => import('./views/PaymentSettings.vue'),

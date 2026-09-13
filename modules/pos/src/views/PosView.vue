@@ -15,12 +15,15 @@ import {
   subtotal,
   total,
 } from '../cart';
+import { useRouter } from 'vue-router';
 import { sdk } from '../runtime';
 
 const providerId = ref('manual');
 const message = ref<string | null>(null);
 const failed = ref(false);
 const search = ref('');
+const lastSaleId = ref<string | null>(null);
+const router = useRouter();
 
 /**
  * Products come from core through the SDK, never from core's database
@@ -86,11 +89,19 @@ function clearCustomDiscount(): void {
 
 async function take(): Promise<void> {
   message.value = null;
-  const outcome = await checkout(providerId.value, crypto.randomUUID());
+  const saleId = crypto.randomUUID();
+  const outcome = await checkout(providerId.value, saleId);
   failed.value = !outcome.approved;
+  lastSaleId.value = outcome.approved ? saleId : null;
   message.value = outcome.approved
     ? `Approved — ${outcome.sale?.currency} ${outcome.sale?.total.toFixed(2)}`
     : (outcome.error ?? 'The payment did not complete.');
+}
+
+function openReceipt(): void {
+  if (lastSaleId.value) {
+    void router.push({ name: 'pos:receipt', params: { saleId: lastSaleId.value } });
+  }
 }
 </script>
 
@@ -179,6 +190,9 @@ async function take(): Promise<void> {
             </button>
           </div>
           <p v-if="message" :class="['result', { bad: failed }]" role="status">{{ message }}</p>
+          <button v-if="lastSaleId" type="button" class="receipt-link" @click="openReceipt">
+            Receipt
+          </button>
         </footer>
       </div>
     </div>
@@ -210,6 +224,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--bly-line, #d6dde4); padding-top: .75rem; }
 .total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
+.receipt-link { align-self: flex-end; }
 .result { margin: 0; font-size: .875rem; color: var(--bly-accent-ink, #0a5a4a); }
 .result.bad { color: var(--bly-danger, #c6512f); }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .ticket { position: static; } }

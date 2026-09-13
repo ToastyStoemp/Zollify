@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { DiscountRule, EventStock, Product, SalesEvent } from '@boothly/shared';
+import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -195,10 +195,29 @@ export interface DiscountApi {
   remove(id: string): Promise<void>;
 }
 
+/**
+ * Recorded sales. Read-only from a module's side: sales are written by core
+ * when a `sale` event is announced, so there is exactly one path by which a
+ * transaction comes into existence.
+ */
+export interface TransactionApi {
+  /** Most recent first, bounded to what core has loaded. */
+  recent(): Transaction[];
+  get(id: string): Transaction | undefined;
+  /** Per-currency totals, for an event or across all of them. */
+  totals(eventId?: string | null): {
+    currency: string;
+    sales: number;
+    gross: number;
+    reverted: number;
+  }[];
+}
+
 export interface DataApi {
   products: CatalogApi;
   events: SalesEventApi;
   discounts: DiscountApi;
+  transactions: TransactionApi;
 }
 
 export interface Logger {

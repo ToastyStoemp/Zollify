@@ -8,7 +8,7 @@ import vue from '@vitejs/plugin-vue';
  * one chunk between the shell and any runtime module — which is what keeps a
  * single Vue instance across the boundary.
  */
-const HOST_ENTRIES = ['vue', 'dexie', 'sdk', 'ui'] as const;
+const HOST_ENTRIES = ['vue', 'dexie', 'sdk', 'ui', 'shared'] as const;
 const hostInputs = Object.fromEntries(
   HOST_ENTRIES.map((name) => [`host-${name}`, resolve(__dirname, `src/host/${name}.ts`)]),
 );

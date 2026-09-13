@@ -33,6 +33,7 @@ modules/
   pos/            cart, checkout, receipts + nested payment provider plugins
   customs/        EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
   sourcing/       suppliers and reorder drafts (client + server half)
+  shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
   migration/      single-use ZollTool backup importer
 apps/
@@ -48,6 +49,10 @@ Publish the bundles into the server's store with:
 ```bash
 npm run publish:modules
 ```
+
+The gateway reads its module store at boot, so after publishing, hit **Rescan
+store** in Modules (or `POST /api/modules/reload` as an owner) rather than
+restarting the server and dropping every open connection.
 
 ## Getting started
 
@@ -125,7 +130,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (67 tests):**
+**Built and passing (84 tests):**
 
 - `@boothly/sdk` — the boundary, with the host-compatibility checker.
 - `@boothly/platform` — module loader (bundled + remote resolvers), hash-verified
@@ -134,20 +139,20 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery.
 - `@boothly/server-core` — gateway, ZollTool's multi-tenant auth ported verbatim,
   entitlements, module registry, central per-account gating.
-- **Five modules** — POS, Customs, Sourcing, Price Cards, Migration.
+- **Six modules** — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.
 - **Runtime delivery** — modules build to ES bundles and publish to the store;
   the shell resolves host deps through an import map so there is one Vue.
 
 **Not built:**
 
-- **Shopify sync** — needs ZollTool's Shopify client ported and credentials
-  configured; the rest of the server-module shape is proven by Sourcing.
 - **Android shell** — deferred deliberately. Costs the four terminal providers
   that need native plugins (myPOS GO2/Carbon/Glass, SumUp) until it lands;
   manual, bridge and Carbon-remote work on the web today.
 - **Billing** — deferred. The per-account enabled-modules list is the seam it
   attaches to.
 
-One security item is outstanding before any deployment: the client expects the
-refresh token in an httpOnly cookie, but the ported `auth.ts` still returns it
-in the response body. See [SECURITY.md](./SECURITY.md) §9.
+The twenty-point security baseline is tracked in [SECURITY.md](./SECURITY.md),
+with each control pointing at where it is enforced. Two items remain open and
+both are genuinely not-yet-needed rather than skipped: **file upload limits**
+(no upload route exists yet) and **response schemas**, which would make response
+trimming structural instead of a convention each route follows.

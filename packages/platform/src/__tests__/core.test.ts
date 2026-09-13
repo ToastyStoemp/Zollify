@@ -89,7 +89,7 @@ describe('catalog', () => {
     await catalog.deleteProduct('p1');
 
     const pending = await outbox.unsyncedOps();
-    expect(pending.map((op) => (op as unknown as { kind: string }).kind)).toEqual([
+    expect(pending.map((op) => op.type)).toEqual([
       'product.upsert',
       'product.delete',
     ]);

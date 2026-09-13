@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { currentAccount, toasts } from '@boothly/platform';
+import { currentAccount, pendingCount, syncNow, syncState, toasts } from '@boothly/platform';
 import { contributions } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 
@@ -43,6 +43,12 @@ const isAdmin = computed(
         </router-link>
       </nav>
 
+      <button type="button" class="sync" :disabled="syncState === 'syncing'" @click="syncNow()">
+        <span class="dot" :class="syncState"></span>
+        <span>{{ syncState === 'syncing' ? 'Syncing…' : syncState === 'offline' ? 'Offline' : 'Synced' }}</span>
+        <span v-if="pendingCount > 0" class="pending">{{ pendingCount }} queued</span>
+      </button>
+
       <footer class="who">
         <div class="name">{{ account.accountName }}</div>
         <div class="role">{{ account.email }} · {{ account.role }}</div>
@@ -79,7 +85,13 @@ nav a { padding: .45rem .6rem; border-radius: 8px; text-decoration: none; color:
 nav a:hover { background: var(--bly-surface-2, #e9edf1); }
 nav a.router-link-active { background: var(--bly-accent-soft, #deeee9); color: var(--bly-accent-ink, #0a5a4a); font-weight: 600; }
 hr { border: 0; border-top: 1px solid var(--bly-line, #d6dde4); margin: .5rem 0; width: 100%; }
-.who { margin-top: auto; font-size: .8rem; color: var(--bly-muted, #5a6472); }
+.sync { margin-top: auto; display: flex; align-items: center; gap: .45rem; font-size: .8rem; justify-content: flex-start; }
+.sync .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--bly-accent, #0e7c66); }
+.sync .dot.offline { background: var(--bly-muted, #5a6472); }
+.sync .dot.error { background: var(--bly-danger, #c6512f); }
+.sync .dot.syncing { background: var(--bly-warning, #c08a2e); }
+.sync .pending { color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.who { margin-top: .5rem; font-size: .8rem; color: var(--bly-muted, #5a6472); }
 .who .name { font-weight: 600; color: var(--bly-ink, #141a22); }
 .content { padding: 1.5rem; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }

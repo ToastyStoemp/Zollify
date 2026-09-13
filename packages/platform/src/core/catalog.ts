@@ -63,7 +63,7 @@ export async function upsertProduct(product: Product): Promise<void> {
   const next: Product = { ...product, updatedAt: Date.now() };
   await db.products.put(next);
   products.set(next.id, next);
-  await queueOp({ kind: 'product.upsert', payload: next });
+  await queueOp({ type: 'product.upsert', payload: next });
 }
 
 /**
@@ -77,7 +77,7 @@ export async function deleteProduct(id: string): Promise<void> {
   const tombstoned: Product = { ...existing, deletedAt: Date.now(), updatedAt: Date.now() };
   await db.products.put(tombstoned);
   products.delete(id);
-  await queueOp({ kind: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
+  await queueOp({ type: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
 }
 
 /** Replaces the local catalogue wholesale — used by sync pulls and the importer. */

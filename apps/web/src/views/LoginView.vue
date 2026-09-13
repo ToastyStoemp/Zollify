@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { applyLogin, getApiBase, loadCatalog, loadSalesEvents } from '@boothly/platform';
+import {
+  applyLogin,
+  getApiBase,
+  loadCatalog,
+  loadSalesEvents,
+  startAutoSync,
+} from '@boothly/platform';
 import { loadEnabledModules } from '../boot';
 
 const router = useRouter();
@@ -47,6 +53,7 @@ async function submit(): Promise<void> {
     // through the SDK as they mount.
     await Promise.all([loadCatalog(), loadSalesEvents()]);
     await loadEnabledModules(router);
+    startAutoSync();
     const next = typeof route.query.next === 'string' ? route.query.next : '/home';
     await router.replace(next);
   } catch {

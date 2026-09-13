@@ -6,6 +6,7 @@ import {
   loadSalesEvents,
   refreshAccessToken,
   refreshPendingCount,
+  startAutoSync,
 } from '@boothly/platform';
 import '@boothly/ui/tokens.css';
 import './styles.css';
@@ -37,6 +38,10 @@ async function start(): Promise<void> {
     console.error('[boothly] module boot failed', err);
     return [];
   });
+
+  // Started after modules mount so the first pull's reload reaches a shell that
+  // can actually render what arrives.
+  if (getAccount()) startAutoSync();
 
   createApp(App).use(router).mount('#app');
 }

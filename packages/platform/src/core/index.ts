@@ -35,3 +35,14 @@ export {
   pendingCount,
   type PendingOp,
 } from './outbox';
+export { deviceId, deviceName, setDeviceName, deviceFlavor, resetDeviceCache } from './device';
+export {
+  syncNow,
+  startAutoSync,
+  stopAutoSync,
+  syncState,
+  lastSyncAt,
+  lastSyncError,
+  type SyncState,
+  type SyncResult,
+} from './sync';

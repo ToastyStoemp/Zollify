@@ -80,7 +80,7 @@ export async function upsertSalesEvent(event: SalesEvent): Promise<void> {
   const next: SalesEvent = { ...event, updatedAt: Date.now() };
   await db.events.put(next);
   events.set(next.id, next);
-  await queueOp({ kind: 'event.upsert', payload: next });
+  await queueOp({ type: 'event.upsert', payload: next });
 }
 
 export async function deleteSalesEvent(id: string): Promise<void> {
@@ -91,7 +91,9 @@ export async function deleteSalesEvent(id: string): Promise<void> {
   await db.events.put(tombstoned);
   events.delete(id);
   if (activeId.value === id) await setActiveEvent(null);
-  await queueOp({ kind: 'event.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
+  // The protocol has no event.delete — a tombstoned upsert is the delete,
+  // which is also exactly how the local soft delete already works.
+  await queueOp({ type: 'event.upsert', payload: tombstoned });
 }
 
 export async function replaceSalesEvents(rows: SalesEvent[]): Promise<void> {
@@ -114,7 +116,7 @@ export async function setStock(entry: EventStock): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const next: EventStock = { ...entry, variantId: entry.variantId ?? '', updatedAt: Date.now() };
   await db.eventStock.put(next);
-  await queueOp({ kind: 'stock.set', payload: next });
+  await queueOp({ type: 'stock.set', payload: next });
 }
 
 export function resetSalesEventCache(): void {

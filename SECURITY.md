@@ -46,15 +46,23 @@ never from a request body or query:
 
 Helper scoping (`allowedEventIds`) rides along in the same object.
 
-## 5. Encrypt sensitive data — Partial
+## 5. Encrypt sensitive data — Done
 
-`packages/server-core/src/secretbox.ts` is ported from ZollTool and encrypts
-stored secrets at rest (TOTP secrets, recovery codes). Password hashes are
-argon2id, not encryption, which is correct.
+`packages/server-core/src/secretbox.ts` (AES-256-GCM, key derived from the JWT
+secret) encrypts secrets at rest. Password hashes are argon2id, not encryption,
+which is correct.
 
-> **Gap:** module config written by server modules is currently stored as plain
-> JSON. Anything credential-shaped a module stores must go through `secretbox`.
-> Enforce this when the first integration module (Tax) gains its config.
+`makeSecretBox` now takes a salt, so each domain derives a **different key from
+the same secret** — the TOTP key and a module's credential key are not the same
+key. The default salt is the original one, since changing it would make existing
+TOTP blobs undecryptable.
+
+The first module to hold a real credential uses it: Shopify's Admin API token is
+stored as an encrypted blob under the `boothly-module-credentials-v1` salt, is
+never returned to the client, and never leaves the server process.
+
+> **Standing rule:** anything credential-shaped a server module stores goes
+> through `secretbox`. Plain config (a shop domain, an API version) does not.
 
 ## 6. Enforce server-side auth — Done
 

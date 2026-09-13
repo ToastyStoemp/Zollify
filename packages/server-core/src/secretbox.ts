@@ -1,6 +1,11 @@
 /**
- * AES-256-GCM encrypt/decrypt for the TOTP secret at rest. The key is derived
- * from the server's JWT secret, so there's no new secret to manage.
+ * AES-256-GCM encrypt/decrypt for secrets at rest. The key is derived from the
+ * server's JWT secret, so there's no new secret to manage.
+ *
+ * Each domain passes its own salt, so the TOTP key and a module's credential
+ * key are different keys even though they come from the same secret. The
+ * default is the original TOTP salt — changing it would make existing TOTP
+ * blobs undecryptable.
  */
 import { scryptSync, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
@@ -9,8 +14,8 @@ export interface SecretBox {
   decrypt<T = unknown>(blob: string): T;
 }
 
-export function makeSecretBox(secret: string): SecretBox {
-  const key = scryptSync(secret, 'zolltool-totp-v1', 32);
+export function makeSecretBox(secret: string, salt = 'zolltool-totp-v1'): SecretBox {
+  const key = scryptSync(secret, salt, 32);
   return {
     encrypt(value) {
       const iv = randomBytes(12);

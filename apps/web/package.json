@@ -17,6 +17,7 @@
     "@boothly/pos": "*",
     "@boothly/price-cards": "*",
     "@boothly/sdk": "*",
+    "@boothly/shopify-sync": "*",
     "@boothly/sourcing": "*",
     "@boothly/ui": "*",
     "dexie": "^4.2.0",

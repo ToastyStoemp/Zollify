@@ -183,7 +183,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   await app.register(
     async (api) => {
       api.addHook('onRequest', app.authenticate);
-      registerModuleRoutes(api, db, store, identity);
+      registerModuleRoutes(api, db, store, identity, opts.moduleStoreDir);
       mountServerModules(api, db, opts.serverModules, identity);
     },
     { prefix: '/api' },

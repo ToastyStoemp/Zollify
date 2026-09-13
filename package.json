@@ -16,7 +16,7 @@
     "dev": "npm run dev -w @boothly/web",
     "dev:server": "npm run dev -w @boothly/server",
     "build": "npm run build --workspaces --if-present",
-    "build:modules": "npm run build -w @boothly/pos -w @boothly/customs -w @boothly/price-cards -w @boothly/sourcing -w @boothly/migration",
+    "build:modules": "npm run build -w @boothly/pos -w @boothly/customs -w @boothly/price-cards -w @boothly/sourcing -w @boothly/migration -w @boothly/shopify-sync",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:deps": "npm audit --audit-level=moderate",

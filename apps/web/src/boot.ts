@@ -27,6 +27,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'price-cards': () => import('@boothly/price-cards'),
   sourcing: () => import('@boothly/sourcing'),
   migration: () => import('@boothly/migration'),
+  'shopify-sync': () => import('@boothly/shopify-sync'),
 };
 
 export const contributions = new ContributionRegistry();

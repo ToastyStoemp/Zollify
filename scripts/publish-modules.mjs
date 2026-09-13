@@ -23,7 +23,7 @@ const store = process.env.BOOTHLY_MODULE_STORE
   ? resolve(process.env.BOOTHLY_MODULE_STORE)
   : join(root, 'apps', 'server', 'modules-store');
 
-const MODULES = ['pos', 'customs', 'price-cards', 'sourcing', 'migration'];
+const MODULES = ['pos', 'customs', 'price-cards', 'sourcing', 'migration', 'shopify-sync'];
 const viteBin = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 
 /**

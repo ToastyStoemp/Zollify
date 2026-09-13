@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { listForAccount, setEnabled } from '../modules/entitlements';
-import { toDescriptor, type PublishedModule } from '../modules/registry';
+import { loadModuleStore, toDescriptor, type PublishedModule } from '../modules/registry';
 import type { RequestIdentity } from '../modules/mount';
 
 const RANK = { member: 0, admin: 1, owner: 2 } as const;
@@ -22,7 +22,32 @@ export function registerModuleRoutes(
   db: Database.Database,
   store: Map<string, PublishedModule>,
   identity: (req: FastifyRequest) => RequestIdentity,
+  storeDir?: string,
 ): void {
+  /**
+   * Re-scans the module store.
+   *
+   * The catalogue is read once at boot, so publishing a module used to require
+   * restarting the gateway — which in turn drops every open connection. The map
+   * is mutated in place rather than replaced, because the routes below close
+   * over this exact reference.
+   */
+  if (storeDir) {
+    app.post('/modules/reload', async (req, reply) => {
+      const who = identity(req);
+      if (RANK[who.role] < RANK.owner) {
+        return reply.code(403).send({ error: 'forbidden', message: 'Only an owner can reload the module store.' });
+      }
+
+      const fresh = loadModuleStore(storeDir);
+      store.clear();
+      for (const [id, mod] of fresh) store.set(id, mod);
+
+      app.log.info({ modules: [...store.keys()] }, 'module store reloaded');
+      return { modules: [...store.keys()].sort() };
+    });
+  }
+
   /**
    * The boot manifest: descriptors for every module this account has enabled
    * and this user's role may load. Filtering by role here means a helper's

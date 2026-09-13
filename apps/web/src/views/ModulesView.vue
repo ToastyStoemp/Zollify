@@ -30,6 +30,23 @@ async function refresh(): Promise<void> {
 onMounted(refresh);
 
 /**
+ * Re-scans the server's module store. The catalogue is read at boot, so a
+ * module published since then is invisible until this runs.
+ */
+async function reloadStore(): Promise<void> {
+  busy.value = 'reload';
+  error.value = null;
+  try {
+    await authFetch('/modules/reload', { method: 'POST' });
+    await refresh();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not reload the module store.';
+  } finally {
+    busy.value = null;
+  }
+}
+
+/**
  * Toggling is applied server-side first, then reflected in the running shell.
  * Doing it in that order means a failed request leaves the UI honest rather
  * than showing a module as enabled that the gateway will refuse to serve.
@@ -59,8 +76,16 @@ async function toggle(mod: AvailableModule): Promise<void> {
 
 <template>
   <section class="modules">
-    <h1>Modules</h1>
-    <p class="lede">Switch features on and off for this account. Changes apply straight away.</p>
+    <header>
+      <h1>Modules</h1>
+      <button type="button" :disabled="busy !== null" @click="reloadStore">
+        {{ busy === 'reload' ? 'Rescanning…' : 'Rescan store' }}
+      </button>
+    </header>
+    <p class="lede">
+      Switch features on and off for this account. Changes apply straight away. Rescan after
+      publishing a new module bundle.
+    </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
@@ -84,6 +109,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
 
 <style scoped>
 .modules { display: flex; flex-direction: column; gap: 1rem; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
 .lede, .empty { color: var(--bly-muted, #5a6472); margin: 0; }
 .error { color: var(--bly-danger, #c6512f); margin: 0; }

@@ -1,12 +1,13 @@
 import { resolve } from 'node:path';
 import { buildGateway, loadDotEnv, type ServerModule } from '@boothly/server-core';
+import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
 import { taxServerModule } from './modules/tax';
 
 loadDotEnv();
 
 /**
- * Server module halves compiled into this deploy.
+ * Server module halves are compiled into this deploy (assembled in main()).
  *
  * Unlike client modules, these are not loaded at runtime: they run in a
  * privileged process holding the database and every tenant's integration keys,
@@ -14,7 +15,7 @@ loadDotEnv();
  * security proposition. They are gated per account instead — see
  * `mountServerModules`.
  */
-const SERVER_MODULES: ServerModule[] = [taxServerModule, sourcingServerModule];
+
 
 /** What a brand-new account starts with, so it isn't an empty shell. */
 const DEFAULT_MODULES = ['pos', 'customs'];
@@ -39,12 +40,21 @@ function flag(name: string, fallback: boolean): boolean {
 async function main(): Promise<void> {
   const dataDir = resolve(process.env.BOOTHLY_DATA_DIR ?? './data');
   const moduleStoreDir = resolve(process.env.BOOTHLY_MODULE_STORE ?? './modules-store');
+  const jwtSecret = required('BOOTHLY_JWT_SECRET');
+
+  // Shopify derives its credential-encryption key from the same secret, so it
+  // is constructed here rather than importing config of its own.
+  const serverModules: ServerModule[] = [
+    taxServerModule,
+    sourcingServerModule,
+    shopifyServerModule(jwtSecret),
+  ];
 
   const app = await buildGateway({
     dataDir,
     moduleStoreDir,
-    jwtSecret: required('BOOTHLY_JWT_SECRET'),
-    serverModules: SERVER_MODULES,
+    jwtSecret,
+    serverModules,
     defaultModules: DEFAULT_MODULES,
     allowedOrigins: (process.env.BOOTHLY_ALLOWED_ORIGINS ?? '')
       .split(',')

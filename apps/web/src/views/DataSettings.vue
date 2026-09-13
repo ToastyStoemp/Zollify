@@ -142,7 +142,8 @@ async function confirmRestore(): Promise<void> {
       <ul class="counts">
         <li><strong>{{ pending.summary.products }}</strong> products</li>
         <li><strong>{{ pending.summary.events }}</strong> events</li>
-        <li><strong>{{ pending.summary.eventStock }}</strong> stock rows</li>
+        <li><strong>{{ pending.summary.inventory }}</strong> stock counts</li>
+        <li><strong>{{ pending.summary.eventStock }}</strong> event claims</li>
         <li><strong>{{ pending.summary.transactions }}</strong> sales</li>
       </ul>
       <div class="row">

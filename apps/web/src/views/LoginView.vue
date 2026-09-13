@@ -6,6 +6,7 @@ import {
   getApiBase,
   loadCatalog,
   loadDiscounts,
+  loadInventory,
   loadSalesEvents,
   loadTransactions,
   startAutoSync,
@@ -53,7 +54,13 @@ async function submit(): Promise<void> {
     applyLogin(body);
     // Same order as a cold boot: core data first, then modules, which read it
     // through the SDK as they mount.
-    await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts()]);
+    await Promise.all([
+      loadCatalog(),
+      loadSalesEvents(),
+      loadTransactions(),
+      loadDiscounts(),
+      loadInventory(),
+    ]);
     await loadEnabledModules(router);
     startAutoSync();
     const next = typeof route.query.next === 'string' ? route.query.next : '/home';

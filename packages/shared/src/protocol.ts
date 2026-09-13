@@ -11,6 +11,8 @@ export const OpTypeSchema = z.enum([
   'event.upsert',
   'event.close',
   'stock.set',
+  /** A claim is still `stock.set`; this carries the inventory count above it. */
+  'inventory.set',
   'discount.upsert',
   'discount.delete',
   'image.meta',

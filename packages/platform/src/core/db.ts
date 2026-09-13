@@ -2,6 +2,7 @@ import Dexie, { type EntityTable } from 'dexie';
 import type {
   DiscountRule,
   EventStock,
+  InventoryItem,
   Op,
   Product,
   SalesEvent,
@@ -43,6 +44,9 @@ export interface SettingRow {
 export type CoreDb = Dexie & {
   products: EntityTable<Product, 'id'>;
   events: EntityTable<SalesEvent, 'id'>;
+  /** The one inventory: what the booth owns, keyed by product and variant. */
+  inventory: Dexie.Table<InventoryItem, [string, string]>;
+  /** Per-event claims on that inventory. */
   eventStock: Dexie.Table<EventStock, [string, string, string]>;
   transactions: EntityTable<Transaction, 'id'>;
   discounts: EntityTable<DiscountRule, 'id'>;
@@ -77,6 +81,38 @@ export function openCoreDb(accountId: string): CoreDb {
     ops: '++seq, synced',
     settings: 'key',
   });
+
+  /**
+   * v2 introduces the single inventory.
+   *
+   * Before this, stock existed only per event and there was no answer to "how
+   * many do I own". Existing per-event rows become claims against the new
+   * inventory, and the inventory is seeded from the largest claim any event
+   * held — the only figure in the old data that is evidence of what was owned.
+   * It is a starting point to correct, not a count, which is why the Inventory
+   * screen leads with a recount prompt when it finds seeded rows.
+   */
+  db.version(2)
+    .stores({ inventory: '[productId+variantId], productId' })
+    .upgrade(async (tx) => {
+      const claims = await tx.table('eventStock').toArray();
+      const largest = new Map<string, InventoryItem>();
+
+      for (const claim of claims) {
+        const key = `${claim.productId}:${claim.variantId ?? ''}`;
+        const existing = largest.get(key);
+        if (!existing || claim.broughtQty > existing.onHand) {
+          largest.set(key, {
+            productId: claim.productId,
+            variantId: claim.variantId ?? '',
+            onHand: claim.broughtQty,
+            updatedAt: Date.now(),
+          });
+        }
+      }
+
+      if (largest.size) await tx.table('inventory').bulkPut([...largest.values()]);
+    });
 
   open.set(name, db);
   return db;

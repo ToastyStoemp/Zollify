@@ -11,7 +11,7 @@ const coreNav: { routeName: string; label: string; order: number; minRole?: 'own
   { routeName: 'home', label: 'Home', order: 0 },
   { routeName: 'events', label: 'Events', order: 10 },
   { routeName: 'catalog', label: 'Catalog', order: 20 },
-  { routeName: 'stock', label: 'Stock', order: 25 },
+  { routeName: 'stock', label: 'Inventory', order: 25 },
   { routeName: 'history', label: 'History', order: 30 },
   { routeName: 'cashup', label: 'Cash up', order: 35, minRole: 'admin' },
   { routeName: 'settings', label: 'Settings', order: 900 },

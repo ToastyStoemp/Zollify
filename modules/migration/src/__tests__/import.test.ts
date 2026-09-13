@@ -91,6 +91,31 @@ describe('planImport — what comes across', () => {
     expect(plan.warnings.join(' ')).toMatch(/missing event or product/i);
   });
 
+  it('seeds an opening inventory from the largest quantity ever taken', () => {
+    // ZollTool never recorded total stock owned — only what went to each event.
+    // The biggest of those is the only evidence of how many existed.
+    const plan = planImport(
+      backup({
+        products: [product('p1')],
+        events: [event('e1'), event('e2')],
+        eventStock: [
+          { eventId: 'e1', productId: 'p1', variantId: '', broughtQty: 12, updatedAt: 1 },
+          { eventId: 'e2', productId: 'p1', variantId: '', broughtQty: 30, updatedAt: 1 },
+        ],
+      }),
+    );
+
+    expect(plan.inventory).toHaveLength(1);
+    expect(plan.inventory[0]?.onHand).toBe(30);
+    // Said out loud, because it is a guess the user has to correct.
+    expect(plan.warnings.join(' ')).toMatch(/recount/i);
+  });
+
+  it('seeds nothing when the file carried no stock', () => {
+    const plan = planImport(backup({ products: [product('p1')] }));
+    expect(plan.inventory).toHaveLength(0);
+  });
+
   it('normalises a null variantId to the empty string', () => {
     // IndexedDB compound keys cannot hold null, which is why the shared type
     // documents '' as the product-level marker.

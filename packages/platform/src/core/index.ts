@@ -91,3 +91,25 @@ export {
   base64ToBlob,
 } from './images';
 export { transactionsToCsv, csvFilename } from './csv';
+export {
+  loadInventory,
+  inventoryLoaded,
+  stockKey,
+  onHandFor,
+  claimFor,
+  claimsForEvent,
+  setOnHand,
+  setClaim,
+  clearClaim,
+  replaceInventory,
+  replaceClaims,
+  soldAt,
+  soldTotal,
+  claimedTotal,
+  freeFor,
+  availabilityFor,
+  inventoryRows,
+  resetInventoryCache,
+  type Availability,
+  type InventoryRow,
+} from './inventory';

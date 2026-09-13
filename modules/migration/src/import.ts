@@ -23,7 +23,17 @@ export interface ZollToolBackup {
 export interface ImportPlan {
   events: SalesEvent[];
   products: Product[];
+  /** ZollTool's per-event stock becomes a claim on the new single inventory. */
   eventStock: EventStock[];
+  /**
+   * A starting inventory seeded from those claims.
+   *
+   * ZollTool had no notion of total stock owned — only what was taken to each
+   * event. The largest quantity any event took is the only evidence in the old
+   * data of how many existed, so it is used as an opening count to correct
+   * rather than a figure to trust.
+   */
+  inventory: { productId: string; variantId: string; onHand: number; updatedAt: number }[];
   /** Rows the file contained but this importer does not bring across. */
   skipped: { what: string; count: number; why: string }[];
   warnings: string[];
@@ -122,10 +132,34 @@ export function planImport(raw: unknown): ImportPlan {
     warnings.push(`${deletedCount} row(s) already deleted in ZollTool were not imported.`);
   }
 
+  const claims = stock.map((s) => ({ ...s, variantId: s.variantId ?? '' }));
+
+  const seeded = new Map<string, { productId: string; variantId: string; onHand: number; updatedAt: number }>();
+  for (const claim of claims) {
+    const key = `${claim.productId}:${claim.variantId}`;
+    const existing = seeded.get(key);
+    if (!existing || claim.broughtQty > existing.onHand) {
+      seeded.set(key, {
+        productId: claim.productId,
+        variantId: claim.variantId,
+        onHand: claim.broughtQty,
+        updatedAt: Date.now(),
+      });
+    }
+  }
+
+  if (seeded.size) {
+    warnings.push(
+      `Opening inventory seeded from the largest quantity each item was ever taken to an event ` +
+        `(${seeded.size} item(s)). Recount before trusting it — ZollTool never recorded total stock.`,
+    );
+  }
+
   return {
     events: liveEvents,
     products: liveProducts,
-    eventStock: stock.map((s) => ({ ...s, variantId: s.variantId ?? '' })),
+    eventStock: claims,
+    inventory: [...seeded.values()],
     skipped,
     warnings,
   };

@@ -30,6 +30,8 @@ export type {
   DiscountApi,
   TransactionApi,
   ImageApi,
+  ItemAvailability,
+  InventoryApi,
   DataApi,
   Logger,
   ToastOptions,

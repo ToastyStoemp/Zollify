@@ -206,6 +206,41 @@ export interface SalesEventApi {
   setStock(entry: EventStock): Promise<void>;
 }
 
+/** What one event can still sell of an item. */
+export interface ItemAvailability {
+  productId: string;
+  variantId: string;
+  label: string;
+  /** Total owned by the booth. */
+  onHand: number;
+  /** This event's claim, or null when it sells from the shared pool. */
+  claimed: number | null;
+  soldHere: number;
+  reservedElsewhere: number;
+  available: number;
+  source: 'claim' | 'pool';
+}
+
+/**
+ * The booth's single inventory, with per-event claims on top.
+ *
+ * A claim reserves stock for one event; an event with no claim sells from
+ * whatever is unclaimed. Availability is derived from recorded sales, never
+ * decremented, so a revert needs no compensating write.
+ */
+export interface InventoryApi {
+  /** Everything this event can still sell. */
+  availability(eventId: string): ItemAvailability[];
+  /** What this event can still sell of one item. */
+  availableFor(eventId: string, productId: string, variantId?: string | null): number;
+  onHand(productId: string, variantId?: string | null): number;
+  setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
+  /** Reserve stock for an event. */
+  claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;
+  /** Drop a claim so the event falls back to the shared pool. */
+  clearClaim(eventId: string, productId: string, variantId: string | null): Promise<void>;
+}
+
 /**
  * Discount rules, stored by core because they reference products and must
  * survive POS being switched off. Modules compute with them; core owns them.
@@ -249,6 +284,7 @@ export interface ImageApi {
 
 export interface DataApi {
   products: CatalogApi;
+  inventory: InventoryApi;
   images: ImageApi;
   events: SalesEventApi;
   discounts: DiscountApi;

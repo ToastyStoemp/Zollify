@@ -6,7 +6,7 @@ import { sdk } from '../runtime';
 const plan = ref<ImportPlan | null>(null);
 const error = ref<string | null>(null);
 const running = ref(false);
-const done = ref<{ products: number; events: number; stock: number } | null>(null);
+const done = ref<{ products: number; events: number; stock: number; inventory: number } | null>(null);
 const fileName = ref('');
 
 /**
@@ -62,11 +62,15 @@ async function run(): Promise<void> {
     for (const product of plan.value.products) await data.products.upsert(product);
     for (const event of plan.value.events) await data.events.upsert(event);
     for (const entry of plan.value.eventStock) await data.events.setStock(entry);
+    for (const item of plan.value.inventory) {
+      await data.inventory.setOnHand(item.productId, item.variantId, item.onHand);
+    }
 
     done.value = {
       products: plan.value.products.length,
       events: plan.value.events.length,
       stock: plan.value.eventStock.length,
+      inventory: plan.value.inventory.length,
     };
     sdk().ui.toast('Import finished. You can switch this module off now.', { kind: 'success' });
   } catch (err) {
@@ -99,7 +103,8 @@ async function run(): Promise<void> {
       <ul class="counts">
         <li><strong>{{ plan.products.length }}</strong> products</li>
         <li><strong>{{ plan.events.length }}</strong> events</li>
-        <li><strong>{{ plan.eventStock.length }}</strong> stock rows</li>
+        <li><strong>{{ plan.eventStock.length }}</strong> event claims</li>
+        <li><strong>{{ plan.inventory.length }}</strong> opening stock counts</li>
       </ul>
 
       <template v-if="plan.skipped.length">
@@ -122,7 +127,8 @@ async function run(): Promise<void> {
     </div>
 
     <p v-if="done" class="done" role="status">
-      Imported {{ done.products }} products, {{ done.events }} events and {{ done.stock }} stock rows.
+      Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims
+      and {{ done.inventory }} opening stock counts.
       Switch this module off in Modules — it has done its job.
     </p>
   </section>

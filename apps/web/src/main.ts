@@ -3,6 +3,7 @@ import {
   configureApiBase,
   getAccount,
   loadCatalog,
+  loadInventory,
   loadSalesEvents,
   loadDiscounts,
   loadTransactions,
@@ -36,6 +37,7 @@ async function start(): Promise<void> {
       loadSalesEvents().catch((err) => console.error('[boothly] events load failed', err)),
       loadTransactions().catch((err) => console.error('[boothly] history load failed', err)),
       loadDiscounts().catch((err) => console.error('[boothly] discounts load failed', err)),
+      loadInventory().catch((err) => console.error('[boothly] inventory load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
   }

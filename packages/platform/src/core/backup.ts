@@ -1,10 +1,11 @@
-import type { EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
+import type { EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { toPlain } from './plain';
 import { loadCatalog, resetCatalogCache } from './catalog';
 import { loadSalesEvents, resetSalesEventCache } from './sales-events';
 import { loadTransactions, resetTransactionCache } from './transactions';
+import { loadInventory, resetInventoryCache } from './inventory';
 import { queueOp } from './outbox';
 
 /**
@@ -28,6 +29,9 @@ export interface BoothlyBackup {
   accountName: string;
   products: Product[];
   events: SalesEvent[];
+  /** The one inventory: what the booth owns. */
+  inventory: InventoryItem[];
+  /** Per-event claims against it. */
   eventStock: EventStock[];
   transactions: Transaction[];
 }
@@ -51,9 +55,10 @@ export async function createBackup(): Promise<BoothlyBackup> {
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
-  const [products, events, eventStock, transactions] = await Promise.all([
+  const [products, events, inventory, eventStock, transactions] = await Promise.all([
     db.products.toArray(),
     db.events.toArray(),
+    db.inventory.toArray(),
     db.eventStock.toArray(),
     db.transactions.toArray(),
   ]);
@@ -66,6 +71,7 @@ export async function createBackup(): Promise<BoothlyBackup> {
     accountName: account.accountName,
     products,
     events,
+    inventory,
     eventStock,
     transactions,
   };
@@ -77,6 +83,7 @@ export interface BackupSummary {
   sameAccount: boolean;
   products: number;
   events: number;
+  inventory: number;
   eventStock: number;
   transactions: number;
 }
@@ -110,6 +117,7 @@ export function inspectBackup(raw: unknown): BackupSummary {
     sameAccount: file.accountId === account.accountId,
     products: file.products?.length ?? 0,
     events: file.events?.length ?? 0,
+    inventory: file.inventory?.length ?? 0,
     eventStock: file.eventStock?.length ?? 0,
     transactions: file.transactions?.length ?? 0,
   };
@@ -118,6 +126,7 @@ export function inspectBackup(raw: unknown): BackupSummary {
 export interface RestoreResult {
   products: number;
   events: number;
+  inventory: number;
   eventStock: number;
   transactions: number;
 }
@@ -139,11 +148,13 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   const products = (file.products ?? []).map(toPlain);
   const events = (file.events ?? []).map(toPlain);
   const stock = (file.eventStock ?? []).map((s) => toPlain({ ...s, variantId: s.variantId ?? '' }));
+  const inventory = (file.inventory ?? []).map((i) => toPlain({ ...i, variantId: i.variantId ?? '' }));
   const transactions = (file.transactions ?? []).map(toPlain);
 
-  await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, async () => {
+  await db.transaction('rw', [db.products, db.events, db.eventStock, db.transactions, db.inventory], async () => {
     if (products.length) await db.products.bulkPut(products);
     if (events.length) await db.events.bulkPut(events);
+    if (inventory.length) await db.inventory.bulkPut(inventory);
     if (stock.length) await db.eventStock.bulkPut(stock);
     // Sales are immutable, so an existing row always wins over the file's copy.
     for (const tx of transactions) {
@@ -154,6 +165,7 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   // Queued after the write, so a failed restore leaves nothing half-announced.
   for (const product of products) await queueOp({ type: 'product.upsert', payload: product });
   for (const event of events) await queueOp({ type: 'event.upsert', payload: event });
+  for (const item of inventory) await queueOp({ type: 'inventory.set', payload: item });
   for (const entry of stock) await queueOp({ type: 'stock.set', payload: entry });
   for (const tx of transactions) await queueOp({ type: 'tx.create', payload: tx });
 
@@ -162,11 +174,13 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   resetCatalogCache();
   resetSalesEventCache();
   resetTransactionCache();
-  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions()]);
+  resetInventoryCache();
+  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadInventory()]);
 
   return {
     products: summary.products,
     events: summary.events,
+    inventory: summary.inventory,
     eventStock: summary.eventStock,
     transactions: summary.transactions,
   };

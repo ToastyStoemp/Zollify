@@ -8,6 +8,7 @@ import type {
   ServerOp,
   Transaction,
   DiscountRule,
+  InventoryItem,
 } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -18,6 +19,7 @@ import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
 import { loadDiscounts } from './discounts';
+import { loadInventory } from './inventory';
 
 /**
  * Offline-first sync.
@@ -82,7 +84,10 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
   const db = openCoreDb(requireAccountId());
   let applied = 0;
 
-  await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, db.discounts, async () => {
+  await db.transaction(
+    'rw',
+    [db.products, db.events, db.eventStock, db.transactions, db.discounts, db.inventory],
+    async () => {
     for (const op of ops) {
       try {
         applied += await applyOne(db, op);
@@ -171,6 +176,16 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       }
       return 0;
     }
+    case 'inventory.set': {
+      const incoming = op.payload as InventoryItem;
+      const key: [string, string] = [incoming.productId, incoming.variantId ?? ''];
+      const existing = await db.inventory.get(key);
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.inventory.put({ ...incoming, variantId: incoming.variantId ?? '' });
+        return 1;
+      }
+      return 0;
+    }
     case 'stock.set': {
       const incoming = op.payload as EventStock;
       const key: [string, string, string] = [
@@ -179,11 +194,18 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
         incoming.variantId ?? '',
       ];
       const existing = await db.eventStock.get(key);
-      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
-        await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
+      if (existing && (incoming.updatedAt ?? 0) < (existing.updatedAt ?? 0)) return 0;
+
+      // A negative quantity is the tombstone for a dropped claim: the protocol
+      // has no stock.delete, and the event must fall back to the shared pool
+      // rather than keep a stale reservation.
+      if (incoming.broughtQty < 0) {
+        await db.eventStock.delete(key);
         return 1;
       }
-      return 0;
+
+      await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
+      return 1;
     }
     default:
       // Unknown to this build — skip rather than fail the whole batch.
@@ -225,7 +247,7 @@ async function pull(): Promise<number> {
     // is stale. Discard synced data and re-pull from the beginning rather than
     // trying to reconcile against payloads that no longer exist.
     const db = openCoreDb(requireAccountId());
-    await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, async () => {
+    await db.transaction('rw', [db.products, db.events, db.eventStock, db.transactions], async () => {
       // Transactions are deliberately kept. They are financial records and are
       // immutable once written, so there is nothing stale to discard — and a
       // sale made on this device but not yet pushed would be lost forever.
@@ -261,7 +283,13 @@ export async function syncNow(): Promise<SyncResult> {
 
       // Reload the in-memory stores so the UI reflects what just arrived.
       if (pulled > 0) {
-        await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts()]);
+        await Promise.all([
+          loadCatalog(),
+          loadSalesEvents(),
+          loadTransactions(),
+          loadDiscounts(),
+          loadInventory(),
+        ]);
       }
       await refreshPendingCount();
 

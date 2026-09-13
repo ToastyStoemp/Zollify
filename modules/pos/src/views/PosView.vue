@@ -44,6 +44,35 @@ const products = computed(() => {
 
 const activeEvent = computed(() => sdk().data.events.active());
 
+/**
+ * What the active event can still sell of each item.
+ *
+ * Advisory only — the till never blocks a sale. If someone is standing there
+ * with cash, the stock figure is what is wrong, not the sale.
+ */
+const availability = computed(() => {
+  const event = activeEvent.value;
+  if (!event) return new Map<string, number>();
+  return new Map(
+    sdk().data.inventory.availability(event.id).map((r) => [`${r.productId}:${r.variantId}`, r.available]),
+  );
+});
+
+function remaining(productId: string, variantId: string | null = ''): number | null {
+  if (!activeEvent.value) return null;
+  return availability.value.get(`${productId}:${variantId ?? ''}`) ?? null;
+}
+
+/** Counting what is already in the cart, so the warning appears before checkout. */
+function wouldExceed(productId: string, variantId: string | null = ''): boolean {
+  const left = remaining(productId, variantId);
+  if (left === null) return false;
+  const inCart = cart.lines
+    .filter((l) => l.productId === productId && (l.variantId ?? '') === (variantId ?? ''))
+    .reduce((n, l) => n + l.qty, 0);
+  return inCart >= left;
+}
+
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
 
@@ -171,7 +200,15 @@ function openReceipt(): void {
             type="button"
             @click="addVariant(choosing, variant)"
           >
-            <span>{{ variant.name }}</span>
+            <span>
+              {{ variant.name }}
+              <span
+                v-if="remaining(choosing.id, variant.id) !== null"
+                :class="['left', { none: wouldExceed(choosing.id, variant.id) }]"
+              >
+                · {{ remaining(choosing.id, variant.id) }} left
+              </span>
+            </span>
             <span class="price">{{ (variant.price ?? choosing.price).toFixed(2) }}</span>
           </button>
         </div>
@@ -189,6 +226,12 @@ function openReceipt(): void {
           <button v-for="product in products" :key="product.id" type="button" class="tile" @click="tap(product)">
             <ProductThumb :image-id="product.imageId" :alt="product.title" :size="44" />
             <span class="title">{{ product.title }}</span>
+            <span
+              v-if="!product.variants?.length && remaining(product.id) !== null"
+              :class="['left', { none: wouldExceed(product.id) }]"
+            >
+              {{ remaining(product.id) }} left
+            </span>
             <span class="price">
               {{ product.price.toFixed(2) }}
               <template v-if="product.variants?.length"> · {{ product.variants.length }} sizes</template>
@@ -279,6 +322,10 @@ h1 { font-size: 1.35rem; margin: 0; }
 .tile { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .7rem .8rem; text-align: left; min-height: 4.2rem; }
 .tile .title { font-weight: 600; font-size: .9rem; }
 .tile .price { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
+.left { font-size: .72rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+/* Advisory, never a block: if someone is standing there with cash, the stock
+   figure is what is wrong. */
+.left.none { color: var(--bly-danger, #c6512f); font-weight: 600; }
 .ticket { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; background: var(--bly-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .lines li { display: grid; grid-template-columns: 1fr 3.5rem 4.5rem auto; gap: .5rem; align-items: center; font-size: .9rem; }

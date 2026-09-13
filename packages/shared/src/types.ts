@@ -78,6 +78,33 @@ export interface Product {
   deletedAt?: number;
 }
 
+/**
+ * The one inventory: how many of a thing the booth owns, full stop.
+ *
+ * This is a counted figure, not a running balance. What is still available is
+ * derived by subtracting recorded sales — a number decremented on every sale
+ * drifts the moment one is reverted or arrives late from another register.
+ */
+export interface InventoryItem {
+  productId: string;
+  /** Variant id, or '' for the product itself (IndexedDB compound keys cannot hold null). */
+  variantId: string;
+  /** Total owned, as last counted. */
+  onHand: number;
+  updatedAt: number;
+}
+
+/**
+ * An event's claim on the inventory — the stock set aside for it.
+ *
+ * A claim is reserved: no other event can sell against it. An event with no
+ * claim sells from whatever is left unclaimed, which is the common case for a
+ * booth that only works one event at a time.
+ *
+ * `broughtQty` is the stored name and means exactly that: what is being taken
+ * to this event. Customs paperwork reads the same figure, because "claimed"
+ * and "brought" are the same physical act.
+ */
 export interface EventStock {
   eventId: string;
   productId: string;

@@ -26,6 +26,13 @@ import {
 import { getTransaction, recentTransactions, totalsFor } from './core/transactions';
 import { imageUrl } from './core/images';
 import {
+  availabilityFor,
+  clearClaim,
+  onHandFor,
+  setClaim,
+  setOnHand,
+} from './core/inventory';
+import {
   activeDiscounts,
   allDiscounts,
   deleteDiscount,
@@ -123,6 +130,17 @@ const coreData: import('@boothly/sdk').DataApi = {
     upsert: (event) => upsertSalesEvent(event),
     remove: (id) => deleteSalesEvent(id),
     setStock: (entry) => setStock(entry),
+  },
+  inventory: {
+    availability: (eventId) => availabilityFor(eventId),
+    availableFor: (eventId, productId, variantId) =>
+      availabilityFor(eventId).find(
+        (r) => r.productId === productId && r.variantId === (variantId ?? ''),
+      )?.available ?? 0,
+    onHand: (productId, variantId) => onHandFor(productId, variantId ?? ''),
+    setOnHand: (productId, variantId, qty) => setOnHand(productId, variantId, qty),
+    claim: (eventId, productId, variantId, qty) => setClaim(eventId, productId, variantId, qty),
+    clearClaim: (eventId, productId, variantId) => clearClaim(eventId, productId, variantId),
   },
   images: {
     url: (imageId, kind) => imageUrl(imageId, kind ?? 'thumb'),

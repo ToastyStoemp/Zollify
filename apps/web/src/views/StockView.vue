@@ -1,134 +1,99 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { EventStock } from '@boothly/shared';
 import {
   activeEventId,
-  allProducts,
+  availabilityFor,
+  clearClaim,
   currentAccount,
-  recentTransactions,
-  setStock,
-  stockForEvent,
+  inventoryLoaded,
+  inventoryRows,
+  loadInventory,
+  setClaim,
+  setOnHand,
   visibleEvents,
 } from '@boothly/platform';
 
 /**
- * Per-event stock: what was brought, what sold, what should still be in the box.
+ * One inventory, with per-event claims on top.
  *
- * "Remaining" is derived from recorded sales rather than decremented on each
- * one. A counter that is written on every sale drifts the moment a sale is
- * reverted or arrives late from another register; recomputing cannot drift.
+ * Two views of the same stock: what the booth owns, and what a given event has
+ * set aside. An event with no claim sells from whatever is unclaimed, which is
+ * the normal case for a booth working one event at a time — so claiming is
+ * opt-in rather than something to fill in for every event.
  */
 
 const account = currentAccount;
+const mode = ref<'inventory' | 'claims'>('inventory');
 const eventId = ref<string>('');
-const brought = ref<Map<string, number>>(new Map());
 const error = ref<string | null>(null);
-const saving = ref<string | null>(null);
 
 const canEdit = computed(
   () => account.value?.role === 'owner' || account.value?.role === 'admin',
 );
 
-/** Stock is tracked per product and variant; '' is the product itself. */
-function key(productId: string, variantId: string): string {
-  return `${productId}:${variantId}`;
-}
-
-interface Row {
-  productId: string;
-  variantId: string;
-  label: string;
-  brought: number;
-  sold: number;
-  remaining: number;
-}
-
-const soldByKey = computed(() => {
-  const counts = new Map<string, number>();
-  for (const tx of recentTransactions.value) {
-    if (tx.eventId !== eventId.value || tx.revertedAt) continue;
-    for (const item of tx.items) {
-      const k = key(item.pid, item.vid ?? '');
-      counts.set(k, (counts.get(k) ?? 0) + item.qty);
-    }
-  }
-  return counts;
-});
-
-const rows = computed<Row[]>(() => {
-  const out: Row[] = [];
-  for (const product of allProducts.value) {
-    const variants = product.variants ?? [];
-    const entries = variants.length
-      ? variants.map((v) => ({ id: v.id, label: `${product.title} · ${v.name}` }))
-      : [{ id: '', label: product.title }];
-
-    for (const entry of entries) {
-      const k = key(product.id, entry.id);
-      const b = brought.value.get(k) ?? 0;
-      const sold = soldByKey.value.get(k) ?? 0;
-      out.push({
-        productId: product.id,
-        variantId: entry.id,
-        label: entry.label,
-        brought: b,
-        sold,
-        remaining: b - sold,
-      });
-    }
-  }
-  return out;
-});
+const stock = computed(() => inventoryRows());
+const claims = computed(() => (eventId.value ? availabilityFor(eventId.value) : []));
 
 const totals = computed(() => ({
-  brought: rows.value.reduce((n, r) => n + r.brought, 0),
-  sold: rows.value.reduce((n, r) => n + r.sold, 0),
-  remaining: rows.value.reduce((n, r) => n + Math.max(0, r.remaining), 0),
+  onHand: stock.value.reduce((n, r) => n + r.onHand, 0),
+  claimed: stock.value.reduce((n, r) => n + r.claimed, 0),
+  sold: stock.value.reduce((n, r) => n + r.sold, 0),
+  free: stock.value.reduce((n, r) => n + r.free, 0),
 }));
 
-async function load(): Promise<void> {
-  if (!eventId.value) {
-    brought.value = new Map();
-    return;
+const overCommitted = computed(() => stock.value.filter((r) => r.overCommitted));
+
+/**
+ * Over-commitment has two causes and they need different fixes, so the message
+ * names whichever one actually applies rather than always blaming claims.
+ */
+const overCommitMessage = computed(() => {
+  const rows = overCommitted.value;
+  if (!rows.length) return '';
+
+  const fromClaims = rows.some((r) => r.claimed > 0);
+  const count = `${rows.length} item${rows.length === 1 ? '' : 's'}`;
+
+  if (fromClaims) {
+    return `${count} ${rows.length === 1 ? 'is' : 'are'} claimed or sold beyond what's counted in. Reduce a claim, or count more in.`;
   }
+  return `${count} ${rows.length === 1 ? 'has' : 'have'} sold more than the count says exists. Count what's actually there.`;
+});
+
+onMounted(async () => {
+  eventId.value = activeEventId.value ?? visibleEvents.value[0]?.id ?? '';
+  if (!inventoryLoaded.value) {
+    await loadInventory().catch((err) => {
+      error.value = err instanceof Error ? err.message : 'Could not load inventory.';
+    });
+  }
+});
+
+watch(mode, (next) => {
+  if (next === 'claims' && !eventId.value) {
+    eventId.value = activeEventId.value ?? visibleEvents.value[0]?.id ?? '';
+  }
+});
+
+async function updateOnHand(productId: string, variantId: string, value: number): Promise<void> {
+  error.value = null;
   try {
-    const rowsForEvent = await stockForEvent(eventId.value);
-    brought.value = new Map(
-      rowsForEvent.map((r) => [key(r.productId, r.variantId ?? ''), r.broughtQty]),
-    );
+    await setOnHand(productId, variantId, value);
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not load stock.';
+    error.value = err instanceof Error ? err.message : 'Could not save that count.';
   }
 }
 
-onMounted(() => {
-  eventId.value = activeEventId.value ?? visibleEvents.value[0]?.id ?? '';
-  void load();
-});
-
-watch(eventId, () => void load());
-
-async function updateBrought(row: Row, value: number): Promise<void> {
+async function updateClaim(productId: string, variantId: string, value: string): Promise<void> {
   if (!eventId.value) return;
-  const qty = Math.max(0, Math.floor(value));
-  const k = key(row.productId, row.variantId);
-  brought.value = new Map(brought.value).set(k, qty);
-
-  saving.value = k;
   error.value = null;
   try {
-    const entry: EventStock = {
-      eventId: eventId.value,
-      productId: row.productId,
-      variantId: row.variantId,
-      broughtQty: qty,
-      updatedAt: Date.now(),
-    };
-    await setStock(entry);
+    // Blank means "no claim" — the event falls back to the shared pool. Zero
+    // is different: it deliberately reserves nothing.
+    if (value.trim() === '') await clearClaim(eventId.value, productId, variantId);
+    else await setClaim(eventId.value, productId, variantId, Number(value));
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not save that count.';
-  } finally {
-    saving.value = null;
+    error.value = err instanceof Error ? err.message : 'Could not save that claim.';
   }
 }
 </script>
@@ -136,7 +101,74 @@ async function updateBrought(row: Row, value: number): Promise<void> {
 <template>
   <section class="stock">
     <header>
-      <h1>Stock</h1>
+      <h1>Inventory</h1>
+      <div class="tabs">
+        <button type="button" :class="{ active: mode === 'inventory' }" @click="mode = 'inventory'">
+          What we own
+        </button>
+        <button type="button" :class="{ active: mode === 'claims' }" @click="mode = 'claims'">
+          Claimed for an event
+        </button>
+      </div>
+    </header>
+
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <!-- ── The one inventory ────────────────────────────────────────────── -->
+    <template v-if="mode === 'inventory'">
+      <ul class="totals">
+        <li><span class="label">On hand</span><strong>{{ totals.onHand }}</strong></li>
+        <li><span class="label">Claimed</span><strong>{{ totals.claimed }}</strong></li>
+        <li><span class="label">Sold</span><strong>{{ totals.sold }}</strong></li>
+        <li>
+          <span class="label">Free</span>
+          <strong :class="{ bad: totals.free < 0 }">{{ totals.free }}</strong>
+          <span class="sub">unclaimed and unsold</span>
+        </li>
+      </ul>
+
+      <p v-if="overCommitMessage" class="warn" role="alert">{{ overCommitMessage }}</p>
+
+      <p v-if="!stock.length" class="empty">No products yet — add some in Catalog.</p>
+
+      <table v-else>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th class="num">On hand</th>
+            <th class="num">Claimed</th>
+            <th class="num">Sold</th>
+            <th class="num">Free</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="row in stock"
+            :key="row.productId + row.variantId"
+            :class="{ short: row.overCommitted }"
+          >
+            <td>{{ row.label }}</td>
+            <td class="num">
+              <input
+                v-if="canEdit"
+                type="number"
+                min="0"
+                :value="row.onHand"
+                :aria-label="`Units owned of ${row.label}`"
+                @change="updateOnHand(row.productId, row.variantId, Number(($event.target as HTMLInputElement).value))"
+              />
+              <span v-else>{{ row.onHand }}</span>
+            </td>
+            <td class="num">{{ row.claimed }}</td>
+            <td class="num">{{ row.sold }}</td>
+            <td class="num" :class="{ bad: row.free < 0 }">{{ row.free }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
+
+    <!-- ── Claims for one event ─────────────────────────────────────────── -->
+    <template v-else>
       <label class="scope">
         <span>Event</span>
         <select v-model="eventId">
@@ -146,34 +178,30 @@ async function updateBrought(row: Row, value: number): Promise<void> {
           </option>
         </select>
       </label>
-    </header>
 
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <p class="hint">
+        Claiming reserves stock for this event — no other event can sell it. Leave a claim blank and
+        the event sells from whatever is unclaimed.
+      </p>
 
-    <p v-if="!eventId" class="empty">Pick an event to plan what you're taking.</p>
-    <p v-else-if="!rows.length" class="empty">No products yet — add some in Catalog.</p>
+      <p v-if="!eventId" class="empty">Pick an event to plan what it takes.</p>
+      <p v-else-if="!claims.length" class="empty">No products yet — add some in Catalog.</p>
 
-    <template v-else>
-      <ul class="totals">
-        <li><span class="label">Brought</span><strong>{{ totals.brought }}</strong></li>
-        <li><span class="label">Sold</span><strong>{{ totals.sold }}</strong></li>
-        <li><span class="label">Remaining</span><strong>{{ totals.remaining }}</strong></li>
-      </ul>
-
-      <table>
+      <table v-else>
         <thead>
           <tr>
             <th>Item</th>
-            <th class="num">Brought</th>
-            <th class="num">Sold</th>
-            <th class="num">Remaining</th>
+            <th class="num">Claim</th>
+            <th class="num">Sold here</th>
+            <th class="num">Available</th>
+            <th>Source</th>
           </tr>
         </thead>
         <tbody>
           <tr
-            v-for="row in rows"
+            v-for="row in claims"
             :key="row.productId + row.variantId"
-            :class="{ short: row.remaining < 0 }"
+            :class="{ short: row.available < 0 }"
           >
             <td>{{ row.label }}</td>
             <td class="num">
@@ -181,16 +209,26 @@ async function updateBrought(row: Row, value: number): Promise<void> {
                 v-if="canEdit"
                 type="number"
                 min="0"
-                :value="row.brought"
-                :aria-label="`Brought quantity for ${row.label}`"
-                @change="updateBrought(row, Number(($event.target as HTMLInputElement).value))"
+                placeholder="—"
+                :value="row.claimed ?? ''"
+                :aria-label="`Claim for ${row.label}`"
+                @change="updateClaim(row.productId, row.variantId, ($event.target as HTMLInputElement).value)"
               />
-              <span v-else>{{ row.brought }}</span>
+              <span v-else>{{ row.claimed ?? '—' }}</span>
             </td>
-            <td class="num">{{ row.sold }}</td>
-            <!-- Negative means more sold than the count says was brought: the
-                 count is wrong, not the sales, so it is flagged rather than clamped. -->
-            <td class="num">{{ row.remaining }}</td>
+            <td class="num">{{ row.soldHere }}</td>
+            <!-- Negative means more was sold than the claim allowed: the claim
+                 is wrong, not the sales, so it is flagged rather than clamped. -->
+            <td class="num" :class="{ bad: row.available < 0 }">{{ row.available }}</td>
+            <td class="source">
+              <template v-if="row.source === 'claim'">reserved</template>
+              <template v-else>
+                shared pool
+                <span v-if="row.reservedElsewhere" class="sub">
+                  · {{ row.reservedElsewhere }} held by other events
+                </span>
+              </template>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -202,17 +240,23 @@ async function updateBrought(row: Row, value: number): Promise<void> {
 .stock { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
+.tabs { display: flex; gap: .3rem; }
+.tabs button.active { background: var(--bly-accent-soft, #deeee9); color: var(--bly-accent-ink, #0a5a4a); border-color: var(--bly-accent, #0e7c66); font-weight: 600; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
+.empty, .hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .9rem; }
 .error { color: var(--bly-danger, #c6512f); margin: 0; }
+.warn { color: var(--bly-danger, #c6512f); margin: 0; font-size: .9rem; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
-.totals li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; min-width: 7rem; }
+.totals li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; min-width: 8rem; }
 .totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--bly-muted, #5a6472); }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.totals .sub, .source .sub { font-size: .75rem; color: var(--bly-muted, #5a6472); }
 table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
 th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr.short { background: var(--bly-signal-soft, #f6e5df); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
-.num input { width: 5rem; text-align: right; }
+.num input { width: 5.5rem; text-align: right; }
+.source { color: var(--bly-muted, #5a6472); font-size: .82rem; }
+.bad { color: var(--bly-danger, #c6512f); font-weight: 600; }
 </style>

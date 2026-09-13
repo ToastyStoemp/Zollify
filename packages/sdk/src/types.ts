@@ -73,11 +73,22 @@ export interface SettingsPanel {
 
 export interface SaleLine {
   productId: string;
+  /** Variant id, or null for the product itself. */
+  variantId?: string | null;
   sku: string | null;
   name: string;
   qty: number;
   /** Major units (12.50), matching the payment provider contracts. */
   unitPrice: number;
+  /**
+   * What this line actually contributed to the total, after discounts were
+   * spread across the basket.
+   *
+   * Carried explicitly rather than recomputed from `unitPrice × qty`: with a
+   * discount applied those two disagree, and a receipt whose lines do not add
+   * up to its total is the first thing anyone notices.
+   */
+  lineTotal: number;
   taxRate: number | null;
 }
 

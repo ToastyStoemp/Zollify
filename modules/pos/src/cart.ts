@@ -78,8 +78,10 @@ export const isEmpty = computed(() => cart.lines.length === 0);
 
 let lineSeq = 0;
 
+// lineTotal is not asked for: the cart derives it, and only the distributed
+// figure computed at checkout is meaningful anyway.
 export function addLine(
-  line: Omit<SaleLine, 'taxRate'> & {
+  line: Omit<SaleLine, 'taxRate' | 'lineTotal'> & {
     taxRate?: number | null;
     variantId?: string | null;
     variantLabel?: string | null;
@@ -99,6 +101,7 @@ export function addLine(
     variantId,
     variantLabel: line.variantLabel ?? null,
     taxRate: line.taxRate ?? null,
+    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
     lineId: `l${++lineSeq}`,
   });
 }
@@ -181,9 +184,7 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
       at: Date.now(),
       currency: cart.currency,
       total: charged,
-      lines: priced.map(
-        ({ lineId: _l, variantId: _v, variantLabel: _vl, type: _t, lineTotal: _lt, ...line }) => line,
-      ),
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }) => line),
       payment: {
         provider: result.provider,
         approved: true,

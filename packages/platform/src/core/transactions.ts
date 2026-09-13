@@ -63,11 +63,14 @@ function toMinor(value: number): number {
 export function saleToTransaction(sale: SaleEvent, device: string): Transaction {
   const items: TxItem[] = sale.lines.map((line) => ({
     pid: line.productId,
-    vid: null,
+    vid: line.variantId ?? null,
     title: line.name,
     qty: line.qty,
     unitPrice: line.unitPrice,
-    lineTotal: (toMinor(line.unitPrice) * line.qty) / 100,
+    // Trust the emitter's figure: it already reflects discounts spread across
+    // the basket. Recomputing here is what made receipts disagree with their
+    // own total.
+    lineTotal: line.lineTotal ?? (toMinor(line.unitPrice) * line.qty) / 100,
   }));
 
   const leg: PaymentLeg = {

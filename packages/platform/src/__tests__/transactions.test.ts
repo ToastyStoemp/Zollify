@@ -31,7 +31,7 @@ function sale(over: Partial<SaleEvent> = {}): SaleEvent {
     at: Date.now(),
     currency: 'CHF',
     total: 35,
-    lines: [{ productId: 'p1', sku: 'ANCH', name: 'Anchor print', qty: 1, unitPrice: 35, taxRate: null }],
+    lines: [{ productId: 'p1', sku: 'ANCH', name: 'Anchor print', qty: 1, unitPrice: 35, lineTotal: 35, taxRate: null }],
     payment: { provider: 'manual', approved: true, txRef: 'ref-1' },
     ...over,
   };
@@ -76,18 +76,38 @@ describe('recording sales', () => {
     expect(tx.getTransaction('s2')?.eventId).toBe('');
   });
 
-  it('computes line totals in minor units', async () => {
+  it('keeps the line total it was given rather than recomputing it', async () => {
     const t = tx.saleToTransaction(
       sale({
         lines: [
-          { productId: 'p', sku: null, name: 'x', qty: 3, unitPrice: 0.1, taxRate: null },
+          { productId: 'p', sku: null, name: 'x', qty: 3, unitPrice: 0.1, lineTotal: 0.3, taxRate: null },
         ],
       }),
       'dev',
     );
 
-    // 0.1 * 3 in floats is 0.30000000000000004; a till must not show that.
+    // Recomputing here is what made a discounted receipt's lines disagree with
+    // its own total. 0.1 * 3 in floats is also 0.30000000000000004.
     expect(t.items[0]?.lineTotal).toBe(0.3);
+  });
+
+  it('records lines that add up to the discounted total', async () => {
+    // The regression this pins: a discounted sale whose line totals still
+    // showed the undiscounted price, so a receipt did not add up to itself.
+    await tx.recordSale(
+      sale({
+        saleId: 'discounted',
+        total: 58.5,
+        lines: [
+          { productId: 'p1', sku: null, name: 'Print', qty: 1, unitPrice: 65, lineTotal: 58.5, taxRate: null },
+        ],
+      }),
+    );
+
+    const stored = tx.getTransaction('discounted');
+    const lineSum = (stored?.items ?? []).reduce((n, i) => n + i.lineTotal, 0);
+
+    expect(lineSum).toBe(stored?.total);
   });
 });
 

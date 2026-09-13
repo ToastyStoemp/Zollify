@@ -4,7 +4,7 @@
  * Brought quantities come from EventStock; sold quantities/values are derived
  * from non-reverted transactions — never stored.
  */
-import type { EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
+import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';

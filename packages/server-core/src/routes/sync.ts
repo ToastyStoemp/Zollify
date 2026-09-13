@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp } from '@boothly/shared';
+import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';

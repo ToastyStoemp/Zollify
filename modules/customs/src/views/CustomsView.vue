@@ -36,7 +36,7 @@ const error = ref<string | null>(null);
 <style scoped>
 .customs-index { display: flex; flex-direction: column; gap: 1rem; }
 h1 { font-size: 1.25rem; margin: 0; }
-.lede, .empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); }
+.lede, .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); }
 .events { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .5rem; }
 </style>

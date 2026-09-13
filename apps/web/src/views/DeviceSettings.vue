@@ -11,7 +11,7 @@ import {
   setDeviceName,
   syncNow,
   syncState,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 const account = currentAccount;
 const name = ref('');
@@ -106,13 +106,13 @@ function when(ts: number): string {
 .device { display: flex; flex-direction: column; gap: .75rem; max-width: 36rem; align-items: flex-start; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.ok { color: var(--bly-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
-.form { display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); align-items: flex-start; width: 100%; }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
+.form { display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); align-items: flex-start; width: 100%; }
 .form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }
 .facts { display: grid; grid-template-columns: 10rem 1fr; gap: .3rem 1rem; margin: 0; font-size: .875rem; width: 100%; }
-.facts dt { color: var(--bly-muted, #5a6472); }
+.facts dt { color: var(--zfy-muted, #5a6472); }
 .facts dd { margin: 0; }
 .mono { font-family: ui-monospace, monospace; font-size: .78rem; word-break: break-all; }
 </style>

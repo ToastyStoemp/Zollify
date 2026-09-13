@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { authFetch } from '@boothly/platform';
+import { authFetch } from '@zollify/platform';
 import { loadEnabledModules, unloadModule } from '../boot';
 
 interface AvailableModule {
@@ -111,11 +111,11 @@ async function toggle(mod: AvailableModule): Promise<void> {
 .modules { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
-.lede, .empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
+.lede, .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .85rem 1rem; background: var(--bly-surface, #fff); }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .85rem 1rem; background: var(--zfy-surface, #fff); }
 .meta { display: flex; flex-direction: column; gap: .1rem; }
-.ver { font-size: .78rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
-.desc, .requires { margin: .25rem 0 0; font-size: .85rem; color: var(--bly-muted, #5a6472); }
+.ver { font-size: .78rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.desc, .requires { margin: .25rem 0 0; font-size: .85rem; color: var(--zfy-muted, #5a6472); }
 </style>

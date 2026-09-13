@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/server-core",
+  "name": "@zollify/server-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,10 +11,10 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "build": "echo \"@boothly/server-core is consumed as source by apps/server\""
+    "build": "echo \"@zollify/server-core is consumed as source by apps/server\""
   },
   "dependencies": {
-    "@boothly/shared": "*",
+    "@zollify/shared": "*",
     "@fastify/cookie": "^11.0.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.1.1",

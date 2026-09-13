@@ -67,7 +67,7 @@ export {
   restoreBackup,
   backupFilename,
   RestoreError,
-  type BoothlyBackup,
+  type ZollifyBackup,
   type BackupSummary,
   type RestoreResult,
 } from './backup';

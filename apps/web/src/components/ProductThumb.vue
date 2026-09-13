@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue';
-import { imageUrl } from '@boothly/platform';
+import { imageUrl } from '@zollify/platform';
 
 const props = defineProps<{ imageId?: string; alt: string; size?: number }>();
 
@@ -51,5 +51,5 @@ onUnmounted(release);
 <style scoped>
 img,
 .placeholder { border-radius: 6px; object-fit: cover; flex: none; }
-.placeholder { background: var(--bly-surface-2, #e9edf1); display: inline-block; }
+.placeholder { background: var(--zfy-surface-2, #e9edf1); display: inline-block; }
 </style>

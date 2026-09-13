@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { buildGateway, loadDotEnv, type ServerModule } from '@boothly/server-core';
+import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-core';
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
 import { taxServerModule } from './modules/tax';
@@ -38,10 +38,10 @@ function flag(name: string, fallback: boolean): boolean {
 }
 
 async function main(): Promise<void> {
-  const dataDir = resolve(process.env.BOOTHLY_DATA_DIR ?? './data');
-  const moduleStoreDir = resolve(process.env.BOOTHLY_MODULE_STORE ?? './modules-store');
-  const webDistDir = process.env.BOOTHLY_WEB_DIST ? resolve(process.env.BOOTHLY_WEB_DIST) : undefined;
-  const jwtSecret = required('BOOTHLY_JWT_SECRET');
+  const dataDir = resolve(process.env.ZOLLIFY_DATA_DIR ?? './data');
+  const moduleStoreDir = resolve(process.env.ZOLLIFY_MODULE_STORE ?? './modules-store');
+  const webDistDir = process.env.ZOLLIFY_WEB_DIST ? resolve(process.env.ZOLLIFY_WEB_DIST) : undefined;
+  const jwtSecret = required('ZOLLIFY_JWT_SECRET');
 
   // Shopify derives its credential-encryption key from the same secret, so it
   // is constructed here rather than importing config of its own.
@@ -58,12 +58,12 @@ async function main(): Promise<void> {
     jwtSecret,
     serverModules,
     defaultModules: DEFAULT_MODULES,
-    allowedOrigins: (process.env.BOOTHLY_ALLOWED_ORIGINS ?? '')
+    allowedOrigins: (process.env.ZOLLIFY_ALLOWED_ORIGINS ?? '')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    requireHttps: flag('BOOTHLY_REQUIRE_HTTPS', true),
-    trustProxy: flag('BOOTHLY_TRUST_PROXY', true),
+    requireHttps: flag('ZOLLIFY_REQUIRE_HTTPS', true),
+    trustProxy: flag('ZOLLIFY_TRUST_PROXY', true),
     logLevel: process.env.LOG_LEVEL ?? 'info',
   });
 
@@ -71,10 +71,10 @@ async function main(): Promise<void> {
   const host = process.env.HOST ?? '0.0.0.0';
 
   await app.listen({ port, host });
-  app.log.info({ port, host, dataDir, moduleStoreDir, webDistDir }, 'Boothly gateway listening');
+  app.log.info({ port, host, dataDir, moduleStoreDir, webDistDir }, 'Zollify gateway listening');
 }
 
 main().catch((err) => {
-  console.error('[boothly] failed to start:', err instanceof Error ? err.message : err);
+  console.error('[zollify] failed to start:', err instanceof Error ? err.message : err);
   process.exitCode = 1;
 });

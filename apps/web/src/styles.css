@@ -1,26 +1,26 @@
 /*
- * Shell-level styling only. Everything reusable belongs in @boothly/ui so the
- * Boothly visual identity can be applied as a token change later rather than a
+ * Shell-level styling only. Everything reusable belongs in @zollify/ui so the
+ * Zollify visual identity can be applied as a token change later rather than a
  * component rewrite.
  */
 *, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: var(--bly-font, system-ui, -apple-system, "Segoe UI", sans-serif);
-  background: var(--bly-bg, #f1f4f6);
-  color: var(--bly-ink, #141a22);
+  font-family: var(--zfy-font, system-ui, -apple-system, "Segoe UI", sans-serif);
+  background: var(--zfy-bg, #f1f4f6);
+  color: var(--zfy-ink, #141a22);
   line-height: 1.5;
 }
 
-:focus-visible { outline: 2px solid var(--bly-accent, #0e7c66); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--zfy-accent, #0e7c66); outline-offset: 2px; }
 
 button {
   font: inherit;
   padding: .45rem .9rem;
   border-radius: 8px;
-  border: 1px solid var(--bly-line, #d6dde4);
-  background: var(--bly-surface, #fff);
+  border: 1px solid var(--zfy-line, #d6dde4);
+  background: var(--zfy-surface, #fff);
   color: inherit;
   cursor: pointer;
 }
@@ -30,7 +30,7 @@ input, select, textarea {
   font: inherit;
   padding: .4rem .55rem;
   border-radius: 8px;
-  border: 1px solid var(--bly-line, #d6dde4);
-  background: var(--bly-surface, #fff);
+  border: 1px solid var(--zfy-line, #d6dde4);
+  background: var(--zfy-surface, #fff);
   color: inherit;
 }

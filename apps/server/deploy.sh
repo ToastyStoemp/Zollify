@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Deploys Boothly on the host it is run from.
+# Deploys Zollify on the host it is run from.
 #
 #   ./apps/server/deploy.sh            build here and restart
 #   ./apps/server/deploy.sh --pull     git pull first
 #
 # Building in Docker is reproducible but slow on a small instance. To build
 # elsewhere instead:
-#   docker build -f apps/server/Dockerfile -t boothly:TAG .
-#   docker save boothly:TAG | ssh HOST 'docker load'
-# then run compose with `image: boothly:TAG` and no build section.
+#   docker build -f apps/server/Dockerfile -t zollify:TAG .
+#   docker save zollify:TAG | ssh HOST 'docker load'
+# then run compose with `image: zollify:TAG` and no build section.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -33,12 +33,12 @@ fi
 echo "→ backing up the database"
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p backups
-if docker compose -f "$compose_file" ps --status running --quiet boothly >/dev/null 2>&1; then
-  docker compose -f "$compose_file" exec -T boothly \
-    node -e "const D=require('better-sqlite3');const db=new D('/data/boothly.db',{readonly:true});db.backup('/data/backup.tmp').then(()=>{db.close();process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})" \
-    && docker compose -f "$compose_file" cp "boothly:/data/backup.tmp" "backups/boothly-$stamp.db" \
-    && docker compose -f "$compose_file" exec -T boothly rm -f /data/backup.tmp \
-    && echo "  saved backups/boothly-$stamp.db"
+if docker compose -f "$compose_file" ps --status running --quiet zollify >/dev/null 2>&1; then
+  docker compose -f "$compose_file" exec -T zollify \
+    node -e "const D=require('better-sqlite3');const db=new D('/data/zollify.db',{readonly:true});db.backup('/data/backup.tmp').then(()=>{db.close();process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})" \
+    && docker compose -f "$compose_file" cp "zollify:/data/backup.tmp" "backups/zollify-$stamp.db" \
+    && docker compose -f "$compose_file" exec -T zollify rm -f /data/backup.tmp \
+    && echo "  saved backups/zollify-$stamp.db"
 else
   echo "  (not running yet — nothing to back up)"
 fi
@@ -57,5 +57,5 @@ for _ in $(seq 1 30); do
 done
 
 echo "✗ did not become healthy in 60s — recent logs:" >&2
-docker compose -f "$compose_file" logs --tail 40 boothly >&2
+docker compose -f "$compose_file" logs --tail 40 zollify >&2
 exit 1

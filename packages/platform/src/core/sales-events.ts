@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue';
-import type { EventStock, SalesEvent } from '@boothly/shared';
+import type { EventStock, SalesEvent } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';

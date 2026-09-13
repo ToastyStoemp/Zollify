@@ -19,7 +19,7 @@ let app: FastifyInstance;
 let dataDir: string;
 
 beforeAll(async () => {
-  dataDir = mkdtempSync(join(tmpdir(), 'boothly-test-'));
+  dataDir = mkdtempSync(join(tmpdir(), 'zollify-test-'));
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.OWNER_PASSWORD = OWNER_PASSWORD;
 
@@ -53,7 +53,7 @@ afterAll(async () => {
  */
 async function teardown(instance: FastifyInstance | undefined, dir: string): Promise<void> {
   try {
-    instance?.boothly?.db?.close();
+    instance?.zollify?.db?.close();
   } catch {
     /* already closed */
   }
@@ -155,7 +155,7 @@ describe('refresh token transport', () => {
   it('still returns the token in the body for a native client', async () => {
     // A Capacitor shell keeps it in platform secure storage; cookies in a
     // WebView are a poorer fit than the keychain.
-    const res = await login({ 'x-boothly-client': 'native' });
+    const res = await login({ 'x-zollify-client': 'native' });
 
     expect(res.json()).toHaveProperty('refreshToken');
     // The cookie is still set, so a native client that ignores it loses nothing.
@@ -165,7 +165,7 @@ describe('refresh token transport', () => {
 
 describe('cookie Secure attribute', () => {
   it('is set when the gateway requires HTTPS', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'boothly-https-'));
+    const dir = mkdtempSync(join(tmpdir(), 'zollify-https-'));
     const secureApp = await buildGateway({
       dataDir: dir,
       moduleStoreDir: join(dir, 'modules'),

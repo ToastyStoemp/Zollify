@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import type Database from 'better-sqlite3';
-import type { DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage } from '@boothly/shared';
+import type { DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage } from '@zollify/shared';
 import type { JwtClaims } from './auth';
 import { touchDevice } from './db';
 

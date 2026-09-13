@@ -1,4 +1,4 @@
-import type { Sdk } from '@boothly/sdk';
+import type { Sdk } from '@zollify/sdk';
 
 /**
  * The module's SDK handle, captured during setup().

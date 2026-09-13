@@ -36,7 +36,7 @@ const saved = ref(false);
 <style scoped>
 .declarant { display: flex; flex-direction: column; gap: .75rem; max-width: 32rem; }
 h2 { font-size: 1.05rem; margin: 0; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
-.ok { color: var(--bly-success, #0e7c66); margin: 0; }
+.ok { color: var(--zfy-success, #0e7c66); margin: 0; }
 </style>

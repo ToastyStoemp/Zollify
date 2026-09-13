@@ -1,5 +1,5 @@
 /**
- * @boothly/server-core — the gateway and everything a deployment composes.
+ * @zollify/server-core — the gateway and everything a deployment composes.
  */
 // Side-effect import: installs the Fastify decorator typings every consumer
 // needs, including apps that compile these sources directly.

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AccountSnapshot } from '@boothly/sdk';
+import type { AccountSnapshot } from '@zollify/sdk';
 
 const account: AccountSnapshot = {
   accountId: 'acct-sync',

@@ -139,15 +139,15 @@ async function run(): Promise<void> {
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .5rem 0 0; font-size: .95rem; }
-.lede, .file { color: var(--bly-muted, #5a6472); margin: 0; }
+.lede, .file { color: var(--zfy-muted, #5a6472); margin: 0; }
 .file { font-size: .85rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.done { color: var(--bly-accent-ink, #0a5a4a); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.done { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; }
 .picker { display: flex; flex-direction: column; gap: .35rem; font-size: .9rem; }
-.plan { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .6rem; align-items: flex-start; }
+.plan { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .6rem; align-items: flex-start; }
 .counts { list-style: none; margin: 0; padding: 0; display: flex; gap: 1.25rem; font-size: .9rem; }
 .counts strong { font-variant-numeric: tabular-nums; }
-.skipped, .warnings { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--bly-muted, #5a6472); }
+.skipped, .warnings { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--zfy-muted, #5a6472); }
 .skipped span { display: block; }
-.warnings { color: var(--bly-warning-ink, #8a5a1e); }
+.warnings { color: var(--zfy-warning-ink, #8a5a1e); }
 </style>

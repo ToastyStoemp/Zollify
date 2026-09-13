@@ -12,7 +12,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     authenticate(req: FastifyRequest, reply: FastifyReply): Promise<void>;
     db: Database.Database;
-    boothly: {
+    zollify: {
       db: Database.Database;
       store: Map<string, PublishedModule>;
       seedDefaults(accountId: string): void;

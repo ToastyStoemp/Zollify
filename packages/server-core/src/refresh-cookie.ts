@@ -20,7 +20,7 @@ import type { FastifyInstance } from 'fastify';
  * cookie at all.
  */
 
-export const REFRESH_COOKIE = 'bly_rt';
+export const REFRESH_COOKIE = 'zfy_rt';
 
 /**
  * Scoped to the auth routes so the cookie is not attached to every API call.
@@ -37,7 +37,7 @@ const COOKIE_PATH = '/api/auth';
 const COOKIE_MAX_AGE_SEC = 90 * 24 * 3600;
 
 /** Native shells keep the token in platform secure storage, not a cookie. */
-const NATIVE_CLIENT_HEADER = 'x-boothly-client';
+const NATIVE_CLIENT_HEADER = 'x-zollify-client';
 
 function wantsBodyToken(req: { headers: Record<string, unknown> }): boolean {
   return String(req.headers[NATIVE_CLIENT_HEADER] ?? '').toLowerCase() === 'native';

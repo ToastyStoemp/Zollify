@@ -19,8 +19,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const store = process.env.BOOTHLY_MODULE_STORE
-  ? resolve(process.env.BOOTHLY_MODULE_STORE)
+const store = process.env.ZOLLIFY_MODULE_STORE
+  ? resolve(process.env.ZOLLIFY_MODULE_STORE)
   : join(root, 'apps', 'server', 'modules-store');
 
 const MODULES = ['pos', 'customs', 'price-cards', 'sourcing', 'migration', 'shopify-sync'];

@@ -18,7 +18,7 @@ import {
   total,
 } from '../cart';
 import { useRouter } from 'vue-router';
-import type { Product, Variant } from '@boothly/shared';
+import type { Product, Variant } from '@zollify/shared';
 import { sdk } from '../runtime';
 import ProductThumb from '../components/ProductThumb.vue';
 
@@ -315,18 +315,18 @@ function openReceipt(): void {
 .pos { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 h1 { font-size: 1.35rem; margin: 0; }
-.event, .count, .empty { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
+.event, .count, .empty { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
 .layout { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: start; }
 .picker { display: flex; flex-direction: column; gap: .75rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .5rem; }
 .tile { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .7rem .8rem; text-align: left; min-height: 4.2rem; }
 .tile .title { font-weight: 600; font-size: .9rem; }
-.tile .price { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
-.left { font-size: .72rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.tile .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
+.left { font-size: .72rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 /* Advisory, never a block: if someone is standing there with cash, the stock
    figure is what is wrong. */
-.left.none { color: var(--bly-danger, #c6512f); font-weight: 600; }
-.ticket { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; background: var(--bly-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }
+.left.none { color: var(--zfy-danger, #c6512f); font-weight: 600; }
+.ticket { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .lines li { display: grid; grid-template-columns: 1fr 3.5rem 4.5rem auto; gap: .5rem; align-items: center; font-size: .9rem; }
 .qty { width: 100%; }
@@ -335,20 +335,20 @@ h1 { font-size: 1.35rem; margin: 0; }
 .discount input { width: 6rem; }
 .discount select { width: 4.5rem; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.line-sub { display: flex; justify-content: space-between; margin: 0; font-size: .82rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
-.discount-line { color: var(--bly-accent-ink, #0a5a4a); }
-.checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--bly-line, #d6dde4); padding-top: .75rem; }
+.line-sub { display: flex; justify-content: space-between; margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.discount-line { color: var(--zfy-accent-ink, #0a5a4a); }
+.checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .75rem; }
 .total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 .receipt-link { align-self: flex-end; }
 .variant-picker { position: fixed; inset: 0; background: rgba(20,26,34,.45); display: grid; place-items: center; padding: 1rem; z-index: 10; }
-.sheet { background: var(--bly-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
+.sheet { background: var(--zfy-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
 .sheet h2 { margin: 0; font-size: 1.05rem; }
 .options { display: grid; gap: .4rem; }
 .options button { display: flex; justify-content: space-between; padding: .7rem .9rem; font-size: .95rem; }
-.options .price { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
+.options .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .cancel { align-self: flex-end; }
-.result { margin: 0; font-size: .875rem; color: var(--bly-accent-ink, #0a5a4a); }
-.result.bad { color: var(--bly-danger, #c6512f); }
+.result { margin: 0; font-size: .875rem; color: var(--zfy-accent-ink, #0a5a4a); }
+.result.bad { color: var(--zfy-danger, #c6512f); }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .ticket { position: static; } }
 </style>

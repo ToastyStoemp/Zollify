@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { CURRENCY_BILLS, fmtPrice, round2 } from '@boothly/shared';
+import { CURRENCY_BILLS, fmtPrice, round2 } from '@zollify/shared';
 import {
   activeEventId,
   recentTransactions,
   visibleEvents,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 /**
  * Cash up.
@@ -165,21 +165,21 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
-.totals li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; min-width: 9rem; }
-.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--bly-muted, #5a6472); }
+.totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 9rem; }
+.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
-.totals .sub { font-size: .75rem; color: var(--bly-muted, #5a6472); }
-.count { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
+.totals .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.count { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
 .float { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
 .float input { width: 8rem; }
 .denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr)); gap: .4rem; }
 .denoms label { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 .denoms input { width: 100%; text-align: right; }
-.result { display: grid; grid-template-columns: 8rem 1fr; gap: .3rem 1rem; margin: 0; border-top: 1px solid var(--bly-line, #d6dde4); padding-top: .75rem; font-variant-numeric: tabular-nums; }
-.result dt { color: var(--bly-muted, #5a6472); font-size: .875rem; }
+.result { display: grid; grid-template-columns: 8rem 1fr; gap: .3rem 1rem; margin: 0; border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .75rem; font-variant-numeric: tabular-nums; }
+.result dt { color: var(--zfy-muted, #5a6472); font-size: .875rem; }
 .result dd { margin: 0; font-weight: 600; }
-.bad { color: var(--bly-danger, #c6512f); }
-.good { color: var(--bly-accent-ink, #0a5a4a); }
+.bad { color: var(--zfy-danger, #c6512f); }
+.good { color: var(--zfy-accent-ink, #0a5a4a); }
 </style>

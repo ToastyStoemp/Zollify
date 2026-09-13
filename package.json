@@ -1,8 +1,8 @@
 {
-  "name": "boothly",
+  "name": "zollify",
   "version": "0.1.0",
   "private": true,
-  "description": "Boothly \u2014 a plugin platform for market and convention booths",
+  "description": "Zollify \u2014 a plugin platform for market and convention booths",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -13,10 +13,10 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev -w @boothly/web",
-    "dev:server": "npm run dev -w @boothly/server",
+    "dev": "npm run dev -w @zollify/web",
+    "dev:server": "npm run dev -w @zollify/server",
     "build": "npm run build --workspaces --if-present",
-    "build:modules": "npm run build -w @boothly/pos -w @boothly/customs -w @boothly/price-cards -w @boothly/sourcing -w @boothly/migration -w @boothly/shopify-sync",
+    "build:modules": "npm run build -w @zollify/pos -w @zollify/customs -w @zollify/price-cards -w @zollify/sourcing -w @zollify/migration -w @zollify/shopify-sync",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:deps": "npm audit --audit-level=moderate",

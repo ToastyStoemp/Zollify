@@ -7,7 +7,7 @@ import type {
   Product,
   SalesEvent,
   Transaction,
-} from '@boothly/shared';
+} from '@zollify/shared';
 
 /**
  * Core's own local database.
@@ -58,7 +58,7 @@ export type CoreDb = Dexie & {
 const open = new Map<string, CoreDb>();
 
 export function coreDbName(accountId: string): string {
-  return `boothly_${accountId.replace(/[^A-Za-z0-9_-]/g, '_')}_core`;
+  return `zollify_${accountId.replace(/[^A-Za-z0-9_-]/g, '_')}_core`;
 }
 
 export function openCoreDb(accountId: string): CoreDb {

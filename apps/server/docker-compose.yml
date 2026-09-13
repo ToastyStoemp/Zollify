@@ -5,8 +5,8 @@
 # make a missing secret a startup failure rather than a server that quietly
 # runs with no signing key.
 services:
-  boothly:
-    container_name: boothly
+  zollify:
+    container_name: zollify
     build:
       context: ../..
       dockerfile: apps/server/Dockerfile
@@ -15,15 +15,15 @@ services:
     volumes:
       # Named volume rather than a bind mount: the container runs unprivileged,
       # and a host directory would land root-owned on first start.
-      - boothly-data:/data
+      - zollify-data:/data
     environment:
-      BOOTHLY_JWT_SECRET: ${BOOTHLY_JWT_SECRET:?set BOOTHLY_JWT_SECRET in apps/server/.env}
+      ZOLLIFY_JWT_SECRET: ${ZOLLIFY_JWT_SECRET:?set ZOLLIFY_JWT_SECRET in apps/server/.env}
       OWNER_EMAIL: ${OWNER_EMAIL:-}
       OWNER_PASSWORD: ${OWNER_PASSWORD:-}
       # Terminated by the reverse proxy in front, which sets x-forwarded-proto.
-      BOOTHLY_REQUIRE_HTTPS: ${BOOTHLY_REQUIRE_HTTPS:-1}
-      BOOTHLY_TRUST_PROXY: ${BOOTHLY_TRUST_PROXY:-1}
-      BOOTHLY_ALLOWED_ORIGINS: ${BOOTHLY_ALLOWED_ORIGINS:-}
+      ZOLLIFY_REQUIRE_HTTPS: ${ZOLLIFY_REQUIRE_HTTPS:-1}
+      ZOLLIFY_TRUST_PROXY: ${ZOLLIFY_TRUST_PROXY:-1}
+      ZOLLIFY_ALLOWED_ORIGINS: ${ZOLLIFY_ALLOWED_ORIGINS:-}
       REGISTRATION_OPEN: ${REGISTRATION_OPEN:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     restart: unless-stopped
@@ -35,4 +35,4 @@ services:
         max-file: '5'
 
 volumes:
-  boothly-data:
+  zollify-data:

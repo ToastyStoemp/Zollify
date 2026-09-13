@@ -21,7 +21,7 @@ export async function registerStatic(app: FastifyInstance, opts: StaticOptions):
   if (!existsSync(join(opts.webDistDir, 'index.html'))) {
     app.log.warn(
       { webDistDir: opts.webDistDir },
-      'no built web app found; serving the API only. Run `npm run build -w @boothly/web`.',
+      'no built web app found; serving the API only. Run `npm run build -w @zollify/web`.',
     );
     return;
   }

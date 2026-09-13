@@ -10,8 +10,8 @@ import {
   refreshAccessToken,
   refreshPendingCount,
   startAutoSync,
-} from '@boothly/platform';
-import '@boothly/ui/tokens.css';
+} from '@zollify/platform';
+import '@zollify/ui/tokens.css';
 import './styles.css';
 import App from './App.vue';
 import { router } from './router';
@@ -33,17 +33,17 @@ async function start(): Promise<void> {
   // through the SDK during setup, so it has to be there when they mount.
   if (getAccount()) {
     await Promise.all([
-      loadCatalog().catch((err) => console.error('[boothly] catalog load failed', err)),
-      loadSalesEvents().catch((err) => console.error('[boothly] events load failed', err)),
-      loadTransactions().catch((err) => console.error('[boothly] history load failed', err)),
-      loadDiscounts().catch((err) => console.error('[boothly] discounts load failed', err)),
-      loadInventory().catch((err) => console.error('[boothly] inventory load failed', err)),
+      loadCatalog().catch((err) => console.error('[zollify] catalog load failed', err)),
+      loadSalesEvents().catch((err) => console.error('[zollify] events load failed', err)),
+      loadTransactions().catch((err) => console.error('[zollify] history load failed', err)),
+      loadDiscounts().catch((err) => console.error('[zollify] discounts load failed', err)),
+      loadInventory().catch((err) => console.error('[zollify] inventory load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
   }
 
   await loadEnabledModules(router).catch((err) => {
-    console.error('[boothly] module boot failed', err);
+    console.error('[zollify] module boot failed', err);
     return [];
   });
 

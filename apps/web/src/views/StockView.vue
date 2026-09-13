@@ -11,7 +11,7 @@ import {
   setClaim,
   setOnHand,
   visibleEvents,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 /**
  * One inventory, with per-event claims on top.
@@ -242,22 +242,22 @@ async function updateClaim(productId: string, variantId: string, value: string):
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
 .tabs { display: flex; gap: .3rem; }
-.tabs button.active { background: var(--bly-accent-soft, #deeee9); color: var(--bly-accent-ink, #0a5a4a); border-color: var(--bly-accent, #0e7c66); font-weight: 600; }
+.tabs button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); font-weight: 600; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.empty, .hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .9rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.warn { color: var(--bly-danger, #c6512f); margin: 0; font-size: .9rem; }
+.empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.warn { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .9rem; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
-.totals li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; min-width: 8rem; }
-.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--bly-muted, #5a6472); }
+.totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 8rem; }
+.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
-.totals .sub, .source .sub { font-size: .75rem; color: var(--bly-muted, #5a6472); }
-table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }
+.totals .sub, .source .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
 tbody tr:last-child td { border-bottom: none; }
-tbody tr.short { background: var(--bly-signal-soft, #f6e5df); }
+tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .num input { width: 5.5rem; text-align: right; }
-.source { color: var(--bly-muted, #5a6472); font-size: .82rem; }
-.bad { color: var(--bly-danger, #c6512f); font-weight: 600; }
+.source { color: var(--zfy-muted, #5a6472); font-size: .82rem; }
+.bad { color: var(--zfy-danger, #c6512f); font-weight: 600; }
 </style>

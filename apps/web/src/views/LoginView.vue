@@ -10,7 +10,7 @@ import {
   loadSalesEvents,
   loadTransactions,
   startAutoSync,
-} from '@boothly/platform';
+} from '@zollify/platform';
 import { loadEnabledModules } from '../boot';
 
 const router = useRouter();
@@ -76,7 +76,7 @@ async function submit(): Promise<void> {
 <template>
   <div class="login">
     <form @submit.prevent="submit">
-      <h1>Boothly<span>.</span></h1>
+      <h1>Zollify<span>.</span></h1>
 
       <label>
         <span>Email</span>
@@ -101,9 +101,9 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .login { display: grid; place-items: center; padding: 1rem; }
-form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--bly-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--bly-line, #d6dde4); }
+form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
 h1 { margin: 0 0 .5rem; font-size: 1.5rem; letter-spacing: -.02em; }
-h1 span { color: var(--bly-accent, #0e7c66); }
+h1 span { color: var(--zfy-accent, #0e7c66); }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; font-size: .875rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
 </style>

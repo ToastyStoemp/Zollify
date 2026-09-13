@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/shared",
+  "name": "@zollify/shared",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
-    "build": "echo \"@boothly/shared is consumed as source\""
+    "build": "echo \"@zollify/shared is consumed as source\""
   },
   "dependencies": {
     "zod": "^4.0.0"

@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/platform",
+  "name": "@zollify/platform",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,12 +11,12 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "build": "echo \"@boothly/platform is consumed as source by the app build\""
+    "build": "echo \"@zollify/platform is consumed as source by the app build\""
   },
   "dependencies": {
-    "@boothly/sdk": "*",
-    "@boothly/shared": "*",
-    "@boothly/ui": "*",
+    "@zollify/sdk": "*",
+    "@zollify/shared": "*",
+    "@zollify/ui": "*",
     "dexie": "^4.2.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"

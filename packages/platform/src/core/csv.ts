@@ -1,4 +1,4 @@
-import type { Transaction } from '@boothly/shared';
+import type { Transaction } from '@zollify/shared';
 
 /**
  * CSV export of recorded sales, for handing to an accountant or a spreadsheet.
@@ -91,5 +91,5 @@ export function transactionsToCsv(transactions: Transaction[]): string {
 export function csvFilename(eventName: string | null): string {
   const stamp = new Date().toISOString().slice(0, 10);
   const scope = (eventName ?? 'all-events').replace(/[^A-Za-z0-9-]+/g, '-').toLowerCase();
-  return `boothly-sales-${scope}-${stamp}.csv`;
+  return `zollify-sales-${scope}-${stamp}.csv`;
 }

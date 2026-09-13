@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
-import type { AdminAccount, AdminAccountDetail, AdminMetricRow, AdminOverview } from '@boothly/shared';
+import type { AdminAccount, AdminAccountDetail, AdminMetricRow, AdminOverview } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { geoEnabled } from '../session-info';
 

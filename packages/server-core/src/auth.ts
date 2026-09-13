@@ -11,7 +11,7 @@ import {
   type AuthUser,
   type TokenResponse,
   type UserRole,
-} from '@boothly/shared';
+} from '@zollify/shared';
 import { bumpMetric } from './db';
 import { generateSecret, otpauthUri, verifyToken, generateRecoveryCodes, hashRecovery } from './totp';
 import { issueChallenge, verifyChallenge } from './captcha';

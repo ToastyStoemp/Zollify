@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/web",
+  "name": "@zollify/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,15 +11,15 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@boothly/customs": "*",
-    "@boothly/migration": "*",
-    "@boothly/platform": "*",
-    "@boothly/pos": "*",
-    "@boothly/price-cards": "*",
-    "@boothly/sdk": "*",
-    "@boothly/shopify-sync": "*",
-    "@boothly/sourcing": "*",
-    "@boothly/ui": "*",
+    "@zollify/customs": "*",
+    "@zollify/migration": "*",
+    "@zollify/platform": "*",
+    "@zollify/pos": "*",
+    "@zollify/price-cards": "*",
+    "@zollify/sdk": "*",
+    "@zollify/shopify-sync": "*",
+    "@zollify/sourcing": "*",
+    "@zollify/ui": "*",
     "dexie": "^4.2.0",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"

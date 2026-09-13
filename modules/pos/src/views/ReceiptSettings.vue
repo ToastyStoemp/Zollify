@@ -130,14 +130,14 @@ async function save(): Promise<void> {
 .receipts { display: flex; flex-direction: column; gap: .75rem; max-width: 40rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.ok { color: var(--bly-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
-.form { display: flex; flex-direction: column; gap: .7rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); align-items: flex-start; }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
+.form { display: flex; flex-direction: column; gap: .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); align-items: flex-start; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .7rem; width: 100%; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .logo { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.logo img { max-width: 12rem; max-height: 6rem; background: #fff; border: 1px solid var(--bly-line, #d6dde4); border-radius: 6px; padding: .25rem; }
+.logo img { max-width: 12rem; max-height: 6rem; background: #fff; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 6px; padding: .25rem; }
 .logo-actions { display: flex; align-items: center; gap: .5rem; }
 </style>

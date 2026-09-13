@@ -11,7 +11,7 @@ import {
   type ShellUi,
   type StoreSchema,
   type Unsubscribe,
-} from '@boothly/sdk';
+} from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
@@ -68,7 +68,7 @@ export interface ModuleHost {
 }
 
 function makeLogger(moduleId: string): Logger {
-  const tag = `[boothly:${moduleId}]`;
+  const tag = `[zollify:${moduleId}]`;
   return {
     debug: (...a) => console.debug(tag, ...a),
     info: (...a) => console.info(tag, ...a),
@@ -113,7 +113,7 @@ function makeHttp(moduleId: string): HttpClient {
  * reactive state could mutate the catalogue without going through core, and the
  * sync outbox would never hear about it.
  */
-const coreData: import('@boothly/sdk').DataApi = {
+const coreData: import('@zollify/sdk').DataApi = {
   products: {
     list: () => [...allProducts.value],
     forSale: () => [...forSaleProducts.value],

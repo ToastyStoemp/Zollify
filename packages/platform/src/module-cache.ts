@@ -22,7 +22,7 @@ export interface CachedBundle {
   cachedAt: number;
 }
 
-const db = new Dexie('boothly_module_cache') as Dexie & {
+const db = new Dexie('zollify_module_cache') as Dexie & {
   bundles: EntityTable<CachedBundle, 'key'>;
 };
 db.version(1).stores({ bundles: 'key, moduleId' });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Product, SalesEvent } from '@boothly/shared';
+import type { Product, SalesEvent } from '@zollify/shared';
 import { buildCustomsState } from '../adapter';
 
 const event: SalesEvent = {

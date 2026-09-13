@@ -1,7 +1,7 @@
 /**
  * Access to the Capacitor native plugins the terminal providers need.
  *
- * Boothly targets the web first, where none of these exist. Rather than guard
+ * Zollify targets the web first, where none of these exist. Rather than guard
  * every call site, each plugin is exposed as a proxy that rejects with a clear
  * message, and `hasNativePlugin` is the single check providers use to decide
  * whether to offer themselves at all. On the web that means myPOS GO2, Carbon,
@@ -43,7 +43,7 @@ export function hasNativePlugin(name: NativePluginName): boolean {
 
 function unavailable(name: NativePluginName): never {
   throw new Error(
-    `The ${name} terminal needs the Boothly Android app — it isn't available in a browser.`,
+    `The ${name} terminal needs the Zollify Android app — it isn't available in a browser.`,
   );
 }
 

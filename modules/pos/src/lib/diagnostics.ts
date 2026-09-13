@@ -6,5 +6,5 @@ import { maybeSdk } from '../runtime';
  * the provider name, currency and outcome are enough to debug a pairing.
  */
 export function logDiagnostic(message: string): void {
-  maybeSdk()?.log.info(message) ?? console.info('[boothly:pos]', message);
+  maybeSdk()?.log.info(message) ?? console.info('[zollify:pos]', message);
 }

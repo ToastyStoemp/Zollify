@@ -1,14 +1,14 @@
 /**
- * @boothly/ui — the shared visual layer.
+ * @zollify/ui — the shared visual layer.
  *
  * Tokens are carried over from ZollDesign so the platform is unblocked, and the
- * Boothly visual identity becomes a token-level change rather than a component
- * rewrite. Components must read `--bly-*` (aliased to the inherited `--zui-*`
+ * Zollify visual identity becomes a token-level change rather than a component
+ * rewrite. Components must read `--zfy-*` (aliased to the inherited `--zui-*`
  * values in tokens.css) and never hard-code a colour — that is the whole
  * mechanism by which a restyle stays cheap.
  */
 
-export const UI_TOKEN_PREFIX = '--bly-';
+export const UI_TOKEN_PREFIX = '--zfy-';
 
 /** Semantic intents components accept, so callers never pass raw colours. */
 export type Intent = 'neutral' | 'primary' | 'success' | 'warning' | 'danger';

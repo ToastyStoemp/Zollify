@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
+import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -311,7 +311,7 @@ export interface ShellUi {
 // ── The SDK surface ─────────────────────────────────────────────────────────
 
 /**
- * Everything a module is allowed to touch. A module imports `@boothly/sdk` and
+ * Everything a module is allowed to touch. A module imports `@zollify/sdk` and
  * nothing else from the platform — that boundary is what makes a published SDK
  * possible later without a rewrite, so it is enforced in review, not by
  * convention.
@@ -331,7 +331,7 @@ export interface Sdk {
 
   /**
    * Opens this module's own Dexie database, namespaced
-   * `boothly_<accountId>_<moduleId>`. Each module versions its schema
+   * `zollify_<accountId>_<moduleId>`. Each module versions its schema
    * independently, so installing or removing one never migrates another's data,
    * and uninstalling is a clean database delete.
    */

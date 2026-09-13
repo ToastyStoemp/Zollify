@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DiscountRule } from '@boothly/shared';
+import type { DiscountRule } from '@zollify/shared';
 import {
   computeCartTotals,
   computeCustomDiscount,

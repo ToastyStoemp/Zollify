@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AccountSnapshot } from '@boothly/sdk';
+import type { AccountSnapshot } from '@zollify/sdk';
 
 /**
  * Core reads the signed-in account to namespace its database and to scope what

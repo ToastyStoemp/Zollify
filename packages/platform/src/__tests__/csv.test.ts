@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Transaction } from '@boothly/shared';
+import type { Transaction } from '@zollify/shared';
 import { csvFilename, transactionsToCsv } from '../core/csv';
 
 function tx(over: Partial<Transaction> = {}): Transaction {
@@ -95,7 +95,7 @@ describe('transactionsToCsv', () => {
 
 describe('csvFilename', () => {
   it('names the scope and sorts by date', () => {
-    expect(csvFilename('Zurich Comic Con')).toMatch(/^boothly-sales-zurich-comic-con-\d{4}-\d{2}-\d{2}\.csv$/);
-    expect(csvFilename(null)).toMatch(/^boothly-sales-all-events-/);
+    expect(csvFilename('Zurich Comic Con')).toMatch(/^zollify-sales-zurich-comic-con-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(csvFilename(null)).toMatch(/^zollify-sales-all-events-/);
   });
 });

@@ -1,5 +1,5 @@
 import Dexie from 'dexie';
-import type { StoreSchema } from '@boothly/sdk';
+import type { StoreSchema } from '@zollify/sdk';
 
 /**
  * Per-module local storage.
@@ -13,9 +13,9 @@ import type { StoreSchema } from '@boothly/sdk';
  * which is the isolation we want anyway.
  */
 
-const DB_PREFIX = 'boothly';
+const DB_PREFIX = 'zollify';
 
-/** `boothly_<accountId>_<moduleId>` — per account, so two logins on one device never mix. */
+/** `zollify_<accountId>_<moduleId>` — per account, so two logins on one device never mix. */
 export function moduleDbName(accountId: string, moduleId: string): string {
   return `${DB_PREFIX}_${sanitise(accountId)}_${sanitise(moduleId)}`;
 }
@@ -64,8 +64,8 @@ export async function deleteModuleDb(accountId: string, moduleId: string): Promi
   await Dexie.delete(name);
 }
 
-/** Every Boothly database currently on this device, for diagnostics and account switch cleanup. */
-export async function listBoothlyDbs(): Promise<string[]> {
+/** Every Zollify database currently on this device, for diagnostics and account switch cleanup. */
+export async function listZollifyDbs(): Promise<string[]> {
   const names = await Dexie.getDatabaseNames();
   return names.filter((n) => n.startsWith(`${DB_PREFIX}_`));
 }

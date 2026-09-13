@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { ShellUi, ToastOptions } from '@boothly/sdk';
+import type { ShellUi, ToastOptions } from '@zollify/sdk';
 
 export interface Toast {
   id: number;

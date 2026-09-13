@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/sdk",
+  "name": "@zollify/sdk",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "build": "echo \"@boothly/sdk is consumed as source by the host build\""
+    "build": "echo \"@zollify/sdk is consumed as source by the host build\""
   },
   "peerDependencies": {
     "dexie": "^4.0.0",
@@ -22,6 +22,6 @@
     "vue": "^3.5.0"
   },
   "dependencies": {
-    "@boothly/shared": "*"
+    "@zollify/shared": "*"
   }
 }

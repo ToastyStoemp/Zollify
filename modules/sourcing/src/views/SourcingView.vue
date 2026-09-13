@@ -129,15 +129,15 @@ function supplierName(id: string): string {
 .sourcing { display: flex; flex-direction: column; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: .5rem 0 0; font-size: 1.05rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .builder { display: flex; align-items: flex-end; gap: .75rem; }
 .builder label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
-table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }
+table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; }
 .num input { width: 6rem; text-align: right; }
 .drafts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.drafts li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--bly-surface, #fff); font-size: .9rem; }
+.drafts li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); font-size: .9rem; }
 </style>

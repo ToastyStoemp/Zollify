@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue';
-import type { AccountSnapshot, HttpError, Role } from '@boothly/sdk';
-import type { TokenResponse } from '@boothly/shared';
+import type { AccountSnapshot, HttpError, Role } from '@zollify/sdk';
+import type { TokenResponse } from '@zollify/shared';
 
 /**
  * Session and token handling.
@@ -78,7 +78,7 @@ function setAccount(next: AccountSnapshot | null): void {
     try {
       listener(next);
     } catch (err) {
-      console.error('[boothly] account listener threw', err);
+      console.error('[zollify] account listener threw', err);
     }
   }
 }

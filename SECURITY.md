@@ -21,12 +21,12 @@ process that holds them.
 
 ## 2. Purge Git secrets — Done (for this repo)
 
-Boothly starts as a fresh repository with no imported history, so there is no
+Zollify starts as a fresh repository with no imported history, so there is no
 secret-bearing past to purge. `.gitignore` excludes `.env*` (except the example),
 `*.pem`, `*.key`, `secrets.json`, and the server's `data/` directory.
 
 > **Carry-over task:** the old Zoll* repositories are *not* covered by this. Scan
-> those before archiving, and rotate anything found. Boothly re-enters all keys
+> those before archiving, and rotate anything found. Zollify re-enters all keys
 > fresh, so rotation costs nothing here.
 
 ## 3. Use public DB key — Done (not applicable in this shape)
@@ -58,7 +58,7 @@ key. The default salt is the original one, since changing it would make existing
 TOTP blobs undecryptable.
 
 The first module to hold a real credential uses it: Shopify's Admin API token is
-stored as an encrypted blob under the `boothly-module-credentials-v1` salt, is
+stored as an encrypted blob under the `zollify-module-credentials-v1` salt, is
 never returned to the client, and never leaves the server process.
 
 > **Standing rule:** anything credential-shaped a server module stores goes
@@ -125,7 +125,7 @@ response body, correct cookie attributes, refresh working from the cookie alone,
 rotation on every refresh, replay of a rotated token refused, and the `Secure`
 flag following the HTTPS setting.
 
-> A native shell opts out with `x-boothly-client: native` and keeps the token in
+> A native shell opts out with `x-zollify-client: native` and keeps the token in
 > platform secure storage, which is a better fit than a cookie in a WebView.
 
 ## 10. Hash passwords — Done
@@ -209,7 +209,7 @@ code this server published and the client hash-verified.
 
 An `onRequest` hook rejects non-HTTPS requests (honouring `x-forwarded-proto`
 when behind a proxy), and HSTS is set with `includeSubDomains` and `preload`.
-Disabling it is an explicit opt-out (`BOOTHLY_REQUIRE_HTTPS=0`) intended only for
+Disabling it is an explicit opt-out (`ZOLLIFY_REQUIRE_HTTPS=0`) intended only for
 local HTTP development.
 
 ## 20. Scan dependencies — Done

@@ -1,5 +1,5 @@
 {
-  "name": "@boothly/server",
+  "name": "@zollify/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "build": "echo \"server runs from source via tsx\""
   },
   "dependencies": {
-    "@boothly/server-core": "*",
-    "@boothly/shared": "*",
+    "@zollify/server-core": "*",
+    "@zollify/shared": "*",
     "tsx": "^4.19.0"
   },
   "devDependencies": {

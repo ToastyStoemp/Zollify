@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, visibleEvents } from '@boothly/platform';
+import { authFetch, currentAccount, visibleEvents } from '@zollify/platform';
 
 /**
  * Team management.
@@ -197,18 +197,18 @@ function when(ts: number | null): string {
 .team { display: flex; flex-direction: column; gap: .75rem; max-width: 40rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.code { margin: 0; font-size: .9rem; color: var(--bly-accent-ink, #0a5a4a); }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.code { margin: 0; font-size: .9rem; color: var(--zfy-accent-ink, #0a5a4a); }
 .code strong { font-family: ui-monospace, monospace; letter-spacing: .08em; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--bly-surface, #fff); }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); }
 .list.muted li { opacity: .8; }
 .meta { display: flex; flex-direction: column; gap: .1rem; font-size: .9rem; }
-.meta span { color: var(--bly-muted, #5a6472); font-size: .78rem; }
-.invite { display: flex; flex-direction: column; gap: .6rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); align-items: flex-start; }
+.meta span { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
+.invite { display: flex; flex-direction: column; gap: .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); align-items: flex-start; }
 .invite label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .invite label.inline { flex-direction: row; align-items: center; gap: .4rem; }
-fieldset { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .3rem; width: 100%; }
-legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
+fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .3rem; width: 100%; }
+legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
 </style>

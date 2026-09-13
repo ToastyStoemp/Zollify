@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { Product, Variant } from '@boothly/shared';
-import { allProducts, deleteProduct, saveProductImage, upsertProduct } from '@boothly/platform';
+import type { Product, Variant } from '@zollify/shared';
+import { allProducts, deleteProduct, saveProductImage, upsertProduct } from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
-import { currentAccount } from '@boothly/platform';
+import { currentAccount } from '@zollify/platform';
 
 const account = currentAccount;
 const query = ref('');
@@ -206,23 +206,23 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 .tools { display: flex; gap: .5rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.editor { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .75rem; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.editor { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .toggles { display: flex; gap: 1rem; }
-.variants { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
-.variants legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
+.variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.variants legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
 .variant { display: grid; grid-template-columns: 1fr 1fr 7rem auto; gap: .4rem; width: 100%; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
-.variants-note { color: var(--bly-muted, #5a6472); font-size: .78rem; }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
+.variants-note { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .image-row { display: flex; align-items: center; gap: .6rem; }
 .title-cell { display: flex; align-items: center; gap: .6rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
-table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }
+table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
+th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
 tbody tr:last-child td { border-bottom: none; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .mono { font-family: ui-monospace, monospace; font-size: .82rem; }

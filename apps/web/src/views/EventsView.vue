@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { toLocalPrice } from '@boothly/shared';
-import type { SalesEvent } from '@boothly/shared';
+import { toLocalPrice } from '@zollify/shared';
+import type { SalesEvent } from '@zollify/shared';
 import {
   activeEventId,
   currentAccount,
@@ -9,7 +9,7 @@ import {
   setActiveEvent,
   upsertSalesEvent,
   visibleEvents,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 const account = currentAccount;
 const editing = ref<SalesEvent | null>(null);
@@ -163,20 +163,20 @@ async function remove(id: string): Promise<void> {
 .events { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
-.empty, .scoped { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.editor { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .75rem; }
+.empty, .scoped { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.editor { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
-.local { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
-.local legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
+.local { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.local legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .75rem 1rem; background: var(--bly-surface, #fff); }
-.list li.active { border-color: var(--bly-accent, #0e7c66); }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .75rem 1rem; background: var(--zfy-surface, #fff); }
+.list li.active { border-color: var(--zfy-accent, #0e7c66); }
 .meta { display: flex; flex-direction: column; gap: .1rem; }
-.when { font-size: .8rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.when { font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .row-actions { display: flex; align-items: center; gap: .4rem; }
-.badge { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--bly-accent-ink, #0a5a4a); background: var(--bly-accent-soft, #deeee9); border-radius: 999px; padding: .15rem .5rem; }
+.badge { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-radius: 999px; padding: .15rem .5rem; }
 </style>

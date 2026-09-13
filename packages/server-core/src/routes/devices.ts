@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import type { DeviceSummary } from '@boothly/shared';
+import type { DeviceSummary } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 
 /**

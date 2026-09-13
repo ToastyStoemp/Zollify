@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, shallowRef, watch, type Component } from 'vue';
-import { currentAccount } from '@boothly/platform';
-import { roleAtLeast, type Role } from '@boothly/sdk';
+import { currentAccount } from '@zollify/platform';
+import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 
 interface Panel {
@@ -131,9 +131,9 @@ const groups = computed(() => [
 h1 { margin: 0; font-size: 1.35rem; }
 .layout { display: grid; grid-template-columns: 13rem 1fr; gap: 1.5rem; align-items: start; }
 nav { display: flex; flex-direction: column; gap: .2rem; }
-.group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--bly-faint, #8a94a2); }
+.group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint, #8a94a2); }
 .group:first-child { margin-top: 0; }
 nav button { text-align: left; border-color: transparent; background: transparent; }
-nav button.active { background: var(--bly-accent-soft, #deeee9); color: var(--bly-accent-ink, #0a5a4a); font-weight: 600; }
+nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
 </style>

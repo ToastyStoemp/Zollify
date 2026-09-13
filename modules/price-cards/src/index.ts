@@ -1,4 +1,4 @@
-import { defineModule, type Sdk } from '@boothly/sdk';
+import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**

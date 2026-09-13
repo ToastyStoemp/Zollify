@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import type { WireOp } from '@boothly/shared';
+import type { WireOp } from '@zollify/shared';
 import { openCoreDb, type OutboxOp } from './db';
 import { getAccount } from '../session';
 import { deviceId } from './device';

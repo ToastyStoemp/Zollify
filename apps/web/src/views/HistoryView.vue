@@ -11,7 +11,7 @@ import {
   revertTransaction,
   totalsFor,
   visibleEvents,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 const account = currentAccount;
 const scope = ref<string>('all');
@@ -161,26 +161,26 @@ async function revert(id: string, total: number, currency: string): Promise<void
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
-.totals li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .1rem; min-width: 9rem; }
-.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--bly-muted, #5a6472); }
+.totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .1rem; min-width: 9rem; }
+.totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .totals strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
-.totals .sub { font-size: .78rem; color: var(--bly-muted, #5a6472); }
-.totals .sub.reverted { color: var(--bly-danger, #c6512f); }
+.totals .sub { font-size: .78rem; color: var(--zfy-muted, #5a6472); }
+.totals .sub.reverted { color: var(--zfy-danger, #c6512f); }
 .txs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-.txs li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; background: var(--bly-surface, #fff); overflow: hidden; }
+.txs li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); overflow: hidden; }
 .txs li.reverted .row { opacity: .6; }
 .row { display: grid; grid-template-columns: 12rem 1fr 5rem 7rem auto; gap: .75rem; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: .6rem .85rem; font-size: .9rem; }
-.row:hover { background: var(--bly-surface-2, #e9edf1); }
-.when { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
+.row:hover { background: var(--zfy-surface-2, #e9edf1); }
+.when { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .amount { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-.badge { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--bly-danger, #c6512f); }
-.detail { border-top: 1px solid var(--bly-line, #d6dde4); padding: .75rem .85rem; display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.badge { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-danger, #c6512f); }
+.detail { border-top: 1px solid var(--zfy-line, #d6dde4); padding: .75rem .85rem; display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
 .items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; width: 100%; font-size: .85rem; }
 .items li { display: flex; justify-content: space-between; }
 .line { font-variant-numeric: tabular-nums; }
-.ref { margin: 0; font-size: .78rem; color: var(--bly-muted, #5a6472); display: flex; gap: .75rem; flex-wrap: wrap; }
+.ref { margin: 0; font-size: .78rem; color: var(--zfy-muted, #5a6472); display: flex; gap: .75rem; flex-wrap: wrap; }
 @media (max-width: 760px) { .row { grid-template-columns: 1fr auto; } .event, .method { display: none; } }
 </style>

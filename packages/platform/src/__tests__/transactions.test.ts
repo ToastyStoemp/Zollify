@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AccountSnapshot, SaleEvent } from '@boothly/sdk';
+import type { AccountSnapshot, SaleEvent } from '@zollify/sdk';
 
 const account: AccountSnapshot = {
   accountId: 'acct-tx',
@@ -234,20 +234,20 @@ describe('backup', () => {
     expect(file.products[0]?.deletedAt).toBeGreaterThan(0);
   });
 
-  it('refuses a file that is not a Boothly backup', () => {
+  it('refuses a file that is not a Zollify backup', () => {
     expect(() => backup.inspectBackup({ hello: 'world' })).toThrow(backup.RestoreError);
     expect(() => backup.inspectBackup(null)).toThrow(backup.RestoreError);
   });
 
   it('refuses a backup version it does not understand', () => {
     expect(() =>
-      backup.inspectBackup({ format: 'boothly-backup', version: 99 }),
+      backup.inspectBackup({ format: 'zollify-backup', version: 99 }),
     ).toThrow(/version 1/i);
   });
 
   it('flags a backup from another account instead of restoring silently', () => {
     const summary = backup.inspectBackup({
-      format: 'boothly-backup',
+      format: 'zollify-backup',
       version: 1,
       exportedAt: 'x',
       accountId: 'someone-else',

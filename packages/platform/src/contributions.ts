@@ -1,6 +1,6 @@
 import { reactive } from 'vue';
-import type { NavItem, Role, RouteDef, SettingsPanel } from '@boothly/sdk';
-import { roleAtLeast } from '@boothly/sdk';
+import type { NavItem, Role, RouteDef, SettingsPanel } from '@zollify/sdk';
+import { roleAtLeast } from '@zollify/sdk';
 
 export interface OwnedRoute extends RouteDef {
   moduleId: string;

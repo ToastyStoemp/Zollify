@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import type { ModuleContext, ServerModule } from '@boothly/server-core';
+import type { ModuleContext, ServerModule } from '@zollify/server-core';
 
 /**
  * Sourcing — the server half.

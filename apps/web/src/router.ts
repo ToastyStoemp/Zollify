@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory, type Router } from 'vue-router';
-import { getAccount, isAuthenticated } from '@boothly/platform';
-import { roleAtLeast, type Role } from '@boothly/sdk';
+import { getAccount, isAuthenticated } from '@zollify/platform';
+import { roleAtLeast, type Role } from '@zollify/sdk';
 
 /**
  * Hash history, carried over from ZollTool for the same reason: it behaves

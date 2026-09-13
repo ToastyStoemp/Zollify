@@ -12,7 +12,7 @@ import {
   type LoadOutcome,
   type ModuleDescriptor,
   type ModuleResolver,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 /**
  * Modules compiled into this build.
@@ -23,12 +23,12 @@ import {
  * change rather than an architectural one.
  */
 const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
-  pos: () => import('@boothly/pos'),
-  customs: () => import('@boothly/customs'),
-  'price-cards': () => import('@boothly/price-cards'),
-  sourcing: () => import('@boothly/sourcing'),
-  migration: () => import('@boothly/migration'),
-  'shopify-sync': () => import('@boothly/shopify-sync'),
+  pos: () => import('@zollify/pos'),
+  customs: () => import('@zollify/customs'),
+  'price-cards': () => import('@zollify/price-cards'),
+  sourcing: () => import('@zollify/sourcing'),
+  migration: () => import('@zollify/migration'),
+  'shopify-sync': () => import('@zollify/shopify-sync'),
 };
 
 export const contributions = new ContributionRegistry();
@@ -45,7 +45,7 @@ events.on('sale', (sale) => {
   void recordSale(sale).catch((err) => {
     // Never rethrow into the emitter: the payment already happened, and the
     // till must not appear to fail after the customer has paid.
-    console.error('[boothly] could not record a sale', err);
+    console.error('[zollify] could not record a sale', err);
   });
 });
 
@@ -115,7 +115,7 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   try {
     manifest = (await authFetch('/modules/manifest')) as ManifestResponse;
   } catch (err) {
-    console.error('[boothly] could not fetch the module manifest', err);
+    console.error('[zollify] could not fetch the module manifest', err);
     return [];
   }
 
@@ -127,7 +127,7 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   for (const outcome of outcomes) {
     if (outcome.status === 'loaded') continue;
     console.warn(
-      `[boothly] module "${outcome.moduleId}" ${outcome.status}: ${outcome.reason ?? 'no reason given'}`,
+      `[zollify] module "${outcome.moduleId}" ${outcome.status}: ${outcome.reason ?? 'no reason given'}`,
     );
   }
 

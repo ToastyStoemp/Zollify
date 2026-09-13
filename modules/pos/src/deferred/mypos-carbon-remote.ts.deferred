@@ -1,5 +1,5 @@
 import type { PaymentProvider, PaymentRequest, PaymentResult, ProviderStatus } from './provider';
-import type { PaymentResultMessage, PaymentTriggerMessage } from '@boothly/shared';
+import type { PaymentResultMessage, PaymentTriggerMessage } from '@zollify/shared';
 import { onPaymentMessage, sendPaymentMessage, syncState } from '@/sync/engine';
 import { DisplayLink, hasNativePlugin } from '@/native/plugins';
 import { getSetting } from '@/db/repo';

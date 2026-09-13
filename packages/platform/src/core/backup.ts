@@ -1,4 +1,4 @@
-import type { EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@boothly/shared';
+import type { EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { toPlain } from './plain';
@@ -20,8 +20,8 @@ import { queueOp } from './outbox';
 
 export const BACKUP_VERSION = 1;
 
-export interface BoothlyBackup {
-  format: 'boothly-backup';
+export interface ZollifyBackup {
+  format: 'zollify-backup';
   version: number;
   exportedAt: string;
   /** Recorded so a restore into the wrong account is visible, not silent. */
@@ -51,7 +51,7 @@ function requireAccount() {
  * resurrect every product ever deleted, because last-write-wins sync has no
  * other way to know they are gone.
  */
-export async function createBackup(): Promise<BoothlyBackup> {
+export async function createBackup(): Promise<ZollifyBackup> {
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
@@ -64,7 +64,7 @@ export async function createBackup(): Promise<BoothlyBackup> {
   ]);
 
   return {
-    format: 'boothly-backup',
+    format: 'zollify-backup',
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     accountId: account.accountId,
@@ -96,12 +96,12 @@ export interface BackupSummary {
  */
 export function inspectBackup(raw: unknown): BackupSummary {
   if (typeof raw !== 'object' || raw === null) {
-    throw new RestoreError('That file is not a Boothly backup.');
+    throw new RestoreError('That file is not a Zollify backup.');
   }
-  const file = raw as Partial<BoothlyBackup>;
+  const file = raw as Partial<ZollifyBackup>;
 
-  if (file.format !== 'boothly-backup') {
-    throw new RestoreError('That file is not a Boothly backup.');
+  if (file.format !== 'zollify-backup') {
+    throw new RestoreError('That file is not a Zollify backup.');
   }
   if (file.version !== BACKUP_VERSION) {
     throw new RestoreError(
@@ -141,7 +141,7 @@ export interface RestoreResult {
  */
 export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   const summary = inspectBackup(raw);
-  const file = raw as BoothlyBackup;
+  const file = raw as ZollifyBackup;
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
@@ -187,8 +187,8 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
 }
 
 /** Filename that sorts chronologically and says which account it came from. */
-export function backupFilename(backup: BoothlyBackup): string {
+export function backupFilename(backup: ZollifyBackup): string {
   const stamp = backup.exportedAt.replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const account = backup.accountName.replace(/[^A-Za-z0-9-]+/g, '-').toLowerCase();
-  return `boothly-${account}-${stamp}.json`;
+  return `zollify-${account}-${stamp}.json`;
 }

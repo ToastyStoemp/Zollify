@@ -100,10 +100,10 @@ async function disconnect(): Promise<void> {
 <style scoped>
 .connection { display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
 h2 { margin: 0; font-size: 1.05rem; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
-.status { margin: 0; font-size: .9rem; color: var(--bly-accent-ink, #0a5a4a); }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.form { display: flex; flex-direction: column; gap: .6rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
+.status { margin: 0; font-size: .9rem; color: var(--zfy-accent-ink, #0a5a4a); }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.form { display: flex; flex-direction: column; gap: .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 </style>

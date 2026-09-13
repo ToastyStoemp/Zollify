@@ -39,7 +39,7 @@ jobs:
         run: npm run build:modules
 
       - name: Build web
-        run: npm run build -w @boothly/web
+        run: npm run build -w @zollify/web
 
   audit:
     runs-on: ubuntu-latest

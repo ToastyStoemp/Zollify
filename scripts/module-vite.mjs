@@ -11,7 +11,7 @@ import vue from '@vitejs/plugin-vue';
  * fails at import time with a bare-specifier error, which is easy to misread as
  * a broken bundle.
  */
-export const HOST_EXTERNALS = ['vue', 'dexie', '@boothly/sdk', '@boothly/ui', '@boothly/shared'];
+export const HOST_EXTERNALS = ['vue', 'dexie', '@zollify/sdk', '@zollify/ui', '@zollify/shared'];
 
 /**
  * Folds the module's CSS into its JS bundle.
@@ -27,7 +27,7 @@ export const HOST_EXTERNALS = ['vue', 'dexie', '@boothly/sdk', '@boothly/ui', '@
  */
 function inlineCss(moduleName) {
   return {
-    name: 'boothly:inline-css',
+    name: 'zollify:inline-css',
     apply: 'build',
     enforce: 'post',
     generateBundle(_options, bundle) {
@@ -48,11 +48,11 @@ function inlineCss(moduleName) {
       const inject = `
 (function(){
   if (typeof document === 'undefined') return;
-  var id = ${JSON.stringify(`boothly-style-${moduleName}`)};
+  var id = ${JSON.stringify(`zollify-style-${moduleName}`)};
   if (document.getElementById(id)) return;
   var el = document.createElement('style');
   el.id = id;
-  el.setAttribute('data-boothly-module', ${JSON.stringify(moduleName)});
+  el.setAttribute('data-zollify-module', ${JSON.stringify(moduleName)});
   el.textContent = ${JSON.stringify(css)};
   document.head.appendChild(el);
 })();
@@ -63,7 +63,7 @@ function inlineCss(moduleName) {
 }
 
 /**
- * Shared Vite config for a Boothly module.
+ * Shared Vite config for a Zollify module.
  *
  * Output is a single ES bundle named `bundle.js`, which is what the registry
  * publishes and the loader executes from a blob URL.

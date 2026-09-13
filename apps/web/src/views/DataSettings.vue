@@ -9,7 +9,7 @@ import {
   restoreBackup,
   syncNow,
   type BackupSummary,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 const busy = ref<'export' | 'restore' | null>(null);
 const error = ref<string | null>(null);
@@ -160,13 +160,13 @@ async function confirmRestore(): Promise<void> {
 .data { display: flex; flex-direction: column; gap: .85rem; max-width: 38rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: 0; font-size: .95rem; }
-.hint, .meta { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.ok { color: var(--bly-accent-ink, #0a5a4a); margin: 0; }
-.warn { color: var(--bly-danger, #c6512f); margin: 0; font-size: .875rem; }
+.hint, .meta { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; }
+.warn { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
 .actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .picker { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; }
-.preview { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .6rem; }
+.preview { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .6rem; }
 .counts { list-style: none; margin: 0; padding: 0; display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: .875rem; }
 .counts strong { font-variant-numeric: tabular-nums; }
 .row { display: flex; gap: .5rem; justify-content: flex-end; }

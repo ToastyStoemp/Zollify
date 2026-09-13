@@ -97,14 +97,14 @@ function print(): void {
 h1 { margin: 0; font-size: 1.35rem; }
 .opts { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .opts label { display: flex; align-items: center; gap: .35rem; font-size: .85rem; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .35rem; }
 .pick { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 .sheet { display: grid; gap: .5rem; }
 .sheet.small { grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); }
 .sheet.medium { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
 .sheet.large { grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
-.card { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .9rem; background: #fff; color: #141a22; display: flex; flex-direction: column; gap: .3rem; break-inside: avoid; }
+.card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .9rem; background: #fff; color: #141a22; display: flex; flex-direction: column; gap: .3rem; break-inside: avoid; }
 .card h2 { margin: 0; font-size: 1rem; line-height: 1.25; }
 .sku { margin: 0; font-size: .75rem; font-family: ui-monospace, monospace; color: #5a6472; }
 .price { margin: auto 0 0; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }

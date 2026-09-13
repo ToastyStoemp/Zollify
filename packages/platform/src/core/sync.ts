@@ -9,7 +9,7 @@ import type {
   Transaction,
   DiscountRule,
   InventoryItem,
-} from '@boothly/shared';
+} from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { authFetch } from '../session';
@@ -95,7 +95,7 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
         // One malformed op must not poison the whole pull. A peer on a newer
         // build can emit a payload this one cannot read, and refusing every
         // other change because of it would strand the device.
-        console.warn(`[boothly] skipped a bad ${op.type} op`, err);
+        console.warn(`[zollify] skipped a bad ${op.type} op`, err);
       }
     }
   });

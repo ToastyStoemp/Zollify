@@ -65,7 +65,7 @@ export function loadModuleStore(storeDir: string): Map<string, PublishedModule> 
         const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ModuleManifestFile;
         const bundlePath = join(dir, manifest.bundle);
         if (!existsSync(bundlePath)) {
-          console.warn(`[boothly] ${manifestPath} points at a missing bundle; skipping`);
+          console.warn(`[zollify] ${manifestPath} points at a missing bundle; skipping`);
           continue;
         }
         const { hex, size } = sha256File(bundlePath);
@@ -86,7 +86,7 @@ export function loadModuleStore(storeDir: string): Map<string, PublishedModule> 
           sizeBytes: size,
         });
       } catch (err) {
-        console.warn(`[boothly] unreadable module manifest at ${manifestPath}`, err);
+        console.warn(`[zollify] unreadable module manifest at ${manifestPath}`, err);
       }
     }
   }

@@ -9,5 +9,5 @@
 <style scoped>
 .nf { display: flex; flex-direction: column; gap: .75rem; }
 h1 { margin: 0; font-size: 1.35rem; }
-p { margin: 0; color: var(--bly-muted, #5a6472); }
+p { margin: 0; color: var(--zfy-muted, #5a6472); }
 </style>

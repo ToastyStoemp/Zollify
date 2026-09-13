@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "boothly-web-5180",
+      "name": "zollify-web-5180",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "@boothly/web"],
+      "runtimeArgs": ["run", "dev", "-w", "@zollify/web"],
       "port": 5180
     }
   ]

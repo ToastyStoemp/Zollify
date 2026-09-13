@@ -1,18 +1,18 @@
 {
-  "name": "@boothly/pos",
+  "name": "@zollify/pos",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "boothly": { "moduleId": "pos", "entry": "./src/index.ts" },
+  "zollify": { "moduleId": "pos", "entry": "./src/index.ts" },
   "scripts": {
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "build": "vite build"
   },
   "dependencies": {
-    "@boothly/sdk": "*",
-    "@boothly/shared": "*"
+    "@zollify/sdk": "*",
+    "@zollify/shared": "*"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",

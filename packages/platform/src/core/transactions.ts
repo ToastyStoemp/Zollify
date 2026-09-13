@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
-import type { SaleEvent } from '@boothly/sdk';
-import type { PaymentLeg, Transaction, TxItem } from '@boothly/shared';
+import type { SaleEvent } from '@zollify/sdk';
+import type { PaymentLeg, Transaction, TxItem } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';

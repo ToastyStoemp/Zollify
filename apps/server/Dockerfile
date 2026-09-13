@@ -1,8 +1,8 @@
 # Build from the repo root:
-#   docker build -f apps/server/Dockerfile -t boothly .
+#   docker build -f apps/server/Dockerfile -t zollify .
 #
 # Unlike ZollTool, the web build happens here rather than being committed as a
-# zip. Boothly has to build the module bundles anyway — their hashes are what
+# zip. Zollify has to build the module bundles anyway — their hashes are what
 # the client verifies — so having the build in one reproducible place is worth
 # more than shaving minutes off a deploy. On a small instance this is slow; see
 # deploy.sh for building elsewhere and shipping the image.
@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 FROM deps AS build
 WORKDIR /repo
 COPY . .
-RUN npm run build -w @boothly/web
+RUN npm run build -w @zollify/web
 # Publishes each module bundle plus its manifest and SHA-256 into the store the
 # gateway serves from.
 RUN node scripts/publish-modules.mjs
@@ -42,9 +42,9 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /repo
 
 ENV NODE_ENV=production \
-    BOOTHLY_DATA_DIR=/data \
-    BOOTHLY_MODULE_STORE=/repo/apps/server/modules-store \
-    BOOTHLY_WEB_DIST=/repo/apps/web/dist \
+    ZOLLIFY_DATA_DIR=/data \
+    ZOLLIFY_MODULE_STORE=/repo/apps/server/modules-store \
+    ZOLLIFY_WEB_DIST=/repo/apps/web/dist \
     PORT=8787 \
     HOST=0.0.0.0
 
@@ -55,7 +55,7 @@ COPY packages/shared/package.json packages/shared/
 COPY packages/server-core/package.json packages/server-core/
 COPY apps/server/package.json apps/server/
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev -w @boothly/server -w @boothly/server-core -w @boothly/shared
+    npm ci --omit=dev -w @zollify/server -w @zollify/server-core -w @zollify/shared
 
 COPY packages/shared packages/shared
 COPY packages/server-core packages/server-core

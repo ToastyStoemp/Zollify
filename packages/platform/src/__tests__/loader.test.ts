@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { defineModule, type ModuleDefinition, type Sdk, type ShellUi } from '@boothly/sdk';
+import { defineModule, type ModuleDefinition, type Sdk, type ShellUi } from '@zollify/sdk';
 import { ContributionRegistry } from '../contributions';
 import { PlatformEventBus } from '../events';
 import {

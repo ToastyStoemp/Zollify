@@ -1,8 +1,8 @@
 /**
- * @boothly/platform — the host.
+ * @zollify/platform — the host.
  *
  * Apps import this. Modules must not: their only permitted import from the
- * platform is @boothly/sdk.
+ * platform is @zollify/sdk.
  */
 
 export { PlatformEventBus } from './events';
@@ -19,7 +19,7 @@ export {
   openModuleDb,
   closeModuleDb,
   deleteModuleDb,
-  listBoothlyDbs,
+  listZollifyDbs,
 } from './module-db';
 export {
   bundleKey,

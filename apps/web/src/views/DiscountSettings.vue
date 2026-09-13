@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { DiscountRule, DiscountTier } from '@boothly/shared';
+import type { DiscountRule, DiscountTier } from '@zollify/shared';
 import {
   allDiscounts,
   allProducts,
@@ -9,7 +9,7 @@ import {
   loadDiscounts,
   pendingConfirm,
   upsertDiscount,
-} from '@boothly/platform';
+} from '@zollify/platform';
 
 /**
  * Discount rules.
@@ -221,21 +221,21 @@ function describe(rule: DiscountRule): string {
 .discounts { display: flex; flex-direction: column; gap: .75rem; max-width: 40rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h2 { margin: 0; font-size: 1.05rem; }
-.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .875rem; }
-.error { color: var(--bly-danger, #c6512f); margin: 0; }
-.editor { display: flex; flex-direction: column; gap: .7rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); }
+.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.editor { display: flex; flex-direction: column; gap: .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); }
 .row { display: grid; grid-template-columns: 1fr 12rem; gap: .75rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
-fieldset { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; }
-legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
+fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; }
+legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .25rem; max-height: 12rem; overflow-y: auto; }
 .tier { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 .tier input { width: 6rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--bly-surface, #fff); }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); }
 .meta { display: flex; flex-direction: column; gap: .1rem; font-size: .9rem; }
-.meta span { color: var(--bly-muted, #5a6472); font-size: .78rem; }
+.meta span { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .row-actions { display: flex; gap: .4rem; }
 </style>

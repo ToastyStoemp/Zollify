@@ -1,6 +1,6 @@
-import type { Transaction } from '@boothly/shared';
+import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
-import { fmtPrice } from '@boothly/shared';
+import { fmtPrice } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 
 /**

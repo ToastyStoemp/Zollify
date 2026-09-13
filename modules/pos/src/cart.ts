@@ -1,6 +1,6 @@
 import { computed, reactive } from 'vue';
-import type { SaleEvent, SaleLine } from '@boothly/sdk';
-import { round2, toLocalPrice } from '@boothly/shared';
+import type { SaleEvent, SaleLine } from '@zollify/sdk';
+import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
 import {

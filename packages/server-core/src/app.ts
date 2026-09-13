@@ -195,7 +195,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     { prefix: '/api' },
   );
 
-  app.decorate('boothly', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+  app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 
   /**
    * Liveness probe. Deliberately unauthenticated and free of detail: a load

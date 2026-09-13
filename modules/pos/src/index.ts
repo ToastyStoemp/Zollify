@@ -1,11 +1,11 @@
-import { defineModule, type Sdk } from '@boothly/sdk';
+import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 import { onActiveProviderChanged } from './payments/registry';
 
 /**
  * POS — taking money at the booth.
  *
- * Boothly never touches the sale itself: myPOS and SumUp terminals take the
+ * Zollify never touches the sale itself: myPOS and SumUp terminals take the
  * card and settle to the vendor's bank. This module orchestrates the checkout,
  * records the result and prints the receipt, which is what keeps PCI scope out
  * of the platform entirely.

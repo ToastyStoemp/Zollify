@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import { makeSecretBox, type ModuleContext, type ServerModule } from '@boothly/server-core';
+import { makeSecretBox, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ShopifyClient } from './shopify';
 import { matchCatalogs } from './match';
 import type { SavedMatches, ShopProduct, ZtProduct } from './types';
@@ -19,7 +19,7 @@ import type { SavedMatches, ShopProduct, ZtProduct } from './types';
  */
 
 /** Domain-separated from the TOTP key, so one compromise is not both. */
-const SECRET_SALT = 'boothly-module-credentials-v1';
+const SECRET_SALT = 'zollify-module-credentials-v1';
 
 const ConnectBody = z.object({
   shop: z
@@ -151,7 +151,7 @@ export function shopifyServerModule(jwtSecret: string): ServerModule {
       });
 
       /**
-       * Proposes matches between the Boothly catalogue and the storefront.
+       * Proposes matches between the Zollify catalogue and the storefront.
        *
        * Read-only by design: matching suggests, a person confirms, and only then
        * does anything get written to the shop. Auto-applying a fuzzy match would
@@ -175,7 +175,7 @@ export function shopifyServerModule(jwtSecret: string): ServerModule {
           return reply.code(502).send({ error: 'shopify_unavailable', message: 'Shopify did not respond as expected.' });
         }
 
-        // The Boothly catalogue lives on the client (it is synced, not
+        // The Zollify catalogue lives on the client (it is synced, not
         // server-authoritative), so it is supplied with the request.
         const ztProducts = ((req.body as { products?: ZtProduct[] })?.products ?? []) as ZtProduct[];
 

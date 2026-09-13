@@ -1,4 +1,4 @@
-import type { Sdk } from '@boothly/sdk';
+import type { Sdk } from '@zollify/sdk';
 
 let current: Sdk | null = null;
 

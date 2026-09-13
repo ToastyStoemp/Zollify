@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { currentAccount } from '@boothly/platform';
+import { currentAccount } from '@zollify/platform';
 import { loader } from '../boot';
 
 const account = currentAccount;
@@ -29,8 +29,8 @@ const modules = computed(() => loader.list());
 <style scoped>
 .home { display: flex; flex-direction: column; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
-.lede, .empty { color: var(--bly-muted, #5a6472); margin: 0; }
+.lede, .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .modules { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); }
-.modules li { border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .75rem; background: var(--bly-surface, #fff); display: flex; flex-direction: column; gap: .15rem; }
-.ver { font-size: .78rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.modules li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .75rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .15rem; }
+.ver { font-size: .78rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 </style>

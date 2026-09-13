@@ -1,4 +1,4 @@
-import type { EventBus, EventName, EventPayload, Unsubscribe } from '@boothly/sdk';
+import type { EventBus, EventName, EventPayload, Unsubscribe } from '@zollify/sdk';
 
 type Handler = (payload: unknown) => void;
 
@@ -17,7 +17,7 @@ export class PlatformEventBus implements EventBus {
     this.onError =
       onError ??
       ((name, err) => {
-        console.error(`[boothly] event handler for "${name}" threw`, err);
+        console.error(`[zollify] event handler for "${name}" threw`, err);
       });
   }
 

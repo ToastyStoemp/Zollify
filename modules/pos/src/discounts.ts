@@ -1,5 +1,5 @@
-import type { DiscountRule } from '@boothly/shared';
-import { round2 } from '@boothly/shared';
+import type { DiscountRule } from '@zollify/shared';
+import { round2 } from '@zollify/shared';
 
 /** A resolved cart line: variant lines carry vid, plain products vid=null. */
 export interface CartLine {

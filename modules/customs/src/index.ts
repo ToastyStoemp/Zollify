@@ -1,4 +1,4 @@
-import { defineModule, type Sdk } from '@boothly/sdk';
+import { defineModule, type Sdk } from '@zollify/sdk';
 
 /**
  * Customs — Swiss customs paperwork for a booth crossing a border.

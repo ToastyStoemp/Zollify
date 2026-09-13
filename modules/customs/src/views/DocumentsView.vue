@@ -87,7 +87,7 @@ function printDocuments(): void {
 h1 { font-size: 1.25rem; margin: 0; }
 .controls { display: flex; align-items: center; gap: .75rem; }
 .field { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.output { flex: 1; min-height: 60vh; width: 100%; border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; background: #fff; }
-.empty, .error { color: var(--bly-muted, #5a6472); }
-.error { color: var(--bly-danger, #c6512f); }
+.output { flex: 1; min-height: 60vh; width: 100%; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: #fff; }
+.empty, .error { color: var(--zfy-muted, #5a6472); }
+.error { color: var(--zfy-danger, #c6512f); }
 </style>

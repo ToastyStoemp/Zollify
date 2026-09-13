@@ -1,4 +1,4 @@
-import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@boothly/shared';
+import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Reads a ZollTool v2 backup.
@@ -113,7 +113,7 @@ export function planImport(raw: unknown): ImportPlan {
     skipped.push({
       what: 'Discount rules',
       count: discounts.length,
-      why: 'Not modelled in Boothly yet — re-create them once discounts land.',
+      why: 'Not modelled in Zollify yet — re-create them once discounts land.',
     });
   }
   const images = asArray(raw.images, 'images', []);

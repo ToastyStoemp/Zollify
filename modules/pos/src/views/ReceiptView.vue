@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { fmtPrice, type Transaction } from '@boothly/shared';
+import { fmtPrice, type Transaction } from '@zollify/shared';
 import { buildReceiptLines, loadReceiptConfig, printReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 
@@ -117,14 +117,14 @@ async function print(): Promise<void> {
 .receipt { display: flex; flex-direction: column; gap: 1rem; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h1 { font-size: 1.25rem; margin: 0; }
-.empty { color: var(--bly-muted, #5a6472); margin: 0; }
-.result { margin: 0; color: var(--bly-accent-ink, #0a5a4a); }
-.result.bad { color: var(--bly-danger, #c6512f); }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.result { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); }
+.result.bad { color: var(--zfy-danger, #c6512f); }
 
 /* Sized to 58mm thermal paper so the on-screen copy matches what prints. */
 .paper {
   width: 100%; max-width: 22rem; background: #fff; color: #141a22;
-  border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px;
+  border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px;
   padding: 1rem; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: .8rem;
   display: flex; flex-direction: column; gap: .35rem;
 }

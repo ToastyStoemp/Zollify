@@ -4,7 +4,7 @@ import {
   satisfies,
   type ModuleDefinition,
   type Role,
-} from '@boothly/sdk';
+} from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { createModuleHost, type ModuleHost } from './sdk-host';
@@ -50,7 +50,7 @@ export interface LoaderOptions {
   contributions: ContributionRegistry;
   events: PlatformEventBus;
   resolver: ModuleResolver;
-  ui: import('@boothly/sdk').ShellUi;
+  ui: import('@zollify/sdk').ShellUi;
   sdkVersion?: string;
   /**
    * Capabilities the host itself provides, which a module may name in
@@ -208,7 +208,7 @@ export class ModuleLoader {
     try {
       await mod.definition.teardown?.();
     } catch (err) {
-      console.error(`[boothly] teardown of "${moduleId}" threw`, err);
+      console.error(`[zollify] teardown of "${moduleId}" threw`, err);
     }
     await mod.host.dispose();
     removeModuleStyles(moduleId);
@@ -226,7 +226,7 @@ export class ModuleLoader {
  */
 function removeModuleStyles(moduleId: string): void {
   if (typeof document === 'undefined') return;
-  for (const el of document.querySelectorAll(`style[data-boothly-module="${moduleId}"]`)) {
+  for (const el of document.querySelectorAll(`style[data-zollify-module="${moduleId}"]`)) {
     el.remove();
   }
 }

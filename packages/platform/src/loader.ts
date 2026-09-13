@@ -211,10 +211,23 @@ export class ModuleLoader {
       console.error(`[boothly] teardown of "${moduleId}" threw`, err);
     }
     await mod.host.dispose();
+    removeModuleStyles(moduleId);
   }
 
   async unloadAll(): Promise<void> {
     for (const id of [...this.loaded.keys()]) await this.unload(id);
+  }
+}
+
+/**
+ * Drops the <style> a module's bundle injected on import. Without this, styles
+ * accumulate across enable/disable cycles and a disabled module keeps quietly
+ * restyling the shell.
+ */
+function removeModuleStyles(moduleId: string): void {
+  if (typeof document === 'undefined') return;
+  for (const el of document.querySelectorAll(`style[data-boothly-module="${moduleId}"]`)) {
+    el.remove();
   }
 }
 

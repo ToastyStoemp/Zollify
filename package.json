@@ -2,7 +2,7 @@
   "name": "boothly",
   "version": "0.1.0",
   "private": true,
-  "description": "Boothly — a plugin platform for market and convention booths",
+  "description": "Boothly \u2014 a plugin platform for market and convention booths",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -19,7 +19,8 @@
     "build:modules": "npm run build -w @boothly/pos -w @boothly/customs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
-    "audit:deps": "npm audit --audit-level=moderate"
+    "audit:deps": "npm audit --audit-level=moderate",
+    "publish:modules": "node scripts/publish-modules.mjs"
   },
   "devDependencies": {
     "typescript": "~5.9.0",

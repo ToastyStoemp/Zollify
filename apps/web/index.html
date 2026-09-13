@@ -5,6 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="referrer" content="strict-origin-when-cross-origin" />
     <title>Boothly</title>
+
+    <!--
+      Resolves the bare specifiers left external in runtime module bundles.
+      Each target re-exports the shell's own copy, so a module shares the host's
+      single Vue and Dexie instance rather than shipping its own.
+
+      Harmless during `vite dev`: Vite rewrites bare imports at transform time,
+      so nothing in development reaches this map. It matters only for the blob
+      modules the loader executes, which is why remote loading is exercised
+      against a production build.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "vue": "/host/vue.js",
+          "dexie": "/host/dexie.js",
+          "@boothly/sdk": "/host/sdk.js",
+          "@boothly/ui": "/host/ui.js"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

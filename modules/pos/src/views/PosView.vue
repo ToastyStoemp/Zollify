@@ -20,6 +20,7 @@ import {
 import { useRouter } from 'vue-router';
 import type { Product, Variant } from '@boothly/shared';
 import { sdk } from '../runtime';
+import ProductThumb from '../components/ProductThumb.vue';
 
 const providerId = ref('manual');
 const message = ref<string | null>(null);
@@ -186,6 +187,7 @@ function openReceipt(): void {
         </p>
         <div v-else class="grid">
           <button v-for="product in products" :key="product.id" type="button" class="tile" @click="tap(product)">
+            <ProductThumb :image-id="product.imageId" :alt="product.title" :size="44" />
             <span class="title">{{ product.title }}</span>
             <span class="price">
               {{ product.price.toFixed(2) }}
@@ -274,7 +276,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .layout { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: start; }
 .picker { display: flex; flex-direction: column; gap: .75rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .5rem; }
-.tile { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; padding: .7rem .8rem; text-align: left; min-height: 4.2rem; }
+.tile { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .7rem .8rem; text-align: left; min-height: 4.2rem; }
 .tile .title { font-weight: 600; font-size: .9rem; }
 .tile .price { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
 .ticket { border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; background: var(--bly-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }

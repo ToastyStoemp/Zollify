@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue';
 import {
   activeEventId,
+  csvFilename,
+  transactionsToCsv,
   currentAccount,
   getSalesEvent,
   pendingConfirm,
@@ -30,6 +32,22 @@ const totals = computed(() => totalsFor(scope.value === 'all' ? null : scope.val
 function eventName(id: string): string {
   if (!id) return 'No event';
   return getSalesEvent(id)?.name ?? 'Removed event';
+}
+
+/**
+ * Exports what the current filter shows, so the file matches the screen the
+ * user is looking at rather than silently exporting everything.
+ */
+function exportCsv(): void {
+  const csv = transactionsToCsv(filtered.value);
+  const name = scope.value === 'all' ? null : eventName(scope.value);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = csvFilename(name);
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function when(ts: number): string {
@@ -71,6 +89,7 @@ async function revert(id: string, total: number, currency: string): Promise<void
   <section class="history">
     <header>
       <h1>History</h1>
+      <button type="button" :disabled="!filtered.length" @click="exportCsv">Export CSV</button>
       <label class="scope">
         <span>Event</span>
         <select v-model="scope">

@@ -237,8 +237,19 @@ export interface TransactionApi {
   }[];
 }
 
+/**
+ * Product images. Blobs stay on the device that added them; only thumbnails
+ * sync, so a catalogue of photos never competes with sale ops for a
+ * convention's connection.
+ */
+export interface ImageApi {
+  /** Object URL for an image, or null when it isn't on this device. */
+  url(imageId: string | undefined, kind?: 'thumb' | 'full'): Promise<string | null>;
+}
+
 export interface DataApi {
   products: CatalogApi;
+  images: ImageApi;
   events: SalesEventApi;
   discounts: DiscountApi;
   transactions: TransactionApi;

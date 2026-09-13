@@ -24,6 +24,7 @@ import {
   upsertProduct,
 } from './core/catalog';
 import { getTransaction, recentTransactions, totalsFor } from './core/transactions';
+import { imageUrl } from './core/images';
 import {
   activeDiscounts,
   allDiscounts,
@@ -122,6 +123,9 @@ const coreData: import('@boothly/sdk').DataApi = {
     upsert: (event) => upsertSalesEvent(event),
     remove: (id) => deleteSalesEvent(id),
     setStock: (entry) => setStock(entry),
+  },
+  images: {
+    url: (imageId, kind) => imageUrl(imageId, kind ?? 'thumb'),
   },
   transactions: {
     recent: () => [...recentTransactions.value],

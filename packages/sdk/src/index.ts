@@ -29,6 +29,7 @@ export type {
   SalesEventApi,
   DiscountApi,
   TransactionApi,
+  ImageApi,
   DataApi,
   Logger,
   ToastOptions,

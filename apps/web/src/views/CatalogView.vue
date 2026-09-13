@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { Product, Variant } from '@boothly/shared';
-import { allProducts, deleteProduct, upsertProduct } from '@boothly/platform';
+import { allProducts, deleteProduct, saveProductImage, upsertProduct } from '@boothly/platform';
+import ProductThumb from '../components/ProductThumb.vue';
 import { currentAccount } from '@boothly/platform';
 
 const account = currentAccount;
@@ -57,6 +58,23 @@ function removeVariant(index: number): void {
   const next = [...variants.value];
   next.splice(index, 1);
   editing.value.variants = next;
+}
+
+/**
+ * Saves the picked image and points the product at it.
+ *
+ * The blob is stored locally and only a thumbnail syncs, so a catalogue full
+ * of photos never competes with sale ops for a convention's connection.
+ */
+async function chooseImage(event: Event): Promise<void> {
+  const file = (event.target as HTMLInputElement).files?.[0];
+  if (!file || !editing.value) return;
+  error.value = null;
+  try {
+    editing.value.imageId = await saveProductImage(editing.value.id, file);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not read that image.';
+  }
 }
 
 function variantSummary(product: Product): string {
@@ -116,6 +134,14 @@ async function remove(product: Product): Promise<void> {
         <label><span>Tariff no.</span><input v-model="editing.tariffNo" type="text" /></label>
         <label><span>Origin country</span><input v-model="editing.originCountry" type="text" maxlength="2" /></label>
       </div>
+      <label class="image">
+        <span>Photo</span>
+        <div class="image-row">
+          <ProductThumb :image-id="editing.imageId" :alt="editing.title || 'Product'" :size="56" />
+          <input type="file" accept="image/*" @change="chooseImage" />
+        </div>
+      </label>
+
       <fieldset class="variants">
         <legend>Variants</legend>
         <p class="hint">
@@ -157,7 +183,10 @@ async function remove(product: Product): Promise<void> {
       </thead>
       <tbody>
         <tr v-for="product in filtered" :key="product.id">
-          <td>{{ product.title }}<span class="variants-note">{{ variantSummary(product) }}</span></td>
+          <td class="title-cell">
+            <ProductThumb :image-id="product.imageId" :alt="product.title" :size="32" />
+            <span>{{ product.title }}<span class="variants-note">{{ variantSummary(product) }}</span></span>
+          </td>
           <td class="mono">{{ product.sku ?? '—' }}</td>
           <td class="num">{{ product.price.toFixed(2) }}</td>
           <td>{{ product.forSale ? 'For sale' : 'Not for sale' }}{{ product.unlisted ? ' · unlisted' : '' }}</td>
@@ -189,6 +218,8 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .variant { display: grid; grid-template-columns: 1fr 1fr 7rem auto; gap: .4rem; width: 100%; }
 .hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
 .variants-note { color: var(--bly-muted, #5a6472); font-size: .78rem; }
+.image-row { display: flex; align-items: center; gap: .6rem; }
+.title-cell { display: flex; align-items: center; gap: .6rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
 th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }

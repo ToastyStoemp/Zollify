@@ -15,6 +15,7 @@ export const router: Router = createRouter({
     { path: '/home', name: 'home', component: () => import('./views/HomeView.vue') },
     { path: '/events', name: 'events', component: () => import('./views/EventsView.vue') },
     { path: '/catalog', name: 'catalog', component: () => import('./views/CatalogView.vue') },
+    { path: '/history', name: 'history', component: () => import('./views/HistoryView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/modules', name: 'modules', component: () => import('./views/ModulesView.vue'), meta: { minRole: 'admin' } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue') },

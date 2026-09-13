@@ -8,6 +8,7 @@ import {
   authFetch,
   createShellUi,
   getAccount,
+  recordSale,
   type LoadOutcome,
   type ModuleDescriptor,
   type ModuleResolver,
@@ -32,6 +33,21 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
 
 export const contributions = new ContributionRegistry();
 export const events = new PlatformEventBus();
+
+/**
+ * Core records every announced sale.
+ *
+ * Subscribing here rather than inside POS means a sale is stored even if POS is
+ * later replaced or switched off mid-session, and any future module that sells
+ * something gets the same treatment for free.
+ */
+events.on('sale', (sale) => {
+  void recordSale(sale).catch((err) => {
+    // Never rethrow into the emitter: the payment already happened, and the
+    // till must not appear to fail after the customer has paid.
+    console.error('[boothly] could not record a sale', err);
+  });
+});
 
 /**
  * Routes reach the router the instant a module contributes them, rather than in

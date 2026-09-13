@@ -4,6 +4,7 @@ import {
   getAccount,
   loadCatalog,
   loadSalesEvents,
+  loadTransactions,
   refreshAccessToken,
   refreshPendingCount,
   startAutoSync,
@@ -32,6 +33,7 @@ async function start(): Promise<void> {
     await Promise.all([
       loadCatalog().catch((err) => console.error('[boothly] catalog load failed', err)),
       loadSalesEvents().catch((err) => console.error('[boothly] events load failed', err)),
+      loadTransactions().catch((err) => console.error('[boothly] history load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
   }

@@ -1,0 +1,118 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue';
+import {
+  currentAccount,
+  deviceFlavor,
+  deviceId,
+  deviceName,
+  lastSyncAt,
+  lastSyncError,
+  pendingCount,
+  setDeviceName,
+  syncNow,
+  syncState,
+} from '@boothly/platform';
+
+const account = currentAccount;
+const name = ref('');
+const id = ref('');
+const saved = ref(false);
+const error = ref<string | null>(null);
+
+onMounted(async () => {
+  try {
+    id.value = await deviceId();
+    name.value = (await deviceName()) ?? '';
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not read this device.';
+  }
+});
+
+async function save(): Promise<void> {
+  error.value = null;
+  try {
+    await setDeviceName(name.value);
+    saved.value = true;
+    setTimeout(() => (saved.value = false), 2500);
+    // Pushed straight away so the name reaches other devices, which use it to
+    // pick a register to target for a remote payment.
+    void syncNow();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save that name.';
+  }
+}
+
+function when(ts: number): string {
+  return ts ? new Date(ts).toLocaleString() : 'never';
+}
+</script>
+
+<template>
+  <section class="device">
+    <h2>This device</h2>
+
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <form class="form" @submit.prevent="save">
+      <label>
+        <span>Device name</span>
+        <input v-model="name" type="text" placeholder="Front counter iPad" />
+      </label>
+      <p class="hint">
+        Shown on your other devices — it's how you pick which register to send a remote payment to.
+      </p>
+      <button type="submit">Save</button>
+      <p v-if="saved" class="ok" role="status">Saved.</p>
+    </form>
+
+    <h3>Sync</h3>
+    <dl class="facts">
+      <dt>Status</dt>
+      <dd>{{ syncState }}</dd>
+
+      <dt>Last sync</dt>
+      <dd>{{ when(lastSyncAt) }}</dd>
+
+      <dt>Queued changes</dt>
+      <!-- Non-zero here is normal offline; it only matters if it never drains. -->
+      <dd>{{ pendingCount }}</dd>
+
+      <dt v-if="lastSyncError">Last error</dt>
+      <dd v-if="lastSyncError" class="error">{{ lastSyncError }}</dd>
+    </dl>
+
+    <button type="button" :disabled="syncState === 'syncing'" @click="syncNow()">
+      {{ syncState === 'syncing' ? 'Syncing…' : 'Sync now' }}
+    </button>
+
+    <h3>Identity</h3>
+    <dl class="facts">
+      <dt>Account</dt>
+      <dd>{{ account?.accountName }}</dd>
+
+      <dt>Signed in as</dt>
+      <dd>{{ account?.email }} · {{ account?.role }}</dd>
+
+      <dt>Platform</dt>
+      <dd>{{ deviceFlavor() }}</dd>
+
+      <dt>Device id</dt>
+      <dd class="mono">{{ id }}</dd>
+    </dl>
+  </section>
+</template>
+
+<style scoped>
+.device { display: flex; flex-direction: column; gap: .75rem; max-width: 36rem; align-items: flex-start; }
+h2 { margin: 0; font-size: 1.05rem; }
+h3 { margin: .75rem 0 0; font-size: .95rem; }
+.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
+.error { color: var(--bly-danger, #c6512f); margin: 0; }
+.ok { color: var(--bly-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
+.form { display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--bly-surface, #fff); align-items: flex-start; width: 100%; }
+.form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }
+.facts { display: grid; grid-template-columns: 10rem 1fr; gap: .3rem 1rem; margin: 0; font-size: .875rem; width: 100%; }
+.facts dt { color: var(--bly-muted, #5a6472); }
+.facts dd { margin: 0; }
+.mono { font-family: ui-monospace, monospace; font-size: .78rem; word-break: break-all; }
+</style>

@@ -47,3 +47,27 @@ export {
   type SyncState,
   type SyncResult,
 } from './sync';
+export {
+  loadTransactions,
+  transactionsLoaded,
+  recentTransactions,
+  getTransaction,
+  recordSale,
+  revertTransaction,
+  replaceTransactions,
+  saleToTransaction,
+  totalsFor,
+  resetTransactionCache,
+  type SalesTotals,
+} from './transactions';
+export {
+  BACKUP_VERSION,
+  createBackup,
+  inspectBackup,
+  restoreBackup,
+  backupFilename,
+  RestoreError,
+  type BoothlyBackup,
+  type BackupSummary,
+  type RestoreResult,
+} from './backup';

@@ -6,6 +6,7 @@ import type {
   PushResponse,
   SalesEvent,
   ServerOp,
+  Transaction,
 } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -14,6 +15,7 @@ import { deviceFlavor, deviceId, deviceName } from './device';
 import { markSynced, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
+import { loadTransactions } from './transactions';
 
 /**
  * Offline-first sync.
@@ -78,7 +80,7 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
   const db = openCoreDb(requireAccountId());
   let applied = 0;
 
-  await db.transaction('rw', db.products, db.events, db.eventStock, async () => {
+  await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, async () => {
     for (const op of ops) {
       switch (op.type) {
         case 'product.upsert': {
@@ -104,6 +106,29 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
           const existing = await db.events.get(incoming.id);
           if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
             await db.events.put(incoming);
+            applied++;
+          }
+          break;
+        }
+        case 'tx.create': {
+          const incoming = op.payload as Transaction;
+          // Sales are immutable once made; first write wins and a replayed op
+          // is a no-op rather than a duplicate row.
+          if (!(await db.transactions.get(incoming.id))) {
+            await db.transactions.put(incoming);
+            applied++;
+          }
+          break;
+        }
+        case 'tx.revert': {
+          const { id, revertedAt, revertedBy } = op.payload as {
+            id: string;
+            revertedAt: number;
+            revertedBy: string;
+          };
+          const existing = await db.transactions.get(id);
+          if (existing && !existing.revertedAt) {
+            await db.transactions.put({ ...existing, revertedAt, revertedBy });
             applied++;
           }
           break;
@@ -166,7 +191,10 @@ async function pull(): Promise<number> {
     // is stale. Discard synced data and re-pull from the beginning rather than
     // trying to reconcile against payloads that no longer exist.
     const db = openCoreDb(requireAccountId());
-    await db.transaction('rw', db.products, db.events, db.eventStock, async () => {
+    await db.transaction('rw', db.products, db.events, db.eventStock, db.transactions, async () => {
+      // Transactions are deliberately kept. They are financial records and are
+      // immutable once written, so there is nothing stale to discard — and a
+      // sale made on this device but not yet pushed would be lost forever.
       await Promise.all([db.products.clear(), db.events.clear(), db.eventStock.clear()]);
     });
     await writeCursor(0, serverEpoch);
@@ -198,7 +226,7 @@ export async function syncNow(): Promise<SyncResult> {
       const pulled = await pull();
 
       // Reload the in-memory stores so the UI reflects what just arrived.
-      if (pulled > 0) await Promise.all([loadCatalog(), loadSalesEvents()]);
+      if (pulled > 0) await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions()]);
       await refreshPendingCount();
 
       lastSyncAt.value = Date.now();

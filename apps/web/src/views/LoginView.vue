@@ -6,6 +6,7 @@ import {
   getApiBase,
   loadCatalog,
   loadSalesEvents,
+  loadTransactions,
   startAutoSync,
 } from '@boothly/platform';
 import { loadEnabledModules } from '../boot';
@@ -51,7 +52,7 @@ async function submit(): Promise<void> {
     applyLogin(body);
     // Same order as a cold boot: core data first, then modules, which read it
     // through the SDK as they mount.
-    await Promise.all([loadCatalog(), loadSalesEvents()]);
+    await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions()]);
     await loadEnabledModules(router);
     startAutoSync();
     const next = typeof route.query.next === 'string' ? route.query.next : '/home';

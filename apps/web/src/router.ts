@@ -17,6 +17,7 @@ export const router: Router = createRouter({
     { path: '/catalog', name: 'catalog', component: () => import('./views/CatalogView.vue') },
     { path: '/stock', name: 'stock', component: () => import('./views/StockView.vue') },
     { path: '/history', name: 'history', component: () => import('./views/HistoryView.vue') },
+    { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue'), meta: { minRole: 'admin' } },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/modules', name: 'modules', component: () => import('./views/ModulesView.vue'), meta: { minRole: 'admin' } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue') },

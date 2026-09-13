@@ -3,7 +3,9 @@ import { computed, onMounted, ref } from 'vue';
 import {
   addLine,
   appliedDiscounts,
+  baseTotal,
   cart,
+  isConverting,
   checkout,
   clear,
   discountTotal,
@@ -43,10 +45,20 @@ const activeEvent = computed(() => sdk().data.events.active());
 
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+
   // The till records against whichever event is active; keep the cart in step
   // so a sale can never be filed under the wrong one.
-  cart.eventId = activeEvent.value?.id ?? null;
-  if (activeEvent.value?.currency) cart.currency = activeEvent.value.currency;
+  const event = activeEvent.value;
+  cart.eventId = event?.id ?? null;
+
+  const base = event?.currency ?? 'CHF';
+  cart.baseCurrency = base;
+  // An event abroad charges in its local currency while the books stay in the
+  // base one.
+  const converting = Boolean(event?.localCurrency && event.exchangeRate);
+  cart.currency = converting ? event!.localCurrency! : base;
+  cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
+  cart.roundingIncrement = event?.roundingIncrement ?? 0;
 });
 
 /** A product with variants needs one chosen before it can be added. */
@@ -234,6 +246,10 @@ function openReceipt(): void {
           </p>
 
           <p class="total"><span>Total</span> <strong>{{ cart.currency }} {{ total.toFixed(2) }}</strong></p>
+          <p v-if="isConverting" class="line-sub">
+            <span>{{ cart.baseCurrency }} equivalent</span>
+            <span>{{ baseTotal.toFixed(2) }}</span>
+          </p>
           <div class="actions">
             <button type="button" :disabled="isEmpty || cart.busy" @click="clear">Clear</button>
             <button type="button" :disabled="isEmpty || cart.busy" @click="take">

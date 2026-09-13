@@ -1,6 +1,6 @@
 import { computed, reactive } from 'vue';
 import type { SaleEvent, SaleLine } from '@boothly/sdk';
-import { round2 } from '@boothly/shared';
+import { round2, toLocalPrice } from '@boothly/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
 import {
@@ -21,7 +21,13 @@ export interface CartLine extends SaleLine {
 
 interface CartState {
   lines: CartLine[];
+  /** What the customer is charged in. Equals baseCurrency unless the event converts. */
   currency: string;
+  /** The event's own currency, which the books are kept in. */
+  baseCurrency: string;
+  /** 1 base = this many of `currency`. null when not converting. */
+  exchangeRate: number | null;
+  roundingIncrement: number;
   eventId: string | null;
   busy: boolean;
   /** A one-off discount the seller applies by hand, on top of any rules. */
@@ -31,10 +37,29 @@ interface CartState {
 export const cart = reactive<CartState>({
   lines: [],
   currency: 'CHF',
+  baseCurrency: 'CHF',
+  exchangeRate: null,
+  roundingIncrement: 0,
   eventId: null,
   busy: false,
   custom: null,
 });
+
+export const isConverting = computed(
+  () => cart.exchangeRate !== null && cart.currency !== cart.baseCurrency,
+);
+
+/**
+ * Converts a base amount into what the customer is actually charged.
+ *
+ * Rounding happens on the converted figure, not the base one — a booth in
+ * Sweden charges round kronor, and rounding before conversion would produce
+ * awkward numbers on the terminal.
+ */
+export function toCharged(baseAmount: number): number {
+  if (!isConverting.value || cart.exchangeRate === null) return round2(baseAmount);
+  return toLocalPrice(baseAmount, cart.exchangeRate, cart.roundingIncrement);
+}
 
 /**
  * Lines in the shape the discount engine expects.
@@ -70,7 +95,11 @@ export const subtotal = computed(() => totals.value.subtotal);
 export const discountTotal = computed(
   () => round2(totals.value.ruleDiscountTotal + totals.value.customDiscountAmount),
 );
-export const total = computed(() => totals.value.grandTotal);
+/** Owed in the event's base currency — this is the figure the books use. */
+export const baseTotal = computed(() => totals.value.grandTotal);
+
+/** Owed in the currency the customer pays in. */
+export const total = computed(() => toCharged(baseTotal.value));
 export const appliedDiscounts = computed(() => totals.value.ruleDiscounts);
 
 export const itemCount = computed(() => cart.lines.reduce((n, l) => n + l.qty, 0));
@@ -150,6 +179,7 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
 
   const charged = total.value;
+  const base = baseTotal.value;
   if (charged <= 0) {
     return { approved: false, error: 'The total is zero — nothing to charge.' };
   }
@@ -170,12 +200,15 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
     // Discounts are spread proportionally across the lines so the recorded
     // line totals add up to what was actually paid. Without this a discounted
     // basket reconciles to the wrong number line by line.
+    // Distributed against the base total: line figures stay in the currency the
+    // books are kept in, so a converted sale still reconciles against the
+    // catalogue. The charged amount is recorded separately on the sale.
     const priced = distributeTotal(
       cart.lines.map((line) => ({
         ...line,
         lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
       })),
-      charged,
+      base,
     );
 
     const sale: SaleEvent = {
@@ -184,6 +217,9 @@ export async function checkout(providerId: string, saleId: string): Promise<Chec
       at: Date.now(),
       currency: cart.currency,
       total: charged,
+      baseCurrency: cart.baseCurrency,
+      baseTotal: base,
+      exchangeRate: cart.exchangeRate ?? undefined,
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }) => line),
       payment: {
         provider: result.provider,

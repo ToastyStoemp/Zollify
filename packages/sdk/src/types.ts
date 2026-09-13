@@ -101,8 +101,21 @@ export interface SaleEvent {
   saleId: string;
   eventId: string | null;
   at: number;
+  /** What the customer was charged in. */
   currency: string;
   total: number;
+  /**
+   * The event's own currency and the equivalent figure in it, when the sale was
+   * charged in a converted local currency.
+   *
+   * Both are recorded because they answer different questions: `total` is what
+   * the terminal took, `baseTotal` is what the books count. Deriving one from
+   * the other later would use whatever rate is current then, not the rate that
+   * was actually applied.
+   */
+  baseCurrency?: string;
+  baseTotal?: number;
+  exchangeRate?: number;
   lines: SaleLine[];
   payment: {
     provider: string;

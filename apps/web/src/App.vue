@@ -7,12 +7,13 @@ import ConfirmDialog from './views/ConfirmDialog.vue';
 const account = currentAccount;
 
 /** Core nav first, then whatever the loaded modules contributed, by order. */
-const coreNav = [
+const coreNav: { routeName: string; label: string; order: number; minRole?: 'owner' | 'admin' }[] = [
   { routeName: 'home', label: 'Home', order: 0 },
   { routeName: 'events', label: 'Events', order: 10 },
   { routeName: 'catalog', label: 'Catalog', order: 20 },
   { routeName: 'stock', label: 'Stock', order: 25 },
   { routeName: 'history', label: 'History', order: 30 },
+  { routeName: 'cashup', label: 'Cash up', order: 35, minRole: 'admin' },
   { routeName: 'settings', label: 'Settings', order: 900 },
 ];
 
@@ -33,9 +34,14 @@ const isAdmin = computed(
       <div class="brand">Boothly<span>.</span></div>
 
       <nav aria-label="Main">
-        <router-link v-for="item in coreNav" :key="item.routeName" :to="{ name: item.routeName }">
-          {{ item.label }}
-        </router-link>
+        <template v-for="item in coreNav" :key="item.routeName">
+          <router-link
+            v-if="!item.minRole || isAdmin"
+            :to="{ name: item.routeName }"
+          >
+            {{ item.label }}
+          </router-link>
+        </template>
         <router-link v-if="isAdmin" :to="{ name: 'modules' }">Modules</router-link>
 
         <hr v-if="moduleNav.length" />

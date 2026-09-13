@@ -109,6 +109,37 @@ describe('recording sales', () => {
 
     expect(lineSum).toBe(stored?.total);
   });
+
+  it('records both the charged and base figures for a converted sale', async () => {
+    // They answer different questions: total is what the terminal took,
+    // baseTotal is what the books count. Deriving one later would use whatever
+    // rate is current then, not the rate actually applied.
+    await tx.recordSale(
+      sale({
+        saleId: 'abroad',
+        currency: 'SEK',
+        total: 700,
+        baseCurrency: 'CHF',
+        baseTotal: 65,
+        exchangeRate: 10.77,
+      }),
+    );
+
+    const stored = tx.getTransaction('abroad');
+    expect(stored?.currency).toBe('SEK');
+    expect(stored?.total).toBe(700);
+    expect(stored?.baseCurrency).toBe('CHF');
+    expect(stored?.baseTotal).toBe(65);
+    expect(stored?.exchangeRate).toBe(10.77);
+  });
+
+  it('leaves the conversion fields off an unconverted sale', async () => {
+    await tx.recordSale(sale({ saleId: 'home', currency: 'CHF', baseCurrency: 'CHF' }));
+
+    const stored = tx.getTransaction('home');
+    expect(stored?.baseCurrency).toBeUndefined();
+    expect(stored?.exchangeRate).toBeUndefined();
+  });
 });
 
 describe('reverting', () => {

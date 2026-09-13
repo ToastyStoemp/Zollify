@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { toLocalPrice } from '@boothly/shared';
 import type { SalesEvent } from '@boothly/shared';
 import {
   activeEventId,
@@ -19,6 +20,20 @@ const canEdit = computed(
 );
 
 const isHelper = computed(() => (account.value?.allowedEventIds?.length ?? 0) > 0);
+
+/**
+ * A worked example of the conversion.
+ *
+ * Exchange rate and rounding are easy to enter backwards, and the cost of
+ * getting it wrong is charging every customer the wrong amount all weekend.
+ * Showing what a round number becomes makes a reversed rate obvious.
+ */
+const localExample = computed(() => {
+  const e = editing.value;
+  if (!e?.localCurrency || !e.exchangeRate) return '';
+  const converted = toLocalPrice(100, e.exchangeRate, e.roundingIncrement ?? 0);
+  return `${e.currency || 'base'} 100 is charged as ${e.localCurrency} ${converted.toFixed(2)}`;
+});
 
 function blank(): SalesEvent {
   return {
@@ -79,10 +94,36 @@ async function remove(id: string): Promise<void> {
     <form v-if="editing" class="editor" @submit.prevent="save">
       <div class="grid">
         <label><span>Name</span><input v-model="editing.name" type="text" required /></label>
-        <label><span>Currency</span><input v-model="editing.currency" type="text" maxlength="3" /></label>
+        <label>
+          <span>Base currency</span>
+          <input v-model="editing.currency" type="text" maxlength="3" />
+        </label>
         <label><span>Starts</span><input v-model="editing.dateStart" type="date" /></label>
         <label><span>Ends</span><input v-model="editing.dateEnd" type="date" /></label>
       </div>
+
+      <fieldset class="local">
+        <legend>Charging in another currency</legend>
+        <p class="hint">
+          For a convention abroad. Prices stay in the base currency for your books; the till charges
+          the converted amount.
+        </p>
+        <div class="grid">
+          <label>
+            <span>Local currency</span>
+            <input v-model="editing.localCurrency" type="text" maxlength="3" placeholder="SEK" />
+          </label>
+          <label>
+            <span>1 {{ editing.currency || 'base' }} =</span>
+            <input v-model.number="editing.exchangeRate" type="number" min="0" step="0.0001" />
+          </label>
+          <label>
+            <span>Round to nearest</span>
+            <input v-model.number="editing.roundingIncrement" type="number" min="0" step="1" placeholder="0" />
+          </label>
+        </div>
+        <p v-if="localExample" class="hint">{{ localExample }}</p>
+      </fieldset>
       <div class="actions">
         <button type="button" @click="editing = null">Cancel</button>
         <button type="submit">Save</button>
@@ -100,6 +141,9 @@ async function remove(id: string): Promise<void> {
           <span class="when">
             {{ event.dateStart ?? '—' }}<template v-if="event.dateEnd"> → {{ event.dateEnd }}</template>
             · {{ event.currency }}
+            <template v-if="event.localCurrency">
+              → {{ event.localCurrency }} @ {{ event.exchangeRate ?? '?' }}
+            </template>
           </span>
         </div>
         <div class="row-actions">
@@ -125,6 +169,9 @@ h1 { margin: 0; font-size: 1.35rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
+.local { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
+.local legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
+.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .75rem 1rem; background: var(--bly-surface, #fff); }
 .list li.active { border-color: var(--bly-accent, #0e7c66); }

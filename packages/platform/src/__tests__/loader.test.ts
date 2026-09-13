@@ -171,14 +171,31 @@ describe('ModuleLoader — dependencies', () => {
     const { loader } = makeLoader({
       tax: defineModule({
         id: 'tax', version: '1.0.0', sdk: '^1.0.0', title: 'Tax',
-        requires: ['catalog'], setup: noopSetup,
+        requires: ['sourcing'], setup: noopSetup,
       }),
     });
 
     const [outcome] = await loader.loadAll([descriptor('tax')], 'owner');
 
     expect(outcome?.status).toBe('skipped');
-    expect(outcome?.reason).toContain('catalog');
+    expect(outcome?.reason).toContain('sourcing');
+  });
+
+  it('satisfies requirements the host provides itself', async () => {
+    // Core is not a module, so `catalog` has no bundle to load. Without this,
+    // every module that depends on core data would be skipped at boot — which
+    // is both first-party modules.
+    const { loader } = makeLoader({
+      pos: defineModule({
+        id: 'pos', version: '1.0.0', sdk: '^1.0.0', title: 'POS',
+        requires: ['catalog'], setup: noopSetup,
+      }),
+    });
+
+    const [outcome] = await loader.loadAll([descriptor('pos')], 'owner');
+
+    expect(outcome?.status).toBe('loaded');
+    expect(loader.isLoaded('pos')).toBe(true);
   });
 
   it('unloads dependents before the module they depend on', async () => {

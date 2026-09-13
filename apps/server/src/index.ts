@@ -16,7 +16,7 @@ loadDotEnv();
 const SERVER_MODULES: ServerModule[] = [taxServerModule];
 
 /** What a brand-new account starts with, so it isn't an empty shell. */
-const DEFAULT_MODULES = ['catalog', 'pos'];
+const DEFAULT_MODULES = ['pos', 'customs'];
 
 function required(name: string): string {
   const value = process.env[name];

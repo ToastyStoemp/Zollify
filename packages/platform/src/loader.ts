@@ -52,6 +52,13 @@ export interface LoaderOptions {
   resolver: ModuleResolver;
   ui: import('@boothly/sdk').ShellUi;
   sdkVersion?: string;
+  /**
+   * Capabilities the host itself provides, which a module may name in
+   * `requires` without a module supplying them. Core is not a module — it is
+   * always present — so `catalog` and `events` resolve here rather than
+   * causing every module that depends on them to be skipped.
+   */
+  provided?: string[];
 }
 
 /**
@@ -66,10 +73,12 @@ export class ModuleLoader {
   private readonly loaded = new Map<string, LoadedModule>();
   private readonly opts: LoaderOptions;
   private readonly sdkVersion: string;
+  private readonly provided: Set<string>;
 
   constructor(opts: LoaderOptions) {
     this.opts = opts;
     this.sdkVersion = opts.sdkVersion ?? SDK_VERSION;
+    this.provided = new Set(opts.provided ?? ['catalog', 'events']);
   }
 
   isLoaded(moduleId: string): boolean {
@@ -113,12 +122,14 @@ export class ModuleLoader {
       }
     }
 
-    for (const definition of orderByDependencies(resolved, (id) => this.loaded.has(id))) {
+    const satisfied = (id: string): boolean => this.provided.has(id) || this.loaded.has(id);
+
+    for (const definition of orderByDependencies(resolved, satisfied)) {
       const descriptor = descriptors.find((d) => d.moduleId === definition.id);
       const version = descriptor?.version ?? definition.version;
 
       const missing = (definition.requires ?? []).filter(
-        (dep) => !this.loaded.has(dep) && !resolved.has(dep),
+        (dep) => !this.provided.has(dep) && !this.loaded.has(dep) && !resolved.has(dep),
       );
       if (missing.length) {
         outcomes.push({

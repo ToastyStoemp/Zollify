@@ -3,7 +3,7 @@ import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-cor
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
 import { publicEventsServerModule } from './modules/public-events';
-import { taxServerModule } from './modules/tax';
+import { taxServerModule } from './modules/tax/index';
 
 loadDotEnv();
 
@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   // Shopify derives its credential-encryption key from the same secret, so it
   // is constructed here rather than importing config of its own.
   const serverModules: ServerModule[] = [
-    taxServerModule,
+    taxServerModule(jwtSecret),
     sourcingServerModule,
     publicEventsServerModule,
     shopifyServerModule(jwtSecret),

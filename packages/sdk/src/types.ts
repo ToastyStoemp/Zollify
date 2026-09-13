@@ -57,7 +57,7 @@ export interface RouteDef {
  * doing, not by which package the screen came from — a seller looking for the
  * till should not need to know it is a module.
  */
-export type NavGroup = 'selling' | 'stock' | 'events' | 'suppliers' | 'account';
+export type NavGroup = 'selling' | 'stock' | 'events' | 'books' | 'suppliers' | 'account';
 
 export interface NavItem {
   /** Route name registered via `routes.add`. */

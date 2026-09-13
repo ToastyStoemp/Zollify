@@ -32,6 +32,7 @@ const GROUPS: { id: Group; label: string }[] = [
   { id: 'selling', label: 'Selling' },
   { id: 'stock', label: 'Stock' },
   { id: 'events', label: 'Events' },
+  { id: 'books', label: 'Books' },
   { id: 'suppliers', label: 'Suppliers' },
   { id: 'addons', label: 'Add-ons' },
   { id: 'account', label: 'Account' },

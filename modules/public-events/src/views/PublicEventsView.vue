@@ -131,7 +131,7 @@ async function copy(text: string, what: string): Promise<void> {
                 v-model="config.slug"
                 type="text"
                 :placeholder="suggestedSlug"
-                pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]"
+                pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]"
                 autocapitalize="off"
                 spellcheck="false"
               />

@@ -36,6 +36,7 @@ modules/
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
+  tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
   migration/      single-use ZollTool backup importer
 apps/
   web/            the shell (first target)
@@ -157,7 +158,19 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events.
+events, Tax & books.
+
+*Tax & books* (the ZollTax port) — **Payments**: drop a myPOS export or
+statement, a Shopify orders CSV or a Wise history, or pull straight from
+myPOS / Shopify / SumUp; rows cluster per convention (a day-and-a-half gap on
+one terminal), online orders group per month; match clusters to events (or
+auto merge & match across terminals), verify against the myPOS Banking API,
+pull cash from the till, and book revenue per cluster and fees per month into
+Lexware with the report PDF attached. The working set persists in the module's
+own IndexedDB, and what was booked is remembered server-side. **Ledger**: per-
+event P&L from op-log revenue against booth / travel / accommodation costs,
+invoices attached, optional Claude invoice scanning behind daily caps.
+Credentials live encrypted per account under Settings → Integrations.
 
 *Public events* (the ZollEvents port) publishes at `/p/public-events/<slug>`:
 the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ics`

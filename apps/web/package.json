@@ -19,6 +19,7 @@
     "@zollify/sdk": "*",
     "@zollify/shopify-sync": "*",
     "@zollify/public-events": "*",
+    "@zollify/tax": "*",
     "@zollify/sourcing": "*",
     "@zollify/ui": "*",
     "dexie": "^4.2.0",

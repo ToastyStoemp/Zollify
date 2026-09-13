@@ -16,7 +16,7 @@
     "dev": "npm run dev -w @zollify/web",
     "dev:server": "npm run dev -w @zollify/server",
     "build": "npm run build --workspaces --if-present",
-    "build:modules": "npm run build -w @zollify/pos -w @zollify/customs -w @zollify/price-cards -w @zollify/sourcing -w @zollify/migration -w @zollify/shopify-sync -w @zollify/public-events",
+    "build:modules": "npm run build -w @zollify/pos -w @zollify/customs -w @zollify/price-cards -w @zollify/sourcing -w @zollify/migration -w @zollify/shopify-sync -w @zollify/public-events -w @zollify/tax",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:deps": "npm audit --audit-level=moderate",

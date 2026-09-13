@@ -152,7 +152,10 @@ export async function refreshAccessToken(): Promise<boolean> {
         headers: { accept: 'application/json' },
       });
       if (!res.ok) {
-        clearSession();
+        // Only a refusal ends the session. A 5xx is the gateway restarting or
+        // a proxy with nothing behind it — signing the booth out for that would
+        // drop the till mid-shift over a hiccup that fixes itself.
+        if (res.status === 401 || res.status === 403 || res.status === 400) clearSession();
         return false;
       }
       const body = (await res.json()) as LoginResult;

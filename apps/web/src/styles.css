@@ -39,8 +39,8 @@ button {
 button:hover:not(:disabled) { background: var(--zfy-surface-2); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 
-button.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: #fff; }
-button.primary:hover:not(:disabled) { background: var(--zfy-accent-ink); border-color: var(--zfy-accent-ink); }
+button.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: var(--zfy-on-accent); }
+button.primary:hover:not(:disabled) { background: var(--zfy-accent); filter: brightness(.92); }
 button.danger { color: var(--zfy-danger); }
 button.danger:hover:not(:disabled) { background: var(--zfy-signal-soft); border-color: var(--zfy-danger); }
 button.quiet { border-color: transparent; background: transparent; }

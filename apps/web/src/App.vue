@@ -222,7 +222,7 @@ nav { display: flex; flex-direction: column; gap: .15rem; overflow-y: auto; }
 .out { align-self: flex-start; margin-top: .25rem; padding-left: .5rem; padding-right: .5rem; font-size: .8rem; }
 .content { padding: 1.5rem; min-width: 0; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
-.toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px rgba(20,26,34,.4); }
+.toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }
 .toast.error { border-color: var(--zfy-danger); }
 .toast.success { border-color: var(--zfy-accent); }
 

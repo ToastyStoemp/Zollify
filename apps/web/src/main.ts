@@ -1,5 +1,6 @@
 import { createApp } from 'vue';
 import {
+  applyStoredTheme,
   configureApiBase,
   getAccount,
   loadCatalog,
@@ -16,6 +17,9 @@ import './styles.css';
 import App from './App.vue';
 import { router } from './router';
 import { connectRouter, loadEnabledModules } from './boot';
+
+// Before anything renders, so the first frame is already the right theme.
+applyStoredTheme();
 
 configureApiBase(import.meta.env.VITE_API_BASE ?? '/api');
 

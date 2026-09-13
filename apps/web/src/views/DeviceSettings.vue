@@ -9,12 +9,21 @@ import {
   lastSyncError,
   pendingCount,
   setDeviceName,
+  setTheme,
   syncNow,
   syncState,
+  theme,
+  type Theme,
 } from '@zollify/platform';
 
 const account = currentAccount;
 const name = ref('');
+
+const THEMES: { value: Theme; label: string; hint: string }[] = [
+  { value: 'system', label: 'Match device', hint: 'Follows the OS setting' },
+  { value: 'light', label: 'Light', hint: 'For a bright hall' },
+  { value: 'dark', label: 'Dark', hint: 'For a dim one, or the evening' },
+];
 const id = ref('');
 const saved = ref(false);
 const error = ref<string | null>(null);
@@ -64,6 +73,17 @@ function when(ts: number): string {
       <button type="submit">Save</button>
       <p v-if="saved" class="ok" role="status">Saved.</p>
     </form>
+
+    <h3>Appearance</h3>
+    <div class="themes" role="radiogroup" aria-label="Theme">
+      <label v-for="opt in THEMES" :key="opt.value" :class="{ active: theme === opt.value }">
+        <input type="radio" name="theme" :value="opt.value" :checked="theme === opt.value" @change="setTheme(opt.value)" />
+        <span class="body">
+          <span class="label">{{ opt.label }}</span>
+          <span class="sub">{{ opt.hint }}</span>
+        </span>
+      </label>
+    </div>
 
     <h3>Sync</h3>
     <dl class="facts">
@@ -115,4 +135,10 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .facts dt { color: var(--zfy-muted, #5a6472); }
 .facts dd { margin: 0; }
 .mono { font-family: ui-monospace, monospace; font-size: .78rem; word-break: break-all; }
+.themes { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .5rem; width: 100%; }
+.themes label { display: flex; align-items: center; gap: .6rem; padding: .6rem .75rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); cursor: pointer; }
+.themes label.active { border-color: var(--zfy-accent, #0e7c66); background: var(--zfy-accent-soft, #deeee9); }
+.themes .body { display: flex; flex-direction: column; }
+.themes .label { font-size: .875rem; font-weight: 600; }
+.themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 </style>

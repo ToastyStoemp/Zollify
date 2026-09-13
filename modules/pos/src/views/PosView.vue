@@ -363,7 +363,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: .6rem; }
 .tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .8rem .9rem; text-align: left; min-height: 6rem; }
 .tile.picked { border-color: var(--zfy-accent, #0e7c66); box-shadow: inset 0 0 0 1px var(--zfy-accent, #0e7c66); }
-.picked-count { position: absolute; top: .5rem; right: .5rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: #fff; background: var(--zfy-accent, #0e7c66); font-variant-numeric: tabular-nums; }
+.picked-count { position: absolute; top: .5rem; right: .5rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); font-variant-numeric: tabular-nums; }
 .tile .title { font-weight: 600; font-size: 1rem; line-height: 1.25; }
 .tile .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
 .left { font-size: .72rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
@@ -388,7 +388,7 @@ h1 { font-size: 1.35rem; margin: 0; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 .pay { flex: 1; min-height: 3rem; font-size: 1rem; }
 .receipt-link { align-self: flex-end; }
-.variant-picker { position: fixed; inset: 0; background: rgba(20,26,34,.45); display: grid; place-items: center; padding: 1rem; z-index: 10; }
+.variant-picker { position: fixed; inset: 0; background: var(--zfy-scrim, rgba(20,26,34,.45)); display: grid; place-items: center; padding: 1rem; z-index: 10; }
 .sheet { background: var(--zfy-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
 .sheet h2 { margin: 0; font-size: 1.05rem; }
 .options { display: grid; gap: .4rem; }

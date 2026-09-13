@@ -41,8 +41,8 @@ function onKey(event: KeyboardEvent): void {
 </template>
 
 <style scoped>
-.backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(20,26,34,.45); display: grid; place-items: center; padding: 1rem; }
-.dialog { background: var(--zfy-surface); border-radius: 12px; padding: 1.25rem; max-width: 26rem; width: 100%; display: flex; flex-direction: column; gap: .75rem; box-shadow: 0 24px 48px -24px rgba(20,26,34,.5); }
+.backdrop { position: fixed; inset: 0; z-index: 20; background: var(--zfy-scrim); display: grid; place-items: center; padding: 1rem; }
+.dialog { background: var(--zfy-surface); border-radius: 12px; padding: 1.25rem; max-width: 26rem; width: 100%; display: flex; flex-direction: column; gap: .75rem; box-shadow: 0 24px 48px -24px var(--zfy-shadow); }
 h2 { margin: 0; font-size: 1.05rem; }
 p { margin: 0; color: var(--zfy-muted); }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }

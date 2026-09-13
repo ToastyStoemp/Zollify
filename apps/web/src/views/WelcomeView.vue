@@ -261,7 +261,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }
 .steps li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--zfy-line); font-variant-numeric: tabular-nums; }
 .steps li.current { color: var(--zfy-ink); font-weight: 600; }
-.steps li.current::before { background: var(--zfy-accent); border-color: var(--zfy-accent); color: #fff; }
+.steps li.current::before { background: var(--zfy-accent); border-color: var(--zfy-accent); color: var(--zfy-on-accent); }
 .steps li.done { color: var(--zfy-muted); }
 .steps li.done::before { content: '✓'; background: var(--zfy-accent-soft); border-color: var(--zfy-accent-soft); color: var(--zfy-accent-ink); }
 .steps li + li::after { content: none; }

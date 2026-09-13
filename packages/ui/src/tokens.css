@@ -2,10 +2,14 @@
  * Zollify design tokens — the single source of truth for colour, type and
  * spacing. Every screen reads these as var(--zfy-*); none names a colour.
  *
- * The palette is a cool grey ground with a deep teal accent, and a warm
- * terracotta reserved for danger so the two can never be confused. Contrast
- * pairs are chosen against the surfaces they sit on: muted text on a surface
- * clears 4.5:1, accent-ink on accent-soft clears 7:1.
+ * Light is a cool grey ground with a deep teal accent and a warm terracotta
+ * reserved for danger. Dark is the ZollTool palette (slate + emerald) so a
+ * seller coming from there is on familiar ground after sunset at the booth.
+ *
+ * Three states: the viewer's OS preference (nothing stamped on <html>), or an
+ * explicit choice stamped as data-theme="light" | "dark". The media block is
+ * guarded so an explicit light choice beats a dark OS, and the [data-theme]
+ * block so an explicit dark choice beats a light OS.
  */
 :root {
   /* ── Surfaces ─────────────────────────────────────────── */
@@ -21,8 +25,9 @@
 
   /* ── Accent ───────────────────────────────────────────── */
   --zfy-accent: #0e7c66;        /* brand, primary buttons        */
-  --zfy-accent-ink: #0a5a4a;    /* accent text on light          */
+  --zfy-accent-ink: #0a5a4a;    /* accent text on the ground     */
   --zfy-accent-soft: #deeee9;   /* active nav, selected          */
+  --zfy-on-accent: #ffffff;     /* text on an accent fill        */
   --zfy-success: #0e7c66;
 
   /* ── Signals ──────────────────────────────────────────── */
@@ -31,8 +36,68 @@
   --zfy-warning: #c08a2e;
   --zfy-warning-ink: #8a5a1e;
 
+  /* ── Overlay ──────────────────────────────────────────── */
+  --zfy-scrim: rgba(20, 26, 34, .45);
+  --zfy-shadow: rgba(20, 26, 34, .4);
+
   /* ── Type ─────────────────────────────────────────────── */
   --zfy-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
   color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --zfy-bg: #020617;
+    --zfy-surface: #0f172a;
+    --zfy-surface-2: #1e293b;
+    --zfy-line: #273449;
+
+    --zfy-ink: #f1f5f9;
+    --zfy-muted: #a3aebd;         /* 7.5:1 on surface */
+    --zfy-faint: #6b7a90;
+
+    --zfy-accent: #34d399;
+    --zfy-accent-ink: #6ee7b7;
+    --zfy-accent-soft: rgba(52, 211, 153, .16);
+    --zfy-on-accent: #052e22;
+    --zfy-success: #34d399;
+
+    --zfy-danger: #f87171;
+    --zfy-signal-soft: rgba(248, 113, 113, .16);
+    --zfy-warning: #fbbf24;
+    --zfy-warning-ink: #fcd34d;
+
+    --zfy-scrim: rgba(2, 6, 23, .7);
+    --zfy-shadow: rgba(0, 0, 0, .6);
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --zfy-bg: #020617;
+  --zfy-surface: #0f172a;
+  --zfy-surface-2: #1e293b;
+  --zfy-line: #273449;
+
+  --zfy-ink: #f1f5f9;
+  --zfy-muted: #a3aebd;
+  --zfy-faint: #6b7a90;
+
+  --zfy-accent: #34d399;
+  --zfy-accent-ink: #6ee7b7;
+  --zfy-accent-soft: rgba(52, 211, 153, .16);
+  --zfy-on-accent: #052e22;
+  --zfy-success: #34d399;
+
+  --zfy-danger: #f87171;
+  --zfy-signal-soft: rgba(248, 113, 113, .16);
+  --zfy-warning: #fbbf24;
+  --zfy-warning-ink: #fcd34d;
+
+  --zfy-scrim: rgba(2, 6, 23, .7);
+  --zfy-shadow: rgba(0, 0, 0, .6);
+
+  color-scheme: dark;
 }

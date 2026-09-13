@@ -61,4 +61,5 @@ export {
   type LoginResult,
 } from './session';
 export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';
+export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';

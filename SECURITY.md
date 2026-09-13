@@ -90,24 +90,35 @@ survives new modules being added.
 - The module-toggle route additionally requires `admin`, so a helper cannot enable a module for themselves.
 - Client-declared module ids are validated against the server's published store — a request cannot invent one.
 
-## 9. Secure session cookies — Partial
+## 9. Secure session cookies — Done
 
-**Designed and implemented client-side** (`packages/platform/src/session.ts`):
-the access token is held in memory only and never written to `localStorage`; the
-refresh token is expected in an httpOnly, Secure, SameSite cookie and never
-touches JavaScript. `credentials: 'same-origin'` is forced on every request so
-the cookie cannot be attached cross-origin. Concurrent refreshes are coalesced
-so a page load cannot rotate the token out from under itself.
+The access token is held in memory only and never written to `localStorage`.
+The refresh token never reaches JavaScript: `refresh-cookie.ts` moves it out of
+the response body into an **httpOnly, Secure, SameSite=Strict** cookie scoped to
+`/api/auth`, and injects it back on the way in so the ported route still sees
+the field it expects.
+
+Adapting the transport rather than rewriting `auth.ts` keeps single-use
+rotation, per-flavor TTLs and device carry-forward exactly as they were proven
+in ZollTool. The hooks are registered on the instance, not per route, so a new
+auth route cannot forget to participate.
+
+On the client, `credentials: 'same-origin'` is forced on every request so the
+cookie can never be attached cross-origin, and concurrent refreshes are
+coalesced — otherwise a page load firing six requests would rotate the token six
+times and invalidate its own session.
 
 This matters more here than in a typical app: runtime-loaded modules execute in
-this origin, so an XSS bug should at worst borrow a short-lived access token,
-never a 90-day refresh token.
+this origin. An XSS bug can at worst borrow a 15-minute access token; it cannot
+read an httpOnly cookie at all.
 
-> **Gap — needs finishing:** the ported `auth.ts` still returns the refresh token
-> in the JSON body (ZollTool's original design). The server must be adapted to
-> set it as a cookie instead. Until then the client's stronger model is not yet
-> being honoured end to end. **This is the single most important outstanding
-> item.**
+**Covered by tests** that drive the real gateway: no `refreshToken` in any auth
+response body, correct cookie attributes, refresh working from the cookie alone,
+rotation on every refresh, replay of a rotated token refused, and the `Secure`
+flag following the HTTPS setting.
+
+> A native shell opts out with `x-boothly-client: native` and keeps the token in
+> platform secure storage, which is a better fit than a cookie in a WebView.
 
 ## 10. Hash passwords — Done
 
@@ -193,13 +204,20 @@ when behind a proxy), and HSTS is set with `includeSubDomains` and `preload`.
 Disabling it is an explicit opt-out (`BOOTHLY_REQUIRE_HTTPS=0`) intended only for
 local HTTP development.
 
-## 20. Scan dependencies — Partial
+## 20. Scan dependencies — Done
 
-`npm run audit:deps` runs `npm audit --audit-level=moderate`.
+`npm run audit:deps` runs `npm audit --audit-level=moderate`, and
+`.github/workflows/ci.yml` runs it on every push and pull request as its own
+job — so a newly-disclosed advisory reports as an audit failure rather than
+masking a real regression in the build.
 
-> **Gap:** this is not wired into CI yet. It should run on every push, and it
-> matters more than usual here — a compromised dependency inside a module bundle
-> executes in the user's session.
+CI also typechecks, tests, and builds both the module bundles and the web app.
+Building the modules in CI is deliberate: a module that compiles but fails to
+bundle would otherwise only be discovered when someone tried to publish it.
+
+This matters more than usual here — a compromised dependency inside a module
+bundle executes in the user's session, in the same origin as their access
+token.
 
 ---
 

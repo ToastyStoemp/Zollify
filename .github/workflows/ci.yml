@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A pull request that keeps getting pushed to does not need every older run to
+# finish; cancel superseded ones rather than queueing behind them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` rather than `install`: the lockfile is the input, and a CI run
+      # that quietly resolves different versions is not verifying what ships.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck --workspaces --if-present
+
+      - name: Test
+        run: npm run test --workspaces --if-present
+
+      # Proves the module pipeline still produces loadable bundles. A module
+      # that compiles but fails to bundle would otherwise only be discovered
+      # when someone tried to publish it.
+      - name: Build modules
+        run: npm run build:modules
+
+      - name: Build web
+        run: npm run build -w @boothly/web
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Separated from `verify` so a newly-disclosed advisory reports as its own
+      # failure rather than masking a real regression in the build.
+      #
+      # This matters more than usual here: a compromised dependency inside a
+      # module bundle executes in the user's session, in the same origin as
+      # their access token.
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate

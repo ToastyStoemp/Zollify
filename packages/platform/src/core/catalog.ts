@@ -3,6 +3,7 @@ import type { Product } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
+import { toPlain } from './plain';
 
 /**
  * The product catalogue.
@@ -60,7 +61,9 @@ export function visibleProductsFor(role: string, isHelper: boolean): Product[] {
 
 export async function upsertProduct(product: Product): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const next: Product = { ...product, updatedAt: Date.now() };
+  // Plain data before it reaches IndexedDB — a caller may hand us reactive
+  // state, and the structured clone algorithm cannot clone a Proxy.
+  const next: Product = toPlain({ ...product, updatedAt: Date.now() });
   await db.products.put(next);
   products.set(next.id, next);
   await queueOp({ type: 'product.upsert', payload: next });
@@ -74,7 +77,7 @@ export async function deleteProduct(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const existing = await db.products.get(id);
   if (!existing) return;
-  const tombstoned: Product = { ...existing, deletedAt: Date.now(), updatedAt: Date.now() };
+  const tombstoned: Product = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
   await db.products.put(tombstoned);
   products.delete(id);
   await queueOp({ type: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
@@ -83,7 +86,7 @@ export async function deleteProduct(id: string): Promise<void> {
 /** Replaces the local catalogue wholesale — used by sync pulls and the importer. */
 export async function replaceCatalog(rows: Product[]): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  await db.products.bulkPut(rows);
+  await db.products.bulkPut(rows.map(toPlain));
   for (const row of rows) {
     if (row.deletedAt) products.delete(row.id);
     else products.set(row.id, row);

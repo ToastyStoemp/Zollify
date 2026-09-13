@@ -35,6 +35,7 @@ export {
   pendingCount,
   type PendingOp,
 } from './outbox';
+export { toPlain } from './plain';
 export { deviceId, deviceName, setDeviceName, deviceFlavor, resetDeviceCache } from './device';
 export {
   syncNow,

@@ -3,6 +3,7 @@ import type { EventStock, SalesEvent } from '@boothly/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
+import { toPlain } from './plain';
 
 /**
  * Sales events — the conventions and markets a booth trades at.
@@ -77,7 +78,7 @@ export async function setActiveEvent(id: string | null): Promise<void> {
 
 export async function upsertSalesEvent(event: SalesEvent): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const next: SalesEvent = { ...event, updatedAt: Date.now() };
+  const next: SalesEvent = toPlain({ ...event, updatedAt: Date.now() });
   await db.events.put(next);
   events.set(next.id, next);
   await queueOp({ type: 'event.upsert', payload: next });
@@ -87,7 +88,7 @@ export async function deleteSalesEvent(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const existing = await db.events.get(id);
   if (!existing) return;
-  const tombstoned: SalesEvent = { ...existing, deletedAt: Date.now(), updatedAt: Date.now() };
+  const tombstoned: SalesEvent = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
   await db.events.put(tombstoned);
   events.delete(id);
   if (activeId.value === id) await setActiveEvent(null);
@@ -98,7 +99,7 @@ export async function deleteSalesEvent(id: string): Promise<void> {
 
 export async function replaceSalesEvents(rows: SalesEvent[]): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  await db.events.bulkPut(rows);
+  await db.events.bulkPut(rows.map(toPlain));
   for (const row of rows) {
     if (row.deletedAt) events.delete(row.id);
     else events.set(row.id, row);
@@ -114,7 +115,7 @@ export async function stockForEvent(eventId: string): Promise<EventStock[]> {
 
 export async function setStock(entry: EventStock): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const next: EventStock = { ...entry, variantId: entry.variantId ?? '', updatedAt: Date.now() };
+  const next: EventStock = toPlain({ ...entry, variantId: entry.variantId ?? '', updatedAt: Date.now() });
   await db.eventStock.put(next);
   await queueOp({ type: 'stock.set', payload: next });
 }

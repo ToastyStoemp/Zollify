@@ -14,6 +14,12 @@ export interface OwnedSettingsPanel extends SettingsPanel {
   moduleId: string;
 }
 
+/** Notified the moment a route is contributed or withdrawn. */
+export interface RouteSink {
+  add(route: OwnedRoute): void;
+  remove(routeName: string): void;
+}
+
 /**
  * Everything modules have contributed to the shell, tracked by owner so a
  * module can be unloaded cleanly. Reactive so the nav and settings index
@@ -23,6 +29,21 @@ export class ContributionRegistry {
   readonly routes = reactive<OwnedRoute[]>([]);
   readonly nav = reactive<OwnedNavItem[]>([]);
   readonly settingsPanels = reactive<OwnedSettingsPanel[]>([]);
+
+  private sink: RouteSink | null = null;
+
+  /**
+   * Wires the router in so a contributed route reaches it immediately.
+   *
+   * Registering routes in a second pass after loading looks equivalent but is
+   * not: `nav` is reactive, so the sidebar can render a <router-link> for a
+   * route the router has not been told about yet, and resolving that link
+   * throws. Pushing each route through as it arrives removes the window.
+   */
+  setRouteSink(sink: RouteSink | null): void {
+    this.sink = sink;
+    if (sink) for (const route of this.routes) sink.add(route);
+  }
 
   /** Mount point for a module's routes. Namespacing prevents collisions and path squatting. */
   static mountPath(moduleId: string, path: string): string {
@@ -41,6 +62,8 @@ export class ContributionRegistry {
       moduleId,
       fullPath: ContributionRegistry.mountPath(moduleId, route.path),
     };
+    // Into the router first, then into the reactive list the nav reads.
+    this.sink?.add(owned);
     this.routes.push(owned);
     return owned;
   }
@@ -55,6 +78,9 @@ export class ContributionRegistry {
 
   /** Removes every contribution a module made. */
   removeModule(moduleId: string): void {
+    for (const route of this.routes) {
+      if (route.moduleId === moduleId) this.sink?.remove(route.name);
+    }
     spliceWhere(this.routes, (r) => r.moduleId === moduleId);
     spliceWhere(this.nav, (n) => n.moduleId === moduleId);
     spliceWhere(this.settingsPanels, (p) => p.moduleId === moduleId);

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 /**
  * SQLite via better-sqlite3 — synchronous, transactional, zero infra.
  * All data lives under DATA_DIR (a Docker volume in production):
- *   DATA_DIR/zolltool.db      the database
+ *   DATA_DIR/boothly.db       the database
  *   DATA_DIR/images/<acct>/   full-size product images
  */
 
@@ -153,7 +153,7 @@ export function openDb(dataDir: string): Database.Database {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, 'images'), { recursive: true });
   mkdirSync(join(dataDir, 'logs'), { recursive: true });
-  const db = new Database(join(dataDir, 'zolltool.db'));
+  const db = new Database(join(dataDir, 'boothly.db'));
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 

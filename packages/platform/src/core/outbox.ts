@@ -3,6 +3,7 @@ import type { WireOp } from '@boothly/shared';
 import { openCoreDb, type OutboxOp } from './db';
 import { getAccount } from '../session';
 import { deviceId } from './device';
+import { toPlain } from './plain';
 
 /**
  * The sync outbox.
@@ -41,7 +42,7 @@ export async function queueOp(op: PendingOp): Promise<void> {
     deviceId: await deviceId(),
     ts: Date.now(),
     type: op.type,
-    payload: op.payload,
+    payload: toPlain(op.payload),
   };
 
   await db.ops.add({ ...wire, synced: 0 } as OutboxOp);

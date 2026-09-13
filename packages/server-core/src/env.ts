@@ -8,14 +8,26 @@ import { dirname, join } from 'node:path';
  * win over the file, so shell/CI/Docker env is never overridden. In Docker the
  * file is passed via `--env-file`, so this is a no-op there.
  */
-export function loadDotEnv(): void {
-  const path = join(dirname(fileURLToPath(import.meta.url)), '..', '.env');
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return; // no server/.env — rely on process.env
+export function loadDotEnv(dir = process.cwd()): void {
+  // Resolved against the running app's directory, not this file's. In ZollTool
+  // the loader lived inside the server itself so a module-relative path worked;
+  // here it is a shared package, and that path would look for apps/server's
+  // .env inside packages/server-core.
+  const candidates = [
+    join(dir, '.env'),
+    join(dirname(fileURLToPath(import.meta.url)), '..', '.env'),
+  ];
+
+  let raw: string | undefined;
+  for (const path of candidates) {
+    try {
+      raw = readFileSync(path, 'utf8');
+      break;
+    } catch {
+      /* try the next candidate */
+    }
   }
+  if (raw === undefined) return; // no .env — rely on process.env
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;

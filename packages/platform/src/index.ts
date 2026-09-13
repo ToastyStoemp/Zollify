@@ -12,6 +12,7 @@ export {
   type OwnedRoute,
   type OwnedNavItem,
   type OwnedSettingsPanel,
+  type RouteSink,
 } from './contributions';
 export {
   moduleDbName,

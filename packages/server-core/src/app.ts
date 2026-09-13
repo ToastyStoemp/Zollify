@@ -3,14 +3,20 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import jwt from '@fastify/jwt';
+import cookie from '@fastify/cookie';
 import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
-import { migrateEntitlements, seedDefaults } from './modules/entitlements';
+import { listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
 import { mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
+import { registerRefreshCookie } from './refresh-cookie';
+import { registerSyncRoutes } from './routes/sync';
+import { registerDeviceRoutes } from './routes/devices';
+import { registerAdminRoutes } from './routes/admin';
+import { Rooms, registerWs } from './ws';
 
 export interface GatewayOptions {
   dataDir: string;
@@ -78,6 +84,16 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   migrateEntitlements(db);
   await seedOwner(db);
 
+  // An account seeded from OWNER_EMAIL never goes through /auth/register, so
+  // nothing had switched on its starting modules and it opened to an empty
+  // shell. Only accounts with no module rows at all are touched, so this can
+  // never re-enable something an owner deliberately switched off.
+  for (const row of db.prepare('SELECT id FROM accounts').all() as { id: string }[]) {
+    if (listForAccount(db, row.id).length === 0) {
+      seedDefaults(db, row.id, opts.defaultModules);
+    }
+  }
+
   // ── Transport & headers ───────────────────────────────────────────────────
 
   await app.register(helmet, {
@@ -134,11 +150,28 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   });
 
   await app.register(jwt, { secret: opts.jwtSecret });
+  // The cookie itself is signed by nothing: the refresh token is already a
+  // 256-bit random value looked up by hash, so a signature would add ceremony
+  // without adding security.
+  await app.register(cookie);
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.decorate('authenticate', authenticate);
+  // Registered before the routes so its hooks see every auth request and
+  // response, including ones added later.
+  registerRefreshCookie(app, { secure: opts.requireHttps });
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
+
+  // ── Sync, devices, admin ──────────────────────────────────────────────────
+  // These declare their own absolute /api/... paths, so they register on the
+  // root instance rather than inside the /api scope below.
+
+  const rooms = new Rooms();
+  registerSyncRoutes(app, db, rooms);
+  registerDeviceRoutes(app, db);
+  registerAdminRoutes(app, db);
+  await registerWs(app, rooms, db);
 
   // ── Module plane ──────────────────────────────────────────────────────────
 

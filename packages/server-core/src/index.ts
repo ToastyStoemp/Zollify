@@ -39,4 +39,5 @@ export {
   type Role,
 } from './modules/mount';
 export { registerModuleRoutes } from './routes/modules';
+export { registerRefreshCookie, REFRESH_COOKIE, type RefreshCookieOptions } from './refresh-cookie';
 export { loadDotEnv } from './env';

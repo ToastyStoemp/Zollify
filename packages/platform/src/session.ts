@@ -1,5 +1,6 @@
 import { computed, ref, shallowRef } from 'vue';
-import type { AccountSnapshot, HttpError } from '@boothly/sdk';
+import type { AccountSnapshot, HttpError, Role } from '@boothly/sdk';
+import type { TokenResponse } from '@boothly/shared';
 
 /**
  * Session and token handling.
@@ -12,10 +13,43 @@ import type { AccountSnapshot, HttpError } from '@boothly/sdk';
  * that distinction is the difference between a bad day and a breach.
  */
 
-export interface LoginResult {
-  accessToken: string;
-  expiresInSec: number;
-  account: AccountSnapshot;
+/**
+ * The server's auth response. The refresh token is absent on web — the gateway
+ * strips it and sets an httpOnly cookie instead — so only `accessToken` and
+ * `user` are relied on here.
+ */
+export type LoginResult = Omit<TokenResponse, 'refreshToken'> & { refreshToken?: string };
+
+/** Maps the server's AuthUser onto the snapshot modules see through the SDK. */
+function toSnapshot(user: TokenResponse['user']): AccountSnapshot {
+  return {
+    accountId: user.accountId,
+    accountName: user.accountName,
+    userId: user.id,
+    email: user.email,
+    role: user.role as Role,
+    allowedEventIds: user.allowedEventIds ?? null,
+  };
+}
+
+/**
+ * Reads the expiry out of the access token itself.
+ *
+ * The server does not report a lifetime separately, and hard-coding one here
+ * would silently drift the moment ACCESS_TTL changes. The `exp` claim is not
+ * trusted for authorisation — only to decide when to refresh — so decoding
+ * without verifying is fine.
+ */
+function expiryFromJwt(token: string): number {
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return 0;
+    const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+    const exp = (JSON.parse(json) as { exp?: number }).exp;
+    return typeof exp === 'number' ? exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
 }
 
 const accessToken = shallowRef<string | null>(null);
@@ -51,8 +85,10 @@ function setAccount(next: AccountSnapshot | null): void {
 
 export function applyLogin(result: LoginResult): void {
   accessToken.value = result.accessToken;
-  expiresAt.value = Date.now() + result.expiresInSec * 1000;
-  setAccount(result.account);
+  // Fall back to a conservative minute if the token carries no usable exp, so a
+  // malformed claim means "refresh soon" rather than "never refresh".
+  expiresAt.value = expiryFromJwt(result.accessToken) || Date.now() + 60_000;
+  setAccount(toSnapshot(result.user));
 }
 
 export function clearSession(): void {

@@ -12,7 +12,7 @@ import '@boothly/ui/tokens.css';
 import './styles.css';
 import App from './App.vue';
 import { router } from './router';
-import { loadEnabledModules } from './boot';
+import { connectRouter, loadEnabledModules } from './boot';
 
 configureApiBase(import.meta.env.VITE_API_BASE ?? '/api');
 
@@ -22,6 +22,8 @@ configureApiBase(import.meta.env.VITE_API_BASE ?? '/api');
  * resolves the first navigation.
  */
 async function start(): Promise<void> {
+  connectRouter(router);
+
   await refreshAccessToken().catch(() => false);
 
   // Core data before modules: POS and Customs read the catalogue and events

@@ -32,6 +32,28 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
 export const contributions = new ContributionRegistry();
 export const events = new PlatformEventBus();
 
+/**
+ * Routes reach the router the instant a module contributes them, rather than in
+ * a pass afterwards — the nav is reactive and would otherwise render a link to
+ * a route the router does not yet know.
+ */
+export function connectRouter(router: Router): void {
+  contributions.setRouteSink({
+    add(route) {
+      if (router.hasRoute(route.name)) return;
+      router.addRoute({
+        path: route.fullPath,
+        name: route.name,
+        component: route.component as never,
+        meta: { moduleId: route.moduleId, minRole: route.minRole, title: route.title },
+      });
+    },
+    remove(routeName) {
+      if (router.hasRoute(routeName)) router.removeRoute(routeName);
+    },
+  });
+}
+
 function resolverFor(mode: 'bundled' | 'remote'): ModuleResolver {
   if (mode === 'bundled') return new StaticResolver(BUNDLED_MODULES);
   return new RemoteResolver(async (url) => {
@@ -77,19 +99,10 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
     return [];
   }
 
+  // Routes are registered through the sink as each module mounts; a module
+  // whose setup throws has its contributions rolled back, so a failed module
+  // never leaves a navigable but broken screen behind.
   const outcomes = await loader.loadAll(manifest.modules, account.role);
-
-  // Routes only reach the router once their module has mounted successfully, so
-  // a failed module never leaves a navigable but broken screen behind.
-  for (const route of contributions.routes) {
-    if (router.hasRoute(route.name)) continue;
-    router.addRoute({
-      path: route.fullPath,
-      name: route.name,
-      component: route.component as never,
-      meta: { moduleId: route.moduleId, minRole: route.minRole, title: route.title },
-    });
-  }
 
   for (const outcome of outcomes) {
     if (outcome.status === 'loaded') continue;
@@ -101,11 +114,7 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   return outcomes;
 }
 
-/** Unloads a module and removes its routes — used when it is switched off in settings. */
-export async function unloadModule(router: Router, moduleId: string): Promise<void> {
-  const owned = contributions.routes.filter((r) => r.moduleId === moduleId).map((r) => r.name);
+/** Unloads a module; the sink withdraws its routes as the registry drops them. */
+export async function unloadModule(_router: Router, moduleId: string): Promise<void> {
   await loader.unload(moduleId);
-  for (const name of owned) {
-    if (router.hasRoute(name)) router.removeRoute(name);
-  }
 }

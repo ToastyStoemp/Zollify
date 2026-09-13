@@ -16,6 +16,14 @@ import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
+import { allProducts, forSaleProducts, getProduct } from './core/catalog';
+import {
+  activeEvent,
+  getSalesEvent,
+  setActiveEvent,
+  stockForEvent,
+  visibleEvents,
+} from './core/sales-events';
 
 export interface HostServices {
   contributions: ContributionRegistry;
@@ -72,6 +80,28 @@ function makeHttp(moduleId: string): HttpClient {
       authFetch(url(path), { ...init, method: 'DELETE' }) as Promise<T>,
   };
 }
+
+/**
+ * Read-only view of core's domain, handed to every module.
+ *
+ * Arrays are copied on the way out: a module holding a live reference to core's
+ * reactive state could mutate the catalogue without going through core, and the
+ * sync outbox would never hear about it.
+ */
+const coreData: import('@boothly/sdk').DataApi = {
+  products: {
+    list: () => [...allProducts.value],
+    forSale: () => [...forSaleProducts.value],
+    get: (id) => getProduct(id),
+  },
+  events: {
+    list: () => [...visibleEvents.value],
+    get: (id) => getSalesEvent(id),
+    active: () => activeEvent.value,
+    setActive: (id) => setActiveEvent(id),
+    stock: (eventId) => stockForEvent(eventId),
+  },
+};
 
 const CONFIG_STORE = 'config';
 const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
@@ -158,6 +188,8 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       ownDb ??= openModuleDb(account.accountId, moduleId, schema, version);
       return ownDb;
     },
+
+    data: coreData,
 
     account: () => getAccount(),
 

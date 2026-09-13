@@ -1,0 +1,96 @@
+import { computed, reactive, ref } from 'vue';
+import type { Product } from '@boothly/shared';
+import { openCoreDb } from './db';
+import { getAccount } from '../session';
+import { queueOp } from './outbox';
+
+/**
+ * The product catalogue.
+ *
+ * Modules never open this table themselves — they read it through
+ * `sdk.data.products`. Keeping the only writer here means the outbox stays
+ * consistent: every mutation records an op for sync, and a module cannot write
+ * a product without one.
+ */
+
+const products = reactive(new Map<string, Product>());
+const loaded = ref(false);
+
+function requireAccountId(): string {
+  const account = getAccount();
+  if (!account) throw new Error('The catalogue was used while signed out.');
+  return account.accountId;
+}
+
+export async function loadCatalog(): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  const rows = await db.products.toArray();
+  products.clear();
+  for (const row of rows) {
+    if (!row.deletedAt) products.set(row.id, row);
+  }
+  loaded.value = true;
+}
+
+export const catalogLoaded = computed(() => loaded.value);
+
+/** Everything sellable, title-sorted. Soft-deleted rows never appear. */
+export const allProducts = computed(() =>
+  [...products.values()].sort((a, b) => a.title.localeCompare(b.title)),
+);
+
+export const forSaleProducts = computed(() => allProducts.value.filter((p) => p.forSale));
+
+export function getProduct(id: string): Product | undefined {
+  return products.get(id);
+}
+
+/**
+ * Catalogue prices a helper may see.
+ *
+ * A helper is scoped to their events and should not learn the full price list;
+ * this mirrors the restriction ZollTool enforces, and the server enforces the
+ * same thing on sync. Hiding it here is convenience, not the control.
+ */
+export function visibleProductsFor(role: string, isHelper: boolean): Product[] {
+  const list = forSaleProducts.value;
+  if (role !== 'member' || !isHelper) return list;
+  return list.filter((p) => !p.unlisted);
+}
+
+export async function upsertProduct(product: Product): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  const next: Product = { ...product, updatedAt: Date.now() };
+  await db.products.put(next);
+  products.set(next.id, next);
+  await queueOp({ kind: 'product.upsert', payload: next });
+}
+
+/**
+ * Soft delete. Sync is last-write-wins across devices, so a hard delete would
+ * simply be resurrected by any device that still had the row.
+ */
+export async function deleteProduct(id: string): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  const existing = await db.products.get(id);
+  if (!existing) return;
+  const tombstoned: Product = { ...existing, deletedAt: Date.now(), updatedAt: Date.now() };
+  await db.products.put(tombstoned);
+  products.delete(id);
+  await queueOp({ kind: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
+}
+
+/** Replaces the local catalogue wholesale — used by sync pulls and the importer. */
+export async function replaceCatalog(rows: Product[]): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  await db.products.bulkPut(rows);
+  for (const row of rows) {
+    if (row.deletedAt) products.delete(row.id);
+    else products.set(row.id, row);
+  }
+}
+
+export function resetCatalogCache(): void {
+  products.clear();
+  loaded.value = false;
+}

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { applyLogin, getApiBase } from '@boothly/platform';
+import { applyLogin, getApiBase, loadCatalog, loadSalesEvents } from '@boothly/platform';
 import { loadEnabledModules } from '../boot';
 
 const router = useRouter();
@@ -43,6 +43,9 @@ async function submit(): Promise<void> {
     }
 
     applyLogin(body);
+    // Same order as a cold boot: core data first, then modules, which read it
+    // through the SDK as they mount.
+    await Promise.all([loadCatalog(), loadSalesEvents()]);
     await loadEnabledModules(router);
     const next = typeof route.query.next === 'string' ? route.query.next : '/home';
     await router.replace(next);

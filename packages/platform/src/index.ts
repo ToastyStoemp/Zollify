@@ -57,3 +57,4 @@ export {
   type LoginResult,
 } from './session';
 export { createShellUi, toasts, pendingConfirm, type Toast, type ConfirmRequest } from './shell-ui';
+export * from './core';

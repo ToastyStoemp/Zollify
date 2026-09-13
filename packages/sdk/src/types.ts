@@ -1,5 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
+import type { EventStock, Product, SalesEvent } from '@boothly/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -141,6 +142,39 @@ export interface HttpClient {
 /** Dexie store definitions, exactly as `db.version(n).stores({ … })` takes them. */
 export type StoreSchema = Record<string, string | null>;
 
+// ── Core data ───────────────────────────────────────────────────────────────
+
+/**
+ * Read access to the shared catalogue. Modules never open core's database
+ * themselves — going through here keeps core the only writer, so every change
+ * records a sync op and no module can quietly diverge from what syncs.
+ */
+export interface CatalogApi {
+  /** Every product, title-sorted. Soft-deleted rows are already excluded. */
+  list(): Product[];
+  forSale(): Product[];
+  get(id: string): Product | undefined;
+}
+
+export interface SalesEventApi {
+  /**
+   * Events this user may see. For a helper that is only their allowed events —
+   * the server applies the same filter on sync, so this is what they can act
+   * on rather than the boundary itself.
+   */
+  list(): SalesEvent[];
+  get(id: string): SalesEvent | undefined;
+  /** The event the till is currently working. Device-local, not synced. */
+  active(): SalesEvent | null;
+  setActive(id: string | null): Promise<void>;
+  stock(eventId: string): Promise<EventStock[]>;
+}
+
+export interface DataApi {
+  products: CatalogApi;
+  events: SalesEventApi;
+}
+
 export interface Logger {
   debug(...args: unknown[]): void;
   info(...args: unknown[]): void;
@@ -186,6 +220,9 @@ export interface Sdk {
    * and uninstalling is a clean database delete.
    */
   db(schema: StoreSchema, version?: number): Dexie;
+
+  /** Read access to core's shared domain — the catalogue and sales events. */
+  data: DataApi;
 
   /** Current account and user. Returns a snapshot; use `onAccountChange` to react. */
   account(): AccountSnapshot | null;

@@ -9,6 +9,8 @@ const account = currentAccount;
 /** Core nav first, then whatever the loaded modules contributed, by order. */
 const coreNav = [
   { routeName: 'home', label: 'Home', order: 0 },
+  { routeName: 'events', label: 'Events', order: 10 },
+  { routeName: 'catalog', label: 'Catalog', order: 20 },
   { routeName: 'settings', label: 'Settings', order: 900 },
 ];
 

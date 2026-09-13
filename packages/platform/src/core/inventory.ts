@@ -198,18 +198,22 @@ export function claimedTotal(productId: string, variantId: string | null = ''): 
 }
 
 /**
- * Units sold by events that hold no claim, per item.
+ * Units drawn from the shared pool, per item.
  *
- * These all draw on the same shared pile, so they are counted together. Sales
- * made against a claim are excluded: that stock was already set aside.
+ * Sales by events with no claim all come out of the pool. Sales against a
+ * claim come out of the claim — until the claim runs out, after which the
+ * overage is drawn from the pool too. A print sold past a claim was still a
+ * real print that left the pile, and pretending the pool is untouched would
+ * let another event sell it a second time.
  */
 function poolSoldByKey(): Map<string, number> {
   const out = new Map<string, number>();
   for (const [soldEventId, forEvent] of soldByEventAndKey.value) {
     for (const [key, qty] of forEvent) {
       const [pid = '', vid = ''] = key.split(':');
-      if (claimFor(soldEventId, pid, vid) !== null) continue;
-      out.set(key, (out.get(key) ?? 0) + qty);
+      const claim = claimFor(soldEventId, pid, vid);
+      const fromPool = claim === null ? qty : Math.max(0, qty - claim);
+      if (fromPool > 0) out.set(key, (out.get(key) ?? 0) + fromPool);
     }
   }
   return out;
@@ -219,9 +223,10 @@ function poolSoldByKey(): Map<string, number> {
  * Stock nobody has claimed and nobody has sold — what an unclaimed event can
  * draw on.
  *
- * Sales made from a claim are deliberately not subtracted here: they were
+ * Sales made within a claim are deliberately not subtracted here: they were
  * already accounted for when the stock was claimed. Subtracting both is the
- * obvious mistake, and it makes the pool shrink twice for one sale.
+ * obvious mistake, and it makes the pool shrink twice for one sale. Only the
+ * part of a claimed event's sales that exceeds its claim comes out of here.
  */
 export function freeFor(productId: string, variantId: string | null = ''): number {
   const key = stockKey(productId, variantId);

@@ -209,6 +209,30 @@ describe('the free pool', () => {
     expect(availability('ev-b').available).toBe(65);
   });
 
+  it('loses the overage when a claim is oversold', async () => {
+    // Three prints past the claim still physically left the pile. They came
+    // out of the unclaimed stock, so the pool — and every unclaimed event —
+    // must see them gone, or a second event could sell the same prints.
+    await inv.setOnHand(PRINT, null, 100);
+    await inv.setClaim('ev-a', PRINT, null, 5);
+    await sell('ev-a', 8);
+
+    expect(inventoryRow().free).toBe(92);
+    expect(availability('ev-b').available).toBe(92);
+    // The claimed event still shows its own shortfall.
+    expect(availability('ev-a').available).toBe(-3);
+  });
+
+  it('drains the pool to zero, not below, when only the claim is oversold', async () => {
+    // Overage is the excess past the claim, not the whole sale: 30 claimed,
+    // 32 sold means 2 left the pool, not 32.
+    await inv.setOnHand(PRINT, null, 100);
+    await inv.setClaim('ev-a', PRINT, null, 30);
+    await sell('ev-a', 32);
+
+    expect(inventoryRow().free).toBe(68);
+  });
+
   it('flags over-commitment when more is promised than owned', async () => {
     await inv.setOnHand(PRINT, null, 40);
     await inv.setClaim('ev-a', PRINT, null, 30);

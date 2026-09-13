@@ -150,8 +150,9 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - History with per-currency totals, reverts and CSV export.
 - Cash up: expected vs counted, with a signed difference.
 - One inventory the whole booth draws on; an event can claim stock, and a claim
-  is reserved for it. Availability is derived from sales, never decremented, so
-  reverting a sale returns the stock with no compensating write.
+  is reserved for it. Selling past a claim draws the overage from the unclaimed
+  pool. Availability is derived from sales, never decremented, so reverting a
+  sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.

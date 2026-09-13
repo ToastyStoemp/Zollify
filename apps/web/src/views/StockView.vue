@@ -181,7 +181,8 @@ async function updateClaim(productId: string, variantId: string, value: string):
 
       <p class="hint">
         Claiming reserves stock for this event — no other event can sell it. Leave a claim blank and
-        the event sells from whatever is unclaimed.
+        the event sells from whatever is unclaimed. Selling past a claim takes the extra from the
+        unclaimed stock.
       </p>
 
       <p v-if="!eventId" class="empty">Pick an event to plan what it takes.</p>

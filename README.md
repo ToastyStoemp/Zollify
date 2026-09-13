@@ -130,14 +130,15 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (137 tests):**
+**Built and passing (156 tests):**
 
 *Platform*
 - `@boothly/sdk` — the boundary, with a host-compatibility checker.
 - `@boothly/platform` — module loader (bundled + remote resolvers), hash-verified
   immutable bundle cache, per-module storage, session handling.
-- **Core** — catalogue with variants and photos, sales events, per-event stock,
-  recorded sales, discount rules, backup/restore, CSV export.
+- **Core** — catalogue with variants and photos, sales events, one inventory
+  with per-event claims, recorded sales, discount rules, backup/restore, CSV
+  export.
 - **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery, and
   per-op isolation so one bad payload cannot strand a device.
 - `@boothly/server-core` — gateway, multi-tenant auth, entitlements, module
@@ -148,6 +149,9 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Receipts, printed to a thermal printer or through the browser.
 - History with per-currency totals, reverts and CSV export.
 - Cash up: expected vs counted, with a signed difference.
+- One inventory the whole booth draws on; an event can claim stock, and a claim
+  is reserved for it. Availability is derived from sales, never decremented, so
+  reverting a sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration.

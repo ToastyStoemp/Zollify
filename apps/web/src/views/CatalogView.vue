@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import type { Product } from '@boothly/shared';
+import type { Product, Variant } from '@boothly/shared';
 import { allProducts, deleteProduct, upsertProduct } from '@boothly/platform';
 import { currentAccount } from '@boothly/platform';
 
@@ -21,6 +21,7 @@ const filtered = computed(() => {
   );
 });
 
+// No cast: letting the type check this is what caught `sortOrder` missing.
 function blank(): Product {
   return {
     id: crypto.randomUUID(),
@@ -28,8 +29,40 @@ function blank(): Product {
     forSale: true,
     unlisted: false,
     price: 0,
+    variants: [],
+    // New products sort to the end of a manually-ordered catalogue.
+    sortOrder: allProducts.value.length,
     updatedAt: Date.now(),
-  } as Product;
+  };
+}
+
+/**
+ * Variants of the product being edited.
+ *
+ * A variant without its own price inherits the product's — that is how "same
+ * print, three sizes, one price" stays a single number to maintain.
+ */
+const variants = computed<Variant[]>(() => editing.value?.variants ?? []);
+
+function addVariant(): void {
+  if (!editing.value) return;
+  editing.value.variants = [
+    ...variants.value,
+    { id: crypto.randomUUID(), name: '' },
+  ];
+}
+
+function removeVariant(index: number): void {
+  if (!editing.value) return;
+  const next = [...variants.value];
+  next.splice(index, 1);
+  editing.value.variants = next;
+}
+
+function variantSummary(product: Product): string {
+  const count = product.variants?.length ?? 0;
+  if (!count) return '';
+  return ` · ${count} variant${count === 1 ? '' : 's'}`;
 }
 
 function startNew(): void {
@@ -83,6 +116,27 @@ async function remove(product: Product): Promise<void> {
         <label><span>Tariff no.</span><input v-model="editing.tariffNo" type="text" /></label>
         <label><span>Origin country</span><input v-model="editing.originCountry" type="text" maxlength="2" /></label>
       </div>
+      <fieldset class="variants">
+        <legend>Variants</legend>
+        <p class="hint">
+          Sizes, colours, editions. Leave the price blank to use the product price.
+        </p>
+        <div v-for="(variant, i) in variants" :key="variant.id" class="variant">
+          <input v-model="variant.name" type="text" placeholder="A3" aria-label="Variant name" />
+          <input v-model="variant.sku" type="text" placeholder="SKU" aria-label="Variant SKU" />
+          <input
+            v-model.number="variant.price"
+            type="number"
+            step="0.01"
+            min="0"
+            placeholder="Price"
+            aria-label="Variant price"
+          />
+          <button type="button" @click="removeVariant(i)">Remove</button>
+        </div>
+        <button type="button" @click="addVariant">Add variant</button>
+      </fieldset>
+
       <div class="toggles">
         <label class="inline"><input v-model="editing.forSale" type="checkbox" /> <span>For sale</span></label>
         <label class="inline"><input v-model="editing.unlisted" type="checkbox" /> <span>Unlisted</span></label>
@@ -103,7 +157,7 @@ async function remove(product: Product): Promise<void> {
       </thead>
       <tbody>
         <tr v-for="product in filtered" :key="product.id">
-          <td>{{ product.title }}</td>
+          <td>{{ product.title }}<span class="variants-note">{{ variantSummary(product) }}</span></td>
           <td class="mono">{{ product.sku ?? '—' }}</td>
           <td class="num">{{ product.price.toFixed(2) }}</td>
           <td>{{ product.forSale ? 'For sale' : 'Not for sale' }}{{ product.unlisted ? ' · unlisted' : '' }}</td>
@@ -130,6 +184,11 @@ h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .toggles { display: flex; gap: 1rem; }
+.variants { border: 1px solid var(--bly-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.variants legend { font-size: .8rem; padding: 0 .3rem; color: var(--bly-muted, #5a6472); }
+.variant { display: grid; grid-template-columns: 1fr 1fr 7rem auto; gap: .4rem; width: 100%; }
+.hint { color: var(--bly-muted, #5a6472); margin: 0; font-size: .8rem; }
+.variants-note { color: var(--bly-muted, #5a6472); font-size: .78rem; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 table { width: 100%; border-collapse: collapse; background: var(--bly-surface, #fff); border: 1px solid var(--bly-line, #d6dde4); border-radius: 12px; overflow: hidden; }
 th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--bly-line, #d6dde4); font-size: .9rem; }

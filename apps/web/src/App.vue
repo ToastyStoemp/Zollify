@@ -11,6 +11,7 @@ const coreNav = [
   { routeName: 'home', label: 'Home', order: 0 },
   { routeName: 'events', label: 'Events', order: 10 },
   { routeName: 'catalog', label: 'Catalog', order: 20 },
+  { routeName: 'stock', label: 'Stock', order: 25 },
   { routeName: 'history', label: 'History', order: 30 },
   { routeName: 'settings', label: 'Settings', order: 900 },
 ];

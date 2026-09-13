@@ -16,6 +16,7 @@ import {
   total,
 } from '../cart';
 import { useRouter } from 'vue-router';
+import type { Product, Variant } from '@boothly/shared';
 import { sdk } from '../runtime';
 
 const providerId = ref('manual');
@@ -48,9 +49,19 @@ onMounted(async () => {
   if (activeEvent.value?.currency) cart.currency = activeEvent.value.currency;
 });
 
-function add(productId: string): void {
-  const product = sdk().data.products.get(productId);
-  if (!product) return;
+/** A product with variants needs one chosen before it can be added. */
+const choosing = ref<Product | null>(null);
+
+function tap(product: Product): void {
+  const variants = (product.variants ?? []).filter((v) => !v.unlisted);
+  if (variants.length) {
+    choosing.value = product;
+    return;
+  }
+  addProduct(product);
+}
+
+function addProduct(product: Product): void {
   addLine({
     productId: product.id,
     sku: product.sku ?? null,
@@ -60,6 +71,25 @@ function add(productId: string): void {
     taxRate: product.vatRate ?? null,
     type: product.type,
   });
+}
+
+/**
+ * A variant without its own price inherits the product's, so "same print,
+ * three sizes, one price" stays a single number to maintain.
+ */
+function addVariant(product: Product, variant: Variant): void {
+  addLine({
+    productId: product.id,
+    variantId: variant.id,
+    variantLabel: variant.name,
+    sku: variant.sku ?? product.sku ?? null,
+    name: `${product.title} · ${variant.name}`,
+    qty: 1,
+    unitPrice: variant.price ?? product.price,
+    taxRate: product.vatRate ?? null,
+    type: product.type,
+  });
+  choosing.value = null;
 }
 
 const discountInput = ref('');
@@ -118,6 +148,24 @@ function openReceipt(): void {
       <p class="count">{{ itemCount }} item{{ itemCount === 1 ? '' : 's' }}</p>
     </header>
 
+    <div v-if="choosing" class="variant-picker" role="dialog" aria-modal="true">
+      <div class="sheet">
+        <h2>{{ choosing.title }}</h2>
+        <div class="options">
+          <button
+            v-for="variant in (choosing.variants ?? []).filter((v) => !v.unlisted)"
+            :key="variant.id"
+            type="button"
+            @click="addVariant(choosing, variant)"
+          >
+            <span>{{ variant.name }}</span>
+            <span class="price">{{ (variant.price ?? choosing.price).toFixed(2) }}</span>
+          </button>
+        </div>
+        <button type="button" class="cancel" @click="choosing = null">Cancel</button>
+      </div>
+    </div>
+
     <div class="layout">
       <div class="picker">
         <input v-model="search" type="search" placeholder="Search products" aria-label="Search products" />
@@ -125,9 +173,12 @@ function openReceipt(): void {
           {{ search ? 'Nothing matches that search.' : 'No products for sale yet — add some in Catalog.' }}
         </p>
         <div v-else class="grid">
-          <button v-for="product in products" :key="product.id" type="button" class="tile" @click="add(product.id)">
+          <button v-for="product in products" :key="product.id" type="button" class="tile" @click="tap(product)">
             <span class="title">{{ product.title }}</span>
-            <span class="price">{{ product.price.toFixed(2) }}</span>
+            <span class="price">
+              {{ product.price.toFixed(2) }}
+              <template v-if="product.variants?.length"> · {{ product.variants.length }} sizes</template>
+            </span>
           </button>
         </div>
       </div>
@@ -225,6 +276,13 @@ h1 { font-size: 1.35rem; margin: 0; }
 .total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .actions { display: flex; gap: .5rem; justify-content: flex-end; }
 .receipt-link { align-self: flex-end; }
+.variant-picker { position: fixed; inset: 0; background: rgba(20,26,34,.45); display: grid; place-items: center; padding: 1rem; z-index: 10; }
+.sheet { background: var(--bly-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
+.sheet h2 { margin: 0; font-size: 1.05rem; }
+.options { display: grid; gap: .4rem; }
+.options button { display: flex; justify-content: space-between; padding: .7rem .9rem; font-size: .95rem; }
+.options .price { font-variant-numeric: tabular-nums; color: var(--bly-muted, #5a6472); }
+.cancel { align-self: flex-end; }
 .result { margin: 0; font-size: .875rem; color: var(--bly-accent-ink, #0a5a4a); }
 .result.bad { color: var(--bly-danger, #c6512f); }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .ticket { position: static; } }

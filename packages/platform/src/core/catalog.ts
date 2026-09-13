@@ -37,7 +37,11 @@ export const catalogLoaded = computed(() => loaded.value);
 
 /** Everything sellable, title-sorted. Soft-deleted rows never appear. */
 export const allProducts = computed(() =>
-  [...products.values()].sort((a, b) => a.title.localeCompare(b.title)),
+  [...products.values()].sort(
+    // Manual order first — it is what a seller arranges on the tile grid so the
+    // things they sell most are where their hand already is. Title breaks ties.
+    (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.title.localeCompare(b.title),
+  ),
 );
 
 export const forSaleProducts = computed(() => allProducts.value.filter((p) => p.forSale));

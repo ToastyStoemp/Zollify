@@ -39,10 +39,13 @@ async function build(): Promise<void> {
       sdk().config.get<Partial<CustomsArtist>>(DECLARANT_KEY),
     ]);
     const built = buildCustomsState(ev, api.products.list(), stock, api.transactions.recent());
-    // The declarant from settings fills whatever the event's own record left
-    // blank — an imported ZollTool event may already carry one.
-    for (const [key, value] of Object.entries(declarant ?? {})) {
-      if (value) built.artist[key as keyof CustomsArtist] = value;
+    // Layered, most specific last: an imported event's own record, then the
+    // account's booth profile, then this module's declarant override.
+    const layers = [sdk().account()?.profile.artist ?? {}, declarant ?? {}];
+    for (const layer of layers) {
+      for (const [key, value] of Object.entries(layer)) {
+        if (value) built.artist[key as keyof CustomsArtist] = value;
+      }
     }
     state.value = built;
   } catch (err) {

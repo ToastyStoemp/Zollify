@@ -23,6 +23,13 @@ const account = currentAccount;
  */
 const corePanels: Panel[] = [
   {
+    id: 'core.profile',
+    label: 'Booth profile',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./ProfileSettings.vue'),
+  },
+  {
     id: 'core.data',
     label: 'Backup & restore',
     group: 'Core',

@@ -5,9 +5,12 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ArtistDetailsSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
   RegisterRequestSchema,
+  emptyProfile,
+  type AccountProfile,
   type AuthUser,
   type TokenResponse,
   type UserRole,
@@ -48,7 +51,7 @@ export interface JwtClaims {
   role: UserRole;
 }
 
-interface UserRow {
+export interface UserRow {
   id: string;
   accountId: string;
   email: string;
@@ -73,13 +76,28 @@ export function parseAllowedEvents(raw: string | null | undefined): string[] | n
   return null;
 }
 
-function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
-  const account = db.prepare('SELECT name FROM accounts WHERE id = ?').get(user.accountId) as { name: string };
+export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
+  const account = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(user.accountId) as { name: string; profile: string | null };
   const row = db.prepare('SELECT allowedEventIds FROM users WHERE id = ?').get(user.id) as { allowedEventIds: string | null } | undefined;
   return {
     id: user.id, email: user.email, role: user.role, accountId: user.accountId, accountName: account.name,
     allowedEventIds: parseAllowedEvents(row?.allowedEventIds),
+    profile: parseProfile(account.profile),
   };
+}
+
+/** A missing or unreadable profile is an empty one — never a crash on login. */
+export function parseProfile(raw: string | null | undefined): AccountProfile {
+  if (!raw) return emptyProfile();
+  try {
+    const parsed = JSON.parse(raw) as Partial<AccountProfile>;
+    return {
+      setupCompletedAt: typeof parsed.setupCompletedAt === 'number' ? parsed.setupCompletedAt : null,
+      artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
+    };
+  } catch {
+    return emptyProfile();
+  }
 }
 
 async function issueTokens(

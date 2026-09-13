@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -29,6 +29,8 @@ export interface AccountSnapshot {
   role: Role;
   /** null = unrestricted. A non-empty list marks a helper, scoped to these events. */
   allowedEventIds: string[] | null;
+  /** Account-wide profile shared by every device: who the booth is. */
+  profile: AccountProfile;
 }
 
 // ── Shell contributions ─────────────────────────────────────────────────────

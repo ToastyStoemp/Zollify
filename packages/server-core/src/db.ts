@@ -147,6 +147,9 @@ const MIGRATIONS: string[] = [
   // product merges into stored tx payloads); the pull API returns it so clients
   // detect the rewrite and re-pull from scratch. See scripts/rewrite-merges.mjs.
   `ALTER TABLE accounts ADD COLUMN syncEpoch INTEGER NOT NULL DEFAULT 0;`,
+  // v8 — account profile (JSON AccountProfile): artist details and whether
+  // first-run setup has been completed. Server-side so every device agrees.
+  `ALTER TABLE accounts ADD COLUMN profile TEXT;`,
 ];
 
 export function openDb(dataDir: string): Database.Database {

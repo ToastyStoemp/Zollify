@@ -18,6 +18,9 @@ onMounted(async () => {
   form.value = { ...defaultCustomsArtist(), ...(stored ?? {}) };
 });
 
+/** The booth profile's value, shown as the placeholder so a blank field reads as "same as profile". */
+const profile = sdk().account()?.profile.artist ?? defaultCustomsArtist();
+
 async function save(): Promise<void> {
   error.value = null;
   try {
@@ -34,8 +37,9 @@ async function save(): Promise<void> {
   <form class="declarant" @submit.prevent="save">
     <h2>Customs declarant</h2>
     <p class="hint">
-      Who is declaring the goods. These details appear on the EDEC declaration, the proforma
-      invoice and the printed forms.
+      Who is declaring the goods, on the EDEC declaration, the proforma invoice and the printed
+      forms. Your booth profile is used by default — fill in a field here only when the declarant
+      differs from it.
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -43,31 +47,31 @@ async function save(): Promise<void> {
     <div class="grid">
       <label>
         <span>Company</span>
-        <input v-model="form.companyName" type="text" autocomplete="organization" />
+        <input v-model="form.companyName" :placeholder="profile.companyName" type="text" autocomplete="organization" />
       </label>
       <label>
         <span>Full name</span>
-        <input v-model="form.fullName" type="text" autocomplete="name" />
+        <input v-model="form.fullName" :placeholder="profile.fullName" type="text" autocomplete="name" />
       </label>
       <label>
         <span>Street</span>
-        <input v-model="form.street" type="text" autocomplete="street-address" />
+        <input v-model="form.street" :placeholder="profile.street" type="text" autocomplete="street-address" />
       </label>
       <label>
         <span>Postcode and city</span>
-        <input v-model="form.postCodeCity" type="text" placeholder="8000 Zürich" />
+        <input v-model="form.postCodeCity" :placeholder="profile.postCodeCity || '8000 Zürich'" type="text" />
       </label>
       <label>
         <span>Country of origin</span>
-        <input v-model="form.countryOfOrigin" type="text" placeholder="Switzerland" autocomplete="country-name" />
+        <input v-model="form.countryOfOrigin" :placeholder="profile.countryOfOrigin || 'Switzerland'" type="text" autocomplete="country-name" />
       </label>
       <label>
         <span>Phone</span>
-        <input v-model="form.phone" type="tel" autocomplete="tel" />
+        <input v-model="form.phone" :placeholder="profile.phone" type="tel" autocomplete="tel" />
       </label>
       <label>
         <span>Email</span>
-        <input v-model="form.email" type="email" autocomplete="email" />
+        <input v-model="form.email" :placeholder="profile.email" type="email" autocomplete="email" />
       </label>
     </div>
 

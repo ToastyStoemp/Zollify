@@ -1,6 +1,6 @@
 import { computed, ref, shallowRef } from 'vue';
 import type { AccountSnapshot, HttpError, Role } from '@zollify/sdk';
-import type { TokenResponse } from '@zollify/shared';
+import { emptyProfile, type ProfileUpdate, type TokenResponse } from '@zollify/shared';
 
 /**
  * Session and token handling.
@@ -29,7 +29,16 @@ function toSnapshot(user: TokenResponse['user']): AccountSnapshot {
     email: user.email,
     role: user.role as Role,
     allowedEventIds: user.allowedEventIds ?? null,
+    profile: user.profile ?? emptyProfile(),
   };
+}
+
+/**
+ * Adopts a fresh user record from the server — after the profile is edited,
+ * for instance — without touching the tokens.
+ */
+export function applyUser(user: TokenResponse['user']): void {
+  setAccount(toSnapshot(user));
 }
 
 /**
@@ -214,4 +223,13 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<u
     throw httpError(res.status, body, message);
   }
   return body;
+}
+
+/** Saves account-wide profile changes and adopts the server's view of the account. */
+export async function updateProfile(update: ProfileUpdate): Promise<void> {
+  const res = (await authFetch('/account/profile', {
+    method: 'PUT',
+    body: JSON.stringify(update),
+  })) as { user: TokenResponse['user'] };
+  applyUser(res.user);
 }

@@ -9,6 +9,7 @@ const account: AccountSnapshot = {
   email: 'owner@example.com',
   role: 'owner',
   allowedEventIds: null,
+  profile: { setupCompletedAt: 1, artist: { companyName: '', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '' } },
 };
 
 /** Requests the fake server has seen, so tests can assert on ordering. */

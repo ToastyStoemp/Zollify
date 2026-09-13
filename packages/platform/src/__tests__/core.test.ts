@@ -21,6 +21,7 @@ const OWNER: AccountSnapshot = {
   email: 'owner@example.com',
   role: 'owner',
   allowedEventIds: null,
+  profile: { setupCompletedAt: 1, artist: { companyName: '', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '' } },
 };
 
 const HELPER: AccountSnapshot = {

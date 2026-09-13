@@ -13,6 +13,7 @@ export const router: Router = createRouter({
     { path: '/', redirect: '/home' },
     { path: '/login', name: 'login', component: () => import('./views/LoginView.vue'), meta: { public: true } },
     { path: '/home', name: 'home', component: () => import('./views/HomeView.vue') },
+    { path: '/welcome', name: 'welcome', component: () => import('./views/WelcomeView.vue'), meta: { minRole: 'admin' } },
     { path: '/events', name: 'events', component: () => import('./views/EventsView.vue') },
     { path: '/catalog', name: 'catalog', component: () => import('./views/CatalogView.vue') },
     { path: '/stock', name: 'stock', component: () => import('./views/StockView.vue') },
@@ -38,10 +39,21 @@ router.beforeEach((to) => {
     return { name: 'login', query: to.fullPath === '/home' ? {} : { next: to.fullPath } };
   }
 
+  const account = getAccount();
   const required = to.meta.minRole as Role | undefined;
   if (required) {
-    const account = getAccount();
     if (!account || !roleAtLeast(account.role, required)) return { name: 'home' };
+  }
+
+  // A fresh account is walked through setup before anything else. Only an
+  // admin can complete it — a helper landing first just sees the app.
+  if (
+    account &&
+    account.profile.setupCompletedAt === null &&
+    roleAtLeast(account.role, 'admin') &&
+    to.name !== 'welcome'
+  ) {
+    return { name: 'welcome' };
   }
 
   return true;

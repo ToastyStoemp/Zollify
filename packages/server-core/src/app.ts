@@ -16,6 +16,7 @@ import { registerRefreshCookie } from './refresh-cookie';
 import { registerStatic } from './static';
 import { registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
+import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { Rooms, registerWs } from './ws';
 
@@ -176,6 +177,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   const rooms = new Rooms();
   registerSyncRoutes(app, db, rooms);
   registerDeviceRoutes(app, db);
+  registerAccountRoutes(app, db);
   registerAdminRoutes(app, db);
   await registerWs(app, rooms, db);
 

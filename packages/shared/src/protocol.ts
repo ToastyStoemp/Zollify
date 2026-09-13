@@ -112,6 +112,37 @@ export type LogUpload = z.infer<typeof LogUploadSchema>;
 
 export type UserRole = 'owner' | 'admin' | 'member';
 
+/** Who is behind the booth — printed on customs paperwork and receipts. */
+export const ArtistDetailsSchema = z.object({
+  companyName: z.string().max(120).default(''),
+  fullName: z.string().max(120).default(''),
+  street: z.string().max(160).default(''),
+  postCodeCity: z.string().max(120).default(''),
+  countryOfOrigin: z.string().max(80).default(''),
+  phone: z.string().max(40).default(''),
+  email: z.string().max(160).default(''),
+});
+export type ArtistDetails = z.infer<typeof ArtistDetailsSchema>;
+
+/** Account-wide settings that every device shares; kept on the server, not synced as ops. */
+export interface AccountProfile {
+  /** When first-run setup was finished or skipped; null shows the wizard. */
+  setupCompletedAt: number | null;
+  artist: ArtistDetails;
+}
+
+export const ProfileUpdateSchema = z.object({
+  /** Renames the account; owner only. */
+  name: z.string().trim().min(1).max(80).optional(),
+  artist: ArtistDetailsSchema.partial().optional(),
+  setupCompleted: z.boolean().optional(),
+});
+export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
+
+export function emptyProfile(): AccountProfile {
+  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}) };
+}
+
 export interface AuthUser {
   id: string;
   email: string;
@@ -120,6 +151,7 @@ export interface AuthUser {
   accountName: string;
   /** Event ids a restricted "helper" is limited to; null/absent = full access. */
   allowedEventIds?: string[] | null;
+  profile?: AccountProfile;
 }
 
 export interface TokenResponse {

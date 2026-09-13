@@ -17,6 +17,9 @@ import ConfirmDialog from './views/ConfirmDialog.vue';
 const account = currentAccount;
 const route = useRoute();
 
+/** First-run setup gets the whole screen; the nav would only bounce back to it. */
+const settingUp = computed(() => route.name === 'welcome');
+
 type Group = NavGroup | 'addons';
 interface Entry { routeName: string; label: string; group: Group; order: number; minRole?: Role }
 
@@ -119,8 +122,8 @@ async function leave(): Promise<void> {
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column — otherwise the login card is squeezed into a 15rem track. -->
-  <div :class="['shell', { 'shell--bare': !account }]">
-    <aside v-if="account" class="sidebar">
+  <div :class="['shell', { 'shell--bare': !account || settingUp }]">
+    <aside v-if="account && !settingUp" class="sidebar">
       <div class="brand">Zollify<span>.</span></div>
 
       <nav aria-label="Main">
@@ -184,6 +187,7 @@ async function leave(): Promise<void> {
 .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
 .shell--bare { grid-template-columns: 1fr; }
 .shell--bare .content { padding: 0; display: grid; }
+.shell--bare .content > .welcome { padding: 1.5rem; width: 100%; }
 .sidebar {
   display: flex; flex-direction: column; gap: 1rem; padding: 1rem;
   background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);

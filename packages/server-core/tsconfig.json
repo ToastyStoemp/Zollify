@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node", "vitest/globals"],
+    // Relaxed only here. The auth, sync and TOTP code is ported verbatim from
+    // ZollTool, where it is proven in production; rewriting its indexing under
+    // a stricter flag mid-port is exactly how a security regression gets
+    // introduced. New server-core code is written to satisfy it anyway.
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
+}

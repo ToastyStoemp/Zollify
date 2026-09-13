@@ -1,0 +1,133 @@
+import type { PaymentProvider, PaymentRequest, PaymentResult, ProviderStatus } from './provider';
+import type { PaymentResultMessage, PaymentTriggerMessage } from '@boothly/shared';
+import { onPaymentMessage, sendPaymentMessage, syncState } from '@/sync/engine';
+import { DisplayLink, hasNativePlugin } from '@/native/plugins';
+import { getSetting } from '@/db/repo';
+import { DISPLAY_KEYS } from '@/lib/display';
+import { uuidv7 } from '@/lib/uuid';
+import { logDiagnostic } from '@/lib/diagnostics';
+
+/** Settings key: the target Carbon's deviceId (find it in Settings on the Carbon itself). */
+export const REMOTE_CARBON_DEVICE_KEY = 'payments.remoteCarbonDeviceId';
+
+const PAYMENT_TIMEOUT_MS = 90_000;
+
+/**
+ * Triggers a card payment on a satellite myPOS Carbon terminal instead of
+ * this device — sends over the sync WS (and Bluetooth, if a customer display
+ * is paired, since it's likely the same physical Carbon) and waits for the
+ * matching payment.result, correlated by requestId. See CarbonPaymentPlugin
+ * on the Carbon side for the actual on-device payment.
+ */
+class RemoteCarbonConnection {
+  private unsubscribe: (() => void) | null = null;
+  private pending: {
+    requestId: string;
+    resolve: (msg: PaymentResultMessage) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+
+  private ensureListening(): void {
+    if (this.unsubscribe) return;
+    this.unsubscribe = onPaymentMessage((msg) => {
+      if (msg.type !== 'payment.result' || !this.pending || msg.requestId !== this.pending.requestId) return;
+      clearTimeout(this.pending.timer);
+      const { resolve } = this.pending;
+      this.pending = null;
+      resolve(msg);
+    });
+  }
+
+  async pay(targetDeviceId: string, req: PaymentRequest): Promise<PaymentResultMessage> {
+    this.ensureListening();
+    if (this.pending) throw new Error('A remote payment is already in progress');
+
+    const requestId = uuidv7();
+    const trigger: PaymentTriggerMessage = {
+      type: 'payment.trigger',
+      to: targetDeviceId,
+      requestId,
+      amount: req.amount,
+      currency: req.currency,
+      reference: req.reference,
+    };
+
+    const resultPromise = new Promise<PaymentResultMessage>((resolve, reject) => {
+      this.pending = {
+        requestId,
+        resolve,
+        timer: setTimeout(() => {
+          this.pending = null;
+          reject(new Error('No response from the Carbon — check it is on, connected, and the Device ID is correct.'));
+        }, PAYMENT_TIMEOUT_MS),
+      };
+    });
+
+    logDiagnostic(`RemoteCarbon trigger to=${targetDeviceId} amount=${req.amount} currency=${req.currency}`);
+    sendPaymentMessage(trigger);
+    const btAddress = await getSetting<string>(DISPLAY_KEYS.btAddress);
+    if (btAddress && hasNativePlugin('DisplayLink')) {
+      void DisplayLink.send({ json: JSON.stringify(trigger) }).catch(() => {});
+    }
+
+    const result = await resultPromise;
+    logDiagnostic(`RemoteCarbon result approved=${result.approved}` + (result.error ? ` error=${result.error}` : ''));
+    return result;
+  }
+
+  cancel(): void {
+    if (!this.pending) return;
+    clearTimeout(this.pending.timer);
+    this.pending = null;
+  }
+}
+
+const connection = new RemoteCarbonConnection();
+
+export const myposCarbonRemoteProvider: PaymentProvider = {
+  id: 'mypos-carbon-remote',
+  label: 'MyPOS Carbon (remote)',
+
+  async isAvailable(): Promise<boolean> {
+    // Works from any device with sync configured — the target is a setting,
+    // not a platform capability, so this always shows in the provider list;
+    // an unset target just surfaces as "not connected" in getStatus().
+    return true;
+  },
+
+  async getStatus(): Promise<ProviderStatus> {
+    const targetId = await getSetting<string>(REMOTE_CARBON_DEVICE_KEY);
+    if (!targetId) return { connected: false, detail: 'No remote Carbon device ID set' };
+    if (syncState.wsConnected) return { connected: true, detail: 'Ready (online)' };
+    if (hasNativePlugin('DisplayLink')) return { connected: true, detail: 'Ready (Bluetooth)' };
+    return { connected: false, detail: 'Not connected to the sync server' };
+  },
+
+  async startPayment(req: PaymentRequest): Promise<PaymentResult> {
+    const targetId = await getSetting<string>(REMOTE_CARBON_DEVICE_KEY);
+    if (!targetId) {
+      return {
+        approved: false,
+        provider: 'mypos-carbon-remote',
+        error: 'No remote Carbon device configured — set its Device ID in Settings.',
+      };
+    }
+    try {
+      const msg = await connection.pay(targetId, req);
+      return {
+        approved: msg.approved,
+        provider: 'mypos-carbon-remote',
+        txRef: msg.txRef,
+        cardBrand: msg.cardBrand,
+        authCode: msg.authCode,
+        error: msg.error,
+      };
+    } catch (err) {
+      return { approved: false, provider: 'mypos-carbon-remote', error: err instanceof Error ? err.message : String(err) };
+    }
+  },
+
+  async cancel(): Promise<void> {
+    connection.cancel();
+  },
+};

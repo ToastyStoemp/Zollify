@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# Local env & secrets — never commit. See SECURITY.md.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# Server runtime data
+data/
+apps/server/data/
+apps/server/modules-store/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test output
+coverage/

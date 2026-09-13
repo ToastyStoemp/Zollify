@@ -1,0 +1,67 @@
+import { resolve } from 'node:path';
+import { buildGateway, loadDotEnv, type ServerModule } from '@boothly/server-core';
+import { taxServerModule } from './modules/tax';
+
+loadDotEnv();
+
+/**
+ * Server module halves compiled into this deploy.
+ *
+ * Unlike client modules, these are not loaded at runtime: they run in a
+ * privileged process holding the database and every tenant's integration keys,
+ * and downloading code into that process would be an entirely different
+ * security proposition. They are gated per account instead — see
+ * `mountServerModules`.
+ */
+const SERVER_MODULES: ServerModule[] = [taxServerModule];
+
+/** What a brand-new account starts with, so it isn't an empty shell. */
+const DEFAULT_MODULES = ['catalog', 'pos'];
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    // Failing at boot is the point: a server that silently generates its own
+    // signing key would invalidate every session on each restart, and a
+    // predictable fallback would be far worse.
+    throw new Error(`${name} is not set. Copy .env.example to .env and fill it in.`);
+  }
+  return value;
+}
+
+function flag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  return raw === '1' || raw.toLowerCase() === 'true';
+}
+
+async function main(): Promise<void> {
+  const dataDir = resolve(process.env.BOOTHLY_DATA_DIR ?? './data');
+  const moduleStoreDir = resolve(process.env.BOOTHLY_MODULE_STORE ?? './modules-store');
+
+  const app = await buildGateway({
+    dataDir,
+    moduleStoreDir,
+    jwtSecret: required('BOOTHLY_JWT_SECRET'),
+    serverModules: SERVER_MODULES,
+    defaultModules: DEFAULT_MODULES,
+    allowedOrigins: (process.env.BOOTHLY_ALLOWED_ORIGINS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    requireHttps: flag('BOOTHLY_REQUIRE_HTTPS', true),
+    trustProxy: flag('BOOTHLY_TRUST_PROXY', true),
+    logLevel: process.env.LOG_LEVEL ?? 'info',
+  });
+
+  const port = Number(process.env.PORT ?? 8787);
+  const host = process.env.HOST ?? '0.0.0.0';
+
+  await app.listen({ port, host });
+  app.log.info({ port, host, dataDir, moduleStoreDir }, 'Boothly gateway listening');
+}
+
+main().catch((err) => {
+  console.error('[boothly] failed to start:', err instanceof Error ? err.message : err);
+  process.exitCode = 1;
+});

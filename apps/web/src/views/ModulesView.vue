@@ -1,0 +1,95 @@
+<script setup lang="ts">
+import { onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { authFetch } from '@boothly/platform';
+import { loadEnabledModules, unloadModule } from '../boot';
+
+interface AvailableModule {
+  moduleId: string;
+  version: string;
+  title: string;
+  description?: string;
+  requires?: string[];
+  enabled: boolean;
+}
+
+const router = useRouter();
+const modules = ref<AvailableModule[]>([]);
+const busy = ref<string | null>(null);
+const error = ref<string | null>(null);
+
+async function refresh(): Promise<void> {
+  try {
+    const res = (await authFetch('/modules/available')) as { modules: AvailableModule[] };
+    modules.value = res.modules;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not load the module list.';
+  }
+}
+
+onMounted(refresh);
+
+/**
+ * Toggling is applied server-side first, then reflected in the running shell.
+ * Doing it in that order means a failed request leaves the UI honest rather
+ * than showing a module as enabled that the gateway will refuse to serve.
+ */
+async function toggle(mod: AvailableModule): Promise<void> {
+  busy.value = mod.moduleId;
+  error.value = null;
+  try {
+    await authFetch('/modules/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ moduleId: mod.moduleId, enabled: !mod.enabled }),
+    });
+
+    if (mod.enabled) {
+      await unloadModule(router, mod.moduleId);
+    } else {
+      await loadEnabledModules(router);
+    }
+    await refresh();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not change that module.';
+  } finally {
+    busy.value = null;
+  }
+}
+</script>
+
+<template>
+  <section class="modules">
+    <h1>Modules</h1>
+    <p class="lede">Switch features on and off for this account. Changes apply straight away.</p>
+
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <ul class="list">
+      <li v-for="mod in modules" :key="mod.moduleId">
+        <div class="meta">
+          <strong>{{ mod.title }}</strong>
+          <span class="ver">{{ mod.moduleId }} · {{ mod.version }}</span>
+          <p v-if="mod.description" class="desc">{{ mod.description }}</p>
+          <p v-if="mod.requires?.length" class="requires">Needs: {{ mod.requires.join(', ') }}</p>
+        </div>
+        <button type="button" :disabled="busy === mod.moduleId" @click="toggle(mod)">
+          {{ busy === mod.moduleId ? 'Working…' : mod.enabled ? 'Switch off' : 'Switch on' }}
+        </button>
+      </li>
+    </ul>
+
+    <p v-if="!modules.length && !error" class="empty">No modules are published on this server yet.</p>
+  </section>
+</template>
+
+<style scoped>
+.modules { display: flex; flex-direction: column; gap: 1rem; }
+h1 { margin: 0; font-size: 1.35rem; }
+.lede, .empty { color: var(--bly-muted, #5a6472); margin: 0; }
+.error { color: var(--bly-danger, #c6512f); margin: 0; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--bly-line, #d6dde4); border-radius: 10px; padding: .85rem 1rem; background: var(--bly-surface, #fff); }
+.meta { display: flex; flex-direction: column; gap: .1rem; }
+.ver { font-size: .78rem; color: var(--bly-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.desc, .requires { margin: .25rem 0 0; font-size: .85rem; color: var(--bly-muted, #5a6472); }
+</style>

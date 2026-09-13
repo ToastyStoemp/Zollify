@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["vitest/globals"],
+    // Relaxed for src/payments, ported verbatim from ZollTool against real
+    // terminal hardware. New POS code (cart, runtime, views) satisfies it.
+    "noUncheckedIndexedAccess": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue"]
+}

@@ -1,0 +1,28 @@
+{
+  "name": "boothly",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Boothly — a plugin platform for market and convention booths",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "modules/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @boothly/web",
+    "dev:server": "npm run dev -w @boothly/server",
+    "build": "npm run build --workspaces --if-present",
+    "build:modules": "npm run build -w @boothly/pos -w @boothly/customs",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "audit:deps": "npm audit --audit-level=moderate"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.0",
+    "vitest": "^3.0.0"
+  }
+}

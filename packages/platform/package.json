@@ -1,0 +1,28 @@
+{
+  "name": "@boothly/platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "build": "echo \"@boothly/platform is consumed as source by the app build\""
+  },
+  "dependencies": {
+    "@boothly/sdk": "*",
+    "@boothly/shared": "*",
+    "@boothly/ui": "*",
+    "dexie": "^4.2.0",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

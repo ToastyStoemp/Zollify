@@ -32,6 +32,9 @@ packages/
 modules/
   pos/            cart, checkout, receipts + nested payment provider plugins
   customs/        EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
+  sourcing/       suppliers and reorder drafts (client + server half)
+  price-cards/    printable price tags from the catalogue
+  migration/      single-use ZollTool backup importer
 apps/
   web/            the shell (first target)
   server/         deployable gateway; mounts server module halves
@@ -39,6 +42,12 @@ apps/
 
 `modules/` build to standalone ESM bundles; server halves compile into
 `apps/server`.
+
+Publish the bundles into the server's store with:
+
+```bash
+npm run publish:modules
+```
 
 ## Getting started
 
@@ -116,11 +125,29 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-Built and passing: SDK, platform (loader, cache, session, per-module storage),
-server gateway with ported multi-tenant auth, entitlements, module registry, POS
-and Customs modules, and the web shell.
+**Built and passing (67 tests):**
 
-Not built yet: sync engine wiring, catalog/events core modules, Sourcing, Price
-Cards, Shopify sync, the Android shell, and billing. See the architecture
-document for sequencing, and [SECURITY.md](./SECURITY.md) for the security
-baseline and its open items.
+- `@boothly/sdk` — the boundary, with the host-compatibility checker.
+- `@boothly/platform` — module loader (bundled + remote resolvers), hash-verified
+  immutable bundle cache, per-module storage, session handling.
+- **Core** — catalogue, sales events with helper scoping, and the sync outbox.
+- **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery.
+- `@boothly/server-core` — gateway, ZollTool's multi-tenant auth ported verbatim,
+  entitlements, module registry, central per-account gating.
+- **Five modules** — POS, Customs, Sourcing, Price Cards, Migration.
+- **Runtime delivery** — modules build to ES bundles and publish to the store;
+  the shell resolves host deps through an import map so there is one Vue.
+
+**Not built:**
+
+- **Shopify sync** — needs ZollTool's Shopify client ported and credentials
+  configured; the rest of the server-module shape is proven by Sourcing.
+- **Android shell** — deferred deliberately. Costs the four terminal providers
+  that need native plugins (myPOS GO2/Carbon/Glass, SumUp) until it lands;
+  manual, bridge and Carbon-remote work on the web today.
+- **Billing** — deferred. The per-account enabled-modules list is the seam it
+  attaches to.
+
+One security item is outstanding before any deployment: the client expects the
+refresh token in an httpOnly cookie, but the ported `auth.ts` still returns it
+in the response body. See [SECURITY.md](./SECURITY.md) §9.

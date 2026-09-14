@@ -7,6 +7,7 @@ import type { CustomsArtist, CustomsState } from '../engine/model';
 import type { GoodsDocNum } from '../engine/goods-list';
 import { DECLARANT_KEY } from './declarant';
 import { sdk } from '../runtime';
+import { Icon } from '@zollify/ui';
 
 const route = useRoute();
 const eventId = computed(() => String(route.params.eventId ?? ''));
@@ -103,7 +104,7 @@ function printDocuments(): void {
   <section class="customs-documents">
     <header class="bar">
       <div class="lead">
-        <router-link :to="{ name: 'customs:index' }" class="back">← Customs</router-link>
+        <router-link :to="{ name: 'customs:index' }" class="back"><Icon name="arrow-left" :size="14" /> Customs</router-link>
         <h1>{{ event?.name ?? 'Customs documents' }}</h1>
       </div>
       <div class="controls">
@@ -149,7 +150,7 @@ function printDocuments(): void {
 .customs-documents { display: flex; flex-direction: column; gap: 1rem; height: 100%; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .lead { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
-.back { color: var(--zfy-muted, #5a6472); text-decoration: none; font-size: .875rem; }
+.back { display: inline-flex; align-items: center; gap: .25rem; color: var(--zfy-muted, #5a6472); text-decoration: none; font-size: .875rem; }
 .back:hover { color: var(--zfy-ink, #141a22); }
 h1 { font-size: 1.35rem; margin: 0; }
 .controls { display: flex; align-items: center; gap: .75rem; }

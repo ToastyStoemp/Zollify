@@ -8,6 +8,7 @@ import { api } from '../api';
 import { bookings, clusters, config, domesticVat, events, loaded, loadWork, clearWork, refreshEvents, refreshStatus, saveWork, status, tidNames } from '../state';
 import { sdk } from '../runtime';
 import ClusterCard from './ClusterCard.vue';
+import { Icon } from '@zollify/ui';
 
 /**
  * Payments: turn the month's card and online takings into bookings.
@@ -123,7 +124,7 @@ async function pull(): Promise<void> {
     }
   }
   if (all.length) await saveWork(eng.mergeIn(clusters.value, all));
-  notice.value = (all.length ? `Imported ${all.length} row(s) — ${progress.value.join(', ')}.` : 'No transactions found.') + (errs.length ? ` ⚠ ${errs.join('; ')}` : '');
+  notice.value = (all.length ? `Imported ${all.length} row(s) — ${progress.value.join(', ')}.` : 'No transactions found.') + (errs.length ? ` Problems: ${errs.join('; ')}` : '');
   busy.value = null;
 }
 
@@ -213,7 +214,7 @@ async function book(uid: string): Promise<void> {
     const pdf = clusterPdf(c, 'payments');
     const res = await api.book({ ...payload, pdfBase64: toBase64(pdf.bytes), filename: pdf.filename, dryRun: false });
     await refreshStatus();
-    notice.value = `Booked ${payload.voucherNumber} ✓ ${res.permalink ?? ''}`;
+    notice.value = `Booked ${payload.voucherNumber}. ${res.permalink ?? ''}`;
   } catch (err) {
     error.value = `Lexware: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
@@ -245,7 +246,7 @@ async function bookAllReady(): Promise<void> {
   }
   await refreshStatus();
   busy.value = null;
-  notice.value = `Booked ${ok}/${ready.length}${fails.length ? ` · failed: ${fails.join('; ')}` : ' ✓'}`;
+  notice.value = `Booked ${ok}/${ready.length}${fails.length ? ` · failed: ${fails.join('; ')}` : '.'}`;
 }
 
 async function bookFees(key: string): Promise<void> {
@@ -261,7 +262,7 @@ async function bookFees(key: string): Promise<void> {
     const pdf = monthPdf(key, clusters.value, 'fees')!;
     const res = await api.book({ ...payload, pdfBase64: toBase64(pdf.bytes), filename: pdf.filename, dryRun: false });
     await refreshStatus();
-    notice.value = `Fees booked ✓ ${res.permalink ?? ''}`;
+    notice.value = `Fees booked. ${res.permalink ?? ''}`;
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
     error.value = `Lexware fees: ${m}${/category/i.test(m) ? ' — set the fee category under Settings → Integrations.' : ''}`;
@@ -341,9 +342,9 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
           <button v-for="d in devices" :key="d" type="button" :class="['pill', { active: filter === d }]" @click="filter = d">{{ d }}</button>
         </div>
         <div class="bulk">
-          <button type="button" :disabled="!events.length" @click="autoMatch">✨ Auto merge &amp; match</button>
-          <button type="button" :disabled="!matchedCount || busy === 'cash'" @click="setAllCash">💶 Cash from sales ({{ matchedCount }})</button>
-          <button v-if="canBook" type="button" class="primary" :disabled="!readyCount || busy === 'book'" @click="bookAllReady">⇪ Book all ready{{ readyCount ? ` (${readyCount})` : '' }}</button>
+          <button type="button" :disabled="!events.length" @click="autoMatch"><Icon name="sparkles" :size="14" /> Auto merge &amp; match</button>
+          <button type="button" :disabled="!matchedCount || busy === 'cash'" @click="setAllCash"><Icon name="coins" :size="14" /> Cash from sales ({{ matchedCount }})</button>
+          <button v-if="canBook" type="button" class="primary" :disabled="!readyCount || busy === 'book'" @click="bookAllReady"><Icon name="send" :size="14" /> Book all ready{{ readyCount ? ` (${readyCount})` : '' }}</button>
           <button type="button" class="danger" @click="reset">Start fresh</button>
         </div>
       </div>
@@ -360,8 +361,8 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
           <div class="mactions">
             <button type="button" class="quiet" @click="monthReport(m.key, 'payments')">PN_{{ m.key }}_P.pdf</button>
             <button type="button" class="quiet" @click="monthReport(m.key, 'fees')">PN_{{ m.key }}_F.pdf</button>
-            <a v-if="m.feesBooked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${m.feesBooked.voucherId}`" target="_blank" rel="noopener">Fees booked ✓</a>
-            <button v-else-if="canBook && m.fee > 0" type="button" @click="bookFees(m.key)">⇪ Book fees</button>
+            <a v-if="m.feesBooked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${m.feesBooked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Fees booked</a>
+            <button v-else-if="canBook && m.fee > 0" type="button" @click="bookFees(m.key)"><Icon name="send" :size="14" /> Book fees</button>
           </div>
         </header>
         <ClusterCard v-for="c in m.list" :key="c.uid" :cluster="c" @book="book" />
@@ -399,9 +400,10 @@ h1 { margin: 0; font-size: 1.35rem; }
 .bad { color: var(--zfy-danger, #c6512f); }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .pills, .bulk { display: flex; gap: .4rem; flex-wrap: wrap; }
+.bulk button, .mactions button { display: inline-flex; align-items: center; gap: .35rem; }
 .pill { min-height: 2rem; padding: .25rem .8rem; border-radius: 999px; font-size: .8rem; }
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
-.pill.good { display: inline-flex; align-items: center; text-decoration: none; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border: 1px solid transparent; }
+.pill.good { display: inline-flex; align-items: center; gap: .3rem; text-decoration: none; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border: 1px solid transparent; }
 .month { display: flex; flex-direction: column; gap: .5rem; }
 .mhead { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .4rem 0; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .mtitle { font-weight: 700; }

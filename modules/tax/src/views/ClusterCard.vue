@@ -7,6 +7,7 @@ import { clusterPdf, download } from '../engine/pdf';
 import { api } from '../api';
 import { bookings, clusters, events, saveWork, status } from '../state';
 import { sdk } from '../runtime';
+import { Icon } from '@zollify/ui';
 
 const props = defineProps<{ cluster: Cluster }>();
 const emit = defineEmits<{ book: [uid: string] }>();
@@ -148,22 +149,22 @@ function pdf(mode: 'payments' | 'fees'): void {
   <article :class="['cluster', { open, editing, booked: booked }]">
     <header class="head" @click="open = !open">
       <div class="title">
-        <span v-if="booked" class="ready booked" title="Booked to Lexware">⇪</span>
-        <span v-else-if="isReady" class="ready" title="Ready to book">✓</span>
+        <span v-if="booked" class="ready booked" title="Booked to Lexware"><Icon name="send" :size="12" /></span>
+        <span v-else-if="isReady" class="ready" title="Ready to book"><Icon name="check" :size="12" /></span>
         <span class="cid">{{ c.clusterID }}</span>
         <span class="range">{{ dateRange }}</span>
         <span v-if="c.customName" class="name">{{ c.customName }}</span>
         <span v-if="c.isOnlineCluster" class="badge online">Online</span>
         <span v-for="d in c.devices ?? [c.device]" v-else :key="d" :class="['badge', sources[0] ?? 'mypos']">{{ d }}</span>
-        <span v-if="ambiguous.length > 1" class="badge warn" :title="ambiguous.map((e) => e.name).join(', ')">⚠ {{ ambiguous.length }} events</span>
-        <span v-if="manual.length" class="badge warn">✋ {{ manual.length }} manual</span>
+        <span v-if="ambiguous.length > 1" class="badge warn" :title="ambiguous.map((e) => e.name).join(', ')"><Icon name="alert-triangle" :size="12" /> {{ ambiguous.length }} events</span>
+        <span v-if="manual.length" class="badge warn"><Icon name="hand" :size="12" /> {{ manual.length }} manual</span>
       </div>
       <div class="meta">
         <span class="stat"><small>Revenue{{ c.cashAmount ? ' +cash' : '' }}</small><strong class="good">{{ fmt(revenue) }}</strong></span>
         <span class="stat"><small>Fees</small><strong class="bad">−{{ fmt(c.totalFee) }}</strong></span>
         <span class="stat"><small>Net</small><strong>{{ fmt(net) }}</strong></span>
         <span class="stat"><small>Txns</small><strong>{{ c.payments.length }}</strong></span>
-        <span class="chev" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
+        <Icon class="chev" :name="open ? 'chevron-down' : 'chevron-right'" :size="14" />
       </div>
     </header>
 
@@ -220,7 +221,7 @@ function pdf(mode: 'payments' | 'fees'): void {
           </div>
         </template>
         <div v-else-if="c.manualOnline && !sources.includes('shopify')" class="row">
-          <button type="button" @click="apply(eng.revertOnline(clusters, c.uid))">↩ Revert to POS cluster</button>
+          <button type="button" @click="apply(eng.revertOnline(clusters, c.uid))"><Icon name="undo" :size="14" /> Revert to POS cluster</button>
         </div>
 
         <p class="eyebrow">Merge with another cluster</p>
@@ -279,18 +280,18 @@ function pdf(mode: 'payments' | 'fees'): void {
         <div class="row">
           <button type="button" :disabled="busy === 'verify'" @click="verify">{{ busy === 'verify' ? 'Checking…' : 'Verify vs myPOS' }}</button>
           <span v-if="c.verify && 'error' in c.verify" class="pill bad">verify failed: {{ c.verify.error }}</span>
-          <span v-else-if="c.verify?.ok" class="pill good">✓ myPOS matches ({{ c.verify.mode }})</span>
+          <span v-else-if="c.verify?.ok" class="pill good"><Icon name="check" :size="12" /> myPOS matches ({{ c.verify.mode }})</span>
           <span v-else-if="c.verify" class="pill warn">Δ {{ fmt(c.verify.diff) }} vs myPOS ({{ c.verify.mode }})</span>
-          <button v-if="c.matchedEvent" type="button" :disabled="busy === 'cash'" @click="loadCash">⬇ Cash from sales</button>
-          <span v-if="c.cashLoaded" class="pill good">💶 {{ fmt(c.cashAmount) }}</span>
+          <button v-if="c.matchedEvent" type="button" :disabled="busy === 'cash'" @click="loadCash"><Icon name="coins" :size="14" /> Cash from sales</button>
+          <span v-if="c.cashLoaded" class="pill good"><Icon name="banknote" :size="12" /> {{ fmt(c.cashAmount) }}</span>
           <template v-if="canBook">
-            <a v-if="booked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${booked.voucherId}`" target="_blank" rel="noopener">Booked ✓ — view</a>
-            <button v-else type="button" class="primary" @click="emit('book', c.uid)">⇪ Book revenue to Lexware</button>
+            <a v-if="booked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${booked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Booked — view <Icon name="external-link" :size="12" /></a>
+            <button v-else type="button" class="primary" @click="emit('book', c.uid)"><Icon name="send" :size="14" /> Book revenue to Lexware</button>
           </template>
         </div>
       </div>
 
-      <button type="button" class="quiet toggle" @click="showTxns = !showTxns">{{ showTxns ? 'Hide transactions ▴' : 'Show transactions ▾' }}</button>
+      <button type="button" class="quiet toggle" @click="showTxns = !showTxns">{{ showTxns ? 'Hide transactions' : 'Show transactions' }} <Icon :name="showTxns ? 'chevron-up' : 'chevron-down'" :size="14" /></button>
       <div v-if="showTxns" class="table-scroll">
         <table>
           <thead><tr><th>Date/Time</th><th>Type</th><th class="num">Amount</th><th>Card / order</th><th></th></tr></thead>
@@ -305,7 +306,7 @@ function pdf(mode: 'payments' | 'fees'): void {
               </td>
               <td :class="['num', t.type === 'Payment' ? 'good' : 'bad']">{{ t.type === 'Payment' ? '+' : '−' }}{{ fmt(Math.abs(t.amount)) }}</td>
               <td>{{ t.source === 'shopify' ? t.orderNum || t.ref : t.card || '–' }}</td>
-              <td><button type="button" class="quiet x" :aria-label="`Remove transaction ${t.ref}`" @click="removeTxn(t.id)">✕</button></td>
+              <td><button type="button" class="quiet x" :aria-label="`Remove transaction ${t.ref}`" @click="removeTxn(t.id)"><Icon name="x" :size="14" /></button></td>
             </tr>
           </tbody>
         </table>
@@ -359,7 +360,9 @@ function pdf(mode: 'payments' | 'fees'): void {
 .box small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .box.cash { border-color: rgba(120,80,200,.4); }
 .acct { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .8rem; display: flex; flex-direction: column; gap: .5rem; }
-.pill { font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; border: 1px solid var(--zfy-line, #d6dde4); text-decoration: none; }
+.pill { display: inline-flex; align-items: center; gap: .3rem; font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; border: 1px solid var(--zfy-line, #d6dde4); text-decoration: none; }
+.badge { display: inline-flex; align-items: center; gap: .25rem; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; }
 .pill.good { color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-color: transparent; }
 .pill.bad { color: var(--zfy-danger, #c6512f); }
 .pill.warn { color: var(--zfy-warning-ink, #8a5a1e); }

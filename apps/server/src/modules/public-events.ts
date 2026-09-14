@@ -157,7 +157,7 @@ header.hero{padding:56px 0 28px;text-align:center}
 .hero .org{font-size:.8rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent-ink);font-weight:700}
 .hero h1{font-size:2.2rem;font-weight:800;letter-spacing:-.02em;margin:8px 0 14px;text-wrap:balance}
 .sub-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center}
-.btn{display:inline-block;background:var(--accent);color:var(--on-accent);text-decoration:none;font-weight:700;font-size:.85rem;padding:10px 18px;border-radius:10px}
+.btn{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--on-accent);text-decoration:none;font-weight:700;font-size:.85rem;padding:10px 18px;border-radius:10px}
 .feedurl{font-size:.72rem;color:var(--muted);word-break:break-all}
 h2.sec{font-size:1.05rem;font-weight:700;margin:36px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
 .grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
@@ -204,7 +204,7 @@ function renderPage(site: Site): string {
   <div class="org">${h(site.org)}</div>
   <h1>${h(site.config.tagline)}</h1>
   <div class="sub-row">
-    <a class="btn" href="${h(webcal)}">＋ Subscribe (calendar)</a>
+    <a class="btn" href="${h(webcal)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg> Subscribe (calendar)</a>
     <span class="feedurl">or add by URL: ${h(icsUrl)}</span>
   </div>
 </header>

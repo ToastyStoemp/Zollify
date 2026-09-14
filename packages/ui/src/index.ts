@@ -18,3 +18,5 @@ export function token(name: string, fallback?: string): string {
   const ref = `var(${UI_TOKEN_PREFIX}${name}`;
   return fallback ? `${ref}, ${fallback})` : `${ref})`;
 }
+
+export { Icon, ICON_PATHS } from './icon';

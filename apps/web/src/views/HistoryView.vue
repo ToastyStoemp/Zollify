@@ -12,6 +12,7 @@ import {
   totalsFor,
   visibleEvents,
 } from '@zollify/platform';
+import { Icon } from '@zollify/ui';
 
 const account = currentAccount;
 const scope = ref<string>('all');
@@ -118,7 +119,7 @@ async function revert(id: string, total: number, currency: string): Promise<void
     <ul v-else class="txs">
       <li v-for="tx in filtered" :key="tx.id" :class="{ reverted: tx.revertedAt }">
         <button type="button" class="row" :aria-expanded="expanded.has(tx.id)" @click="toggle(tx.id)">
-          <span class="chev" aria-hidden="true">{{ expanded.has(tx.id) ? '▾' : '▸' }}</span>
+          <Icon class="chev" :name="expanded.has(tx.id) ? 'chevron-down' : 'chevron-right'" :size="14" />
           <span class="when">{{ when(tx.timestamp) }}</span>
           <span class="event">{{ eventName(tx.eventId) }}</span>
           <span class="method">{{ tx.method }}</span>

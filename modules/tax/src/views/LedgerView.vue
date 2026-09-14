@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import { api, type Expense, type InvoiceScan, type PnlRow } from '../api';
 import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
+import { Icon } from '@zollify/ui';
 
 /**
  * Ledger: per-event profit and loss. Revenue comes from the till; costs —
@@ -166,7 +167,7 @@ async function openInvoice(e: Expense): Promise<void> {
   <section class="ledger">
     <header class="top">
       <div>
-        <button v-if="current" type="button" class="quiet back" @click="back">← All events</button>
+        <button v-if="current" type="button" class="quiet back" @click="back"><Icon name="arrow-left" :size="14" /> All events</button>
         <h1>{{ current ? current.name : 'Ledger' }}</h1>
         <p class="lede">
           <template v-if="current">{{ current.country }}{{ current.start ? ` · ${current.start}` : '' }} — revenue from the till against the costs of doing the event.</template>
@@ -217,7 +218,7 @@ async function openInvoice(e: Expense): Promise<void> {
           <h2>{{ editingId ? 'Edit expense' : 'Add an expense' }}</h2>
           <label v-if="canScan && !editingId" class="scan">
             <input type="file" accept="application/pdf" @change="scanInvoice(($event.target as HTMLInputElement).files?.[0])" />
-            <span>{{ busy === 'scan' ? 'Reading…' : '✨ Scan an invoice PDF' }}</span>
+            <Icon name="scan" :size="14" /><span>{{ busy === 'scan' ? 'Reading…' : 'Scan an invoice PDF' }}</span>
           </label>
         </div>
         <p v-if="scan" class="hint">
@@ -272,7 +273,7 @@ async function openInvoice(e: Expense): Promise<void> {
 .ledger { display: flex; flex-direction: column; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: 1.05rem; }
-.back { margin-bottom: .3rem; padding-left: .3rem; }
+.back { display: inline-flex; align-items: center; gap: .3rem; margin-bottom: .3rem; padding-left: .3rem; }
 .lede, .hint, .empty { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; max-width: 64ch; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .6rem; flex-wrap: wrap; }
@@ -296,7 +297,7 @@ tr.row:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
 .grid .wide { grid-column: 1 / -1; }
 .actions, .rowactions { display: flex; gap: .4rem; }
-.scan, .attach { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; cursor: pointer; font-size: .875rem; }
+.scan, .attach { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; padding: .45rem .95rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; cursor: pointer; font-size: .875rem; }
 .attach { min-height: 2rem; padding: .2rem .6rem; font-size: .8rem; }
 .scan input, .attach input { display: none; }
 .link { color: var(--zfy-accent-ink, #0a5a4a); min-height: 2rem; padding: .2rem .5rem; text-decoration: underline; }

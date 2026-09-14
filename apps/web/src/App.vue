@@ -13,7 +13,7 @@ import {
 } from '@zollify/platform';
 import { contributions, loader } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
-import NavIcon from './components/NavIcon.vue';
+import { Icon } from '@zollify/ui';
 
 const account = currentAccount;
 const route = useRoute();
@@ -112,11 +112,11 @@ async function leave(): Promise<void> {
       <div class="brand">Zollify<span>.</span></div>
 
       <nav aria-label="Main">
-        <router-link :to="{ name: 'home' }" class="item top"><NavIcon name="home" /><span>Home</span></router-link>
+        <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
 
         <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
           <router-link :to="{ name: sec.head.routeName }" class="item top" :class="{ 'router-link-active': inSection(sec) && sec.head.routeName !== route.name }">
-            <NavIcon :name="sec.icon" /><span>{{ sec.head.label }}</span>
+            <Icon :name="sec.icon" /><span>{{ sec.head.label }}</span>
           </router-link>
           <div v-if="sec.children.length && inSection(sec)" class="children">
             <router-link v-for="item in sec.children" :key="item.routeName" :to="{ name: item.routeName }" class="item sub">
@@ -125,7 +125,7 @@ async function leave(): Promise<void> {
           </div>
         </div>
 
-        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top spaced"><NavIcon name="puzzle" /><span>Modules</span></router-link>
+        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top spaced"><Icon name="puzzle" /><span>Modules</span></router-link>
       </nav>
 
       <div class="tail">
@@ -140,7 +140,7 @@ async function leave(): Promise<void> {
           <span>{{ syncLabel }}</span>
         </button>
 
-        <router-link :to="{ name: 'settings' }" class="item top"><NavIcon name="settings" /><span>Settings</span></router-link>
+        <router-link :to="{ name: 'settings' }" class="item top"><Icon name="settings" /><span>Settings</span></router-link>
 
         <footer class="who">
           <div class="name">{{ account.accountName }}</div>
@@ -181,8 +181,8 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; font-size: .9rem; }
 .item:hover { background: var(--zfy-surface-2); }
 .item.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
-.item.router-link-active .nav-icon { color: var(--zfy-accent); }
-.item.top .nav-icon { color: var(--zfy-muted); }
+.item.router-link-active .zfy-icon { color: var(--zfy-accent); }
+.item.top .zfy-icon { color: var(--zfy-muted); }
 .item.spaced { margin-top: .6rem; }
 .section { display: flex; flex-direction: column; gap: .1rem; }
 /* The open section's own row stays quiet when a child is the page: one accent at a time. */

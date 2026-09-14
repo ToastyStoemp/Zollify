@@ -79,7 +79,6 @@ const sections = computed<Section[]>(() => {
   });
 });
 
-const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 /** Account-level module pages (the ZollTool importer, …) sit with Modules and Settings, under the rule. */
 const accountNav = computed(() => allNav.value.filter((e) => e.group === 'account'));
 
@@ -139,32 +138,36 @@ async function leave(): Promise<void> {
           </div>
         </div>
 
-        <hr class="rule" />
-        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top"><Icon name="puzzle" /><span>Modules</span></router-link>
-        <router-link v-for="item in accountNav" :key="item.routeName" :to="{ name: item.routeName }" class="item top"><Icon :name="item.icon || 'puzzle'" /><span>{{ item.label }}</span></router-link>
-        <router-link :to="{ name: 'settings' }" class="item top"><Icon name="settings" /><span>Settings</span></router-link>
+        <template v-if="accountNav.length">
+          <hr class="rule" />
+          <router-link v-for="item in accountNav" :key="item.routeName" :to="{ name: item.routeName }" class="item top"><Icon :name="item.icon || 'puzzle'" /><span>{{ item.label }}</span></router-link>
+        </template>
 
-        <footer class="who">
-          <div class="name">{{ account.accountName }}</div>
-          <div class="role">{{ account.email }} · {{ account.role }}</div>
-          <button type="button" class="quiet out" @click="leave">Sign out</button>
-          <div class="build">build {{ build }}</div>
+        <footer class="tail">
+          <div class="row">
+            <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span></router-link>
+            <button
+              type="button"
+              class="quiet sync"
+              :class="syncState"
+              :disabled="syncState === 'syncing'"
+              :title="syncLabel"
+              :aria-label="`Sync now. ${syncLabel}`"
+              @click="syncNow()"
+            >
+              <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="who">
+            <div class="name">{{ account.accountName }}</div>
+            <div class="role">{{ account.email }} · {{ account.role }}</div>
+            <button type="button" class="quiet out" @click="leave">Sign out</button>
+            <div class="build">build {{ build }}</div>
+          </div>
         </footer>
       </nav>
 
-      <div class="tail">
-        <button
-          type="button"
-          class="sync"
-          :disabled="syncState === 'syncing'"
-          :aria-label="`Sync now. ${syncLabel}`"
-          @click="syncNow()"
-        >
-          <span class="dot" :class="syncState" aria-hidden="true"></span>
-          <span>{{ syncLabel }}</span>
-        </button>
-        <button type="button" class="quiet burger" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /></button>
-      </div>
+      <button type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
     </aside>
 
     <main class="content">
@@ -207,6 +210,7 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item.top .zfy-icon { color: var(--zfy-muted); }
 .rule { border: 0; border-top: 1px solid var(--zfy-line); margin: .6rem .3rem; }
 .burger, .scrim { display: none; }
+.burger .dot { top: .2rem; right: .2rem; }
 .section { display: flex; flex-direction: column; gap: .1rem; }
 /* The open section's own row stays quiet when a child is the page: one accent at a time. */
 .section.open > .item.top:not(.router-link-exact-active) { background: transparent; color: inherit; font-weight: 600; }
@@ -214,14 +218,19 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item.sub { margin-left: 1.55rem; padding: .35rem .6rem .35rem .95rem; font-size: .85rem; color: var(--zfy-muted); border-left: 2px solid var(--zfy-line); border-radius: 0 8px 8px 0; }
 .item.sub:hover { color: var(--zfy-ink); }
 .item.sub.router-link-active { color: var(--zfy-accent-ink); border-left-color: var(--zfy-accent); background: transparent; }
-.tail { display: flex; flex-direction: column; gap: .75rem; }
+.tail { margin-top: auto; display: flex; flex-direction: column; gap: .5rem; padding-top: .75rem; }
 nav { flex: 1; }
-nav .who { margin-top: auto; padding-top: .75rem; }
-.sync { display: flex; align-items: center; gap: .45rem; font-size: .8rem; justify-content: flex-start; }
-.sync .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-accent); flex: none; }
-.sync .dot.offline { background: var(--zfy-muted); }
-.sync .dot.error { background: var(--zfy-danger); }
-.sync .dot.syncing { background: var(--zfy-warning); }
+.row { display: flex; align-items: center; gap: .25rem; }
+.grow { flex: 1; }
+/* Sync is an icon with a status dot; the words live in its tooltip and label. */
+.sync, .burger { position: relative; padding: .4rem .5rem; min-height: 0; }
+.sync .zfy-icon { color: var(--zfy-muted); }
+.sync.syncing .zfy-icon { animation: spin 1s linear infinite; }
+.dot { position: absolute; top: .3rem; right: .3rem; width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-accent); border: 1.5px solid var(--zfy-surface); }
+.offline .dot { background: var(--zfy-muted); }
+.error .dot { background: var(--zfy-danger); }
+.syncing .dot { background: var(--zfy-warning); }
+@keyframes spin { to { transform: rotate(360deg); } }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
@@ -242,9 +251,7 @@ nav .who { margin-top: auto; padding-top: .75rem; }
     border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 7;
   }
   .brand { font-size: 1.1rem; }
-  .tail { margin: 0 0 0 auto; flex-direction: row; align-items: center; gap: .5rem; }
-  .sync { min-height: 2rem; padding: .25rem .6rem; }
-  .burger { display: inline-flex; min-height: 2rem; padding: .25rem .5rem; }
+  .burger { display: inline-flex; margin-left: auto; min-height: 2rem; padding: .25rem .5rem; }
   .sidebar nav {
     display: none; position: fixed; top: 3.1rem; left: 0; bottom: 0; width: min(18rem, 85vw);
     padding: .75rem; background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);

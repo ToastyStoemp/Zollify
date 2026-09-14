@@ -49,6 +49,13 @@ const corePanels: Panel[] = [
     component: () => import('./TeamSettings.vue'),
   },
   {
+    id: 'core.modules',
+    label: 'Modules',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./ModulesView.vue'),
+  },
+  {
     id: 'core.admin',
     label: 'Server admin',
     group: 'Core',

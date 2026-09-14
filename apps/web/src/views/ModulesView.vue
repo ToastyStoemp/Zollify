@@ -77,7 +77,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
 <template>
   <section class="modules">
     <header>
-      <h1>Modules</h1>
+      <h2>Modules</h2>
       <button type="button" :disabled="busy !== null" @click="reloadStore">
         {{ busy === 'reload' ? 'Rescanning…' : 'Rescan store' }}
       </button>
@@ -110,7 +110,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
 <style scoped>
 .modules { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-h1 { margin: 0; font-size: 1.35rem; }
+h2 { margin: 0; font-size: 1.05rem; }
 .lede, .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }

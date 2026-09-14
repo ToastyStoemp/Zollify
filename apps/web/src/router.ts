@@ -24,7 +24,7 @@ export const router: Router = createRouter({
     { path: '/display', name: 'display', component: () => import('./views/DisplayView.vue'), meta: { bare: true } },
     { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue'), meta: { minRole: 'admin' } },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
-    { path: '/modules', name: 'modules', component: () => import('./views/ModulesView.vue'), meta: { minRole: 'admin' } },
+    { path: '/modules', redirect: { name: 'settings', query: { panel: 'core.modules' } } },
     { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('./views/NotFoundView.vue') },
   ],
 });

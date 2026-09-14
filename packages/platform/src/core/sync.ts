@@ -9,6 +9,7 @@ import type {
   Transaction,
   DiscountRule,
   InventoryItem,
+  ProductMerge,
 } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -18,6 +19,7 @@ import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './ou
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
+import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
 import { base64ToBlob } from './images';
@@ -206,6 +208,11 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       }
 
       await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
+      return 1;
+    }
+    case 'product.merge': {
+      // Append-only; the rewrite is idempotent, so a replayed op changes nothing.
+      await materializeMerge(db, op.payload as ProductMerge);
       return 1;
     }
     case 'image.meta': {

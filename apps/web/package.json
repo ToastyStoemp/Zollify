@@ -16,6 +16,7 @@
     "@zollify/platform": "*",
     "@zollify/pos": "*",
     "@zollify/price-cards": "*",
+    "@zollify/costs": "*",
     "@zollify/sdk": "*",
     "@zollify/shopify-sync": "*",
     "@zollify/public-events": "*",

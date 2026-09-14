@@ -115,4 +115,5 @@ export {
   type InventoryRow,
 } from './inventory';
 export * from './exchange-rate';
+export { mergeProducts, materializeMerge } from './merge';
 export { startRealtime, stopRealtime, sendDisplayCart, displayCarts, realtimeConnected, type DisplayCartSnapshot } from './realtime';

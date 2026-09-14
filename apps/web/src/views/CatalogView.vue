@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
-import type { Product, Variant } from '@zollify/shared';
+import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, typeColor } from '@zollify/ui';
 import {
@@ -10,6 +10,7 @@ import {
   currentAccount,
   deleteProduct,
   freeFor,
+  mergeProducts,
   onHandFor,
   saveProductImage,
   setOnHand,
@@ -61,6 +62,59 @@ function exportRestockCsv(): void {
   a.download = `restock_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ── Merge: fold plain products into one product with a variant each ─────────
+// Only variant-less products qualify: each becomes one variant of the merged
+// product, and its sales history re-attaches to that variant.
+const merging = ref(false);
+const mergeSel = ref<Set<string>>(new Set());
+const mergePrimary = ref('');
+const mergeTitle = ref('');
+const mergeNames = ref<Record<string, string>>({});
+const mergeCandidates = computed(() => allProducts.value.filter((p) => p.variants.length === 0));
+const mergeSelected = computed(() => mergeCandidates.value.filter((p) => mergeSel.value.has(p.id)));
+function openMerge(): void {
+  mergeSel.value = new Set();
+  mergePrimary.value = '';
+  mergeTitle.value = '';
+  mergeNames.value = {};
+  merging.value = true;
+}
+function toggleMerge(pid: string): void {
+  const s = new Set(mergeSel.value);
+  if (s.has(pid)) s.delete(pid);
+  else s.add(pid);
+  mergeSel.value = s;
+  const sel = mergeSelected.value;
+  if (!mergePrimary.value || !s.has(mergePrimary.value)) mergePrimary.value = sel[0]?.id ?? '';
+  const primary = sel.find((p) => p.id === mergePrimary.value);
+  if (!mergeTitle.value.trim() && primary) mergeTitle.value = primary.title;
+  for (const p of sel) if (!(p.id in mergeNames.value)) mergeNames.value[p.id] = p.title || '(untitled)';
+}
+async function runMerge(): Promise<void> {
+  const sel = mergeSelected.value;
+  if (sel.length < 2) return;
+  const primary = sel.find((p) => p.id === mergePrimary.value) ?? sel[0]!;
+  const title = mergeTitle.value.trim() || primary.title;
+  const ok = await shellConfirm(`Fold ${sel.length} products into "${title}", one variant each? Their sales history moves with them. This cannot be undone.`, 'Merge products?');
+  if (!ok) return;
+  const variants: Variant[] = [];
+  const sources: MergeSource[] = [];
+  for (const p of sel) {
+    const vid = crypto.randomUUID();
+    const label = (mergeNames.value[p.id] || p.title || '(untitled)').trim();
+    variants.push({ id: vid, name: label, sku: p.sku, price: p.price, cost: p.cost, weightG: p.weightG, imageId: p.imageId });
+    sources.push({ fromKey: p.id, toPid: primary.id, toVid: vid, title, variantLabel: label });
+  }
+  const merged: Product = { ...primary, title, variants, updatedAt: Date.now() };
+  const merge: ProductMerge = { id: crypto.randomUUID(), intoId: primary.id, sources, updatedAt: Date.now() };
+  try {
+    await mergeProducts(merged, merge, sel.filter((p) => p.id !== primary.id).map((p) => p.id));
+    merging.value = false;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not merge those products.';
+  }
 }
 
 // ── Reorder: the global sortOrder drives the till grid ──────────────────────
@@ -288,6 +342,7 @@ async function remove(product: Product): Promise<void> {
       <label v-if="lowOnly && activeEventId" class="inline thr">≤ <input v-model="lowThreshold" type="number" min="0" inputmode="numeric" aria-label="Threshold" /> left</label>
       <button v-if="lowOnly && activeEventId" type="button" class="quiet" :disabled="!filtered.length" @click="exportRestockCsv"><Icon name="download" :size="14" /> Restock CSV</button>
       <span class="spacer"></span>
+      <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
       <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
     </div>
     <p v-if="!activeEventId" class="hint">No active event — open one under Events to see what is running low there.</p>
@@ -312,6 +367,38 @@ async function remove(product: Product): Promise<void> {
         </li>
       </ul>
     </section>
+
+    <ModalShell v-if="merging" title="Merge products" @close="merging = false">
+      <div class="form">
+        <p class="hint">Combine plain products into one product with a variant each — keychain designs into "Keychain", say. Sales history re-attaches to the variants; nothing is lost.</p>
+        <fieldset class="variants">
+          <legend>Products to fold together</legend>
+          <div class="picks">
+            <label v-for="p in mergeCandidates" :key="p.id" class="inline"><input type="checkbox" :checked="mergeSel.has(p.id)" @change="toggleMerge(p.id)" /> <span>{{ p.title || '(untitled)' }}</span><small v-if="p.type" :style="{ color: typeColor(p.type) }">{{ p.type }}</small></label>
+          </div>
+        </fieldset>
+        <template v-if="mergeSelected.length >= 2">
+          <div class="two">
+            <label>
+              <span>Keep as container</span>
+              <select v-model="mergePrimary"><option v-for="p in mergeSelected" :key="p.id" :value="p.id">{{ p.title || '(untitled)' }}</option></select>
+              <small>Its photo, SKU and type carry over; the others are removed.</small>
+            </label>
+            <label><span>Merged title</span><input v-model="mergeTitle" type="text" /></label>
+          </div>
+          <fieldset class="variants">
+            <legend>Variant names</legend>
+            <div v-for="p in mergeSelected" :key="p.id" class="mrow">
+              <span class="main"><span class="title">{{ p.title || '(untitled)' }}</span><small>{{ soldTotal(p.id, '') }} sold</small></span>
+              <input v-model="mergeNames[p.id]" type="text" aria-label="Variant name" />
+            </div>
+          </fieldset>
+        </template>
+      </div>
+      <template #footer>
+        <div class="actions"><span class="spacer"></span><button type="button" @click="merging = false">Cancel</button><button type="button" class="primary" :disabled="mergeSelected.length < 2" @click="runMerge">Merge {{ mergeSelected.length || '' }}</button></div>
+      </template>
+    </ModalShell>
 
     <ModalShell v-if="reordering" title="Reorder products" @close="reordering = false">
       <p class="hint">This order is used by the till and the catalogue. Changes sync to every device.</p>
@@ -426,6 +513,11 @@ h1 { margin: 0; font-size: 1.35rem; }
 .toolbar .spacer { flex: 1; }
 .toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2rem; }
 .thr input { width: 3.5rem; min-height: 1.8rem; padding: .1rem .4rem; }
+.picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .25rem; max-height: 14rem; overflow-y: auto; }
+.picks small { margin-left: .3rem; font-size: .7rem; }
+.mrow { display: grid; grid-template-columns: 1fr 12rem; gap: .5rem; align-items: center; }
+.mrow .main { display: flex; flex-direction: column; min-width: 0; }
+.mrow small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .reorder { list-style: none; margin: .6rem 0 0; padding: 0; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; overflow: hidden; }
 .reorder li { display: flex; align-items: center; gap: .6rem; padding: .4rem .6rem; }
 .reorder li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }

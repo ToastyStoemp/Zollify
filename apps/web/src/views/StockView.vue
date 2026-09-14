@@ -66,7 +66,8 @@ const totals = computed(() => ({
   onHand: stock.value.reduce((n, r) => n + r.onHand, 0),
   claimed: stock.value.reduce((n, r) => n + r.claimed, 0),
   sold: stock.value.reduce((n, r) => n + r.sold, 0),
-  free: stock.value.reduce((n, r) => n + r.free, 0),
+  free: stock.value.reduce((n, r) => n + (r.counted ? r.free : 0), 0),
+  uncounted: stock.value.filter((r) => !r.counted).length,
 }));
 
 const overCommitted = computed(() => stock.value.filter((r) => r.overCommitted));
@@ -176,6 +177,11 @@ async function unclaimAll(): Promise<void> {
         </li>
       </ul>
 
+      <p class="hint">
+        On hand is what you counted; Sold is what has gone since that count, so a fresh count resets it.
+        <template v-if="totals.uncounted"> {{ totals.uncounted }} item{{ totals.uncounted === 1 ? '' : 's' }} never counted — Free shows once you count them.</template>
+      </p>
+
       <p v-if="overCommitMessage" class="warn" role="alert">{{ overCommitMessage }}</p>
 
       <p v-if="!stock.length" class="empty">No products yet — add some in Catalog.</p>
@@ -186,7 +192,7 @@ async function unclaimAll(): Promise<void> {
             <th>Item</th>
             <th class="num">On hand</th>
             <th class="num">Claimed</th>
-            <th class="num">Sold</th>
+            <th class="num">Sold since count</th>
             <th class="num">Free</th>
           </tr>
         </thead>
@@ -211,8 +217,8 @@ async function unclaimAll(): Promise<void> {
               <span v-else>{{ row.onHand }}</span>
             </td>
             <td class="num">{{ row.claimed }}</td>
-            <td class="num">{{ row.sold }}</td>
-            <td class="num" :class="{ bad: row.free < 0 }">{{ row.free }}</td>
+            <td class="num">{{ row.counted ? row.sold : '—' }}</td>
+            <td class="num" :class="{ bad: row.counted && row.free < 0 }">{{ row.counted ? row.free : '—' }}</td>
           </tr>
           </template>
         </tbody>

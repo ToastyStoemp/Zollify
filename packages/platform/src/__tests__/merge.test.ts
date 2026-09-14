@@ -52,10 +52,11 @@ describe('merging products', () => {
   it('folds sources into variants, re-attaches sales and stock, and queues one merge op', async () => {
     await catalog.upsertProduct(product('cat', 'Keychain Cat'));
     await catalog.upsertProduct(product('dog', 'Keychain Dog'));
-    await tx.recordSale(sale('cat', 'Keychain Cat'));
-    await tx.recordSale(sale('dog', 'Keychain Dog'));
+    // Counted first: only sales after a count reduce it.
     await inventory.setOnHand('cat', '', 5);
     await inventory.setOnHand('dog', '', 7);
+    await tx.recordSale(sale('cat', 'Keychain Cat'));
+    await tx.recordSale(sale('dog', 'Keychain Dog'));
 
     await mergeProducts(
       { ...product('cat', 'Keychain'), variants: [{ id: 'v-cat', name: 'Cat', price: 10 }, { id: 'v-dog', name: 'Dog', price: 10 }] },

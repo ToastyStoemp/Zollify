@@ -53,7 +53,9 @@ export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise
     await db.inventory.delete([row.productId, row.variantId]);
     const key: [string, string] = [t.pid, t.vid ?? ''];
     const existing = await db.inventory.get(key);
-    await db.inventory.put({ productId: t.pid, variantId: t.vid ?? '', onHand: (existing?.onHand ?? 0) + row.onHand, updatedAt: now });
+    // Keep the earliest count time: "sold since count" must still see every
+    // sale either side of the merge made after its own count.
+    await db.inventory.put({ productId: t.pid, variantId: t.vid ?? '', onHand: (existing?.onHand ?? 0) + row.onHand, updatedAt: Math.min(existing?.updatedAt ?? row.updatedAt, row.updatedAt) });
   }
 
   for (const rule of await db.discounts.toArray()) {

@@ -16,10 +16,11 @@ import { getSalesEvent } from './sales-events';
  * claim sells from whatever is left unclaimed, which is the normal case for a
  * booth working one event at a time.
  *
- * Nothing here is a running balance. `onHand` is what was counted; what is
- * still sellable is derived from recorded sales every time it is asked for.
- * A counter decremented per sale drifts the moment a sale is reverted or
- * arrives late from another register, and recomputing cannot drift.
+ * Nothing here is a running balance. `onHand` is what was counted, and when;
+ * what is still sellable is that count minus the sales made *since* it — a
+ * count already reflects everything sold before it. Deriving from recorded
+ * sales every time means a reverted or late-arriving sale cannot drift the
+ * figure the way a decremented counter would.
  */
 
 const items = reactive(new Map<string, InventoryItem>());
@@ -63,6 +64,11 @@ export const inventoryLoaded = computed(() => loaded.value);
 
 export function onHandFor(productId: string, variantId: string | null = ''): number {
   return items.get(stockKey(productId, variantId))?.onHand ?? 0;
+}
+
+/** When the item was last counted; 0 when it never was, so every sale counts. */
+export function countedAt(productId: string, variantId: string | null = ''): number {
+  return items.get(stockKey(productId, variantId))?.updatedAt ?? 0;
 }
 
 export function claimFor(
@@ -184,15 +190,31 @@ export function soldAt(eventId: string, productId: string, variantId: string | n
 // screen asks for them once per row, and a row-by-row scan of every
 // transaction is what made pages crawl once the history grew.
 
+/** Like soldByEventAndKey, but only sales made after the item's last count — the ones the count does not already reflect. */
+const soldSinceCountByEventAndKey = computed(() => {
+  const byEvent = new Map<string, Map<string, number>>();
+  for (const tx of recentTransactions.value) {
+    if (tx.revertedAt) continue;
+    const forEvent = byEvent.get(tx.eventId) ?? new Map<string, number>();
+    for (const item of tx.items) {
+      const key = stockKey(item.pid, item.vid);
+      if (tx.timestamp < (items.get(key)?.updatedAt ?? 0)) continue;
+      forEvent.set(key, (forEvent.get(key) ?? 0) + item.qty);
+    }
+    byEvent.set(tx.eventId, forEvent);
+  }
+  return byEvent;
+});
+
 const soldTotalByKey = computed(() => {
   const out = new Map<string, number>();
-  for (const forEvent of soldByEventAndKey.value.values()) {
+  for (const forEvent of soldSinceCountByEventAndKey.value.values()) {
     for (const [key, qty] of forEvent) out.set(key, (out.get(key) ?? 0) + qty);
   }
   return out;
 });
 
-/** Every sale of this item, across every event. */
+/** Sales of this item since it was last counted, across every event. */
 export function soldTotal(productId: string, variantId: string | null = ''): number {
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
@@ -241,7 +263,7 @@ export function claimedTotal(productId: string, variantId: string | null = ''): 
  */
 const poolSoldByKey = computed(() => {
   const out = new Map<string, number>();
-  for (const [soldEventId, forEvent] of soldByEventAndKey.value) {
+  for (const [soldEventId, forEvent] of soldSinceCountByEventAndKey.value) {
     for (const [key, qty] of forEvent) {
       const [pid = '', vid = ''] = key.split(':');
       const claim = reservingClaimFor(soldEventId, pid, vid);
@@ -338,7 +360,10 @@ export interface InventoryRow {
   variantId: string;
   label: string;
   onHand: number;
+  /** False until someone has counted this item; until then Free means nothing. */
+  counted: boolean;
   claimed: number;
+  /** Sold since the last count. */
   sold: number;
   /** Unclaimed and unsold — what an event with no claim can draw on. */
   free: number;
@@ -361,18 +386,20 @@ export function inventoryRows(): InventoryRow[] {
       const claimed = claimedTotal(product.id, entry.id);
       const sold = soldTotal(product.id, entry.id);
       const free = freeFor(product.id, entry.id);
+      const counted = countedAt(product.id, entry.id) > 0;
 
       rows.push({
         productId: product.id,
         variantId: entry.id,
         label: entry.label,
         onHand,
+        counted,
         claimed,
         sold,
         free,
         // A negative pool is the honest signal: between claims and sales, more
         // has been committed than exists.
-        overCommitted: free < 0,
+        overCommitted: counted && free < 0,
       });
     }
   }

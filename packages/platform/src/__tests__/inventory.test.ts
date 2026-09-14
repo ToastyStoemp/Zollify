@@ -285,3 +285,22 @@ describe('a past event', () => {
     expect(inv.eventIsOver(undefined)).toBe(true);
   });
 });
+
+describe('a fresh count', () => {
+  it('already reflects earlier sales, so only later ones reduce it', async () => {
+    await inv.setOnHand(PRINT, '', 10);
+    await sell('ev-a', 4);
+    expect(inv.freeFor(PRINT, '')).toBe(6);
+
+    // Recount: the 4 sold are gone from the pile, the count says so.
+    await new Promise((r) => setTimeout(r, 2));
+    await inv.setOnHand(PRINT, '', 6);
+    expect(inv.soldTotal(PRINT, '')).toBe(0);
+    expect(inv.freeFor(PRINT, '')).toBe(6);
+
+    await new Promise((r) => setTimeout(r, 2));
+    await sell('ev-a', 1);
+    expect(inv.freeFor(PRINT, '')).toBe(5);
+    expect(inv.inventoryRows().find((r) => r.productId === PRINT)?.counted).toBe(true);
+  });
+});

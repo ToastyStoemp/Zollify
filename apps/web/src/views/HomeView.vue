@@ -98,11 +98,11 @@ function range(e: { dateStart?: string; dateEnd?: string }): string {
 const LOW = 3;
 const lowStock = computed(() =>
   inventoryRows()
-    .filter((r) => r.onHand > 0 && r.free <= LOW)
+    .filter((r) => r.counted && r.free <= LOW)
     .sort((a, b) => a.free - b.free)
     .slice(0, 6),
 );
-const uncounted = computed(() => inventoryRows().filter((r) => r.onHand === 0).length);
+const uncounted = computed(() => inventoryRows().filter((r) => !r.counted).length);
 const productCount = computed(() => allProducts.value.length);
 
 const syncLine = computed(() => {

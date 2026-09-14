@@ -19,13 +19,13 @@ export default defineModule({
 
   setup(sdk: Sdk) {
     setSdk(sdk);
-    sdk.routes.add({
-      path: '',
-      name: 'index',
-      title: 'Price cards',
-      component: () => import('./views/PriceCardsView.vue'),
-    });
-    sdk.nav.add({ routeName: 'index', group: 'stock', label: 'Price cards', icon: 'tag', order: 140 });
+    sdk.routes.addAll([
+      { path: '', name: 'index', title: 'Price sheet', component: () => import('./views/PriceSheetView.vue') },
+      { path: 'cards', name: 'cards', title: 'Price cards', component: () => import('./views/PriceCardsView.vue') },
+    ]);
+    sdk.nav.add({ routeName: 'index', group: 'stock', label: 'Price sheet', icon: 'tag', order: 140 });
+    sdk.nav.add({ routeName: 'cards', group: 'stock', label: 'Price cards', icon: 'tag', order: 141 });
+    sdk.settings.panel({ id: 'plugin', label: 'Photoshop plugin', minRole: 'admin', component: () => import('./views/PluginSettings.vue') });
     sdk.log.info('price-cards module ready');
   },
 

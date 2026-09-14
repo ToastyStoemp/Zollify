@@ -8,3 +8,4 @@ export * from './countries';
 export * from './cash';
 export * from './flags';
 export * from './public-events';
+export * from './price-rows';

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { BackupParseError, planImport, type ImportPlan } from '../import';
+import { BackupParseError, planImport, unpackZip, type ImportPlan } from '../import';
 import { sdk } from '../runtime';
 
 const plan = ref<ImportPlan | null>(null);
 const error = ref<string | null>(null);
 const running = ref(false);
-const done = ref<{ products: number; events: number; stock: number; inventory: number } | null>(null);
+const done = ref<{ products: number; events: number; stock: number; inventory: number; images: number } | null>(null);
+const progress = ref('');
 const fileName = ref('');
 
 /**
@@ -26,8 +27,15 @@ async function choose(event: Event): Promise<void> {
   fileName.value = file.name;
 
   try {
-    const text = await file.text();
-    plan.value = planImport(JSON.parse(text));
+    if (/\.zip$/i.test(file.name)) {
+      // The zip backup carries the photos beside the JSON. fflate is loaded on
+      // demand: the JSON-only path never pays for it.
+      const { unzipSync } = await import('fflate');
+      const { json, images } = unpackZip(unzipSync(new Uint8Array(await file.arrayBuffer())));
+      plan.value = planImport(json, images);
+    } else {
+      plan.value = planImport(JSON.parse(await file.text()));
+    }
   } catch (err) {
     plan.value = null;
     error.value =
@@ -65,12 +73,21 @@ async function run(): Promise<void> {
     for (const item of plan.value.inventory) {
       await data.inventory.setOnHand(item.productId, item.variantId, item.onHand);
     }
+    // Photos last, and one at a time: they are the bulk of the bytes, and a
+    // failure here leaves a complete catalogue that merely lacks pictures.
+    let images = 0;
+    for (const image of plan.value.images) {
+      progress.value = `Storing photo ${++images} of ${plan.value.images.length}…`;
+      await data.images.put(image);
+    }
+    progress.value = '';
 
     done.value = {
       products: plan.value.products.length,
       events: plan.value.events.length,
       stock: plan.value.eventStock.length,
       inventory: plan.value.inventory.length,
+      images,
     };
     sdk().ui.toast('Import finished. You can switch this module off now.', { kind: 'success' });
   } catch (err) {
@@ -85,13 +102,14 @@ async function run(): Promise<void> {
   <section class="import">
     <h1>Import from ZollTool</h1>
     <p class="lede">
-      Reads one ZollTool backup (version 2) into this account. Business data only — users, API keys
-      and integration settings are re-entered by hand.
+      Reads one ZollTool backup (version 2) into this account. Use the <strong>.zip</strong> backup
+      to bring product photos across; the .json alone has no photo bytes. Business data only — users,
+      API keys and integration settings are re-entered by hand.
     </p>
 
     <label class="picker">
       <span>Choose a backup file</span>
-      <input type="file" accept="application/json,.json" @change="choose" />
+      <input type="file" accept="application/json,.json,application/zip,.zip" @change="choose" />
     </label>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -105,6 +123,7 @@ async function run(): Promise<void> {
         <li><strong>{{ plan.events.length }}</strong> events</li>
         <li><strong>{{ plan.eventStock.length }}</strong> event claims</li>
         <li><strong>{{ plan.inventory.length }}</strong> opening stock counts</li>
+        <li><strong>{{ plan.images.length }}</strong> photos</li>
       </ul>
 
       <template v-if="plan.skipped.length">
@@ -121,14 +140,15 @@ async function run(): Promise<void> {
         <li v-for="(warning, i) in plan.warnings" :key="i">{{ warning }}</li>
       </ul>
 
-      <button type="button" :disabled="running" @click="run">
-        {{ running ? 'Importing…' : 'Run the import' }}
+      <button type="button" class="primary" :disabled="running" @click="run">
+        {{ running ? progress || 'Importing…' : 'Run the import' }}
       </button>
     </div>
 
     <p v-if="done" class="done" role="status">
-      Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims
-      and {{ done.inventory }} opening stock counts.
+      Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims,
+      {{ done.inventory }} opening stock counts and {{ done.images }} photos.
+      Photos sync to your other devices as thumbnails; the full-size copies stay on this one.
       Switch this module off in Modules — it has done its job.
     </p>
   </section>

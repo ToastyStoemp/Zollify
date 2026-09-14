@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BackupParseError, dropDeleted, planImport } from '../import';
+import { BackupParseError, dropDeleted, planImport, unpackZip } from '../import';
 
 function backup(over: Record<string, unknown> = {}) {
   return {
@@ -168,5 +168,50 @@ describe('planImport — what is deliberately left behind', () => {
 describe('dropDeleted', () => {
   it('keeps only live rows', () => {
     expect(dropDeleted([{ id: 'a' }, { id: 'b', deletedAt: 1 }])).toEqual([{ id: 'a' }]);
+  });
+});
+
+describe('photos', () => {
+  const png = new Uint8Array([137, 80, 78, 71]);
+
+  it('brings a photo across when its bytes are in the zip', () => {
+    const backup = {
+      version: 2, exportedAt: 'x', events: [], eventStock: [], transactions: [], discounts: [],
+      products: [product('p1', { imageId: 'img1' })],
+      images: [{ id: 'img1', productId: 'p1', updatedAt: 5 }],
+    };
+    const files = {
+      'backup.json': new TextEncoder().encode(JSON.stringify(backup)),
+      'images/img1.full': png,
+      'images/img1.thumb': png,
+    };
+    const { json, images } = unpackZip(files);
+    const plan = planImport(json, images);
+    expect(plan.images).toHaveLength(1);
+    expect(plan.images[0]).toMatchObject({ id: 'img1', productId: 'p1', updatedAt: 5 });
+    expect(plan.images[0]!.full.type).toBe('image/jpeg');
+    expect(plan.images[0]!.thumb.type).toBe('image/webp');
+    expect(plan.skipped.find((s) => s.what === 'Product images')).toBeUndefined();
+  });
+
+  it('skips metadata-only photos and says why', () => {
+    const plan = planImport(backup({ products: [product('p1')], images: [{ id: 'img1', productId: 'p1', updatedAt: 1 }] }));
+    expect(plan.images).toHaveLength(0);
+    expect(plan.skipped.find((s) => s.what === 'Product images')?.why).toMatch(/\.zip/);
+  });
+
+  it('drops a photo whose product was deleted', () => {
+    const backup2 = {
+      version: 2, exportedAt: 'x', events: [], eventStock: [], transactions: [], discounts: [],
+      products: [product('gone', { deletedAt: 9 })],
+      images: [{ id: 'img1', productId: 'gone', updatedAt: 5 }],
+    };
+    const files = { 'backup.json': new TextEncoder().encode(JSON.stringify(backup2)), 'images/img1.full': png, 'images/img1.thumb': png };
+    const { json, images } = unpackZip(files);
+    expect(planImport(json, images).images).toHaveLength(0);
+  });
+
+  it('refuses a zip with no backup inside', () => {
+    expect(() => unpackZip({ 'readme.txt': png })).toThrow(BackupParseError);
   });
 });

@@ -20,6 +20,7 @@ import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
 import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
+import { base64ToBlob } from './images';
 
 /**
  * Offline-first sync.
@@ -86,7 +87,7 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
 
   await db.transaction(
     'rw',
-    [db.products, db.events, db.eventStock, db.transactions, db.discounts, db.inventory],
+    [db.products, db.events, db.eventStock, db.transactions, db.discounts, db.inventory, db.images],
     async () => {
     for (const op of ops) {
       try {
@@ -207,34 +208,62 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       await db.eventStock.put({ ...incoming, variantId: incoming.variantId ?? '' });
       return 1;
     }
+    case 'image.meta': {
+      // Only the thumbnail travels. Until this device gets the full-size blob
+      // (it never will, unless a backup is restored here) the thumb stands in
+      // for it, which is what a second register's catalogue needs anyway.
+      const incoming = op.payload as { imageId: string; productId: string; updatedAt: number; thumbB64?: string };
+      if (!incoming.thumbB64) return 0;
+      const existing = await db.images.get(incoming.imageId);
+      if (existing && (existing.updatedAt ?? 0) >= (incoming.updatedAt ?? 0)) return 0;
+      const thumb = base64ToBlob(incoming.thumbB64, 'image/webp');
+      await db.images.put({ id: incoming.imageId, productId: incoming.productId, updatedAt: incoming.updatedAt, thumb, full: existing?.full ?? thumb });
+      return 1;
+    }
     default:
       // Unknown to this build — skip rather than fail the whole batch.
       return 0;
   }
 }
 
-async function push(): Promise<number> {
-  const ops = await unsyncedOps();
-  if (!ops.length) return 0;
+/** Well under the gateway's body limit, so a batch of image thumbnails still fits. */
+const PUSH_MAX_BYTES = 4 * 1024 * 1024;
 
-  const body = {
-    deviceId: await deviceId(),
-    deviceName: await deviceName(),
-    flavor: deviceFlavor(),
+/**
+ * Drains the outbox in batches bounded by op count and by bytes. Counting ops
+ * alone let a restore with a few hundred thumbnails build one request the
+ * server refused, after which nothing on the device ever synced again.
+ */
+async function push(): Promise<number> {
+  let accepted = 0;
+  const deviceInfo = { deviceId: await deviceId(), deviceName: await deviceName(), flavor: deviceFlavor() };
+  for (let round = 0; round < 50; round++) {
+    const pending = await unsyncedOps();
+    if (!pending.length) break;
+
     // Strip the local bookkeeping columns; the server validates against the
     // wire schema and would reject the extras.
-    ops: ops.map(({ seq: _seq, synced: _synced, ...wire }) => wire),
-  };
+    const batch: typeof pending = [];
+    let bytes = 0;
+    for (const op of pending) {
+      const size = JSON.stringify(op.payload).length + 200;
+      if (batch.length && bytes + size > PUSH_MAX_BYTES) break;
+      batch.push(op);
+      bytes += size;
+    }
 
-  const res = (await authFetch('/sync/push', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  })) as PushResponse;
+    const res = (await authFetch('/sync/push', {
+      method: 'POST',
+      body: JSON.stringify({ ...deviceInfo, ops: batch.map(({ seq: _seq, synced: _synced, ...wire }) => wire) }),
+    })) as PushResponse;
 
-  // Marked synced whether accepted or duplicate: a duplicate means the server
-  // already has it, which is exactly what we were trying to achieve.
-  await markSynced(ops.map((op) => op.seq!).filter((seq) => typeof seq === 'number'));
-  return res.accepted;
+    // Marked synced whether accepted or duplicate: a duplicate means the server
+    // already has it, which is exactly what we were trying to achieve.
+    await markSynced(batch.map((op) => op.seq!).filter((seq) => typeof seq === 'number'));
+    accepted += res.accepted;
+    if (batch.length === pending.length) break;
+  }
+  return accepted;
 }
 
 async function pull(): Promise<number> {

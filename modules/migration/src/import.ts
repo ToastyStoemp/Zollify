@@ -17,8 +17,23 @@ export interface ZollToolBackup {
   eventStock: EventStock[];
   transactions: Transaction[];
   discounts: DiscountRule[];
-  images?: { id: string; productId: string; updatedAt: number }[];
+  images?: { id: string; productId: string; updatedAt: number; fullB64?: string; thumbB64?: string }[];
 }
+
+/** A photo with both renditions in hand, ready to store under its original id. */
+export interface ImportImage {
+  id: string;
+  productId: string;
+  updatedAt: number;
+  full: Blob;
+  thumb: Blob;
+}
+
+/**
+ * Photo bytes found beside the JSON: `images/<id>.full` (JPEG) and
+ * `images/<id>.thumb` (WebP) inside a ZollTool .zip backup.
+ */
+export type ImageBlobs = Map<string, { full?: Blob; thumb?: Blob }>;
 
 export interface ImportPlan {
   events: SalesEvent[];
@@ -34,6 +49,8 @@ export interface ImportPlan {
    * rather than a figure to trust.
    */
   inventory: { productId: string; variantId: string; onHand: number; updatedAt: number }[];
+  /** Photos whose bytes were in the file, keyed to the products that reference them. */
+  images: ImportImage[];
   /** Rows the file contained but this importer does not bring across. */
   skipped: { what: string; count: number; why: string }[];
   warnings: string[];
@@ -61,7 +78,7 @@ function asArray<T>(value: unknown, what: string, warnings: string[]): T[] {
  * a live catalogue without seeing the counts is how someone discovers they
  * picked the wrong file after it has already run.
  */
-export function planImport(raw: unknown): ImportPlan {
+export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): ImportPlan {
   if (!isRecord(raw)) {
     throw new BackupParseError('That file is not a ZollTool backup.');
   }
@@ -116,12 +133,27 @@ export function planImport(raw: unknown): ImportPlan {
       why: 'Not modelled in Zollify yet — re-create them once discounts land.',
     });
   }
-  const images = asArray(raw.images, 'images', []);
-  if (images.length) {
+  // Photos come across when their bytes do: from the zip, or inline base64 in
+  // an older backup. Metadata alone is nothing to show, so it is skipped.
+  const imageMeta = asArray<NonNullable<ZollToolBackup['images']>[number]>(raw.images, 'images', warnings);
+  const images: ImportImage[] = [];
+  for (const img of imageMeta) {
+    if (typeof img?.id !== 'string' || typeof img?.productId !== 'string') continue;
+    const zip = imageBlobs.get(img.id);
+    let full = zip?.full;
+    let thumb = zip?.thumb;
+    if ((!full || !thumb) && img.fullB64 && img.thumbB64) {
+      full = base64ToBlob(img.fullB64, 'image/jpeg');
+      thumb = base64ToBlob(img.thumbB64, 'image/webp');
+    }
+    if (full && thumb) images.push({ id: img.id, productId: img.productId, updatedAt: Number(img.updatedAt) || Date.now(), full, thumb });
+  }
+  const withoutBytes = imageMeta.length - images.length;
+  if (withoutBytes > 0) {
     skipped.push({
       what: 'Product images',
-      count: images.length,
-      why: 'Image blobs are not in the JSON backup, only their metadata.',
+      count: withoutBytes,
+      why: 'Only listed in the JSON, with no photo bytes. Use the .zip backup to bring photos across.',
     });
   }
 
@@ -155,14 +187,51 @@ export function planImport(raw: unknown): ImportPlan {
     );
   }
 
+  const liveProductIds = new Set(liveProducts.map((p) => p.id));
   return {
     events: liveEvents,
     products: liveProducts,
     eventStock: claims,
     inventory: [...seeded.values()],
+    images: images.filter((i) => liveProductIds.has(i.productId)),
     skipped,
     warnings,
   };
+}
+
+function base64ToBlob(base64: string, type: string): Blob {
+  const bytes = atob(base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new Blob([arr], { type });
+}
+
+const ZIP_IMAGE_RE = /^images\/(.+)\.(full|thumb)$/;
+
+/**
+ * Splits a ZollTool .zip backup into its JSON and the photo bytes beside it.
+ * The JSON is parsed by the caller through planImport like any other backup.
+ */
+export function unpackZip(files: Record<string, Uint8Array>): { json: unknown; images: ImageBlobs } {
+  const jsonBytes = files['backup.json'];
+  if (!jsonBytes) throw new BackupParseError('That zip has no backup.json inside — it is not a ZollTool backup.');
+  const images: ImageBlobs = new Map();
+  for (const [name, bytes] of Object.entries(files)) {
+    const m = name.match(ZIP_IMAGE_RE);
+    if (!m) continue;
+    const entry = images.get(m[1]!) ?? {};
+    const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: m[2] === 'full' ? 'image/jpeg' : 'image/webp' });
+    if (m[2] === 'full') entry.full = blob;
+    else entry.thumb = blob;
+    images.set(m[1]!, entry);
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder().decode(jsonBytes));
+  } catch {
+    throw new BackupParseError("The backup.json inside the zip isn't valid JSON.");
+  }
+  return { json, images };
 }
 
 /**

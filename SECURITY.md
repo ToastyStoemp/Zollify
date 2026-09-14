@@ -174,12 +174,23 @@ toggle route.
   (`modules/customs/src/views/DocumentsView.vue`) rather than injected into the
   shell's DOM — so even self-generated HTML cannot reach the session.
 
-## 16. Restrict file uploads — Open
+## 16. Restrict file uploads — Done
 
-No upload route is implemented yet. When one is added (product images are the
-obvious first), it needs: an explicit allow-list of MIME types, a size cap below
-the 2 MB body limit, content-sniffing rather than trusting the declared type, a
-generated filename, and storage outside the served static root.
+Two upload paths exist, both authenticated and account-scoped:
+
+- **Ledger invoices** (`POST /api/m/tax/ledger/expenses/:id/invoice`, Tax
+  module): base64 in JSON, capped at 10 MB, stored as a BLOB in SQLite keyed by
+  account and expense — never on the served static root, never by a caller-
+  chosen filename. Served back as base64 JSON to the authenticated caller only.
+- **Product photos** never reach the server as files. The device re-encodes any
+  picked image to a bounded JPEG + WebP thumbnail; only the thumbnail (~20 KB)
+  travels, as an `image.meta` sync op, and it is stored as bytes, never
+  executed or served with a caller-chosen type.
+
+The gateway body limit is 32 MB — deliberately generous for a single-operator
+deployment (a backup restore pushes hundreds of thumbnails); the client splits
+pushes into batches under 4 MB. Authentication and the per-IP rate limit bound
+who can send that much, not the size itself.
 
 ## 17. Trim API responses — Partial
 

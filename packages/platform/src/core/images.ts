@@ -89,6 +89,19 @@ export async function saveProductImage(productId: string, file: Blob): Promise<s
   return rec.id;
 }
 
+/**
+ * Stores an already-processed image under a given id — a backup restore, where
+ * products already point at that id. Same op as a fresh photo, so the other
+ * devices receive the thumbnail the same way.
+ */
+export async function importProductImage(rec: ImageRec): Promise<void> {
+  await db().images.put(rec);
+  await queueOp({
+    type: 'image.meta',
+    payload: { imageId: rec.id, productId: rec.productId, updatedAt: rec.updatedAt, thumbB64: await blobToBase64(rec.thumb) },
+  });
+}
+
 export async function deleteImage(imageId: string): Promise<void> {
   await db().images.delete(imageId);
 }

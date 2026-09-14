@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
-  "zollify": { "moduleId": "migration", "entry": "./src/index.ts" },
+  "zollify": {
+    "moduleId": "migration",
+    "entry": "./src/index.ts"
+  },
   "scripts": {
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -12,7 +15,8 @@
   },
   "dependencies": {
     "@zollify/sdk": "*",
-    "@zollify/shared": "*"
+    "@zollify/shared": "*",
+    "fflate": "^0.8.2"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.0",

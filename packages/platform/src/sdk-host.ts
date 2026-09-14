@@ -24,7 +24,7 @@ import {
   upsertProduct,
 } from './core/catalog';
 import { getTransaction, recentTransactions, totalsFor } from './core/transactions';
-import { imageUrl } from './core/images';
+import { imageUrl, importProductImage } from './core/images';
 import {
   availabilityFor,
   clearClaim,
@@ -144,6 +144,7 @@ const coreData: import('@zollify/sdk').DataApi = {
   },
   images: {
     url: (imageId, kind) => imageUrl(imageId, kind ?? 'thumb'),
+    put: (image) => importProductImage(image),
   },
   transactions: {
     recent: () => [...recentTransactions.value],

@@ -37,7 +37,7 @@ modules/
   price-cards/    printable price tags from the catalogue
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
-  migration/      single-use ZollTool backup importer
+  migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
   server/         deployable gateway; mounts server module halves

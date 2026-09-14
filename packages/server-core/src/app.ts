@@ -84,7 +84,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       },
     },
     trustProxy: opts.trustProxy,
-    bodyLimit: 2 * 1024 * 1024,
+    // Generous on purpose: a backup restore pushes hundreds of image
+    // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
+    // authentication bound who can send this much, not the size itself.
+    bodyLimit: 32 * 1024 * 1024,
   });
 
   const db = openDb(opts.dataDir);

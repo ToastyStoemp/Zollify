@@ -297,6 +297,11 @@ export interface TransactionApi {
 export interface ImageApi {
   /** Object URL for an image, or null when it isn't on this device. */
   url(imageId: string | undefined, kind?: 'thumb' | 'full'): Promise<string | null>;
+  /**
+   * Stores an image under a known id, for restores where products already
+   * reference it. Both renditions are stored as given; nothing is re-encoded.
+   */
+  put(image: { id: string; productId: string; full: Blob; thumb: Blob; updatedAt: number }): Promise<void>;
 }
 
 export interface DataApi {

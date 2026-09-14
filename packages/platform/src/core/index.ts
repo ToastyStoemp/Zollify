@@ -85,6 +85,7 @@ export {
 export {
   processImageFile,
   saveProductImage,
+  importProductImage,
   deleteImage,
   imageUrl,
   blobToBase64,

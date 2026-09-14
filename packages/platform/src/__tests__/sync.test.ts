@@ -192,4 +192,32 @@ describe('sync', () => {
     // treat it as exceptional.
     expect(sync.syncState.value === 'error' || sync.syncState.value === 'offline').toBe(true);
   });
+
+  it('splits a push into byte-bounded batches so big payloads cannot wedge the outbox', async () => {
+    // Twelve ops of ~1 MB each: counted alone they are one batch of 12; by
+    // bytes they must go in several requests, each under the cap.
+    const big = 'x'.repeat(1_000_000);
+    for (let i = 0; i < 12; i++) await outbox.queueOp({ type: 'image.meta', payload: { imageId: `img${i}`, productId: 'p1', updatedAt: i, thumbB64: big } });
+
+    await sync.syncNow();
+
+    const pushes = calls.filter((c) => c.path === '/sync/push');
+    expect(pushes.length).toBeGreaterThan(1);
+    for (const p of pushes) expect(JSON.stringify(p.body).length).toBeLessThan(5 * 1024 * 1024);
+    expect(pushes.reduce((n, p) => n + (p.body as { ops: unknown[] }).ops.length, 0)).toBe(12);
+    expect(await outbox.unsyncedOps()).toHaveLength(0);
+  });
+
+  it('stores a pulled image thumbnail so a second device can show the photo', async () => {
+    const thumbB64 = btoa('webp-bytes');
+    pullResponses = [{ ops: [{ seq: 1, opId: 'op-image-000000001', deviceId: 'other', ts: 1, type: 'image.meta', payload: { imageId: 'img1', productId: 'p1', updatedAt: 5, thumbB64 } }], latestSeq: 1 }];
+
+    await sync.syncNow();
+
+    const rec = await openCoreDb(account.accountId).images.get('img1');
+    expect(rec?.productId).toBe('p1');
+    expect(rec?.thumb.type).toBe('image/webp');
+    // No full-size copy travels; the thumbnail stands in for it here.
+    expect(rec?.full).toBe(rec?.thumb);
+  });
 });

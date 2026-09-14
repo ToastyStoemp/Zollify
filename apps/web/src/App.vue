@@ -5,14 +5,11 @@ import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
   currentAccount,
   pendingCount,
-  signOut,
-  stopAutoSync,
-  stopRealtime,
   syncNow,
   syncState,
   toasts,
 } from '@zollify/platform';
-import { booted, contributions, loader } from './boot';
+import { booted, contributions } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import { Icon } from '@zollify/ui';
 
@@ -101,19 +98,6 @@ const syncLabel = computed(() => {
   return pendingCount.value ? `${pendingCount.value} to sync` : 'Synced';
 });
 
-/**
- * Everything in memory belongs to the account that just left, so the cleanest
- * teardown is a fresh boot. Modules are unloaded first so their teardown hooks
- * run while the SDK they were given is still valid.
- */
-async function leave(): Promise<void> {
-  stopAutoSync();
-  stopRealtime();
-  await loader.unloadAll();
-  await signOut();
-  window.location.hash = '#/login';
-  window.location.reload();
-}
 </script>
 
 <template>
@@ -161,7 +145,6 @@ async function leave(): Promise<void> {
           <div class="who">
             <div class="name">{{ account.accountName }}</div>
             <div class="role">{{ account.email }} · {{ account.role }}</div>
-            <button type="button" class="quiet out" @click="leave">Sign out</button>
             <div class="build">build {{ build }}</div>
           </div>
         </footer>
@@ -235,7 +218,6 @@ nav { flex: 1; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
-.out { align-self: flex-start; margin-top: .25rem; padding-left: .5rem; padding-right: .5rem; font-size: .8rem; }
 .content { padding: 1.5rem; min-width: 0; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
 .toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }

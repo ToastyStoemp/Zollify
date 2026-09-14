@@ -178,11 +178,10 @@ async function register(): Promise<void> {
 form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
 h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; }
 h1 span { color: var(--zfy-accent, #0e7c66); }
-.seg { display: flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
-.seg button { flex: 1; min-height: 1.9rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted, #5a6472); font-size: .85rem; }
-.seg button.on { background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow, rgba(20,26,34,.15)); }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .78rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
+.seg { display: flex; }
+.seg button { flex: 1; }
 </style>

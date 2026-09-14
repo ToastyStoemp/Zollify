@@ -79,10 +79,10 @@ input[type='file'] { border: 0; padding: 0; background: none; }
 button .zfy-icon { margin-right: .1rem; }
 
 /* Segmented switch — one choice out of a few, the same on every page. */
-.seg { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-surface-2); }
+.seg { display: inline-flex; flex-wrap: wrap; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-surface-2); }
 .seg button { min-height: 1.9rem; padding: .25rem .8rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted); font-size: .85rem; }
 .seg button:hover:not(:disabled) { color: var(--zfy-ink); background: transparent; }
-.seg button.active { background: var(--zfy-surface); color: var(--zfy-ink); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow); }
+.seg button.active, .seg button.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
 
 /* Data tables: cards on wide screens, and on a phone they scroll sideways
    inside .table-scroll instead of crushing every column. */

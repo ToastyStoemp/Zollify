@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, deviceId, shellConfirm, signOut } from '@zollify/platform';
+import { authFetch, currentAccount, deviceId, shellConfirm, signOut, stopAutoSync, stopRealtime } from '@zollify/platform';
+import { loader } from '../boot';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -137,6 +138,20 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+/**
+ * Everything in memory belongs to the account that just left, so the cleanest
+ * teardown is a fresh boot. Modules are unloaded first so their teardown hooks
+ * run while the SDK they were given is still valid.
+ */
+async function leave(): Promise<void> {
+  stopAutoSync();
+  stopRealtime();
+  await loader.unloadAll();
+  await signOut();
+  window.location.hash = '#/login';
+  window.location.reload();
+}
+
 onMounted(async () => {
   myDevice.value = await deviceId();
   await Promise.all([loadTwofa(), loadSessions()]);
@@ -179,6 +194,7 @@ onMounted(async () => {
         <button v-if="sessions.length > 1" type="button" class="quiet danger" @click="revokeOthers">Log out all others</button>
       </div>
       <p class="hint">Devices currently signed in as you.<template v-if="!geo"> Location is off — showing device and IP.</template></p>
+      <button type="button" class="signout" @click="leave">Sign out on this device</button>
       <p v-if="!sessions.length" class="hint">No active sessions.</p>
       <ul v-else class="sessions">
         <li v-for="s in sessions" :key="s.id">
@@ -232,4 +248,5 @@ h3 { margin: 0; font-size: .95rem; }
 .main em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); vertical-align: middle; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .form { display: flex; flex-direction: column; gap: .5rem; width: 100%; max-width: 22rem; }
+.signout { align-self: flex-start; }
 </style>

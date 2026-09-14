@@ -400,9 +400,6 @@ h2 { margin: 0; font-size: .95rem; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .7rem; }
 .fmt { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .fmt h2 { flex: 1; }
-.seg { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
-.seg button { min-height: 1.8rem; padding: .1rem .7rem; font-size: .78rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted, #5a6472); }
-.seg button.on { background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow, rgba(20,26,34,.15)); }
 .seg.narrow { align-self: flex-start; }
 .seg.narrow button { min-width: 6rem; }
 .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .5rem; }

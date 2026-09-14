@@ -669,9 +669,9 @@ async function cancelPayment(): Promise<void> {
     <!-- ── Cart discount ─────────────────────────────────────────────────── -->
     <ModalShell v-if="showDiscount" title="Cart discount" @close="showDiscount = false">
       <div class="form">
-        <div class="two seg">
-          <button type="button" :class="{ primary: discountForm.type === 'amount' }" @click="discountForm.type = 'amount'">Amount ({{ currency }})</button>
-          <button type="button" :class="{ primary: discountForm.type === 'percent' }" @click="discountForm.type = 'percent'">Percent (%)</button>
+        <div class="seg two">
+          <button type="button" :class="{ active: discountForm.type === 'amount' }" @click="discountForm.type = 'amount'">Amount ({{ currency }})</button>
+          <button type="button" :class="{ active: discountForm.type === 'percent' }" @click="discountForm.type = 'percent'">Percent (%)</button>
         </div>
         <input v-model="discountForm.value" type="number" min="0" step="0.05" inputmode="decimal" placeholder="Value" />
         <input v-model="discountForm.name" type="text" placeholder="Name (optional)" />
@@ -825,7 +825,8 @@ async function cancelPayment(): Promise<void> {
 
 .form { display: flex; flex-direction: column; gap: .6rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
-.two.seg button { min-height: 2.5rem; }
+.seg.two { display: flex; }
+.seg.two button { flex: 1; min-height: 2.5rem; }
 .field { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; text-align: left; }
 .field .big { font-size: 1.2rem; }
 .actions { display: flex; justify-content: flex-end; gap: .5rem; }

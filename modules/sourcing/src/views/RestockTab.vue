@@ -123,9 +123,6 @@ async function order(): Promise<void> {
 .tools { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .tools .primary { display: inline-flex; align-items: center; gap: .35rem; }
-.seg { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
-.seg button { min-height: 1.8rem; padding: .1rem .7rem; font-size: .78rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted, #5a6472); }
-.seg button.on { background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow, rgba(20,26,34,.15)); }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; max-width: 70ch; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .table-scroll { overflow-x: auto; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }

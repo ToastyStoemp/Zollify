@@ -404,9 +404,6 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .cardhead h2 { margin: 0; font-size: .95rem; flex: 1; }
 .cardhead select { max-width: 14rem; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .75rem; }
-.seg { display: flex; flex-wrap: wrap; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
-.seg button { min-height: 1.7rem; padding: .1rem .6rem; font-size: .74rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted, #5a6472); text-transform: capitalize; }
-.seg button.on { background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow, rgba(20,26,34,.15)); }
 .toggle { min-height: 1.7rem; padding: .1rem .6rem; font-size: .74rem; }
 .toggle.on { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .compare { width: 100%; border-collapse: collapse; font-size: .875rem; font-variant-numeric: tabular-nums; }

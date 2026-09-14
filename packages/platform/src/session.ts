@@ -72,6 +72,11 @@ const REFRESH_SKEW_MS = 30_000;
 export const currentAccount = computed(() => account.value);
 export const isAuthenticated = computed(() => account.value !== null);
 
+/** The live bearer token, for the one place (the realtime socket) that cannot use authFetch. */
+export function getAccessToken(): string | null {
+  return accessToken.value;
+}
+
 export function getAccount(): AccountSnapshot | null {
   return account.value;
 }

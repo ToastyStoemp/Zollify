@@ -25,6 +25,7 @@ import {
 } from './core/catalog';
 import { getTransaction, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
 import { imageUrl, importProductImage } from './core/images';
+import { sendDisplayCart } from './core/realtime';
 import {
   availabilityFor,
   clearClaim,
@@ -257,6 +258,8 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       subscriptions.push(off);
       return off;
     },
+
+    display: { publish: (cart) => sendDisplayCart(cart) },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

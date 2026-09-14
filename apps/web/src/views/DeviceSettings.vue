@@ -74,6 +74,10 @@ function when(ts: number): string {
       <p v-if="saved" class="ok" role="status">Saved.</p>
     </form>
 
+    <h3>Customer display</h3>
+    <p class="hint">Turn this device into a second screen that mirrors another register's cart live — a tablet facing the customer. Sales still happen on the register.</p>
+    <router-link :to="{ name: 'display' }" class="btn">Open customer display</router-link>
+
     <h3>Appearance</h3>
     <div class="themes" role="radiogroup" aria-label="Theme">
       <label v-for="opt in THEMES" :key="opt.value" :class="{ active: theme === opt.value }">
@@ -126,6 +130,7 @@ function when(ts: number): string {
 .device { display: flex; flex-direction: column; gap: .75rem; max-width: 36rem; align-items: flex-start; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
+.btn { display: inline-flex; align-items: center; min-height: 2.4rem; padding: .3rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; font-size: .875rem; text-decoration: none; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }

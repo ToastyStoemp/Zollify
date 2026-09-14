@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DiscountRule, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, DiscountRule, DisplayCart, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -371,6 +371,9 @@ export interface Sdk {
   /** Current account and user. Returns a snapshot; use `onAccountChange` to react. */
   account(): AccountSnapshot | null;
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
+
+  /** Customer display: publish what this register's cart looks like right now. */
+  display: { publish(cart: DisplayCart): void };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

@@ -20,6 +20,7 @@ export const router: Router = createRouter({
     { path: '/stock', name: 'stock', component: () => import('./views/StockView.vue') },
     { path: '/discounts', name: 'discounts', component: () => import('./views/DiscountsView.vue'), meta: { minRole: 'admin' } },
     { path: '/history', name: 'history', component: () => import('./views/HistoryView.vue') },
+    { path: '/display', name: 'display', component: () => import('./views/DisplayView.vue'), meta: { bare: true } },
     { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue'), meta: { minRole: 'admin' } },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/modules', name: 'modules', component: () => import('./views/ModulesView.vue'), meta: { minRole: 'admin' } },

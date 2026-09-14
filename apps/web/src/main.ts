@@ -11,6 +11,7 @@ import {
   refreshAccessToken,
   refreshPendingCount,
   startAutoSync,
+  startRealtime,
 } from '@zollify/platform';
 import '@zollify/ui/tokens.css';
 import './styles.css';
@@ -61,7 +62,10 @@ async function boot(): Promise<void> {
 
   // Started after modules mount so the first pull's reload reaches a shell that
   // can actually render what arrives.
-  if (getAccount()) startAutoSync();
+  if (getAccount()) {
+    startAutoSync();
+    startRealtime();
+  }
   markBooted();
 }
 

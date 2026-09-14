@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product, Variant } from '@zollify/shared';
 import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
@@ -251,6 +251,31 @@ function addMiscItem(): void {
   showMisc.value = false;
 }
 
+// ── Customer display: mirror the cart on the account's other screens ───────
+let publishTimer: ReturnType<typeof setTimeout> | undefined;
+function publish(paid?: { total: number }): void {
+  sdk().display.publish({
+    deviceName: '',
+    eventName: activeEvent.value?.name ?? '',
+    currency: currency.value,
+    lines: paid ? [] : lines.value.map((l) => ({ title: l.name, variantLabel: l.variantLabel ?? undefined, qty: l.qty, lineTotal: l.chargedTotal })),
+    discounts: paid
+      ? []
+      : [...appliedDiscounts.value.map((r) => ({ name: r.rule.name, amount: toCharged(r.amount) })), ...(cart.custom ? [{ name: cart.custom.name, amount: Math.max(0, discountTotalCharged.value - toCharged(appliedDiscounts.value.reduce((s, a) => s + a.amount, 0))) }] : [])],
+    total: paid ? paid.total : total.value,
+    paid,
+    ts: Date.now(),
+  });
+}
+watch(
+  () => [cart.lines.map((l) => `${l.lineId}:${l.qty}`).join(','), cart.custom?.value, total.value],
+  () => {
+    clearTimeout(publishTimer);
+    publishTimer = setTimeout(() => publish(), 150);
+  },
+);
+onUnmounted(() => clearTimeout(publishTimer));
+
 // ── Today ───────────────────────────────────────────────────────────────────
 const today = computed(() => {
   const start = new Date();
@@ -349,6 +374,8 @@ function finish(sale: SaleEvent, message: string): void {
   // The transaction row lands a tick later; the sale itself has all the bar needs.
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
   toast(message);
+  clearTimeout(publishTimer);
+  publish({ total: sale.total });
   void autoPrint(sale.saleId);
 }
 

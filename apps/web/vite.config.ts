@@ -20,7 +20,7 @@ export default defineConfig({
     proxy: {
       // Same-origin in production; proxied in dev so the session cookie and
       // CORS rules behave identically in both.
-      '/api': { target: 'http://localhost:8787', changeOrigin: false },
+      '/api': { target: 'http://localhost:8787', changeOrigin: false, ws: true },
       // Public module halves (events page, feed, widget) live on the gateway too.
       '/p': { target: 'http://localhost:8787', changeOrigin: false },
     },

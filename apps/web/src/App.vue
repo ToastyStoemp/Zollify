@@ -7,6 +7,7 @@ import {
   pendingCount,
   signOut,
   stopAutoSync,
+  stopRealtime,
   syncNow,
   syncState,
   toasts,
@@ -19,7 +20,7 @@ const account = currentAccount;
 const route = useRoute();
 
 /** First-run setup gets the whole screen; the nav would only bounce back to it. */
-const settingUp = computed(() => route.name === 'welcome');
+const settingUp = computed(() => route.name === 'welcome' || route.meta.bare === true);
 
 type Group = NavGroup | 'addons';
 interface Entry { routeName: string; label: string; icon: string; group: Group; order: number; minRole?: Role }
@@ -99,6 +100,7 @@ const syncLabel = computed(() => {
  */
 async function leave(): Promise<void> {
   stopAutoSync();
+  stopRealtime();
   await loader.unloadAll();
   await signOut();
   window.location.hash = '#/login';

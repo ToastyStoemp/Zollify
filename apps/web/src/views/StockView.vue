@@ -11,6 +11,7 @@ import {
   loadInventory,
   setClaim,
   setOnHand,
+  shellConfirm,
   visibleEvents,
   eventIsOver,
 } from '@zollify/platform';
@@ -123,6 +124,26 @@ async function updateClaim(productId: string, variantId: string, value: string):
     error.value = err instanceof Error ? err.message : 'Could not save that claim.';
   }
 }
+
+const claimedRows = computed(() => claims.value.filter((r) => r.claimed !== null));
+const unclaiming = ref(false);
+
+/** Drops every claim this event holds, so it sells from the shared pool again. */
+async function unclaimAll(): Promise<void> {
+  const rows = claimedRows.value;
+  if (!eventId.value || !rows.length) return;
+  const ok = await shellConfirm(`Remove all ${rows.length} claims for this event? It will sell from unclaimed stock instead.`, 'Unclaim all');
+  if (!ok) return;
+  unclaiming.value = true;
+  error.value = null;
+  try {
+    for (const row of rows) await clearClaim(eventId.value, row.productId, row.variantId);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not remove those claims.';
+  } finally {
+    unclaiming.value = false;
+  }
+}
 </script>
 
 <template>
@@ -215,6 +236,9 @@ async function updateClaim(productId: string, variantId: string, value: string):
             </option>
           </optgroup>
         </select>
+        <button v-if="canEdit && claimedRows.length" type="button" class="quiet" :disabled="unclaiming" @click="unclaimAll">
+          {{ unclaiming ? 'Removing…' : `Unclaim all (${claimedRows.length})` }}
+        </button>
       </label>
 
       <p class="hint">

@@ -207,6 +207,23 @@ async function doRevert(): Promise<void> {
   }
 }
 
+/** jsPDF is heavy — loaded only when a report is actually asked for. */
+async function exportPdf(): Promise<void> {
+  if (!scopeEvent.value) return;
+  try {
+    const { buildSalesReportPdf } = await import('../lib/pdf-report');
+    const { bytes, filename } = buildSalesReportPdf(scopeEvent.value, scoped.value);
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not build the PDF.';
+  }
+}
+
 function exportCsv(): void {
   const blob = new Blob([transactionsToCsv(scoped.value)], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -233,6 +250,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       </select>
       <span class="spacer"></span>
       <button type="button" :disabled="!scoped.length" @click="exportCsv"><Icon name="download" :size="14" /> Export CSV</button>
+      <button v-if="!allMode" type="button" :disabled="!scoped.length" @click="exportPdf"><Icon name="file-text" :size="14" /> PDF report</button>
       <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
     </header>
 

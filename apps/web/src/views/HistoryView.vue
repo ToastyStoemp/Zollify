@@ -75,8 +75,10 @@ const stats = computed(() => {
     revenue += amountOf(t);
     for (const i of t.items) items += i.qty;
     for (const p of t.payments) {
-      if (p.kind === 'cash') cash += p.amount;
-      else card += p.amount;
+      // Legs are in the charge currency; across events they are shown in base.
+      const amount = allMode.value && t.exchangeRate ? p.amount / t.exchangeRate : p.amount;
+      if (p.kind === 'cash') cash += amount;
+      else card += amount;
     }
   }
   return { count: live.value.length, revenue: round2(revenue), items, cash: round2(cash), card: round2(card) };

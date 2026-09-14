@@ -26,12 +26,13 @@ function requireAccountId(): string {
 }
 
 /**
- * Loads recent sales. Bounded deliberately: a busy convention produces
- * thousands, and History pages rather than holding them all in memory.
+ * Loads every sale. Totals over "all events" must see the whole history; a
+ * cap of the most recent rows silently under-reported years of takings.
+ * A few thousand small records is well within what a phone holds.
  */
-export async function loadTransactions(limit = 500): Promise<void> {
+export async function loadTransactions(): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const rows = await db.transactions.orderBy('timestamp').reverse().limit(limit).toArray();
+  const rows = await db.transactions.orderBy('timestamp').reverse().toArray();
   transactions.clear();
   for (const row of rows) transactions.set(row.id, row);
   loaded.value = true;

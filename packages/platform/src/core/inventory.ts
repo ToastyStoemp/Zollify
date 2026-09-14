@@ -208,13 +208,13 @@ const soldSinceCountByEventAndKey = computed(() => {
 
 const soldTotalByKey = computed(() => {
   const out = new Map<string, number>();
-  for (const forEvent of soldSinceCountByEventAndKey.value.values()) {
+  for (const forEvent of soldByEventAndKey.value.values()) {
     for (const [key, qty] of forEvent) out.set(key, (out.get(key) ?? 0) + qty);
   }
   return out;
 });
 
-/** Sales of this item since it was last counted, across every event. */
+/** Every sale of this item ever, across every event — a lifetime counter, not what Free subtracts. */
 export function soldTotal(productId: string, variantId: string | null = ''): number {
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
@@ -363,7 +363,7 @@ export interface InventoryRow {
   /** False until someone has counted this item; until then Free means nothing. */
   counted: boolean;
   claimed: number;
-  /** Sold since the last count. */
+  /** Sold ever, across every event. */
   sold: number;
   /** Unclaimed and unsold — what an event with no claim can draw on. */
   free: number;

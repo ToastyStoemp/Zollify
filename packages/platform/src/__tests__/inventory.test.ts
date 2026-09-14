@@ -295,7 +295,7 @@ describe('a fresh count', () => {
     // Recount: the 4 sold are gone from the pile, the count says so.
     await new Promise((r) => setTimeout(r, 2));
     await inv.setOnHand(PRINT, '', 6);
-    expect(inv.soldTotal(PRINT, '')).toBe(0);
+    expect(inv.soldTotal(PRINT, '')).toBe(4); // lifetime counter, unaffected by the recount
     expect(inv.freeFor(PRINT, '')).toBe(6);
 
     await new Promise((r) => setTimeout(r, 2));

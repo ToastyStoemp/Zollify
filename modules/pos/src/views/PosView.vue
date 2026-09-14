@@ -24,6 +24,7 @@ import {
 } from '../cart';
 import { getProvider } from '../payments/registry';
 import { findSearchMatch, typeColor } from '../search';
+import { buildReceiptLines, loadReceiptConfig, printReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import ProductThumb from '../components/ProductThumb.vue';
 
@@ -348,6 +349,26 @@ function finish(sale: SaleEvent, message: string): void {
   // The transaction row lands a tick later; the sale itself has all the bar needs.
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
   toast(message);
+  void autoPrint(sale.saleId);
+}
+
+/** Prints the receipt on the paired printer when Settings asks for it; never blocks the till. */
+async function autoPrint(saleId: string): Promise<void> {
+  try {
+    const config = await loadReceiptConfig();
+    if (!config.autoPrint || !(await printingAvailable())) return;
+    // The row is written by core a tick after the event fires.
+    let tx = sdk().data.transactions.get(saleId);
+    for (let i = 0; !tx && i < 10; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      tx = sdk().data.transactions.get(saleId);
+    }
+    if (!tx) return;
+    const result = await printReceipt(buildReceiptLines(tx, activeEvent.value?.name ?? '', config));
+    if (!result.printed) toast(`Receipt: ${result.error ?? 'print failed'}`, 'bad');
+  } catch (err) {
+    toast(`Receipt: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+  }
 }
 
 async function cancelPayment(): Promise<void> {
@@ -492,7 +513,10 @@ async function cancelPayment(): Promise<void> {
       <div class="grid inmodal">
         <button v-for="v in (variantPicker.variants ?? []).filter((x: Variant) => !x.unlisted)" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
           <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
-          <span class="title">{{ v.name || '(untitled)' }}</span>
+          <span class="head">
+            <ProductThumb v-if="v.imageId || variantPicker.imageId" :image-id="v.imageId || variantPicker.imageId" :alt="v.name" :size="36" />
+            <span class="title">{{ v.name || '(untitled)' }}</span>
+          </span>
           <small v-if="v.sku">{{ v.sku }}</small>
           <span v-if="bundleQtys(variantPicker, v.id).length" class="bundles">
             <span v-for="q in bundleQtys(variantPicker, v.id)" :key="q" role="button" class="bundle" @click.stop="addBundle(variantPicker!.id, v.id, q)">+{{ q }}</span>

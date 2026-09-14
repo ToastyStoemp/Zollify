@@ -20,6 +20,28 @@ const eventId = ref<string>(activeEventId.value ?? visibleEvents.value[0]?.id ??
 const counted = ref<Map<number, number>>(new Map());
 const float = ref(0);
 
+// The float is remembered per event on this device: it is set once in the
+// morning and must still be there at the evening count.
+const floatKey = (id: string) => `zollify.cashup.float.${id}`;
+function loadFloat(id: string): number {
+  try {
+    return Number(localStorage.getItem(floatKey(id))) || 0;
+  } catch {
+    return 0;
+  }
+}
+watch(
+  float,
+  (v) => {
+    if (!eventId.value) return;
+    try {
+      localStorage.setItem(floatKey(eventId.value), String(v || 0));
+    } catch {
+      /* no storage */
+    }
+  },
+);
+
 const sales = computed(() =>
   recentTransactions.value.filter((tx) => tx.eventId === eventId.value && !tx.revertedAt),
 );
@@ -62,9 +84,14 @@ const expected = computed(() => round2(float.value + takings.value.cash));
 const variance = computed(() => round2(countedTotal.value - expected.value));
 
 // Counting is per event, so switching events must not carry a count across.
-watch(eventId, () => {
-  counted.value = new Map();
-});
+watch(
+  eventId,
+  (id) => {
+    counted.value = new Map();
+    float.value = id ? loadFloat(id) : 0;
+  },
+  { immediate: true },
+);
 
 function setCount(value: number, qty: number): void {
   const next = new Map(counted.value);

@@ -326,7 +326,7 @@ async function remove(product: Product): Promise<void> {
 </script>
 
 <template>
-  <section class="catalog">
+  <section class="page catalog">
     <header>
       <h1>Products</h1>
       <div class="tools">
@@ -502,15 +502,6 @@ async function remove(product: Product): Promise<void> {
 </template>
 
 <style scoped>
-.catalog { display: flex; flex-direction: column; gap: 1rem; max-width: 60rem; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
-.tools { display: flex; gap: .5rem; flex-wrap: wrap; }
-.tools input { min-width: 14rem; }
-.tools .primary { display: inline-flex; align-items: center; gap: .4rem; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
-.error { color: var(--zfy-danger, #c6512f); margin: 0; }
-.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
 .toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2rem; }

@@ -61,3 +61,42 @@ input[type='file'] { border: 0; padding: 0; background: none; }
 
 /* Wide things scroll inside themselves; the page never scrolls sideways. */
 .table-scroll { overflow-x: auto; }
+
+/* ── One page shape, shell and modules alike ─────────────────────────────
+   <section class="page">
+     <header><h1>Title</h1><div class="tools">…buttons/search/segmented…</div></header>
+     <p class="lede">One line of context.</p>
+     …content…
+   </section> */
+.page { display: flex; flex-direction: column; gap: 1rem; max-width: 64rem; }
+.page > header { display: flex; align-items: center; justify-content: space-between; gap: .6rem 1rem; flex-wrap: wrap; min-height: 2.4rem; }
+.page > header h1 { margin: 0; font-size: 1.35rem; line-height: 1.2; }
+.page > header .tools { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.page > header .tools input[type='search'] { min-width: 14rem; }
+.page .lede, .page .hint { margin: 0; color: var(--zfy-muted); font-size: .875rem; max-width: 72ch; }
+.page .error { margin: 0; color: var(--zfy-danger); }
+.page .empty { margin: 0; padding: 1.5rem; text-align: center; color: var(--zfy-muted); border: 1px dashed var(--zfy-line); border-radius: 12px; }
+button .zfy-icon { margin-right: .1rem; }
+
+/* Segmented switch — one choice out of a few, the same on every page. */
+.seg { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-surface-2); }
+.seg button { min-height: 1.9rem; padding: .25rem .8rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted); font-size: .85rem; }
+.seg button:hover:not(:disabled) { color: var(--zfy-ink); background: transparent; }
+.seg button.active { background: var(--zfy-surface); color: var(--zfy-ink); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow); }
+
+/* Data tables: cards on wide screens, and on a phone they scroll sideways
+   inside .table-scroll instead of crushing every column. */
+.table-scroll table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 12px; overflow: hidden; }
+
+@media (max-width: 720px) {
+  /* Title and its buttons share the first row; a search or a segmented
+     switch takes the full width of its own row underneath. */
+  .page > header .tools { flex: 1; justify-content: flex-end; }
+  .page > header .tools:has(input[type='search'], .seg) { flex-basis: 100%; }
+  .page > header .tools input[type='search'] { flex: 1 1 8rem; min-width: 0; }
+  .page > header .tools .seg { display: flex; flex-basis: 100%; }
+  .seg button { flex: 1; }
+  .table-scroll { margin: 0 -1rem; padding: 0 1rem; }
+  .table-scroll table { min-width: 36rem; }
+}
+

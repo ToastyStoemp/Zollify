@@ -95,14 +95,14 @@ function open(): void {
 </script>
 
 <template>
-  <section class="sheet">
+  <section class="page sheet">
     <header>
-      <div>
-        <h1>Price sheet</h1>
-        <p class="hint">A merged, print-ready list from the catalogue and its deals. {{ shownLines }} of {{ totalLines }} lines included.</p>
+      <h1>Price sheet</h1>
+      <div class="tools">
+        <button type="button" class="primary" :disabled="!shownLines" @click="open"><Icon name="printer" :size="16" /> Open price sheet</button>
       </div>
-      <button type="button" class="primary" :disabled="!shownLines" @click="open"><Icon name="printer" :size="16" /> Open price sheet</button>
     </header>
+    <p class="lede">A merged, print-ready list from the catalogue and its deals. {{ shownLines }} of {{ totalLines }} lines included.</p>
     <p v-if="notice" class="error" role="alert">{{ notice }}</p>
     <p v-if="!groups.length" class="empty">No products for sale yet.</p>
 
@@ -132,13 +132,6 @@ function open(): void {
 </template>
 
 <style scoped>
-.sheet { display: flex; flex-direction: column; gap: 1rem; max-width: 56rem; }
-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
-header .primary { display: inline-flex; align-items: center; gap: .4rem; }
-.hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .85rem; }
-.error { color: var(--zfy-danger, #c6512f); margin: 0; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .group { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); overflow: hidden; }
 .head { display: flex; align-items: center; gap: .5rem; padding: .5rem .8rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .head h2 { margin: 0; font-size: .95rem; }

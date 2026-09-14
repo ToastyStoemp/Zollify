@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Icon } from '@zollify/ui';
 import { computed, onMounted, ref } from 'vue';
 import { sdk } from '../runtime';
 
@@ -88,12 +89,14 @@ function pct(score: number | undefined): string {
 </script>
 
 <template>
-  <section class="shopify">
+  <section class="page shopify">
     <header>
-      <h1>Shopify sync</h1>
-      <button type="button" :disabled="busy || !connected" @click="run">
-        {{ busy ? 'Matching…' : 'Match catalogue' }}
-      </button>
+      <h1>Shopify</h1>
+      <div class="tools">
+        <button type="button" class="primary" :disabled="busy || !connected" @click="run">
+          <Icon name="refresh-cw" :size="16" /> {{ busy ? 'Matching…' : 'Match catalogue' }}
+        </button>
+      </div>
     </header>
 
     <p v-if="!connected" class="empty">
@@ -137,12 +140,8 @@ function pct(score: number | undefined): string {
 </template>
 
 <style scoped>
-.shopify { display: flex; flex-direction: column; gap: 1rem; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: .5rem 0 0; font-size: 1.05rem; }
-.empty, .hint, .summary { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; }
-.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.summary { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); }
 .meta { display: flex; flex-direction: column; gap: .1rem; font-size: .9rem; }

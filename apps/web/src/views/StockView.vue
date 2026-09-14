@@ -148,21 +148,19 @@ async function unclaimAll(): Promise<void> {
 </script>
 
 <template>
-  <section class="stock">
+  <section class="page stock">
     <header>
       <h1>Inventory</h1>
-      <div class="tabs">
-        <button type="button" :class="{ active: mode === 'inventory' }" @click="mode = 'inventory'">
-          What we own
-        </button>
-        <button type="button" :class="{ active: mode === 'claims' }" @click="mode = 'claims'">
-          Claimed for an event
-        </button>
+      <div class="tools">
+        <input v-model="search" type="search" placeholder="Search items…" aria-label="Search items" />
+        <div class="seg" role="tablist">
+          <button type="button" role="tab" :aria-selected="mode === 'inventory'" :class="{ active: mode === 'inventory' }" @click="mode = 'inventory'">What we own</button>
+          <button type="button" role="tab" :aria-selected="mode === 'claims'" :class="{ active: mode === 'claims' }" @click="mode = 'claims'">Claimed for an event</button>
+        </div>
       </div>
     </header>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <input v-model="search" type="search" class="search" placeholder="Search items…" aria-label="Search items" />
 
     <!-- ── The one inventory ────────────────────────────────────────────── -->
     <template v-if="mode === 'inventory'">
@@ -177,7 +175,7 @@ async function unclaimAll(): Promise<void> {
         </li>
       </ul>
 
-      <p class="hint">
+      <p class="lede">
         On hand is what you counted; only sales made after that count reduce Free, so a fresh count resets it. Sold is the lifetime total.
         <template v-if="totals.uncounted"> {{ totals.uncounted }} item{{ totals.uncounted === 1 ? '' : 's' }} never counted — Free shows once you count them.</template>
       </p>
@@ -247,7 +245,7 @@ async function unclaimAll(): Promise<void> {
         </button>
       </label>
 
-      <p class="hint">
+      <p class="lede">
         Claiming reserves stock for this event — no other event can sell it. Leave a claim blank and
         the event sells from whatever is unclaimed. Selling past a claim takes the extra from the
         unclaimed stock.
@@ -309,21 +307,13 @@ async function unclaimAll(): Promise<void> {
 </template>
 
 <style scoped>
-.stock { display: flex; flex-direction: column; gap: 1rem; }
-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
-.tabs { display: flex; gap: .3rem; }
-.tabs button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); font-weight: 600; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
-.empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; }
-.error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .warn { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .9rem; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
 .totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 8rem; }
 .totals .label { font-size: .75rem; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
 .totals .sub, .source .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
-table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
 th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; white-space: nowrap; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
@@ -331,11 +321,9 @@ tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
 .num input { width: 5.5rem; text-align: right; }
 .source { color: var(--zfy-muted, #5a6472); font-size: .82rem; }
 .bad { color: var(--zfy-danger, #c6512f); font-weight: 600; }
-.search { max-width: 18rem; }
 tr.group th { padding: .35rem .75rem; font-size: .75rem; font-weight: 600; background: var(--zfy-bg, #f1f4f6); }
 .swatch { display: inline-block; width: .35rem; height: .8rem; border-radius: 999px; margin-right: .5rem; vertical-align: middle; }
-td.item { white-space: normal; }
+td.item { white-space: normal; min-width: 14rem; }
 td.item span { display: inline-block; vertical-align: middle; margin-left: .5rem; }
 td.item :deep(img), td.item :deep(.thumb) { vertical-align: middle; }
-.stock { max-width: 64rem; }
 </style>

@@ -51,10 +51,10 @@ function print(): void {
 </script>
 
 <template>
-  <section class="price-cards">
-    <header class="controls">
+  <section class="page price-cards">
+    <header>
       <h1>Price cards</h1>
-      <div class="opts">
+      <div class="tools opts">
         <label>
           <span>Size</span>
           <select v-model="size">
@@ -92,12 +92,7 @@ function print(): void {
 </template>
 
 <style scoped>
-.price-cards { display: flex; flex-direction: column; gap: 1rem; }
-.controls { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
-.opts { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .opts label { display: flex; align-items: center; gap: .35rem; font-size: .85rem; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .35rem; }
 .pick { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 .sheet { display: grid; gap: .5rem; }

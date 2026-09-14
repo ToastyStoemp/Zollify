@@ -192,14 +192,14 @@ function targets(d: DiscountRule): string {
 </script>
 
 <template>
-  <section class="discounts">
+  <section class="page discounts">
     <header>
-      <div>
-        <h1>Discounts</h1>
-        <p class="hint">Rules apply themselves at the till. A seller can still add a one-off discount on top of them.</p>
+      <h1>Discounts</h1>
+      <div class="tools">
+        <button type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New rule</button>
       </div>
-      <button type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New rule</button>
     </header>
+    <p class="lede">Rules apply themselves at the till. A seller can still add a one-off discount on top of them.</p>
 
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
@@ -292,13 +292,6 @@ function targets(d: DiscountRule): string {
 </template>
 
 <style scoped>
-.discounts { display: flex; flex-direction: column; gap: 1rem; max-width: 52rem; }
-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
-header .primary { display: inline-flex; align-items: center; gap: .4rem; }
-.hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .85rem; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
-.error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); overflow: hidden; }
 .list li { display: flex; align-items: center; gap: .5rem; padding-right: .5rem; }
 .list li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }

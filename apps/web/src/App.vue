@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
@@ -57,7 +57,7 @@ interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
  * the till, and History and Cash up hang below it. A section with one page is
  * just that page.
  */
-const sections = computed<Section[]>(() => {
+const allNav = computed<Entry[]>(() => {
   const acct = account.value;
   if (!acct) return [];
   const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
@@ -68,7 +68,10 @@ const sections = computed<Section[]>(() => {
     group: item.group ?? 'addons',
     order: item.order ?? 100,
   }));
-  const all = [...mine, ...theirs].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+  return [...mine, ...theirs].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
+});
+const sections = computed<Section[]>(() => {
+  const all = allNav.value;
   return SECTIONS.flatMap((sec) => {
     const [head, ...children] = all.filter((e) => e.group === sec.id);
     if (!head) return [];
@@ -77,11 +80,16 @@ const sections = computed<Section[]>(() => {
 });
 
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Account-level module pages (the ZollTool importer, …) sit with Modules and Settings, under the rule. */
+const accountNav = computed(() => allNav.value.filter((e) => e.group === 'account'));
+
+/** Phone: the nav folds behind a burger and closes itself once a page is picked. */
+const menuOpen = ref(false);
+watch(() => route.fullPath, () => { menuOpen.value = false; });
 
 /** The section holding the current page unfolds; the others stay one line each. */
 const inSection = (sec: Section): boolean =>
   sec.head.routeName === route.name || sec.children.some((c) => c.routeName === route.name);
-const openSection = computed(() => sections.value.find((sec) => inSection(sec)) ?? null);
 
 /**
  * One label that cannot contradict itself: queued work is named as such, and
@@ -114,10 +122,10 @@ async function leave(): Promise<void> {
        column — otherwise the login card is squeezed into a 15rem track. -->
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand">Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
-    <aside v-if="account && !settingUp" class="sidebar">
+    <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen }]">
       <div class="brand">Zollify<span>.</span></div>
 
-      <nav aria-label="Main">
+      <nav id="main-nav" aria-label="Main">
         <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
 
         <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
@@ -131,7 +139,17 @@ async function leave(): Promise<void> {
           </div>
         </div>
 
-        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top spaced"><Icon name="puzzle" /><span>Modules</span></router-link>
+        <hr class="rule" />
+        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top"><Icon name="puzzle" /><span>Modules</span></router-link>
+        <router-link v-for="item in accountNav" :key="item.routeName" :to="{ name: item.routeName }" class="item top"><Icon :name="item.icon || 'puzzle'" /><span>{{ item.label }}</span></router-link>
+        <router-link :to="{ name: 'settings' }" class="item top"><Icon name="settings" /><span>Settings</span></router-link>
+
+        <footer class="who">
+          <div class="name">{{ account.accountName }}</div>
+          <div class="role">{{ account.email }} · {{ account.role }}</div>
+          <button type="button" class="quiet out" @click="leave">Sign out</button>
+          <div class="build">build {{ build }}</div>
+        </footer>
       </nav>
 
       <div class="tail">
@@ -145,15 +163,7 @@ async function leave(): Promise<void> {
           <span class="dot" :class="syncState" aria-hidden="true"></span>
           <span>{{ syncLabel }}</span>
         </button>
-
-        <router-link :to="{ name: 'settings' }" class="item top"><Icon name="settings" /><span>Settings</span></router-link>
-
-        <footer class="who">
-          <div class="name">{{ account.accountName }}</div>
-          <div class="role">{{ account.email }} · {{ account.role }}</div>
-          <button type="button" class="quiet out" @click="leave">Sign out</button>
-          <div class="build">build {{ build }}</div>
-        </footer>
+        <button type="button" class="quiet burger" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /></button>
       </div>
     </aside>
 
@@ -161,18 +171,8 @@ async function leave(): Promise<void> {
       <router-view />
     </main>
 
-    <!-- Phone: ZollTool's bottom tab bar — thumbs reach it, and the till above
-         keeps the whole viewport. The open section's pages sit in a row above. -->
-    <nav v-if="account && !settingUp" class="bottom" aria-label="Main">
-      <div v-if="openSection?.children.length" class="subrow">
-        <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
-      </div>
-      <div class="tabs">
-        <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
-        <router-link v-for="sec in sections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
-        <router-link :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
-      </div>
-    </nav>
+    <!-- Phone: tapping outside the open drawer closes it. -->
+    <div v-if="menuOpen" class="scrim" @click="menuOpen = false"></div>
 
     <!-- Toast text is bound, never injected as markup: a module controls this string. -->
     <div class="toasts" aria-live="polite">
@@ -205,7 +205,8 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
 .item.router-link-active .zfy-icon { color: var(--zfy-accent); }
 .item.top .zfy-icon { color: var(--zfy-muted); }
-.item.spaced { margin-top: .6rem; }
+.rule { border: 0; border-top: 1px solid var(--zfy-line); margin: .6rem .3rem; }
+.burger, .scrim { display: none; }
 .section { display: flex; flex-direction: column; gap: .1rem; }
 /* The open section's own row stays quiet when a child is the page: one accent at a time. */
 .section.open > .item.top:not(.router-link-exact-active) { background: transparent; color: inherit; font-weight: 600; }
@@ -213,7 +214,9 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item.sub { margin-left: 1.55rem; padding: .35rem .6rem .35rem .95rem; font-size: .85rem; color: var(--zfy-muted); border-left: 2px solid var(--zfy-line); border-radius: 0 8px 8px 0; }
 .item.sub:hover { color: var(--zfy-ink); }
 .item.sub.router-link-active { color: var(--zfy-accent-ink); border-left-color: var(--zfy-accent); background: transparent; }
-.tail { margin-top: auto; display: flex; flex-direction: column; gap: .75rem; }
+.tail { display: flex; flex-direction: column; gap: .75rem; }
+nav { flex: 1; }
+nav .who { margin-top: auto; padding-top: .75rem; }
 .sync { display: flex; align-items: center; gap: .45rem; font-size: .8rem; justify-content: flex-start; }
 .sync .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-accent); flex: none; }
 .sync .dot.offline { background: var(--zfy-muted); }
@@ -230,31 +233,25 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .toast.error { border-color: var(--zfy-danger); }
 .toast.success { border-color: var(--zfy-accent); }
 
-.bottom { display: none; }
-
-/* Phone: a slim top bar (brand, sync) and a bottom tab bar; the sidebar's
-   nav is hidden because the tabs carry it. */
-@media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
+/* Phone and narrow tablets: a slim top bar (brand, sync, burger); the nav
+   becomes a drawer under it, opened by the burger. */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
   .sidebar {
     display: flex; flex-direction: row; align-items: center; gap: .5rem; padding: .5rem .75rem;
-    border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 5;
+    border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 7;
   }
   .brand { font-size: 1.1rem; }
-  .sidebar nav, .who .name, .who .role, .tail .item { display: none; }
   .tail { margin: 0 0 0 auto; flex-direction: row; align-items: center; gap: .5rem; }
   .sync { min-height: 2rem; padding: .25rem .6rem; }
-  .out { margin: 0; min-height: 2rem; }
+  .burger { display: inline-flex; min-height: 2rem; padding: .25rem .5rem; }
+  .sidebar nav {
+    display: none; position: fixed; top: 3.1rem; left: 0; bottom: 0; width: min(18rem, 85vw);
+    padding: .75rem; background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
+    box-shadow: 0 12px 32px -12px var(--zfy-shadow); z-index: 7;
+  }
+  .sidebar.menu-open nav { display: flex; }
+  .scrim { display: block; position: fixed; inset: 3.1rem 0 0 0; background: var(--zfy-shadow); opacity: .35; z-index: 6; }
   .content { padding: 1rem; padding-bottom: 1.5rem; }
-  .bottom { display: flex; flex-direction: column; position: sticky; bottom: 0; z-index: 6; background: var(--zfy-surface); border-top: 1px solid var(--zfy-line); padding-bottom: env(safe-area-inset-bottom, 0); }
-  .subrow { display: flex; gap: .3rem; padding: .4rem .6rem 0; overflow-x: auto; scrollbar-width: none; }
-  .subrow::-webkit-scrollbar { display: none; }
-  .chip { white-space: nowrap; font-size: .78rem; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--zfy-line); color: var(--zfy-muted); text-decoration: none; }
-  .chip.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); border-color: var(--zfy-accent-soft); font-weight: 600; }
-  .tabs { display: flex; }
-  .tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: .15rem; padding: .45rem 0 .4rem; font-size: .66rem; color: var(--zfy-muted); text-decoration: none; }
-  .tab.router-link-active { color: var(--zfy-accent-ink); }
-  .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
-  .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }
 }
 </style>

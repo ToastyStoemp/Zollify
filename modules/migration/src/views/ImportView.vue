@@ -6,7 +6,7 @@ import { sdk } from '../runtime';
 const plan = ref<ImportPlan | null>(null);
 const error = ref<string | null>(null);
 const running = ref(false);
-const done = ref<{ products: number; events: number; stock: number; inventory: number; images: number } | null>(null);
+const done = ref<{ products: number; events: number; stock: number; inventory: number; transactions: number; images: number } | null>(null);
 const progress = ref('');
 const fileName = ref('');
 
@@ -53,8 +53,8 @@ async function run(): Promise<void> {
   if (!plan.value) return;
 
   const confirmed = await sdk().ui.confirm(
-    `Import ${plan.value.products.length} products and ${plan.value.events.length} events into this account? ` +
-      'Existing rows with the same id will be overwritten.',
+    `Import ${plan.value.products.length} products, ${plan.value.events.length} events and ${plan.value.transactions.length} past sales into this account? ` +
+      'Existing products and events with the same id will be overwritten; sales already present are left alone.',
     'Run the import',
   );
   if (!confirmed) return;
@@ -73,6 +73,8 @@ async function run(): Promise<void> {
     for (const item of plan.value.inventory) {
       await data.inventory.setOnHand(item.productId, item.variantId, item.onHand);
     }
+    progress.value = `Restoring ${plan.value.transactions.length} past sales…`;
+    const transactions = await data.transactions.restore(plan.value.transactions);
     // Photos last, and one at a time: they are the bulk of the bytes, and a
     // failure here leaves a complete catalogue that merely lacks pictures.
     let images = 0;
@@ -87,6 +89,7 @@ async function run(): Promise<void> {
       events: plan.value.events.length,
       stock: plan.value.eventStock.length,
       inventory: plan.value.inventory.length,
+      transactions,
       images,
     };
     sdk().ui.toast('Import finished. You can switch this module off now.', { kind: 'success' });
@@ -123,6 +126,7 @@ async function run(): Promise<void> {
         <li><strong>{{ plan.events.length }}</strong> events</li>
         <li><strong>{{ plan.eventStock.length }}</strong> event claims</li>
         <li><strong>{{ plan.inventory.length }}</strong> opening stock counts</li>
+        <li><strong>{{ plan.transactions.length }}</strong> past sales</li>
         <li><strong>{{ plan.images.length }}</strong> photos</li>
       </ul>
 
@@ -147,7 +151,7 @@ async function run(): Promise<void> {
 
     <p v-if="done" class="done" role="status">
       Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims,
-      {{ done.inventory }} opening stock counts and {{ done.images }} photos.
+      {{ done.inventory }} opening stock counts, {{ done.transactions }} past sales and {{ done.images }} photos.
       Photos sync to your other devices as thumbnails; the full-size copies stay on this one.
       Switch this module off in Modules — it has done its job.
     </p>

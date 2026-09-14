@@ -76,6 +76,14 @@ if (import.meta.env.DEV) {
   router.afterEach((to) => {
     requestAnimationFrame(() => requestAnimationFrame(() => console.info(`[zollify] route ${String(to.name)} in ${Math.round(performance.now() - started)} ms`)));
   });
+  // Anything that blocks the main thread for 50 ms+ is logged with its attribution.
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) console.info(`[zollify] long task ${Math.round(e.duration)} ms`, (e as PerformanceEntry & { attribution?: unknown[] }).attribution?.[0] ?? '');
+    }).observe({ entryTypes: ['longtask'] });
+  } catch {
+    /* unsupported */
+  }
 }
 
 /**

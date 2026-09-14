@@ -24,7 +24,7 @@ import {
   getProduct,
   upsertProduct,
 } from './core/catalog';
-import { getTransaction, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
+import { getTransaction, importTransactions, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
@@ -157,6 +157,7 @@ const coreData: import('@zollify/sdk').DataApi = {
     recent: () => [...recentTransactions.value],
     get: (id) => getTransaction(id),
     revert: (id) => revertTransaction(id),
+    restore: (rows) => importTransactions(rows),
     totals: (eventId) => totalsFor(eventId),
   },
   discounts: {

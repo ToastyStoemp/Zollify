@@ -286,6 +286,11 @@ export interface TransactionApi {
   get(id: string): Transaction | undefined;
   /** Marks a sale reverted. The record stays; stock is derived, so nothing else moves. */
   revert(id: string): Promise<void>;
+  /**
+   * Restores past sales from a backup, ids kept. Rows already present are
+   * skipped, so an import can be re-run safely. Returns how many were new.
+   */
+  restore(rows: Transaction[]): Promise<number>;
   /** Per-currency totals, for an event or across all of them. */
   totals(eventId?: string | null): {
     currency: string;

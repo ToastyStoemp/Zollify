@@ -139,14 +139,13 @@ describe('planImport — what comes across', () => {
 });
 
 describe('planImport — what is deliberately left behind', () => {
-  it('reports transactions as skipped with a reason', () => {
-    const plan = planImport(backup({ transactions: [{ id: 't1' }, { id: 't2' }] }));
+  it('imports well-formed transactions and drops malformed ones with a warning', () => {
+    const good = { id: 't1', eventId: 'e1', timestamp: 1, items: [] };
+    const plan = planImport(backup({ transactions: [good, { id: 't2' }] }));
 
-    const entry = plan.skipped.find((s) => s.what === 'Past transactions');
-    expect(entry?.count).toBe(2);
-    // Running both systems in parallel is expected, so importing history would
-    // double-count revenue.
-    expect(entry?.why).toMatch(/double-count/i);
+    expect(plan.transactions).toEqual([good]);
+    expect(plan.skipped.find((s) => s.what === 'Past transactions')).toBeUndefined();
+    expect(plan.warnings.join(' ')).toMatch(/1 transaction\(s\) were malformed/);
   });
 
   it('reports discounts and images as skipped', () => {

@@ -49,6 +49,8 @@ export interface ImportPlan {
    * rather than a figure to trust.
    */
   inventory: { productId: string; variantId: string; onHand: number; updatedAt: number }[];
+  /** Sales history, ids kept so a second run cannot double-count. */
+  transactions: Transaction[];
   /** Photos whose bytes were in the file, keyed to the products that reference them. */
   images: ImportImage[];
   /** Rows the file contained but this importer does not bring across. */
@@ -117,13 +119,16 @@ export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): Im
   }
 
   const skipped: ImportPlan['skipped'] = [];
-  const transactions = asArray<Transaction>(raw.transactions, 'transactions', []);
-  if (transactions.length) {
-    skipped.push({
-      what: 'Past transactions',
-      count: transactions.length,
-      why: 'Sales history stays in ZollTool. Importing it would double-count revenue if both systems are live.',
-    });
+  const allTransactions = asArray<Transaction>(raw.transactions, 'transactions', warnings);
+  const transactions = allTransactions.filter(
+    (t) => typeof t?.id === 'string' && typeof t?.eventId === 'string' && Number.isFinite(t?.timestamp) && Array.isArray(t?.items),
+  );
+  if (allTransactions.length > transactions.length) {
+    warnings.push(`${allTransactions.length - transactions.length} transaction(s) were malformed and were skipped.`);
+  }
+  const orphanTx = transactions.filter((t) => !knownEvents.has(t.eventId)).length;
+  if (orphanTx > 0) {
+    warnings.push(`${orphanTx} transaction(s) belong to an event missing from the backup; they are imported but only show under "All events".`);
   }
   const discounts = asArray<DiscountRule>(raw.discounts, 'discounts', []);
   if (discounts.length) {
@@ -193,6 +198,7 @@ export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): Im
     products: liveProducts,
     eventStock: claims,
     inventory: [...seeded.values()],
+    transactions,
     images: images.filter((i) => liveProductIds.has(i.productId)),
     skipped,
     warnings,

@@ -33,6 +33,7 @@ export const ICON_PATHS: Record<string, string> = {
   sparkles: 'm12 3 1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.9zM5 3v4M19 17v4M3 5h4M17 19h4',
   undo: 'M3 7v6h6M21 17a9 9 0 0 0-15-6.7L3 13',
   x: 'M18 6 6 18M6 6l12 12',
+  menu: 'M4 6h16M4 12h16M4 18h16',
   plus: 'M12 5v14M5 12h14',
   'arrow-left': 'm12 19-7-7 7-7M19 12H5',
   'chevron-right': 'm9 18 6-6-6-6',

@@ -145,6 +145,26 @@ export async function revertTransaction(id: string): Promise<void> {
   await queueOp({ type: 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
 }
 
+/**
+ * Brings historical sales in from a backup, each queued as its own `tx.create`
+ * so the other devices receive them too. Rows already known here are left
+ * alone: the op is insert-if-absent everywhere, so re-running an import cannot
+ * double-count. Returns how many were new.
+ */
+export async function importTransactions(rows: Transaction[]): Promise<number> {
+  const db = openCoreDb(requireAccountId());
+  let added = 0;
+  for (const row of rows) {
+    const tx = toPlain(row);
+    if (await db.transactions.get(tx.id)) continue;
+    await db.transactions.put(tx);
+    transactions.set(tx.id, tx);
+    await queueOp({ type: 'tx.create', payload: tx });
+    added++;
+  }
+  return added;
+}
+
 /** Replaces rows wholesale — used by sync pulls and restore. */
 export async function replaceTransactions(rows: Transaction[]): Promise<void> {
   const db = openCoreDb(requireAccountId());

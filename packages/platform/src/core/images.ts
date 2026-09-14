@@ -1,6 +1,7 @@
 import { openCoreDb, type ImageRec } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
+import { toPlain } from './plain';
 
 /**
  * Product images.
@@ -94,7 +95,8 @@ export async function saveProductImage(productId: string, file: Blob): Promise<s
  * products already point at that id. Same op as a fresh photo, so the other
  * devices receive the thumbnail the same way.
  */
-export async function importProductImage(rec: ImageRec): Promise<void> {
+export async function importProductImage(image: ImageRec): Promise<void> {
+  const rec = toPlain(image);
   await db().images.put(rec);
   await queueOp({
     type: 'image.meta',

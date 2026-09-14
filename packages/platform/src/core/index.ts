@@ -70,6 +70,7 @@ export {
   type ZollifyBackup,
   type BackupSummary,
   type RestoreResult,
+  wipeAccountData,
 } from './backup';
 export {
   loadDiscounts,

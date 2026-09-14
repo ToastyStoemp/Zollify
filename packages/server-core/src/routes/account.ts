@@ -10,6 +10,27 @@ import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth'
  * a signed-in device, and every other device reads it at its next login.
  */
 export function registerAccountRoutes(app: FastifyInstance, db: Database.Database): void {
+  /**
+   * Starts the booth over: every synced op, image and metric row for the
+   * account is dropped and the sync epoch is bumped, so devices that still
+   * hold the old log throw it away on their next pull. Users, devices and the
+   * profile stay — it is the data that is reset, not the account.
+   */
+  app.post('/api/account/wipe', { preHandler: app.authenticate }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    if (claims.role !== 'owner') {
+      return reply.code(403).send({ error: 'forbidden', message: 'Only the owner can erase the booth data.' });
+    }
+    const removed = db.transaction((accountId: string) => {
+      const ops = db.prepare('DELETE FROM ops WHERE accountId = ?').run(accountId).changes;
+      db.prepare('DELETE FROM images WHERE accountId = ?').run(accountId);
+      db.prepare('DELETE FROM metrics WHERE accountId = ?').run(accountId);
+      db.prepare('UPDATE accounts SET syncEpoch = syncEpoch + 1 WHERE id = ?').run(accountId);
+      return ops;
+    })(claims.accountId);
+    return { ok: true, removedOps: removed };
+  });
+
   app.get('/api/account/profile', { preHandler: app.authenticate }, async (req): Promise<AccountProfile> => {
     const claims = req.user as JwtClaims;
     const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(claims.accountId) as

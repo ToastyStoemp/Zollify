@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, shallowRef } from 'vue';
 import { BackupParseError, planImport, unpackZip, type ImportPlan } from '../import';
 import { sdk } from '../runtime';
 
-const plan = ref<ImportPlan | null>(null);
+// Shallow on purpose: a deep-reactive plan would proxy every row (thousands of sales, image blobs) for nothing.
+const plan = shallowRef<ImportPlan | null>(null);
 const error = ref<string | null>(null);
 const running = ref(false);
 const done = ref<{ products: number; events: number; stock: number; inventory: number; transactions: number; images: number } | null>(null);

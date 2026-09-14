@@ -8,10 +8,29 @@ import {
   restoreBackup,
   shellConfirm,
   syncNow,
+  wipeAccountData,
+  currentAccount,
   type BackupSummary,
 } from '@zollify/platform';
 
-const busy = ref<'export' | 'restore' | null>(null);
+const busy = ref<'export' | 'restore' | 'wipe' | null>(null);
+
+/** Owner only: server-side erase plus a local reset; the page reloads into an empty booth. */
+async function wipe(): Promise<void> {
+  const ok = await shellConfirm(
+    'Erase every product, event, sale and photo in this booth, on the server and on this device? Export a backup first — this cannot be undone.',
+    'Erase everything',
+  );
+  if (!ok) return;
+  busy.value = 'wipe';
+  error.value = null;
+  try {
+    await wipeAccountData();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not erase the booth data.';
+    busy.value = null;
+  }
+}
 const error = ref<string | null>(null);
 const status = ref<string | null>(null);
 const pending = ref<{ summary: BackupSummary; raw: unknown; name: string } | null>(null);
@@ -147,6 +166,19 @@ async function confirmRestore(): Promise<void> {
         </button>
       </div>
     </div>
+
+    <template v-if="currentAccount?.role === 'owner'">
+      <h2 class="danger-h">Start from scratch</h2>
+      <p class="hint">
+        Erases every product, event, sale and photo in this booth — on the server and on this device.
+        Other devices empty themselves at their next sync. Users, invites and the booth profile stay.
+      </p>
+      <div class="actions">
+        <button type="button" class="danger" :disabled="busy !== null" @click="wipe">
+          {{ busy === 'wipe' ? 'Erasing…' : 'Erase everything' }}
+        </button>
+      </div>
+    </template>
   </section>
 </template>
 
@@ -164,4 +196,6 @@ h3 { margin: 0; font-size: .95rem; }
 .counts { list-style: none; margin: 0; padding: 0; display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: .875rem; }
 .counts strong { font-variant-numeric: tabular-nums; }
 .row { display: flex; gap: .5rem; justify-content: flex-end; }
+.danger-h { margin-top: 1rem; color: var(--zfy-danger, #c6512f); }
+button.danger { border-color: var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); }
 </style>

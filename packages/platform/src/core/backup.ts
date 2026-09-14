@@ -1,5 +1,8 @@
 import type { EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@zollify/shared';
-import { openCoreDb } from './db';
+import { deleteCoreDb, openCoreDb } from './db';
+import { listZollifyDbs } from '../module-db';
+import Dexie from 'dexie';
+import { authFetch } from '../session';
 import { getAccount } from '../session';
 import { toPlain } from './plain';
 import { loadCatalog, resetCatalogCache } from './catalog';
@@ -191,4 +194,25 @@ export function backupFilename(backup: ZollifyBackup): string {
   const stamp = backup.exportedAt.replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const account = backup.accountName.replace(/[^A-Za-z0-9-]+/g, '-').toLowerCase();
   return `zollify-${account}-${stamp}.json`;
+}
+
+/**
+ * Erases the booth's data everywhere and starts over: the server drops the
+ * account's op log, then every local Zollify database for the account on this
+ * device is deleted and the app reloads to an empty booth. Other devices
+ * discard their copy on their next sync (the server's epoch changed); their
+ * unpushed sales are kept locally, as with any epoch change.
+ */
+export async function wipeAccountData(): Promise<void> {
+  const account = getAccount();
+  if (!account) throw new Error('Not signed in.');
+  // The device identity lives in the same database; keep it so this stays the
+  // same registered device (and its refresh token) after the reload.
+  const keep = await openCoreDb(account.accountId).settings.where('key').startsWith('core.device').toArray();
+  await authFetch('/account/wipe', { method: 'POST' });
+  await deleteCoreDb(account.accountId);
+  const mine = (await listZollifyDbs()).filter((n) => n.includes(account.accountId.replace(/[^A-Za-z0-9_-]/g, '_')));
+  for (const name of mine) await Dexie.delete(name);
+  await openCoreDb(account.accountId).settings.bulkPut(keep);
+  window.location.reload();
 }

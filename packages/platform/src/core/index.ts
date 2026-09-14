@@ -108,6 +108,7 @@ export {
   soldAt,
   soldTotal,
   claimedTotal,
+  eventIsOver,
   freeFor,
   availabilityFor,
   inventoryRows,

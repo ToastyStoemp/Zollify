@@ -12,6 +12,7 @@ import {
   setClaim,
   setOnHand,
   visibleEvents,
+  eventIsOver,
 } from '@zollify/platform';
 import { typeColor } from '@zollify/ui';
 import ProductThumb from '../components/ProductThumb.vue';
@@ -36,6 +37,10 @@ const canEdit = computed(
 
 const stock = computed(() => inventoryRows());
 const claims = computed(() => (eventId.value ? availabilityFor(eventId.value) : []));
+/** Upcoming first, soonest at the top; past events below, most recent first. */
+const dateKey = (e: { dateStart?: string; dateEnd?: string }): string => e.dateStart || e.dateEnd || '';
+const upcomingEvents = computed(() => visibleEvents.value.filter((e) => !eventIsOver(e)).sort((a, b) => dateKey(a).localeCompare(dateKey(b))));
+const pastEvents = computed(() => visibleEvents.value.filter((e) => eventIsOver(e)).sort((a, b) => dateKey(b).localeCompare(dateKey(a))));
 
 /** Rows grouped by product type, matching the catalogue and the till; a search narrows both tables. */
 const search = ref('');
@@ -83,7 +88,7 @@ const overCommitMessage = computed(() => {
 });
 
 onMounted(async () => {
-  eventId.value = activeEventId.value ?? visibleEvents.value[0]?.id ?? '';
+  eventId.value = activeEventId.value ?? upcomingEvents.value[0]?.id ?? '';
   if (!inventoryLoaded.value) {
     await loadInventory().catch((err) => {
       error.value = err instanceof Error ? err.message : 'Could not load inventory.';
@@ -93,7 +98,7 @@ onMounted(async () => {
 
 watch(mode, (next) => {
   if (next === 'claims' && !eventId.value) {
-    eventId.value = activeEventId.value ?? visibleEvents.value[0]?.id ?? '';
+    eventId.value = activeEventId.value ?? upcomingEvents.value[0]?.id ?? '';
   }
 });
 
@@ -199,9 +204,16 @@ async function updateClaim(productId: string, variantId: string, value: string):
         <span>Event</span>
         <select v-model="eventId">
           <option value="">Pick an event</option>
-          <option v-for="event in visibleEvents" :key="event.id" :value="event.id">
-            {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
-          </option>
+          <optgroup label="Upcoming">
+            <option v-for="event in upcomingEvents" :key="event.id" :value="event.id">
+              {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
+            </option>
+          </optgroup>
+          <optgroup v-if="pastEvents.length" label="Past">
+            <option v-for="event in pastEvents" :key="event.id" :value="event.id">
+              {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
+            </option>
+          </optgroup>
         </select>
       </label>
 

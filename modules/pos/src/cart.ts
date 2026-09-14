@@ -30,8 +30,12 @@ interface CartState {
   roundingIncrement: number;
   eventId: string | null;
   busy: boolean;
-  /** A one-off discount the seller applies by hand, on top of any rules. */
+  /** A one-off discount the seller applies by hand, on top of any rules. An amount is in the charge currency. */
   custom: CustomDiscount | null;
+  /** Per-event local prices set under Prices, keyed "pid:vid" ('' for the product). */
+  priceOverrides: Record<string, number>;
+  /** Per-event local bundle totals, keyed "ruleId:tierIndex" or "ruleId:combo". */
+  tierOverrides: Record<string, number>;
 }
 
 export const cart = reactive<CartState>({
@@ -43,6 +47,8 @@ export const cart = reactive<CartState>({
   eventId: null,
   busy: false,
   custom: null,
+  priceOverrides: {},
+  tierOverrides: {},
 });
 
 export const isConverting = computed(
@@ -59,6 +65,18 @@ export const isConverting = computed(
 export function toCharged(baseAmount: number): number {
   if (!isConverting.value || cart.exchangeRate === null) return round2(baseAmount);
   return toLocalPrice(baseAmount, cart.exchangeRate, cart.roundingIncrement);
+}
+
+/** What one catalogue line is charged: the event's override when set, else converted and rounded. */
+export function localPrice(productId: string, variantId: string | null, basePrice: number): number {
+  if (!isConverting.value) return round2(basePrice);
+  const override = cart.priceOverrides[`${productId}:${variantId ?? ''}`];
+  return override != null ? override : toCharged(basePrice);
+}
+
+function localTierTotal(ruleId: string, index: number | string, baseTotal: number): number {
+  const override = cart.tierOverrides[`${ruleId}:${index}`];
+  return override != null ? override : toCharged(baseTotal);
 }
 
 /**
@@ -87,9 +105,37 @@ const discountLines = computed<DiscountCartLine[]>(() =>
  * Rules come from core through the SDK, so a rule edited in Settings applies at
  * the next keystroke without POS holding its own copy.
  */
-export const totals = computed(() =>
-  computeCartTotals(discountLines.value, sdk().data.discounts.active(), cart.custom),
+const rate = computed(() => (isConverting.value && cart.exchangeRate ? cart.exchangeRate : 1));
+
+/** The manual discount in base currency — an amount was typed in the charge currency. */
+const baseCustom = computed<CustomDiscount | null>(() =>
+  cart.custom && cart.custom.type === 'amount' ? { ...cart.custom, value: round2(cart.custom.value / rate.value) } : cart.custom,
 );
+
+export const totals = computed(() =>
+  computeCartTotals(discountLines.value, sdk().data.discounts.active(), baseCustom.value),
+);
+
+/**
+ * The charge layer, ported from ZollTool: discounts are computed directly
+ * against the local (override-aware) line prices and local bundle totals,
+ * not by scaling the base-currency figure — so a bundle price set under
+ * Prices lands exactly at checkout instead of drifting through rounding.
+ */
+const chargeLines = computed<DiscountCartLine[]>(() =>
+  discountLines.value.map((l) => {
+    const unitPrice = localPrice(l.pid, l.vid, l.unitPrice);
+    return { ...l, unitPrice, lineTotal: (Math.round(unitPrice * 100) * l.qty) / 100 };
+  }),
+);
+const localRules = computed(() =>
+  sdk().data.discounts.active().map((rule) => {
+    if (rule.type === 'tiered' && rule.tiers?.length) return { ...rule, tiers: rule.tiers.map((t, i) => ({ ...t, total: localTierTotal(rule.id, i, t.total) })) };
+    if (rule.type === 'combo' && rule.comboDiscountAmount != null) return { ...rule, comboDiscountAmount: localTierTotal(rule.id, 'combo', rule.comboDiscountAmount) };
+    return rule;
+  }),
+);
+export const chargeTotals = computed(() => (isConverting.value ? computeCartTotals(chargeLines.value, localRules.value, cart.custom) : totals.value));
 
 export const subtotal = computed(() => totals.value.subtotal);
 export const discountTotal = computed(
@@ -99,8 +145,11 @@ export const discountTotal = computed(
 export const baseTotal = computed(() => totals.value.grandTotal);
 
 /** Owed in the currency the customer pays in. */
-export const total = computed(() => toCharged(baseTotal.value));
-export const appliedDiscounts = computed(() => totals.value.ruleDiscounts);
+export const total = computed(() => chargeTotals.value.grandTotal);
+/** Rule discounts as charged, in the charge currency. */
+export const appliedDiscounts = computed(() => chargeTotals.value.ruleDiscounts);
+/** The manual discount as charged. */
+export const customDiscountCharged = computed(() => chargeTotals.value.customDiscountAmount);
 
 export const itemCount = computed(() => cart.lines.reduce((n, l) => n + l.qty, 0));
 export const isEmpty = computed(() => cart.lines.length === 0);

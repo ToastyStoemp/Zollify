@@ -9,6 +9,9 @@ import {
   addLine,
   addMisc,
   appliedDiscounts,
+  chargeTotals,
+  customDiscountCharged,
+  localPrice,
   baseTotal,
   cart,
   checkout,
@@ -66,12 +69,14 @@ onMounted(async () => {
   cart.currency = converting ? event!.localCurrency! : base;
   cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
   cart.roundingIncrement = event?.roundingIncrement ?? 0;
+  cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
+  cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
 });
 onUnmounted(() => clearTimeout(noticeTimer));
 
 const currency = computed(() => cart.currency);
 const money = (n: number): string => fmtPrice(n, currency.value);
-const price = (base: number): string => money(toCharged(base));
+const price = (pid: string, vid: string | null, base: number): string => money(localPrice(pid, vid, base));
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const availability = computed(() => {
@@ -200,12 +205,16 @@ function addBundle(pid: string, vid: string | null, qty: number): void {
   for (let i = 0; i < qty; i++) add(pid, vid);
 }
 
-const fromPrice = (p: Product): string => `from ${money(Math.min(...(p.variants ?? []).map((v) => toCharged(v.price ?? p.price))))}`;
+const fromPrice = (p: Product): string => `from ${money(Math.min(...(p.variants ?? []).map((v) => localPrice(p.id, v.id, v.price ?? p.price))))}`;
 
 // ── Cart ────────────────────────────────────────────────────────────────────
 const showCartSheet = ref(false);
-const lines = computed(() => cart.lines.map((l) => ({ ...l, chargedUnit: toCharged(l.unitPrice), chargedTotal: toCharged(l.unitPrice * l.qty) })));
-const discountTotalCharged = computed(() => toCharged(subtotal.value) - total.value);
+const lines = computed(() =>
+  cart.lines.map((l) => {
+    const chargedUnit = localPrice(l.productId, l.variantId, l.unitPrice);
+    return { ...l, chargedUnit, chargedTotal: round2(chargedUnit * l.qty) };
+  }),
+);
 
 const clearArmed = ref(false);
 let clearTimer: ReturnType<typeof setTimeout> | undefined;
@@ -261,7 +270,7 @@ function publish(paid?: { total: number }): void {
     lines: paid ? [] : lines.value.map((l) => ({ title: l.name, variantLabel: l.variantLabel ?? undefined, qty: l.qty, lineTotal: l.chargedTotal })),
     discounts: paid
       ? []
-      : [...appliedDiscounts.value.map((r) => ({ name: r.rule.name, amount: toCharged(r.amount) })), ...(cart.custom ? [{ name: cart.custom.name, amount: Math.max(0, discountTotalCharged.value - toCharged(appliedDiscounts.value.reduce((s, a) => s + a.amount, 0))) }] : [])],
+      : [...appliedDiscounts.value.map((r) => ({ name: r.rule.name, amount: r.amount })), ...(cart.custom && customDiscountCharged.value > 0 ? [{ name: cart.custom.name, amount: customDiscountCharged.value }] : [])],
     total: paid ? paid.total : total.value,
     paid,
     ts: Date.now(),
@@ -458,7 +467,7 @@ async function cancelPayment(): Promise<void> {
             </span>
             <span class="foot">
               <span :class="stockLabel(e.product.id, null).cls">{{ e.product.variants?.length ? `${e.product.variants.length} sizes` : stockLabel(e.product.id, null).text }}</span>
-              <strong>{{ e.product.variants?.length ? fromPrice(e.product) : price(e.product.price) }}</strong>
+              <strong>{{ e.product.variants?.length ? fromPrice(e.product) : price(e.product.id, null, e.product.price) }}</strong>
             </span>
           </button>
         </template>
@@ -495,9 +504,9 @@ async function cancelPayment(): Promise<void> {
 
       <footer>
         <div class="sums">
-          <div class="row muted"><span>Subtotal</span><span>{{ money(toCharged(subtotal)) }}</span></div>
-          <div v-for="r in appliedDiscounts" :key="r.rule.id" class="row good"><span>{{ r.rule.name }}</span><span>− {{ money(toCharged(r.amount)) }}</span></div>
-          <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(Math.max(0, discountTotalCharged - toCharged(appliedDiscounts.reduce((s, a) => s + a.amount, 0)))) }}</span></div>
+          <div class="row muted"><span>Subtotal</span><span>{{ money(chargeTotals.subtotal) }}</span></div>
+          <div v-for="r in appliedDiscounts" :key="r.rule.id" class="row good"><span>{{ r.rule.name }}</span><span>− {{ money(r.amount) }}</span></div>
+          <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(customDiscountCharged) }}</span></div>
           <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
           <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
         </div>
@@ -529,7 +538,7 @@ async function cancelPayment(): Promise<void> {
           </span>
           <span class="foot">
             <span :class="stockLabel(p.id, null).cls">{{ p.variants?.length ? `${p.variants.length} sizes` : stockLabel(p.id, null).text }}</span>
-            <strong>{{ p.variants?.length ? fromPrice(p) : price(p.price) }}</strong>
+            <strong>{{ p.variants?.length ? fromPrice(p) : price(p.id, null, p.price) }}</strong>
           </span>
         </button>
       </div>
@@ -550,7 +559,7 @@ async function cancelPayment(): Promise<void> {
           </span>
           <span class="foot">
             <span :class="stockLabel(variantPicker.id, v.id).cls">{{ stockLabel(variantPicker.id, v.id).text }}</span>
-            <strong>{{ price(v.price ?? variantPicker.price) }}</strong>
+            <strong>{{ price(variantPicker.id, v.id, v.price ?? variantPicker.price) }}</strong>
           </span>
         </button>
       </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
@@ -13,6 +13,7 @@ import {
 } from '@zollify/platform';
 import { contributions, loader } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
+import NavIcon from './components/NavIcon.vue';
 
 const account = currentAccount;
 const route = useRoute();
@@ -21,79 +22,62 @@ const route = useRoute();
 const settingUp = computed(() => route.name === 'welcome');
 
 type Group = NavGroup | 'addons';
-interface Entry { routeName: string; label: string; group: Group; order: number; minRole?: Role }
+interface Entry { routeName: string; label: string; icon: string; group: Group; order: number; minRole?: Role }
 
 /**
- * The sidebar is arranged by what someone is doing, not by where a screen
- * lives in the code. A module's screen sits next to the core screens for the
- * same job; the seller never sees the word "module".
+ * Laid out the way a shop admin is: a short list of top-level sections, each
+ * with an icon, and the section you are in unfolds its pages underneath. A
+ * module's screen sits inside the section for the job it belongs to; the
+ * seller never sees the word "module".
  */
-const GROUPS: { id: Group; label: string }[] = [
-  { id: 'selling', label: 'Selling' },
-  { id: 'stock', label: 'Stock' },
-  { id: 'events', label: 'Events' },
-  { id: 'books', label: 'Books' },
-  { id: 'suppliers', label: 'Suppliers' },
-  { id: 'addons', label: 'Add-ons' },
-  { id: 'account', label: 'Account' },
+const SECTIONS: { id: Group; icon: string }[] = [
+  { id: 'selling', icon: 'shopping-cart' },
+  { id: 'stock', icon: 'package' },
+  { id: 'events', icon: 'calendar' },
+  { id: 'books', icon: 'book' },
+  { id: 'suppliers', icon: 'truck' },
+  { id: 'addons', icon: 'puzzle' },
 ];
 
 const coreNav: Entry[] = [
-  { routeName: 'history', label: 'History', group: 'selling', order: 110 },
-  { routeName: 'cashup', label: 'Cash up', group: 'selling', order: 115, minRole: 'admin' },
-  { routeName: 'catalog', label: 'Catalog', group: 'stock', order: 20 },
-  { routeName: 'stock', label: 'Inventory', group: 'stock', order: 25 },
-  { routeName: 'events', label: 'Events', group: 'events', order: 10 },
-  { routeName: 'modules', label: 'Modules', group: 'account', order: 890, minRole: 'admin' },
-  { routeName: 'settings', label: 'Settings', group: 'account', order: 900 },
+  { routeName: 'history', label: 'History', icon: 'clock', group: 'selling', order: 110 },
+  { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115, minRole: 'admin' },
+  { routeName: 'catalog', label: 'Products', icon: 'package', group: 'stock', order: 20 },
+  { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
+  { routeName: 'events', label: 'Events', icon: 'calendar', group: 'events', order: 10 },
 ];
 
-const groups = computed(() => {
+interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
+
+/**
+ * Each section's first page is the section itself: clicking "Selling" opens
+ * the till, and History and Cash up hang below it. A section with one page is
+ * just that page.
+ */
+const sections = computed<Section[]>(() => {
   const acct = account.value;
   if (!acct) return [];
   const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
   const theirs: Entry[] = contributions.navFor(acct.role).map((item) => ({
     routeName: item.routeName,
     label: item.label,
+    icon: item.icon ?? '',
     group: item.group ?? 'addons',
     order: item.order ?? 100,
   }));
   const all = [...mine, ...theirs].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
-  return GROUPS.map((g) => ({ ...g, items: all.filter((e) => e.group === g.id) })).filter(
-    (g) => g.items.length > 0,
-  );
+  return SECTIONS.flatMap((sec) => {
+    const [head, ...children] = all.filter((e) => e.group === sec.id);
+    if (!head) return [];
+    return [{ id: sec.id, icon: head.icon || sec.icon, head, children }];
+  });
 });
 
-/**
- * Which groups are folded. Persisted per browser so the sidebar opens the way
- * it was left; the group holding the current screen is always shown open so
- * the active item can never be hidden.
- */
-const COLLAPSED_KEY = 'zollify.nav.collapsed';
-const collapsed = ref<Set<string>>(new Set());
-try {
-  const raw = localStorage.getItem(COLLAPSED_KEY);
-  if (raw) collapsed.value = new Set(JSON.parse(raw) as string[]);
-} catch {
-  // Storage unavailable: groups simply start open.
-}
+const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 
-function isOpen(group: { id: string; items: Entry[] }): boolean {
-  if (group.items.some((e) => e.routeName === route.name)) return true;
-  return !collapsed.value.has(group.id);
-}
-
-function toggle(id: string): void {
-  const next = new Set(collapsed.value);
-  if (next.has(id)) next.delete(id);
-  else next.add(id);
-  collapsed.value = next;
-  try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
-  } catch {
-    // Not worth surfacing; the sidebar still works for this session.
-  }
-}
+/** The section holding the current page unfolds; the others stay one line each. */
+const inSection = (sec: Section): boolean =>
+  sec.head.routeName === route.name || sec.children.some((c) => c.routeName === route.name);
 
 /**
  * One label that cannot contradict itself: queued work is named as such, and
@@ -128,25 +112,20 @@ async function leave(): Promise<void> {
       <div class="brand">Zollify<span>.</span></div>
 
       <nav aria-label="Main">
-        <router-link :to="{ name: 'home' }" class="item">Home</router-link>
+        <router-link :to="{ name: 'home' }" class="item top"><NavIcon name="home" /><span>Home</span></router-link>
 
-        <section v-for="group in groups" :key="group.id" :class="['group', { closed: !isOpen(group) }]">
-          <button
-            type="button"
-            class="quiet head"
-            :aria-expanded="isOpen(group)"
-            :aria-controls="`nav-${group.id}`"
-            @click="toggle(group.id)"
-          >
-            <span>{{ group.label }}</span>
-            <span class="chev" aria-hidden="true">▾</span>
-          </button>
-          <div :id="`nav-${group.id}`" class="items">
-            <router-link v-for="item in group.items" :key="item.routeName" :to="{ name: item.routeName }" class="item">
+        <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
+          <router-link :to="{ name: sec.head.routeName }" class="item top" :class="{ 'router-link-active': inSection(sec) && sec.head.routeName !== route.name }">
+            <NavIcon :name="sec.icon" /><span>{{ sec.head.label }}</span>
+          </router-link>
+          <div v-if="sec.children.length && inSection(sec)" class="children">
+            <router-link v-for="item in sec.children" :key="item.routeName" :to="{ name: item.routeName }" class="item sub">
               {{ item.label }}
             </router-link>
           </div>
-        </section>
+        </div>
+
+        <router-link v-if="isAdmin" :to="{ name: 'modules' }" class="item top spaced"><NavIcon name="puzzle" /><span>Modules</span></router-link>
       </nav>
 
       <div class="tail">
@@ -160,6 +139,8 @@ async function leave(): Promise<void> {
           <span class="dot" :class="syncState" aria-hidden="true"></span>
           <span>{{ syncLabel }}</span>
         </button>
+
+        <router-link :to="{ name: 'settings' }" class="item top"><NavIcon name="settings" /><span>Settings</span></router-link>
 
         <footer class="who">
           <div class="name">{{ account.accountName }}</div>
@@ -196,21 +177,20 @@ async function leave(): Promise<void> {
 }
 .brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; }
 .brand span { color: var(--zfy-accent); }
-nav { display: flex; flex-direction: column; gap: .15rem; overflow-y: auto; }
-.item { display: block; padding: .5rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; }
+nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
+.item { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; font-size: .9rem; }
 .item:hover { background: var(--zfy-surface-2); }
 .item.router-link-active { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
-.group { display: flex; flex-direction: column; gap: .1rem; margin-top: .5rem; }
-.head {
-  display: flex; justify-content: space-between; align-items: center; width: 100%;
-  min-height: 1.75rem; padding: .2rem .6rem; font-size: .7rem; font-weight: 600;
-  letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint);
-}
-.head:hover:not(:disabled) { color: var(--zfy-muted); background: transparent; }
-.chev { font-size: .75rem; transition: transform .15s; }
-.closed .chev { transform: rotate(-90deg); }
-.items { display: flex; flex-direction: column; gap: .1rem; }
-.closed .items { display: none; }
+.item.router-link-active .nav-icon { color: var(--zfy-accent); }
+.item.top .nav-icon { color: var(--zfy-muted); }
+.item.spaced { margin-top: .6rem; }
+.section { display: flex; flex-direction: column; gap: .1rem; }
+/* The open section's own row stays quiet when a child is the page: one accent at a time. */
+.section.open > .item.top:not(.router-link-exact-active) { background: transparent; color: inherit; font-weight: 600; }
+.children { display: flex; flex-direction: column; gap: .05rem; padding: .1rem 0 .3rem; }
+.item.sub { margin-left: 1.55rem; padding: .35rem .6rem .35rem .95rem; font-size: .85rem; color: var(--zfy-muted); border-left: 2px solid var(--zfy-line); border-radius: 0 8px 8px 0; }
+.item.sub:hover { color: var(--zfy-ink); }
+.item.sub.router-link-active { color: var(--zfy-accent-ink); border-left-color: var(--zfy-accent); background: transparent; }
 .tail { margin-top: auto; display: flex; flex-direction: column; gap: .75rem; }
 .sync { display: flex; align-items: center; gap: .45rem; font-size: .8rem; justify-content: flex-start; }
 .sync .dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-accent); flex: none; }
@@ -245,10 +225,10 @@ nav { display: flex; flex-direction: column; gap: .15rem; overflow-y: auto; }
   }
   nav::-webkit-scrollbar { display: none; }
   .item { white-space: nowrap; padding: .5rem .7rem; }
-  .group { flex-direction: row; margin: 0; }
-  .head { display: none; }
-  .items, .closed .items { display: flex; flex-direction: row; gap: .25rem; }
-  .group::before { content: ''; border-left: 1px solid var(--zfy-line); margin: .35rem .2rem; }
+  .item.spaced { margin: 0; }
+  .section { flex-direction: row; gap: .25rem; }
+  .children { flex-direction: row; padding: 0; }
+  .item.sub { margin: 0; border-left: 0; padding: .5rem .7rem; }
   .tail { margin: 0; flex-direction: row; align-items: center; justify-content: flex-end; gap: .5rem; }
   .sync { min-height: 2rem; padding: .25rem .6rem; }
   .who .name, .who .role { display: none; }

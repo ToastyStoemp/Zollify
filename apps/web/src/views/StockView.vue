@@ -5,6 +5,7 @@ import {
   availabilityFor,
   clearClaim,
   currentAccount,
+  getProduct,
   inventoryLoaded,
   inventoryRows,
   loadInventory,
@@ -12,6 +13,8 @@ import {
   setOnHand,
   visibleEvents,
 } from '@zollify/platform';
+import { typeColor } from '@zollify/ui';
+import ProductThumb from '../components/ProductThumb.vue';
 
 /**
  * One inventory, with per-event claims on top.
@@ -33,6 +36,25 @@ const canEdit = computed(
 
 const stock = computed(() => inventoryRows());
 const claims = computed(() => (eventId.value ? availabilityFor(eventId.value) : []));
+
+/** Rows grouped by product type, matching the catalogue and the till; a search narrows both tables. */
+const search = ref('');
+function grouped<T extends { productId: string; variantId: string; label: string }>(rows: T[]): { type: string; rows: T[] }[] {
+  const q = search.value.trim().toLowerCase();
+  const map = new Map<string, T[]>();
+  for (const r of rows) {
+    if (q && !r.label.toLowerCase().includes(q)) continue;
+    const type = getProduct(r.productId)?.type?.trim() || 'Other';
+    (map.get(type) ?? map.set(type, []).get(type)!).push(r);
+  }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([type, list]) => ({ type, rows: list }));
+}
+const stockGroups = computed(() => grouped(stock.value));
+const claimGroups = computed(() => grouped(claims.value));
+const imageOf = (productId: string, variantId: string): string | undefined => {
+  const p = getProduct(productId);
+  return (variantId && p?.variants.find((v) => v.id === variantId)?.imageId) || p?.imageId;
+};
 
 const totals = computed(() => ({
   onHand: stock.value.reduce((n, r) => n + r.onHand, 0),
@@ -113,6 +135,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
     </header>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <input v-model="search" type="search" class="search" placeholder="Search items…" aria-label="Search items" />
 
     <!-- ── The one inventory ────────────────────────────────────────────── -->
     <template v-if="mode === 'inventory'">
@@ -142,12 +165,14 @@ async function updateClaim(productId: string, variantId: string, value: string):
           </tr>
         </thead>
         <tbody>
+          <template v-for="g in stockGroups" :key="g.type">
+          <tr class="group"><th colspan="5"><span class="swatch" :style="{ background: typeColor(g.type) }"></span>{{ g.type }}</th></tr>
           <tr
-            v-for="row in stock"
+            v-for="row in g.rows"
             :key="row.productId + row.variantId"
             :class="{ short: row.overCommitted }"
           >
-            <td>{{ row.label }}</td>
+            <td class="item"><ProductThumb :image-id="imageOf(row.productId, row.variantId)" :alt="row.label" :size="28" /><span>{{ row.label }}</span></td>
             <td class="num">
               <input
                 v-if="canEdit"
@@ -163,6 +188,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
             <td class="num">{{ row.sold }}</td>
             <td class="num" :class="{ bad: row.free < 0 }">{{ row.free }}</td>
           </tr>
+          </template>
         </tbody>
       </table></div>
     </template>
@@ -199,12 +225,14 @@ async function updateClaim(productId: string, variantId: string, value: string):
           </tr>
         </thead>
         <tbody>
+          <template v-for="g in claimGroups" :key="g.type">
+          <tr class="group"><th colspan="5"><span class="swatch" :style="{ background: typeColor(g.type) }"></span>{{ g.type }}</th></tr>
           <tr
-            v-for="row in claims"
+            v-for="row in g.rows"
             :key="row.productId + row.variantId"
             :class="{ short: row.available < 0 }"
           >
-            <td>{{ row.label }}</td>
+            <td class="item"><ProductThumb :image-id="imageOf(row.productId, row.variantId)" :alt="row.label" :size="28" /><span>{{ row.label }}</span></td>
             <td class="num">
               <input
                 v-if="canEdit"
@@ -231,6 +259,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
               </template>
             </td>
           </tr>
+          </template>
         </tbody>
       </table></div>
     </template>
@@ -260,4 +289,11 @@ tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
 .num input { width: 5.5rem; text-align: right; }
 .source { color: var(--zfy-muted, #5a6472); font-size: .82rem; }
 .bad { color: var(--zfy-danger, #c6512f); font-weight: 600; }
+.search { max-width: 18rem; }
+tr.group th { padding: .35rem .75rem; font-size: .75rem; font-weight: 600; background: var(--zfy-bg, #f1f4f6); }
+.swatch { display: inline-block; width: .35rem; height: .8rem; border-radius: 999px; margin-right: .5rem; vertical-align: middle; }
+td.item { white-space: normal; }
+td.item span { display: inline-block; vertical-align: middle; margin-left: .5rem; }
+td.item :deep(img), td.item :deep(.thumb) { vertical-align: middle; }
+.stock { max-width: 64rem; }
 </style>

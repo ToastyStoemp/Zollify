@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { authFetch } from '@zollify/platform';
-import { loadEnabledModules, unloadModule } from '../boot';
+import { loadEnabledModules, loadOutcomes, loader, unloadModule } from '../boot';
 
 interface AvailableModule {
   moduleId: string;
@@ -28,6 +28,17 @@ async function refresh(): Promise<void> {
 }
 
 onMounted(refresh);
+
+/**
+ * Switched on is not the same as running: a module the loader skipped (role
+ * too low, an unmet dependency, a bundle that failed to load) would otherwise
+ * read as on while nothing of it is visible.
+ */
+function problem(mod: AvailableModule): string | null {
+  if (!mod.enabled || loader.isLoaded(mod.moduleId)) return null;
+  const outcome = loadOutcomes.value.find((o) => o.moduleId === mod.moduleId);
+  return outcome?.reason ?? 'Not running on this device — reload the app.';
+}
 
 /**
  * Re-scans the server's module store. The catalogue is read at boot, so a
@@ -96,6 +107,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
           <span class="ver">{{ mod.moduleId }} · {{ mod.version }}</span>
           <p v-if="mod.description" class="desc">{{ mod.description }}</p>
           <p v-if="mod.requires?.length" class="requires">Needs: {{ mod.requires.join(', ') }}</p>
+          <p v-if="problem(mod)" class="problem">Switched on but not running: {{ problem(mod) }}</p>
         </div>
         <button type="button" :class="mod.enabled ? 'quiet' : 'primary'" :disabled="busy === mod.moduleId" @click="toggle(mod)">
           {{ busy === mod.moduleId ? 'Working…' : mod.enabled ? 'Switch off' : 'Switch on' }}
@@ -118,4 +130,5 @@ h2 { margin: 0; font-size: 1.05rem; }
 .meta { display: flex; flex-direction: column; gap: .1rem; }
 .ver { font-size: .78rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .desc, .requires { margin: .25rem 0 0; font-size: .85rem; color: var(--zfy-muted, #5a6472); }
+.problem { margin: .25rem 0 0; font-size: .85rem; color: var(--zfy-danger, #c6512f); }
 </style>

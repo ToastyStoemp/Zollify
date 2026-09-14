@@ -18,7 +18,7 @@ const chosen = computed(() =>
 onMounted(async () => {
   size.value = (await sdk().config.get<CardSize>('cardSize')) ?? 'medium';
   showSku.value = (await sdk().config.get<boolean>('showSku')) ?? false;
-  currency.value = sdk().data.events.active()?.currency ?? 'CHF';
+  currency.value = sdk().data.events.active()?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'CHF';
   // Nothing selected reads as a mistake on a printing screen, so start with
   // everything on and let the user narrow it down.
   selected.value = new Set(products.value.map((p) => p.id));

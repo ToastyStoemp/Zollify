@@ -51,6 +51,7 @@ export interface ImportPlan {
   inventory: { productId: string; variantId: string; onHand: number; updatedAt: number }[];
   /** Sales history, ids kept so a second run cannot double-count. */
   transactions: Transaction[];
+  discounts: DiscountRule[];
   /** Photos whose bytes were in the file, keyed to the products that reference them. */
   images: ImportImage[];
   /** Rows the file contained but this importer does not bring across. */
@@ -130,14 +131,9 @@ export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): Im
   if (orphanTx > 0) {
     warnings.push(`${orphanTx} transaction(s) belong to an event missing from the backup; they are imported but only show under "All events".`);
   }
-  const discounts = asArray<DiscountRule>(raw.discounts, 'discounts', []);
-  if (discounts.length) {
-    skipped.push({
-      what: 'Discount rules',
-      count: discounts.length,
-      why: 'Not modelled in Zollify yet — re-create them once discounts land.',
-    });
-  }
+  const discounts = dropDeleted(
+    asArray<DiscountRule>(raw.discounts, 'discounts', warnings).filter((d) => typeof d?.id === 'string' && typeof d?.name === 'string'),
+  );
   // Photos come across when their bytes do: from the zip, or inline base64 in
   // an older backup. Metadata alone is nothing to show, so it is skipped.
   const imageMeta = asArray<NonNullable<ZollToolBackup['images']>[number]>(raw.images, 'images', warnings);
@@ -199,6 +195,7 @@ export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): Im
     eventStock: claims,
     inventory: [...seeded.values()],
     transactions,
+    discounts,
     images: images.filter((i) => liveProductIds.has(i.productId)),
     skipped,
     warnings,

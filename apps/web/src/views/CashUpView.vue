@@ -3,6 +3,8 @@ import { computed, ref, watch } from 'vue';
 import { CURRENCY_COINS, denominationsFor, fmtPrice, round2 } from '@zollify/shared';
 import {
   activeEventId,
+  currentAccount,
+  getSalesEvent,
   recentTransactions,
   visibleEvents,
 } from '@zollify/platform';
@@ -46,7 +48,9 @@ const sales = computed(() =>
   recentTransactions.value.filter((tx) => tx.eventId === eventId.value && !tx.revertedAt),
 );
 
-const currency = computed(() => sales.value[0]?.currency ?? 'CHF');
+const currency = computed(
+  () => sales.value[0]?.currency ?? getSalesEvent(eventId.value)?.currency ?? currentAccount.value?.profile.defaultCurrency ?? 'CHF',
+);
 
 /** Notes and coins for the event's currency, largest first. */
 const denominations = computed(() => denominationsFor(currency.value));

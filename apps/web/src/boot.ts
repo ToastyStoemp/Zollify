@@ -121,6 +121,9 @@ interface ManifestResponse {
  * stop the shell from starting. A booth with a broken Tax module still needs to
  * open the till.
  */
+/** Why each switched-on module is or is not running, from the last load — the Modules panel shows it. */
+export const loadOutcomes = ref<LoadOutcome[]>([]);
+
 export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]> {
   const account = getAccount();
   if (!account) return [];
@@ -137,6 +140,8 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   // whose setup throws has its contributions rolled back, so a failed module
   // never leaves a navigable but broken screen behind.
   const outcomes = await loader.loadAll(manifest.modules, account.role);
+  const seen = new Set(outcomes.map((o) => o.moduleId));
+  loadOutcomes.value = [...outcomes, ...loadOutcomes.value.filter((o) => !seen.has(o.moduleId))];
 
   for (const outcome of outcomes) {
     if (outcome.status === 'loaded') continue;

@@ -51,7 +51,7 @@ function sum(list: typeof recentTransactions.value, kind?: 'cash' | 'card'): num
   }
   return Math.round(total * 100) / 100;
 }
-const currency = computed(() => event.value?.localCurrency ?? event.value?.currency ?? todaysSales.value[0]?.currency ?? 'CHF');
+const currency = computed(() => event.value?.localCurrency ?? event.value?.currency ?? todaysSales.value[0]?.currency ?? account.value?.profile.defaultCurrency ?? 'CHF');
 const todayTotal = computed(() => sum(todaysSales.value));
 const todayCash = computed(() => sum(todaysSales.value, 'cash'));
 const todayCard = computed(() => sum(todaysSales.value, 'card'));

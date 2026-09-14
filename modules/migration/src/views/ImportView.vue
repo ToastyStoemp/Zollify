@@ -7,7 +7,7 @@ import { sdk } from '../runtime';
 const plan = shallowRef<ImportPlan | null>(null);
 const error = ref<string | null>(null);
 const running = ref(false);
-const done = ref<{ products: number; events: number; stock: number; inventory: number; transactions: number; images: number } | null>(null);
+const done = ref<{ products: number; events: number; stock: number; inventory: number; transactions: number; discounts: number; images: number } | null>(null);
 const progress = ref('');
 const fileName = ref('');
 
@@ -70,6 +70,7 @@ async function run(): Promise<void> {
     const data = sdk().data;
     for (const product of plan.value.products) await data.products.upsert(product);
     for (const event of plan.value.events) await data.events.upsert(event);
+    for (const rule of plan.value.discounts) await data.discounts.upsert(rule);
     for (const entry of plan.value.eventStock) await data.events.setStock(entry);
     for (const item of plan.value.inventory) {
       await data.inventory.setOnHand(item.productId, item.variantId, item.onHand);
@@ -91,6 +92,7 @@ async function run(): Promise<void> {
       stock: plan.value.eventStock.length,
       inventory: plan.value.inventory.length,
       transactions,
+      discounts: plan.value.discounts.length,
       images,
     };
     sdk().ui.toast('Import finished. You can switch this module off now.', { kind: 'success' });
@@ -128,6 +130,7 @@ async function run(): Promise<void> {
         <li><strong>{{ plan.eventStock.length }}</strong> event claims</li>
         <li><strong>{{ plan.inventory.length }}</strong> opening stock counts</li>
         <li><strong>{{ plan.transactions.length }}</strong> past sales</li>
+        <li><strong>{{ plan.discounts.length }}</strong> discount rules</li>
         <li><strong>{{ plan.images.length }}</strong> photos</li>
       </ul>
 
@@ -152,7 +155,7 @@ async function run(): Promise<void> {
 
     <p v-if="done" class="done" role="status">
       Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims,
-      {{ done.inventory }} opening stock counts, {{ done.transactions }} past sales and {{ done.images }} photos.
+      {{ done.inventory }} opening stock counts, {{ done.transactions }} past sales, {{ done.discounts }} discount rules and {{ done.images }} photos.
       Photos sync to your other devices as thumbnails; the full-size copies stay on this one.
       Switch this module off in Modules — it has done its job.
     </p>

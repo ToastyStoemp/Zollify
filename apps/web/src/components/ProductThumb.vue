@@ -1,27 +1,19 @@
 <script setup lang="ts">
-import { onUnmounted, ref, watch } from 'vue';
+import { ref, watch } from 'vue';
 import { imageUrl } from '@zollify/platform';
 
 const props = defineProps<{ imageId?: string; alt: string; size?: number }>();
 
 const url = ref<string | null>(null);
 
-/**
- * Object URLs are revoked when the image changes and when the component goes
- * away. A POS tile grid re-renders constantly, and leaking one URL per render
- * would pin every thumbnail blob in memory for the whole session.
- */
-function release(): void {
-  if (url.value) {
-    URL.revokeObjectURL(url.value);
-    url.value = null;
-  }
-}
-
+// Object URLs come from a platform-level cache keyed by image id, so they are
+// shared by every tile that shows the same thumbnail and live for the session.
+// Revoking one here (as an earlier version did) broke every other user of it —
+// the second visit to a page showed blank thumbnails.
 watch(
   () => props.imageId,
   async (id) => {
-    release();
+    url.value = null;
     if (!id) return;
     // A missing image is not an error worth surfacing — the placeholder says
     // enough, and a broken thumbnail must never block selling.
@@ -29,8 +21,6 @@ watch(
   },
   { immediate: true },
 );
-
-onUnmounted(release);
 </script>
 
 <template>

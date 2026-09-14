@@ -148,14 +148,13 @@ describe('planImport — what is deliberately left behind', () => {
     expect(plan.warnings.join(' ')).toMatch(/1 transaction\(s\) were malformed/);
   });
 
-  it('reports discounts and images as skipped', () => {
+  it('imports live discount rules and reports photos without bytes as skipped', () => {
     const plan = planImport(
-      backup({ discounts: [{ id: 'd1' }], images: [{ id: 'i1', productId: 'p1', updatedAt: 1 }] }),
+      backup({ discounts: [{ id: 'd1', name: 'Two for one' }, { id: 'd2', name: 'Old', deletedAt: 1 }], images: [{ id: 'i1', productId: 'p1', updatedAt: 1 }] }),
     );
 
-    expect(plan.skipped.map((s) => s.what)).toEqual(
-      expect.arrayContaining(['Discount rules', 'Product images']),
-    );
+    expect(plan.discounts.map((d) => d.id)).toEqual(['d1']);
+    expect(plan.skipped.map((s) => s.what)).toEqual(['Product images']);
   });
 
   it('says nothing about categories the file did not contain', () => {

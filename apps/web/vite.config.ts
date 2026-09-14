@@ -1,3 +1,5 @@
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
@@ -13,7 +15,20 @@ const hostInputs = Object.fromEntries(
   HOST_ENTRIES.map((name) => [`host-${name}`, resolve(__dirname, `src/host/${name}.ts`)]),
 );
 
+/** Build stamp shown in the sidebar and attached to diagnostic uploads: version + short commit. */
+function buildStamp(): string {
+  const version = (JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string }).version;
+  let sha = '';
+  try {
+    sha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    /* no git */
+  }
+  return sha ? `${version}+${sha}` : version;
+}
+
 export default defineConfig({
+  define: { __ZOLLIFY_VERSION__: JSON.stringify(buildStamp()) },
   plugins: [vue()],
   server: {
     port: 5180,

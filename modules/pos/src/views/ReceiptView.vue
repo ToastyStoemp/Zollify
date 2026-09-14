@@ -55,7 +55,7 @@ async function print(): Promise<void> {
 
   try {
     const config = await loadReceiptConfig();
-    const receiptLines = buildReceiptLines(tx.value, eventName.value, config);
+    const receiptLines = buildReceiptLines(tx.value, eventName.value, config, sdk().data.events.get(tx.value.eventId)?.venue?.country);
     const result = await printReceipt(receiptLines);
     failed.value = !result.printed;
     message.value = result.printed ? 'Printed.' : (result.error ?? 'The printer did not respond.');

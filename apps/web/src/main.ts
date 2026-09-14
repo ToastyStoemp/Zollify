@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import {
   applyStoredTheme,
+  installDiagnostics,
   configureApiBase,
   getAccount,
   loadCatalog,
@@ -21,6 +22,7 @@ import { connectRouter, loadEnabledModules, markBooted } from './boot';
 
 // Before anything renders, so the first frame is already the right theme.
 applyStoredTheme();
+installDiagnostics();
 
 configureApiBase(import.meta.env.VITE_API_BASE ?? '/api');
 

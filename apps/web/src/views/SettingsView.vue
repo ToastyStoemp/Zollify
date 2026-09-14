@@ -36,11 +36,24 @@ const corePanels: Panel[] = [
     component: () => import('./DataSettings.vue'),
   },
   {
+    id: 'core.security',
+    label: 'Account & security',
+    group: 'Core',
+    component: () => import('./SecuritySettings.vue'),
+  },
+  {
     id: 'core.team',
     label: 'Team',
     group: 'Core',
     minRole: 'admin',
     component: () => import('./TeamSettings.vue'),
+  },
+  {
+    id: 'core.admin',
+    label: 'Server admin',
+    group: 'Core',
+    minRole: 'owner',
+    component: () => import('./AdminSettings.vue'),
   },
   {
     id: 'core.device',

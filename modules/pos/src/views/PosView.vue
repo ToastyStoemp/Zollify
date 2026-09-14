@@ -58,6 +58,27 @@ const provider = computed(() => getProvider(providerId.value as never));
 const hasTerminal = computed(() => providerId.value !== 'manual');
 const customMethods = ref<string[]>([]);
 
+// ── Terminal connection indicator: polled while the till is open ────────────
+const terminalConnected = ref<boolean | null>(null); // null = still checking
+const terminalDetail = ref('');
+let statusTimer: ReturnType<typeof setInterval> | undefined;
+async function refreshTerminalStatus(): Promise<void> {
+  if (!hasTerminal.value) return;
+  try {
+    const s = await provider.value.getStatus();
+    terminalConnected.value = s.connected;
+    terminalDetail.value = s.detail ?? '';
+  } catch (err) {
+    terminalConnected.value = false;
+    terminalDetail.value = String(err);
+  }
+}
+function tapTerminalState(): void {
+  void refreshTerminalStatus();
+  const state = terminalConnected.value === true ? 'connected' : terminalConnected.value === false ? 'not connected' : 'checking…';
+  toast(`${provider.value.label}: ${terminalDetail.value || state}`, terminalConnected.value ? 'ok' : 'bad');
+}
+
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
@@ -71,8 +92,14 @@ onMounted(async () => {
   cart.roundingIncrement = event?.roundingIncrement ?? 0;
   cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
   cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
+  void refreshTerminalStatus();
+  statusTimer = setInterval(() => void refreshTerminalStatus(), 5000);
 });
-onUnmounted(() => clearTimeout(noticeTimer));
+onUnmounted(() => {
+  clearTimeout(noticeTimer);
+  clearInterval(statusTimer);
+  clearInterval(heartbeat);
+});
 
 const currency = computed(() => cart.currency);
 const money = (n: number): string => fmtPrice(n, currency.value);
@@ -241,6 +268,7 @@ function openDiscount(): void {
 function applyDiscount(): void {
   const value = Number(discountForm.value);
   if (!Number.isFinite(value) || value <= 0) return toast('Enter a discount value.', 'bad');
+  if (discountForm.type === 'percent' && value > 100) return toast('Percent discount cannot be over 100%.', 'bad');
   setCustomDiscount({ type: discountForm.type, value, name: discountForm.name.trim() || (discountForm.type === 'percent' ? `${value}% off` : 'Discount') });
   showDiscount.value = false;
 }
@@ -280,9 +308,19 @@ watch(
   () => [cart.lines.map((l) => `${l.lineId}:${l.qty}`).join(','), cart.custom?.value, total.value],
   () => {
     clearTimeout(publishTimer);
-    publishTimer = setTimeout(() => publish(), 150);
+    publishTimer = setTimeout(() => {
+      // Don't clobber the post-sale thank-you with the emptied cart.
+      if (Date.now() < thankYouUntil && !cart.lines.length) return;
+      publish();
+    }, 150);
   },
 );
+// Sends are fire-and-forget; a heartbeat re-publishes so a dropped frame self-heals within one interval.
+let thankYouUntil = 0;
+const heartbeat = setInterval(() => {
+  if (Date.now() < thankYouUntil) return;
+  publish();
+}, 15_000);
 onUnmounted(() => clearTimeout(publishTimer));
 
 // ── Today ───────────────────────────────────────────────────────────────────
@@ -312,7 +350,7 @@ function receipt(): void {
 }
 
 // ── Payment ─────────────────────────────────────────────────────────────────
-type Phase = 'idle' | 'confirm' | 'terminal' | 'failed';
+type Phase = 'idle' | 'confirm' | 'terminal' | 'failed' | 'needsLogin';
 const payment = reactive({ phase: 'idle' as Phase, method: 'cash' as string, total: 0, cashReceived: '', splitCash: '', splitCard: '', error: '' });
 
 const cashShortcuts = computed(() => (payment.method === 'cash' ? cashShortcutAmounts(payment.total, currency.value) : []));
@@ -342,12 +380,54 @@ function startPayment(method: string): void {
   payment.splitCash = '';
   payment.splitCard = '';
   payment.error = '';
+  logSent.value = false;
   if (method === 'card' && hasTerminal.value) {
-    payment.phase = 'terminal';
-    void runTerminal();
+    void beginCardPayment();
     return;
   }
   payment.phase = 'confirm';
+}
+
+/** A reader that needs an interactive sign-in (SumUp) and isn't signed in gets a connect-or-choose screen instead of a failing terminal call. */
+async function beginCardPayment(): Promise<void> {
+  try {
+    if (await provider.value.needsLogin?.()) {
+      payment.phase = 'needsLogin';
+      return;
+    }
+  } catch {
+    /* if the check itself fails, let the terminal report it */
+  }
+  payment.phase = 'terminal';
+  void runTerminal();
+}
+async function connectReader(): Promise<void> {
+  const p = provider.value;
+  if (!p.configure) return;
+  try {
+    await p.configure();
+  } catch (err) {
+    return toast(err instanceof Error ? err.message : String(err), 'bad');
+  }
+  if (await p.needsLogin?.()) return toast(`Still not signed in to ${p.label}`, 'bad');
+  void refreshTerminalStatus();
+  payment.phase = 'terminal';
+  void runTerminal();
+}
+
+// ── Support: send the diagnostic log straight from a failed payment ─────────
+const sendingLog = ref(false);
+const logSent = ref(false);
+async function sendLog(): Promise<void> {
+  sendingLog.value = true;
+  try {
+    await sdk().diagnostics.sendLog('payment-failed');
+    logSent.value = true;
+  } catch (err) {
+    toast(`Send failed: ${err instanceof Error ? err.message : String(err)}`, 'bad');
+  } finally {
+    sendingLog.value = false;
+  }
 }
 
 async function runTerminal(): Promise<void> {
@@ -374,7 +454,8 @@ async function confirmPayment(): Promise<void> {
     cashReceived: payment.method === 'cash' ? Number(payment.cashReceived) || undefined : undefined,
   });
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
-  finish(outcome.sale!, 'Payment confirmed');
+  const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
+  finish(outcome.sale!, `Payment confirmed — ${count} item${count === 1 ? '' : 's'} sold`);
 }
 
 function finish(sale: SaleEvent, message: string): void {
@@ -384,6 +465,7 @@ function finish(sale: SaleEvent, message: string): void {
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
   toast(message);
   clearTimeout(publishTimer);
+  thankYouUntil = Date.now() + 6000;
   publish({ total: sale.total });
   void autoPrint(sale.saleId);
 }
@@ -400,7 +482,7 @@ async function autoPrint(saleId: string): Promise<void> {
       tx = sdk().data.transactions.get(saleId);
     }
     if (!tx) return;
-    const result = await printReceipt(buildReceiptLines(tx, activeEvent.value?.name ?? '', config));
+    const result = await printReceipt(buildReceiptLines(tx, activeEvent.value?.name ?? '', config, activeEvent.value?.venue?.country));
     if (!result.printed) toast(`Receipt: ${result.error ?? 'print failed'}`, 'bad');
   } catch (err) {
     toast(`Receipt: ${err instanceof Error ? err.message : String(err)}`, 'bad');
@@ -425,6 +507,9 @@ async function cancelPayment(): Promise<void> {
           <small v-else>Open one under Events — sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
+        <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} — tap to re-check`" @click="tapTerminalState">
+          <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
+        </button>
         <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
         <div class="modes">
           <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
@@ -455,7 +540,7 @@ async function cancelPayment(): Promise<void> {
               <Icon name="chevron-right" :size="14" />
             </span>
           </button>
-          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (remaining(e.product.id, null) ?? 1) <= 0 && !e.product.variants?.length }" @click="add(e.product.id, null)">
+          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (productLeft(e.product) ?? 1) <= 0 }" @click="add(e.product.id, null)">
             <span v-if="productInCart(e.product)" class="count">{{ productInCart(e.product) }}</span>
             <span class="head">
               <ProductThumb v-if="e.product.imageId" :image-id="e.product.imageId" :alt="e.product.title" :size="36" />
@@ -550,7 +635,8 @@ async function cancelPayment(): Promise<void> {
         <button v-for="v in (variantPicker.variants ?? []).filter((x: Variant) => !x.unlisted)" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
           <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
           <span class="head">
-            <ProductThumb v-if="v.imageId || variantPicker.imageId" :image-id="v.imageId || variantPicker.imageId" :alt="v.name" :size="36" />
+            <!-- Only the variant's own photo — the product's would misrepresent the variant. -->
+            <ProductThumb v-if="v.imageId" :image-id="v.imageId" :alt="v.name" :size="36" />
             <span class="title">{{ v.name || '(untitled)' }}</span>
           </span>
           <small v-if="v.sku">{{ v.sku }}</small>
@@ -605,7 +691,12 @@ async function cancelPayment(): Promise<void> {
       <div class="paybody">
         <p class="amount">{{ money(payment.total) }}</p>
 
-        <template v-if="payment.phase === 'terminal'">
+        <template v-if="payment.phase === 'needsLogin'">
+          <p class="warn strong">{{ provider.label }} isn't signed in</p>
+          <p class="hint">Log in to take this card payment on the reader, or record the card another way.</p>
+        </template>
+
+        <template v-else-if="payment.phase === 'terminal'">
           <p class="pulse">Present card to terminal…</p>
           <p class="hint">{{ provider.label }}</p>
         </template>
@@ -614,6 +705,7 @@ async function cancelPayment(): Promise<void> {
           <p class="bad strong">Card payment didn't go through</p>
           <p v-if="payment.error" class="hint">{{ payment.error }}</p>
           <p class="hint">Retry the card, or complete the sale by hand if it was paid another way.</p>
+          <button type="button" class="quiet" :disabled="sendingLog" @click="sendLog">{{ sendingLog ? 'Sending…' : logSent ? 'Log sent' : 'Send log to support' }}</button>
         </template>
 
         <template v-else-if="payment.method === 'cash'">
@@ -647,7 +739,8 @@ async function cancelPayment(): Promise<void> {
           <button type="button" @click="cancelPayment">Cancel</button>
           <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
           <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="payment.phase = 'terminal'; runTerminal()">Retry card</button>
-          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">Complete by hand</button>
+          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
+          <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
         </div>
       </template>
     </ModalShell>
@@ -661,6 +754,11 @@ async function cancelPayment(): Promise<void> {
 .event { min-width: 0; display: flex; flex-direction: column; }
 .iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }
 .iconbtn:hover { background: var(--zfy-bg, #f1f4f6); color: var(--zfy-ink, #1a2230); }
+.terminal { display: inline-flex; align-items: center; gap: .3rem; min-height: 2rem; padding: .3rem .5rem; }
+.dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-muted, #5a6472); }
+.dot.on { background: var(--zfy-accent, #0e7c66); }
+.dot.off { background: var(--zfy-danger, #c6512f); }
+.dot.checking { animation: pulse 1.4s ease-in-out infinite; }
 .event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }

@@ -15,3 +15,6 @@ declare module '*.vue' {
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, unknown>;
   export default component;
 }
+
+/** Version + short commit, stamped by vite.config.ts at build time. */
+declare const __ZOLLIFY_VERSION__: string;

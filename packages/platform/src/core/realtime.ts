@@ -1,5 +1,5 @@
 import { reactive, ref } from 'vue';
-import type { DisplayCart, DisplayCartMessage, NudgeMessage } from '@zollify/shared';
+import type { DisplayCart, DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage } from '@zollify/shared';
 import { getAccessToken, getAccount, getApiBase } from '../session';
 import { deviceFlavor, deviceId } from './device';
 import { syncNow } from './sync';
@@ -11,7 +11,15 @@ import { syncNow } from './sync';
  * the polling interval.
  */
 
-type Incoming = NudgeMessage | DisplayCartMessage;
+export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
+type Incoming = NudgeMessage | DisplayCartMessage | PaymentMessage;
+
+const paymentListeners = new Set<(msg: PaymentMessage) => void>();
+/** Point-to-point payment trigger/result messages addressed to this device. */
+export function onPaymentMessage(handler: (msg: PaymentMessage) => void): () => void {
+  paymentListeners.add(handler);
+  return () => paymentListeners.delete(handler);
+}
 
 export interface DisplayCartSnapshot extends DisplayCart {
   deviceId: string;
@@ -62,6 +70,8 @@ async function connect(): Promise<void> {
     if (msg?.type === 'nudge') void syncNow();
     else if (msg?.type === 'display.cart' && msg.from && msg.cart && typeof msg.cart === 'object') {
       displayCarts[msg.from] = { ...msg.cart, deviceId: msg.from, receivedAt: Date.now() };
+    } else if ((msg?.type === 'payment.trigger' || msg?.type === 'payment.result') && typeof msg.requestId === 'string') {
+      for (const h of paymentListeners) h(msg);
     }
   };
   ws.onclose = () => {
@@ -101,6 +111,13 @@ export function stopRealtime(): void {
   socket = null;
   realtimeConnected.value = false;
   for (const key of Object.keys(displayCarts)) delete displayCarts[key];
+}
+
+/** Sends a payment trigger or result to one named device. Best effort; nothing is stored. */
+export function sendPaymentMessage(msg: PaymentMessage): boolean {
+  if (!socket || socket.readyState !== socket.OPEN) return false;
+  socket.send(JSON.stringify(msg));
+  return true;
 }
 
 /** Broadcasts this register's cart to the account's other devices. Best effort; nothing is stored. */

@@ -20,6 +20,7 @@ const account = currentAccount;
 const route = useRoute();
 
 /** First-run setup gets the whole screen; the nav would only bounce back to it. */
+const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
 const settingUp = computed(() => route.name === 'welcome' || route.meta.bare === true);
 
 type Group = NavGroup | 'addons';
@@ -151,6 +152,7 @@ async function leave(): Promise<void> {
           <div class="name">{{ account.accountName }}</div>
           <div class="role">{{ account.email }} · {{ account.role }}</div>
           <button type="button" class="quiet out" @click="leave">Sign out</button>
+          <div class="build">build {{ build }}</div>
         </footer>
       </div>
     </aside>
@@ -220,6 +222,7 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
+.build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
 .out { align-self: flex-start; margin-top: .25rem; padding-left: .5rem; padding-right: .5rem; font-size: .8rem; }
 .content { padding: 1.5rem; min-width: 0; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }

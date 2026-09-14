@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import type { ArtistDetails } from '@zollify/shared';
-import { authFetch, currentAccount, updateProfile } from '@zollify/platform';
+import type { ArtistDetails, SalesEvent } from '@zollify/shared';
+import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
+import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
 import { loadEnabledModules, unloadModule } from '../boot';
 
@@ -50,7 +51,7 @@ const router = useRouter();
 const account = currentAccount;
 const canRename = computed(() => account.value?.role === 'owner');
 
-const step = ref<1 | 2 | 3>(1);
+const step = ref<1 | 2 | 3 | 4>(1);
 const busy = ref(false);
 const error = ref<string | null>(null);
 
@@ -75,6 +76,39 @@ async function saveWho(): Promise<void> {
     step.value = 2;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save those details.';
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ── Step 2: the next event ───────────────────────────────────────────────────
+// Everything happens inside an event: stock, sales and paperwork. Leave the
+// name empty to skip; events that already synced in make this step moot.
+const eventForm = ref({ name: '', dateStart: '', dateEnd: '' });
+async function saveEvent(): Promise<void> {
+  const name = eventForm.value.name.trim();
+  if (!name) {
+    step.value = 3;
+    return;
+  }
+  busy.value = true;
+  error.value = null;
+  try {
+    const event: SalesEvent = {
+      id: crypto.randomUUID(),
+      name,
+      dateStart: eventForm.value.dateStart || undefined,
+      dateEnd: eventForm.value.dateEnd || undefined,
+      venue: { country: artist.value.countryOfOrigin || undefined },
+      currency: currency.value.trim().toUpperCase() || 'CHF',
+      status: 'active',
+      updatedAt: Date.now(),
+    };
+    await upsertSalesEvent(event);
+    await setActiveEvent(event.id);
+    step.value = 3;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not create that event.';
   } finally {
     busy.value = false;
   }
@@ -132,7 +166,7 @@ async function saveModules(): Promise<void> {
       mod.enabled = !mod.enabled;
     }
     if (changed.some((m) => m.enabled)) await loadEnabledModules(router);
-    step.value = 3;
+    step.value = 4;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not change those modules.';
   } finally {
@@ -161,8 +195,9 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <p class="brand">Zollify<span>.</span></p>
     <ol class="steps" aria-label="Setup progress">
       <li :class="{ current: step === 1, done: step > 1 }">Who you are</li>
-      <li :class="{ current: step === 2, done: step > 2 }">Modules</li>
-      <li :class="{ current: step === 3 }">Next steps</li>
+      <li :class="{ current: step === 2, done: step > 2 }">Next event</li>
+      <li :class="{ current: step === 3, done: step > 3 }">Modules</li>
+      <li :class="{ current: step === 4 }">Next steps</li>
     </ol>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -185,7 +220,23 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     </form>
 
     <!-- ── 2 ─────────────────────────────────────────────────────────────── -->
-    <form v-else-if="step === 2" class="card" @submit.prevent="saveModules">
+    <form v-else-if="step === 2" class="card" @submit.prevent="saveEvent">
+      <h1>Your next event</h1>
+      <p class="lede">Everything in Zollify happens inside an event: stock, sales and customs documents. Name your next convention to get started, or leave it empty to skip.</p>
+      <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} event{{ visibleEvents.length === 1 ? '' : 's' }} already synced in — you can skip this.</p>
+      <div class="grid">
+        <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
+        <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
+      </div>
+      <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later under Events.</p>
+      <footer class="actions">
+        <button type="button" class="quiet" :disabled="busy" @click="step = 2">Back</button>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : eventForm.name.trim() ? 'Create & continue' : 'Skip' }}</button>
+      </footer>
+    </form>
+
+    <!-- ── 3 ─────────────────────────────────────────────────────────────── -->
+    <form v-else-if="step === 3" class="card" @submit.prevent="saveModules">
       <h1>Switch on what you need</h1>
       <p class="lede">
         Zollify is built from modules. Turn on the ones that fit your booth — anything you leave off
@@ -256,7 +307,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </ol>
 
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="step = 2">Back</button>
+        <button type="button" class="quiet" :disabled="busy" @click="step = 3">Back</button>
         <button type="button" class="primary" :disabled="busy" @click="finish()">{{ busy ? 'Finishing…' : 'Go to Home' }}</button>
       </footer>
     </div>
@@ -267,6 +318,10 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .welcome { max-width: 44rem; margin: 0 auto; display: flex; flex-direction: column; gap: 1rem; align-self: start; }
 .brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; margin: 0; }
 .brand span { color: var(--zfy-accent); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
+.grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.lede.small { font-size: .8rem; }
+.lede.ok { color: var(--zfy-accent-ink); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; gap: .5rem; counter-reset: step; }
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }
 .steps li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--zfy-line); font-variant-numeric: tabular-nums; }

@@ -1,5 +1,6 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
+import { listenForRemotePayments } from './payments/satellite';
 import { onActiveProviderChanged } from './payments/registry';
 
 /**
@@ -55,6 +56,9 @@ export default defineModule({
       minRole: 'admin',
       order: 100,
     });
+
+    // A Carbon answers remote payment triggers from any screen; the subscription is released with the module.
+    listenForRemotePayments();
 
     void sdk.config.get<string>('activeProvider').then((id) => {
       if (id) onActiveProviderChanged(id as never);

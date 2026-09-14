@@ -6,11 +6,13 @@ import { myposCarbonProvider } from './mypos-carbon';
 import { myposGlassProvider } from './mypos-glass';
 import { bridgeProvider, bridgeConnection } from './bridge-ws';
 import { sumupProvider } from './sumup';
+import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
 
 const providers: PaymentProvider[] = [
   manualProvider,
   myposGo2Provider,
   myposCarbonProvider,
+  myposCarbonRemoteProvider,
   myposGlassProvider,
   bridgeProvider,
   sumupProvider,

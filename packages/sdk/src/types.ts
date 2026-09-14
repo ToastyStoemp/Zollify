@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DiscountRule, DisplayCart, EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -374,6 +374,23 @@ export interface Sdk {
 
   /** Customer display: publish what this register's cart looks like right now. */
   display: { publish(cart: DisplayCart): void };
+
+  /**
+   * Point-to-point messages between this account's devices over the live
+   * channel — a register asking a satellite terminal to take a card, and the
+   * terminal's answer. `connected` says whether the channel is up right now.
+   */
+  realtime: {
+    connected(): boolean;
+    deviceId(): Promise<string>;
+    /** Every device that has signed in to this account — the possible targets. */
+    devices(): Promise<DeviceSummary[]>;
+    sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage): boolean;
+    onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;
+  };
+
+  /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */
+  diagnostics: { sendLog(reason?: string): Promise<void> };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

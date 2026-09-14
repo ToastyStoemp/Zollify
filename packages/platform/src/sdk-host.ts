@@ -1,4 +1,5 @@
 import type Dexie from 'dexie';
+import type { DeviceSummary } from '@zollify/shared';
 import {
   SDK_VERSION,
   type AccountSnapshot,
@@ -25,7 +26,9 @@ import {
 } from './core/catalog';
 import { getTransaction, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
 import { imageUrl, importProductImage } from './core/images';
-import { sendDisplayCart } from './core/realtime';
+import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
+import { deviceId } from './core/device';
+import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import {
   availabilityFor,
   clearClaim,
@@ -72,7 +75,10 @@ function makeLogger(moduleId: string): Logger {
   const tag = `[zollify:${moduleId}]`;
   return {
     debug: (...a) => console.debug(tag, ...a),
-    info: (...a) => console.info(tag, ...a),
+    info: (...a) => {
+      logDiagnostic([tag, ...a].map(String).join(' '));
+      console.info(tag, ...a);
+    },
     warn: (...a) => console.warn(tag, ...a),
     error: (...a) => console.error(tag, ...a),
   };
@@ -260,6 +266,18 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     },
 
     display: { publish: (cart) => sendDisplayCart(cart) },
+    realtime: {
+      connected: () => realtimeConnected.value,
+      deviceId: () => deviceId(),
+      devices: () => authFetch('/devices') as Promise<DeviceSummary[]>,
+      sendPayment: (msg) => sendPaymentMessage(msg),
+      onPayment: (handler) => {
+        const off = onPaymentMessage(handler);
+        subscriptions.push(off);
+        return off;
+      },
+    },
+    diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

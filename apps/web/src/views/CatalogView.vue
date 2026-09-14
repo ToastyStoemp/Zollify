@@ -422,6 +422,8 @@ async function remove(product: Product): Promise<void> {
             <Icon v-else name="package" :size="28" />
           </div>
           <div class="photo-actions">
+            <!-- capture opens the camera directly on a phone; desktops ignore it -->
+            <label class="btn"><Icon name="scan" :size="14" /> Take photo<input type="file" accept="image/*" capture="environment" hidden @change="pickImage" /></label>
             <label class="btn"><Icon name="upload" :size="14" /> {{ hasPhoto ? 'Replace photo' : 'Add photo' }}<input type="file" accept="image/*" hidden @change="pickImage" /></label>
             <button v-if="hasPhoto" type="button" class="quiet danger" @click="dropImage">Remove</button>
           </div>

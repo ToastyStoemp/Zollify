@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import type { DeviceSummary } from '@zollify/shared';
 import {
+  authFetch,
   currentAccount,
   deviceFlavor,
   deviceId,
@@ -8,6 +10,7 @@ import {
   lastSyncAt,
   lastSyncError,
   pendingCount,
+  sendDiagnosticLog,
   setDeviceName,
   setTheme,
   syncNow,
@@ -27,15 +30,35 @@ const THEMES: { value: Theme; label: string; hint: string }[] = [
 const id = ref('');
 const saved = ref(false);
 const error = ref<string | null>(null);
+const devices = ref<DeviceSummary[]>([]);
+const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
 
 onMounted(async () => {
   try {
     id.value = await deviceId();
     name.value = (await deviceName()) ?? '';
+    devices.value = (await authFetch('/devices')) as DeviceSummary[];
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not read this device.';
   }
 });
+
+// ── Diagnostics: send this device's log to the server for support ──────────
+const sending = ref(false);
+const sent = ref(false);
+async function sendLog(): Promise<void> {
+  sending.value = true;
+  error.value = null;
+  try {
+    await sendDiagnosticLog('manual');
+    sent.value = true;
+    setTimeout(() => (sent.value = false), 4000);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not send the log.';
+  } finally {
+    sending.value = false;
+  }
+}
 
 async function save(): Promise<void> {
   error.value = null;
@@ -122,7 +145,22 @@ function when(ts: number): string {
 
       <dt>Device id</dt>
       <dd class="mono">{{ id }}</dd>
+
+      <dt>Build</dt>
+      <dd class="mono">{{ build }}</dd>
     </dl>
+
+    <h3>Devices on this account</h3>
+    <p class="hint">Every register and display that has signed in. Names are set on each device.</p>
+    <ul class="devices">
+      <li v-for="d in devices" :key="d.id" :class="{ me: d.id === id }">
+        <span class="main"><span>{{ d.name || 'Unnamed device' }}<em v-if="d.id === id">this device</em></span><small>{{ d.flavor || 'web' }} · seen {{ when(d.lastSeenAt) }}</small></span>
+      </li>
+    </ul>
+
+    <h3>Diagnostics</h3>
+    <p class="hint">Sends this device's recent warnings, errors and payment breadcrumbs to the server so support can look at them. No sale amounts or card data are included.</p>
+    <button type="button" :disabled="sending" @click="sendLog">{{ sending ? 'Sending…' : sent ? 'Log sent' : 'Send diagnostic log' }}</button>
   </section>
 </template>
 
@@ -130,6 +168,11 @@ function when(ts: number): string {
 .device { display: flex; flex-direction: column; gap: .75rem; max-width: 36rem; align-items: flex-start; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
+.devices { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: .3rem; }
+.devices li { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .875rem; }
+.devices .main { display: flex; flex-direction: column; }
+.devices em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); vertical-align: middle; }
+.devices small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .btn { display: inline-flex; align-items: center; min-height: 2.4rem; padding: .3rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; font-size: .875rem; text-decoration: none; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }

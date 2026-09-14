@@ -1,143 +1,66 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { draftsApi, suppliersApi, type ReorderDraft, type Supplier } from '../api';
-import { sdk } from '../runtime';
+import { loaded, refresh, snap } from '../api';
+import DossiersTab from './DossiersTab.vue';
+import ReordersTab from './ReordersTab.vue';
+import RestockTab from './RestockTab.vue';
+import IssuesTab from './IssuesTab.vue';
+import MaterialsTab from './MaterialsTab.vue';
 
-const suppliers = ref<Supplier[]>([]);
-const drafts = ref<ReorderDraft[]>([]);
-const qty = ref<Record<string, number>>({});
-const supplierId = ref('');
+/**
+ * Sourcing — the reorder cockpit, ported from ZollSource. Dossiers hold what
+ * a supplier needs to make each product; Restock says what to order;
+ * Reorders carry an order from quote to received; Issues and Materials feed
+ * the specs and the home-print costs.
+ */
+type Tab = 'dossiers' | 'reorders' | 'restock' | 'issues' | 'materials';
+const tab = ref<Tab>('dossiers');
 const error = ref<string | null>(null);
-const busy = ref(false);
-
-const products = computed(() => sdk().data.products.list());
-
-const chosen = computed(() =>
-  products.value
-    .filter((p) => (qty.value[p.id] ?? 0) > 0)
-    .map((p) => ({ productId: p.id, title: p.title, qty: qty.value[p.id] ?? 0 })),
-);
-
-async function refresh(): Promise<void> {
-  try {
-    const [s, d] = await Promise.all([suppliersApi.list(), draftsApi.list()]);
-    suppliers.value = s.suppliers;
-    drafts.value = d.drafts;
-    if (!supplierId.value) supplierId.value = s.suppliers[0]?.id ?? '';
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not load sourcing data.';
-  }
-}
-
-onMounted(refresh);
-
-function setQty(productId: string, value: number): void {
-  qty.value = { ...qty.value, [productId]: Math.max(0, value) };
-}
-
-async function createDraft(): Promise<void> {
-  if (!supplierId.value || !chosen.value.length) return;
-  busy.value = true;
+onMounted(() => {
+  refresh().catch((e) => (error.value = e instanceof Error ? e.message : 'Could not load sourcing data.'));
+});
+const open = computed(() => snap.value.reorders.filter((r) => r.status !== 'received').length);
+const tabs = computed<{ id: Tab; label: string; badge?: number }[]>(() => [
+  { id: 'dossiers', label: 'Dossiers', badge: snap.value.dossiers.length },
+  { id: 'reorders', label: 'Reorders', badge: open.value },
+  { id: 'restock', label: 'Restock' },
+  { id: 'issues', label: 'Issues', badge: snap.value.issues.filter((i) => i.status === 'open').length },
+  { id: 'materials', label: 'Materials' },
+]);
+function pick(id: Tab): void {
+  tab.value = id;
   error.value = null;
-  try {
-    await draftsApi.create(supplierId.value, chosen.value);
-    qty.value = {};
-    await refresh();
-    sdk().ui.toast('Reorder draft created.', { kind: 'success' });
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not create that draft.';
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function markSent(id: string): Promise<void> {
-  try {
-    await draftsApi.markSent(id);
-    await refresh();
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not update that draft.';
-  }
-}
-
-function supplierName(id: string): string {
-  return suppliers.value.find((s) => s.id === id)?.name ?? 'Unknown supplier';
 }
 </script>
 
 <template>
   <section class="sourcing">
-    <h1>Sourcing</h1>
+    <header>
+      <h1>Sourcing</h1>
+      <nav class="seg" aria-label="Sourcing sections">
+        <button v-for="t in tabs" :key="t.id" type="button" :class="{ on: tab === t.id }" @click="pick(t.id)">{{ t.label }}<em v-if="t.badge">{{ t.badge }}</em></button>
+      </nav>
+    </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-
-    <p v-if="!suppliers.length" class="empty">
-      Add a supplier in Settings first — a reorder draft is always addressed to one.
-    </p>
-
+    <p v-if="!loaded" class="hint">Loading…</p>
     <template v-else>
-      <div class="builder">
-        <label>
-          <span>Supplier</span>
-          <select v-model="supplierId">
-            <option v-for="s in suppliers" :key="s.id" :value="s.id">{{ s.name }}</option>
-          </select>
-        </label>
-        <button type="button" :disabled="busy || !chosen.length" @click="createDraft">
-          {{ busy ? 'Creating…' : 'Create draft (' + chosen.length + ')' }}
-        </button>
-      </div>
-
-      <table>
-        <thead>
-          <tr><th>Product</th><th class="num">Reorder qty</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="product in products" :key="product.id">
-            <td>{{ product.title }}</td>
-            <td class="num">
-              <input
-                type="number"
-                min="0"
-                :value="qty[product.id] ?? 0"
-                :aria-label="'Reorder quantity for ' + product.title"
-                @input="setQty(product.id, Number(($event.target as HTMLInputElement).value))"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </template>
-
-    <template v-if="drafts.length">
-      <h2>Drafts</h2>
-      <ul class="drafts">
-        <li v-for="draft in drafts" :key="draft.id">
-          <span>
-            {{ supplierName(draft.supplierId) }} · {{ draft.lines.length }} line(s) ·
-            <strong>{{ draft.status }}</strong>
-          </span>
-          <button v-if="draft.status === 'draft'" type="button" @click="markSent(draft.id)">
-            Mark sent
-          </button>
-        </li>
-      </ul>
+      <DossiersTab v-if="tab === 'dossiers'" @error="error = $event" />
+      <ReordersTab v-else-if="tab === 'reorders'" @error="error = $event" />
+      <RestockTab v-else-if="tab === 'restock'" @error="error = $event" />
+      <IssuesTab v-else-if="tab === 'issues'" @error="error = $event" />
+      <MaterialsTab v-else @error="error = $event" />
     </template>
   </section>
 </template>
 
 <style scoped>
-.sourcing { display: flex; flex-direction: column; gap: 1rem; }
+.sourcing { display: flex; flex-direction: column; gap: 1rem; max-width: 64rem; }
+header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
-h2 { margin: .5rem 0 0; font-size: 1.05rem; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.seg { display: inline-flex; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); flex-wrap: wrap; }
+.seg button { min-height: 1.9rem; padding: .1rem .8rem; font-size: .82rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted, #5a6472); display: inline-flex; align-items: center; gap: .35rem; }
+.seg button.on { background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 600; box-shadow: 0 1px 2px var(--zfy-shadow, rgba(20,26,34,.15)); }
+.seg em { font-style: normal; font-size: .68rem; padding: 0 .35rem; border-radius: 999px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
-.builder { display: flex; align-items: flex-end; gap: .75rem; }
-.builder label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
-table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .5rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
-tbody tr:last-child td { border-bottom: none; }
-.num { text-align: right; }
-.num input { width: 6rem; text-align: right; }
-.drafts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.drafts li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); font-size: .9rem; }
+.hint { margin: 0; color: var(--zfy-muted, #5a6472); }
 </style>

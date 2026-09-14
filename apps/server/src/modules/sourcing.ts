@@ -3,72 +3,62 @@ import { z } from 'zod';
 import type { ModuleContext, ServerModule } from '@zollify/server-core';
 
 /**
- * Sourcing — the server half.
+ * Sourcing — the server half, ported from ZollSource.
  *
- * Supplier contacts and reorder drafts live here rather than in the browser, so
- * they belong to the account rather than to whichever device happened to create
- * them — and so any future Alibaba credentials have somewhere to sit that is
- * not a WebView.
- *
- * Every query is scoped by accountId. The gateway has already checked
- * authentication, this account's entitlement for the module, and the minimum
- * role before any of this runs.
+ * Suppliers, reps, product dossiers, reorders, issues and materials are
+ * small documents; they live server-side because supplier contacts must not
+ * sit in a browser, and because the reorder board is shared by everyone on
+ * the account. Design files are stored as bytes here so a reorder's zip can
+ * be built from any device. All reasoning (specs, restock maths, costs)
+ * happens in the client half against core data it reads through the SDK.
  */
 
-const SupplierBody = z.object({
-  id: z.string().min(1).max(64),
-  name: z.string().min(1).max(200),
-  contactEmail: z.string().email().max(320).nullable().optional(),
-  notes: z.string().max(2000).nullable().optional(),
-});
-
-const DraftBody = z.object({
-  supplierId: z.string().min(1).max(64),
-  lines: z
-    .array(
-      z.object({
-        productId: z.string().min(1).max(64),
-        title: z.string().min(1).max(300),
-        qty: z.number().int().positive().max(100_000),
-      }),
-    )
-    .min(1)
-    .max(500),
-});
+const COLLECTIONS = ['suppliers', 'reps', 'dossiers', 'reorders', 'issues', 'materials'] as const;
+type Coll = (typeof COLLECTIONS)[number];
 
 function migrate(db: Database.Database): void {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS sourcing_suppliers (
-      accountId    TEXT NOT NULL,
-      id           TEXT NOT NULL,
-      name         TEXT NOT NULL,
-      contactEmail TEXT,
-      notes        TEXT,
-      updatedAt    INTEGER NOT NULL,
+    CREATE TABLE IF NOT EXISTS sourcing_docs (
+      accountId TEXT NOT NULL,
+      coll      TEXT NOT NULL,
+      id        TEXT NOT NULL,
+      doc       TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      PRIMARY KEY (accountId, coll, id)
+    );
+    CREATE TABLE IF NOT EXISTS sourcing_files (
+      accountId TEXT NOT NULL,
+      id        TEXT NOT NULL,
+      dossierId TEXT NOT NULL,
+      kind      TEXT NOT NULL,
+      filename  TEXT NOT NULL,
+      mime      TEXT NOT NULL,
+      size      INTEGER NOT NULL,
+      version   INTEGER NOT NULL,
+      approval  TEXT,
+      note      TEXT,
+      bytes     BLOB NOT NULL,
+      createdAt INTEGER NOT NULL,
       PRIMARY KEY (accountId, id)
     );
-    CREATE TABLE IF NOT EXISTS sourcing_drafts (
-      accountId  TEXT NOT NULL,
-      id         TEXT NOT NULL,
-      supplierId TEXT NOT NULL,
-      status     TEXT NOT NULL CHECK (status IN ('draft','sent')),
-      lines      TEXT NOT NULL,
-      createdAt  INTEGER NOT NULL,
-      sentAt     INTEGER,
-      PRIMARY KEY (accountId, id)
-    );
-    CREATE INDEX IF NOT EXISTS idx_sourcing_drafts_account ON sourcing_drafts(accountId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_sourcing_files_dossier ON sourcing_files(accountId, dossierId);
   `);
 }
 
-interface DraftRow {
-  id: string;
-  supplierId: string;
-  status: 'draft' | 'sent';
-  lines: string;
-  createdAt: number;
-  sentAt: number | null;
-}
+const Doc = z.object({ id: z.string().min(1).max(80) }).passthrough();
+const FileBody = z.object({
+  dossierId: z.string().min(1),
+  filename: z.string().min(1).max(200),
+  mime: z.string().max(120).default('application/octet-stream'),
+  kind: z.enum(['design', 'proof']).default('design'),
+  dataB64: z.string().min(1),
+});
+const Approval = z.object({ approval: z.enum(['approved', 'rejected', 'pending']), note: z.string().max(500).optional() });
+
+/** 25 MB of base64 — a PSD or a print-ready PDF, not a video. */
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+const isColl = (s: string): s is Coll => (COLLECTIONS as readonly string[]).includes(s);
 
 export const sourcingServerModule: ServerModule = {
   id: 'sourcing',
@@ -76,122 +66,88 @@ export const sourcingServerModule: ServerModule = {
   migrate,
 
   routes: (ctx: ModuleContext) => async (app) => {
-    app.get('/suppliers', async (req) => {
+    /** Everything the cockpit needs, in one shot. */
+    app.get('/snapshot', async (req) => {
       const who = ctx.identity(req);
-      const suppliers = ctx.db
-        .prepare(
-          `SELECT id, name, contactEmail, notes, updatedAt
-           FROM sourcing_suppliers WHERE accountId = ? ORDER BY name`,
-        )
+      const rows = ctx.db.prepare('SELECT coll, doc FROM sourcing_docs WHERE accountId = ?').all(who.accountId) as { coll: string; doc: string }[];
+      const out: Record<string, unknown[]> = Object.fromEntries(COLLECTIONS.map((c) => [c, []]));
+      for (const r of rows) out[r.coll]?.push(JSON.parse(r.doc));
+      const files = ctx.db
+        .prepare('SELECT id, dossierId, kind, filename, mime, size, version, approval, note, createdAt FROM sourcing_files WHERE accountId = ? ORDER BY createdAt')
         .all(who.accountId);
-      return { suppliers };
+      return { ...out, files };
     });
 
-    app.post('/suppliers', async (req, reply) => {
+    app.put<{ Params: { coll: string; id: string } }>('/:coll/:id', async (req, reply) => {
       const who = ctx.identity(req);
-      const parsed = SupplierBody.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'invalid_request', message: 'Supplier name is required.' });
-      }
-      const s = parsed.data;
+      if (!isColl(req.params.coll)) return reply.code(404).send({ error: 'not_found' });
+      const parsed = Doc.safeParse(req.body);
+      if (!parsed.success || parsed.data.id !== req.params.id) return reply.code(400).send({ error: 'invalid_request', message: 'That record is not valid.' });
       const updatedAt = Date.now();
-
+      const doc = { ...parsed.data, updatedAt };
       ctx.db
         .prepare(
-          `INSERT INTO sourcing_suppliers (accountId, id, name, contactEmail, notes, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(accountId, id) DO UPDATE SET
-             name = excluded.name,
-             contactEmail = excluded.contactEmail,
-             notes = excluded.notes,
-             updatedAt = excluded.updatedAt`,
+          `INSERT INTO sourcing_docs (accountId, coll, id, doc, updatedAt) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(accountId, coll, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
         )
-        .run(who.accountId, s.id, s.name, s.contactEmail ?? null, s.notes ?? null, updatedAt);
-
-      return { supplier: { ...s, contactEmail: s.contactEmail ?? null, notes: s.notes ?? null, updatedAt } };
+        .run(who.accountId, req.params.coll, req.params.id, JSON.stringify(doc), updatedAt);
+      return { doc };
     });
 
-    app.delete<{ Params: { id: string } }>('/suppliers/:id', async (req) => {
+    app.delete<{ Params: { coll: string; id: string } }>('/:coll/:id', async (req, reply) => {
       const who = ctx.identity(req);
-      // Scoped by accountId in the statement itself, so an id from another
-      // tenant simply matches nothing.
-      ctx.db
-        .prepare('DELETE FROM sourcing_suppliers WHERE accountId = ? AND id = ?')
-        .run(who.accountId, req.params.id);
+      if (!isColl(req.params.coll)) return reply.code(404).send({ error: 'not_found' });
+      ctx.db.transaction(() => {
+        ctx.db.prepare('DELETE FROM sourcing_docs WHERE accountId = ? AND coll = ? AND id = ?').run(who.accountId, req.params.coll, req.params.id);
+        if (req.params.coll === 'dossiers') ctx.db.prepare('DELETE FROM sourcing_files WHERE accountId = ? AND dossierId = ?').run(who.accountId, req.params.id);
+        if (req.params.coll === 'suppliers') {
+          ctx.db.prepare("DELETE FROM sourcing_docs WHERE accountId = ? AND coll = 'reps' AND json_extract(doc, '$.supplierId') = ?").run(who.accountId, req.params.id);
+        }
+      })();
       return { ok: true };
     });
 
-    app.get('/drafts', async (req) => {
+    // ── Design files and proofs ───────────────────────────────────────────
+    app.post('/files', async (req, reply) => {
       const who = ctx.identity(req);
-      const rows = ctx.db
-        .prepare(
-          `SELECT id, supplierId, status, lines, createdAt, sentAt
-           FROM sourcing_drafts WHERE accountId = ? ORDER BY createdAt DESC LIMIT 200`,
-        )
-        .all(who.accountId) as DraftRow[];
-
-      return {
-        drafts: rows.map((r) => ({ ...r, lines: JSON.parse(r.lines) as unknown })),
-      };
-    });
-
-    app.post('/drafts', async (req, reply) => {
-      const who = ctx.identity(req);
-      const parsed = DraftBody.safeParse(req.body);
-      if (!parsed.success) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_request', message: 'A draft needs a supplier and at least one line.' });
-      }
-
-      const supplierExists = ctx.db
-        .prepare('SELECT 1 FROM sourcing_suppliers WHERE accountId = ? AND id = ?')
-        .get(who.accountId, parsed.data.supplierId);
-      if (!supplierExists) {
-        return reply.code(404).send({ error: 'unknown_supplier', message: 'No such supplier.' });
-      }
-
-      const draft = {
-        id: crypto.randomUUID(),
-        supplierId: parsed.data.supplierId,
-        status: 'draft' as const,
-        lines: parsed.data.lines,
-        createdAt: Date.now(),
-        sentAt: null,
-      };
-
+      const parsed = FileBody.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'A file needs a dossier, a name and its bytes.' });
+      const f = parsed.data;
+      const bytes = Buffer.from(f.dataB64, 'base64');
+      if (!bytes.length || bytes.length > MAX_FILE_BYTES) return reply.code(413).send({ error: 'too_large', message: 'Files up to 25 MB.' });
+      // Re-uploading the same filename keeps a version trail.
+      const prev = ctx.db
+        .prepare('SELECT MAX(version) AS v FROM sourcing_files WHERE accountId = ? AND dossierId = ? AND filename = ?')
+        .get(who.accountId, f.dossierId, f.filename) as { v: number | null };
+      const meta = { id: crypto.randomUUID(), dossierId: f.dossierId, kind: f.kind, filename: f.filename, mime: f.mime, size: bytes.length, version: (prev.v ?? 0) + 1, approval: f.kind === 'proof' ? 'pending' : null, note: null, createdAt: Date.now() };
       ctx.db
-        .prepare(
-          `INSERT INTO sourcing_drafts (accountId, id, supplierId, status, lines, createdAt, sentAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          who.accountId,
-          draft.id,
-          draft.supplierId,
-          draft.status,
-          JSON.stringify(draft.lines),
-          draft.createdAt,
-          null,
-        );
-
-      return reply.code(201).send({ draft });
+        .prepare('INSERT INTO sourcing_files (accountId, id, dossierId, kind, filename, mime, size, version, approval, note, bytes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(who.accountId, meta.id, meta.dossierId, meta.kind, meta.filename, meta.mime, meta.size, meta.version, meta.approval, meta.note, bytes, meta.createdAt);
+      return reply.code(201).send({ file: meta });
     });
 
-    app.post<{ Params: { id: string } }>('/drafts/:id/sent', async (req, reply) => {
+    /** The bytes, base64 in JSON — the SDK's client speaks JSON, and a design file is a few MB at most. */
+    app.get<{ Params: { id: string } }>('/files/:id', async (req, reply) => {
       const who = ctx.identity(req);
-      const sentAt = Date.now();
-      const result = ctx.db
-        .prepare(
-          `UPDATE sourcing_drafts SET status = 'sent', sentAt = ?
-           WHERE accountId = ? AND id = ? AND status = 'draft'`,
-        )
-        .run(sentAt, who.accountId, req.params.id);
+      const row = ctx.db.prepare('SELECT filename, mime, bytes FROM sourcing_files WHERE accountId = ? AND id = ?').get(who.accountId, req.params.id) as
+        | { filename: string; mime: string; bytes: Buffer }
+        | undefined;
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      return { filename: row.filename, mime: row.mime, dataB64: row.bytes.toString('base64') };
+    });
 
-      if (result.changes === 0) {
-        return reply.code(404).send({ error: 'not_found', message: 'No open draft with that id.' });
-      }
-      return { draft: { id: req.params.id, status: 'sent', sentAt } };
+    app.post<{ Params: { id: string } }>('/files/:id/approval', async (req, reply) => {
+      const who = ctx.identity(req);
+      const parsed = Approval.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ error: 'invalid_request' });
+      ctx.db.prepare('UPDATE sourcing_files SET approval = ?, note = ? WHERE accountId = ? AND id = ?').run(parsed.data.approval, parsed.data.note ?? null, who.accountId, req.params.id);
+      return { ok: true };
+    });
+
+    app.delete<{ Params: { id: string } }>('/files/:id', async (req) => {
+      const who = ctx.identity(req);
+      ctx.db.prepare('DELETE FROM sourcing_files WHERE accountId = ? AND id = ?').run(who.accountId, req.params.id);
+      return { ok: true };
     });
   },
 };

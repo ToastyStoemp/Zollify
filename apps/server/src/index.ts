@@ -74,7 +74,19 @@ async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8787);
   const host = process.env.HOST ?? '0.0.0.0';
 
-  await app.listen({ port, host });
+  // Under `tsx watch` the previous process can still hold the port for a
+  // moment (open WebSockets delay its exit), so the port is retried briefly
+  // rather than the restart dying on EADDRINUSE and leaving stale code up.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await app.listen({ port, host });
+      break;
+    } catch (err) {
+      const busy = err instanceof Error && 'code' in err && (err as { code?: string }).code === 'EADDRINUSE';
+      if (!busy || attempt >= 20) throw err;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
   app.log.info({ port, host, dataDir, moduleStoreDir, webDistDir }, 'Zollify gateway listening');
 }
 

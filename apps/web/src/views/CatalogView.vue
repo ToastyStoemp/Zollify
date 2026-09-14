@@ -1,122 +1,231 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { Product, Variant } from '@zollify/shared';
+import { fmtPrice } from '@zollify/shared';
+import { CountryPicker, Icon, ModalShell, typeColor } from '@zollify/ui';
 import {
   allProducts,
   currentAccount,
   deleteProduct,
+  freeFor,
+  onHandFor,
   saveProductImage,
+  setOnHand,
   shellConfirm,
+  soldTotal,
   upsertProduct,
 } from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
 
+/**
+ * The catalogue — ZollTool's, grouped by type, edited in a sheet.
+ *
+ * Stock here is what the booth owns; Inventory is where events claim a share
+ * of it. Editing a product and counting it are one form because that is how
+ * a box gets unpacked: title, price, how many.
+ */
+
 const account = currentAccount;
-const query = ref('');
-const editing = ref<Product | null>(null);
+const currency = computed(() => account.value?.profile.defaultCurrency ?? 'CHF');
+const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+const search = ref('');
 const error = ref<string | null>(null);
 
-const canEdit = computed(
-  () => account.value?.role === 'owner' || account.value?.role === 'admin',
-);
-
 const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase();
+  const q = search.value.trim().toLowerCase();
   if (!q) return allProducts.value;
-  return allProducts.value.filter(
-    (p) => p.title.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q),
-  );
+  return allProducts.value.filter((p) => [p.title, p.sku, p.type, ...p.variants.flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q));
 });
 
-// No cast: letting the type check this is what caught `sortOrder` missing.
-function blank(): Product {
-  return {
-    id: crypto.randomUUID(),
-    title: '',
-    forSale: true,
-    unlisted: false,
-    price: 0,
-    variants: [],
-    // New products sort to the end of a manually-ordered catalogue.
-    sortOrder: allProducts.value.length,
-    updatedAt: Date.now(),
-  };
-}
-
-/**
- * Variants of the product being edited.
- *
- * A variant without its own price inherits the product's — that is how "same
- * print, three sizes, one price" stays a single number to maintain.
- */
-const variants = computed<Variant[]>(() => editing.value?.variants ?? []);
-
-function addVariant(): void {
-  if (!editing.value) return;
-  editing.value.variants = [
-    ...variants.value,
-    { id: crypto.randomUUID(), name: '' },
-  ];
-}
-
-function removeVariant(index: number): void {
-  if (!editing.value) return;
-  const next = [...variants.value];
-  next.splice(index, 1);
-  editing.value.variants = next;
-}
-
-/**
- * Saves the picked image and points the product at it.
- *
- * The blob is stored locally and only a thumbnail syncs, so a catalogue full
- * of photos never competes with sale ops for a convention's connection.
- */
-async function chooseImage(event: Event): Promise<void> {
-  const file = (event.target as HTMLInputElement).files?.[0];
-  if (!file || !editing.value) return;
-  error.value = null;
-  try {
-    editing.value.imageId = await saveProductImage(editing.value.id, file);
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not read that image.';
+/** Always grouped by type, matching the till. */
+const groups = computed(() => {
+  const map = new Map<string, Product[]>();
+  for (const p of filtered.value) {
+    const type = p.type?.trim() || 'Other';
+    (map.get(type) ?? map.set(type, []).get(type)!).push(p);
   }
+  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([type, products]) => ({ type, products }));
+});
+const types = computed(() => [...new Set(['Art Print', 'Purse', ...allProducts.value.map((p) => p.type).filter((t): t is string => !!t)])].sort());
+
+const onHandOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + onHandFor(p.id, v.id), 0) : onHandFor(p.id, ''));
+const freeOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + freeFor(p.id, v.id), 0) : freeFor(p.id, ''));
+const soldOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + soldTotal(p.id, v.id), 0) : soldTotal(p.id, ''));
+
+// Customs wants title + year for art prints and the material for purses.
+const isArtwork = (type: string): boolean => /print|art/i.test(type);
+const isPurse = (type: string): boolean => /purse|wallet|bag/i.test(type);
+
+// ── Editor ──────────────────────────────────────────────────────────────────
+interface VariantForm extends Variant {
+  onHand: number;
+  newImage?: File;
+  previewUrl?: string;
+  removeImage?: boolean;
+}
+const editing = ref(false);
+const editId = ref<string | null>(null);
+const imageFile = ref<File | null>(null);
+const imagePreview = ref<string | null>(null);
+const removeImage = ref(false);
+const form = reactive({
+  title: '',
+  sku: '',
+  type: '',
+  price: '',
+  priceNote: '',
+  weightG: '',
+  tariffNo: '',
+  originCountry: '',
+  year: '',
+  material: '',
+  forSale: true,
+  unlisted: false,
+  onHand: 0,
+  variants: [] as VariantForm[],
+});
+const existing = computed(() => (editId.value ? allProducts.value.find((p) => p.id === editId.value) : undefined));
+const hasPhoto = computed(() => Boolean(imagePreview.value || (existing.value?.imageId && !removeImage.value)));
+
+function resetForm(p?: Product): void {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
+  imageFile.value = null;
+  imagePreview.value = null;
+  removeImage.value = false;
+  Object.assign(form, {
+    title: p?.title ?? '',
+    sku: p?.sku ?? '',
+    type: p?.type ?? '',
+    price: p ? String(p.price ?? '') : '',
+    priceNote: p?.priceNote ?? '',
+    weightG: p?.weightG != null ? String(p.weightG) : '',
+    tariffNo: p?.tariffNo ?? '',
+    originCountry: p?.originCountry ?? '',
+    year: p?.year != null ? String(p.year) : '',
+    material: p?.material ?? '',
+    forSale: p?.forSale ?? true,
+    unlisted: p?.unlisted ?? false,
+    onHand: p ? onHandFor(p.id, '') : 0,
+    variants: (p?.variants ?? []).map((v) => ({ ...v, onHand: onHandFor(p!.id, v.id) })),
+  });
+}
+function openNew(): void {
+  editId.value = null;
+  resetForm();
+  error.value = null;
+  editing.value = true;
+}
+function openEdit(p: Product): void {
+  editId.value = p.id;
+  resetForm(p);
+  error.value = null;
+  editing.value = true;
+}
+onUnmounted(() => resetForm());
+
+function pickImage(e: Event): void {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
+  imageFile.value = file;
+  removeImage.value = false;
+  imagePreview.value = URL.createObjectURL(file);
+}
+function dropImage(): void {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
+  imageFile.value = null;
+  imagePreview.value = null;
+  removeImage.value = true;
+}
+function addVariant(): void {
+  form.variants.push({ id: crypto.randomUUID(), name: '', onHand: 0 });
+}
+function pickVariantImage(v: VariantForm, e: Event): void {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (v.previewUrl) URL.revokeObjectURL(v.previewUrl);
+  v.newImage = file;
+  v.previewUrl = URL.createObjectURL(file);
+  v.removeImage = false;
+}
+function dropVariantImage(v: VariantForm): void {
+  if (v.previewUrl) URL.revokeObjectURL(v.previewUrl);
+  v.newImage = undefined;
+  v.previewUrl = undefined;
+  v.removeImage = true;
 }
 
-function variantSummary(product: Product): string {
-  const count = product.variants?.length ?? 0;
-  if (!count) return '';
-  return ` · ${count} variant${count === 1 ? '' : 's'}`;
-}
-
-function startNew(): void {
-  editing.value = blank();
-}
+const num = (s: string | number | undefined): number | undefined => {
+  const n = typeof s === 'number' ? s : parseFloat(String(s ?? ''));
+  return Number.isFinite(n) ? n : undefined;
+};
 
 async function save(): Promise<void> {
-  if (!editing.value) return;
-  if (!editing.value.title.trim()) {
+  if (!form.title.trim()) {
     error.value = 'Give the product a title before saving.';
     return;
   }
   error.value = null;
+  const prior = existing.value;
+  const productId = editId.value ?? crypto.randomUUID();
   try {
-    await upsertProduct({ ...editing.value, title: editing.value.title.trim() });
-    editing.value = null;
+    let imageId = removeImage.value ? undefined : prior?.imageId;
+    if (imageFile.value) imageId = await saveProductImage(productId, imageFile.value);
+
+    const variants: Variant[] = [];
+    for (const { onHand: _o, newImage, previewUrl: _p, removeImage: rm, ...v } of form.variants) {
+      variants.push({
+        ...v,
+        name: v.name.trim(),
+        sku: v.sku?.trim() || undefined,
+        price: num(v.price),
+        imageId: rm ? undefined : newImage ? await saveProductImage(productId, newImage) : v.imageId,
+      });
+    }
+    const product: Product = {
+      ...prior,
+      id: productId,
+      title: form.title.trim(),
+      sku: form.sku.trim() || undefined,
+      type: form.type.trim() || undefined,
+      forSale: form.forSale,
+      unlisted: form.unlisted,
+      price: num(form.price) ?? 0,
+      priceNote: form.priceNote.trim() || undefined,
+      weightG: num(form.weightG),
+      tariffNo: form.tariffNo.trim() || undefined,
+      originCountry: form.originCountry.trim() || undefined,
+      year: form.year ? parseInt(form.year, 10) || undefined : undefined,
+      material: form.material.trim() || undefined,
+      variants,
+      imageId,
+      sortOrder: prior?.sortOrder ?? allProducts.value.length,
+      updatedAt: Date.now(),
+    };
+    await upsertProduct(product);
+
+    // Stock is written only where it changed, so a plain title edit stays one op.
+    if (variants.length) {
+      for (const v of form.variants) if (v.onHand !== onHandFor(productId, v.id)) await setOnHand(productId, v.id, v.onHand);
+    } else if (form.onHand !== onHandFor(productId, '')) {
+      await setOnHand(productId, '', form.onHand);
+    }
+    editing.value = false;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save that product.';
   }
 }
 
 async function remove(product: Product): Promise<void> {
-  const ok = await shellConfirm(
-    `Remove "${product.title}" from the catalogue? Past sales of it stay in History.`,
-    'Remove this product',
-  );
+  const ok = await shellConfirm(`Remove "${product.title}" from the catalogue? Past sales of it stay in History.`, 'Remove this product');
   if (!ok) return;
-  error.value = null;
   try {
     await deleteProduct(product.id);
+    if (editId.value === product.id) editing.value = false;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not remove that product.';
   }
@@ -126,127 +235,174 @@ async function remove(product: Product): Promise<void> {
 <template>
   <section class="catalog">
     <header>
-      <h1>Catalog</h1>
+      <h1>Products</h1>
       <div class="tools">
-        <input v-model="query" type="search" placeholder="Search title or SKU" aria-label="Search catalog" />
-        <button v-if="canEdit" type="button" class="primary" @click="startNew">New product</button>
+        <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
+        <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
       </div>
     </header>
 
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
-    <form v-if="editing" class="editor" @submit.prevent="save">
-      <h2>{{ editing.title || 'New product' }}</h2>
-      <div class="grid">
-        <label><span>Title</span><input v-model="editing.title" type="text" required /></label>
-        <label><span>SKU</span><input v-model="editing.sku" type="text" /></label>
-        <label><span>Price</span><input v-model.number="editing.price" type="number" step="0.01" min="0" inputmode="decimal" /></label>
-      </div>
+    <p v-if="!filtered.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products yet.' }}</p>
 
-      <details class="customs" :open="Boolean(editing.tariffNo || editing.weightG || editing.originCountry)">
-        <summary>Customs details</summary>
-        <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
-        <div class="grid">
-          <label><span>Weight (g)</span><input v-model.number="editing.weightG" type="number" min="0" inputmode="numeric" /></label>
-          <label><span>Tariff no.</span><input v-model="editing.tariffNo" type="text" inputmode="numeric" /></label>
-          <label><span>Origin country</span><input v-model="editing.originCountry" type="text" maxlength="2" placeholder="CH" /></label>
+    <section v-for="group in groups" :key="group.type" class="group">
+      <h2><span class="swatch" :style="{ background: typeColor(group.type) }"></span><span :style="{ color: typeColor(group.type) }">{{ group.type }}</span><small>{{ group.products.length }}</small></h2>
+      <ul>
+        <li v-for="p in group.products" :key="p.id">
+          <button type="button" class="row" @click="canEdit ? openEdit(p) : undefined">
+            <ProductThumb :image-id="p.imageId" :alt="p.title" :size="40" />
+            <span class="main">
+              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em></span>
+              <span class="sub">{{ p.sku }}<template v-if="p.sku && p.variants.length"> · </template><template v-if="p.variants.length">{{ p.variants.length }} variant{{ p.variants.length === 1 ? '' : 's' }}</template></span>
+            </span>
+            <span class="side">
+              <strong>{{ fmtPrice(p.price, currency) }}</strong>
+              <span class="sub" :class="{ bad: freeOf(p) < 0 }">{{ onHandOf(p) }} on hand · {{ soldOf(p) }} sold</span>
+            </span>
+          </button>
+        </li>
+      </ul>
+    </section>
+
+    <ModalShell v-if="editing" :title="editId ? 'Edit product' : 'New product'" wide @close="editing = false">
+      <div class="form">
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <div class="photo">
+          <div class="frame">
+            <img v-if="imagePreview" :src="imagePreview" alt="" />
+            <ProductThumb v-else-if="hasPhoto" :image-id="existing?.imageId" :alt="form.title || 'Product'" :size="80" />
+            <Icon v-else name="package" :size="28" />
+          </div>
+          <div class="photo-actions">
+            <label class="btn"><Icon name="upload" :size="14" /> {{ hasPhoto ? 'Replace photo' : 'Add photo' }}<input type="file" accept="image/*" hidden @change="pickImage" /></label>
+            <button v-if="hasPhoto" type="button" class="quiet danger" @click="dropImage">Remove</button>
+          </div>
         </div>
-      </details>
-      <label class="image">
-        <span>Photo</span>
-        <div class="image-row">
-          <ProductThumb :image-id="editing.imageId" :alt="editing.title || 'Product'" :size="56" />
-          <input type="file" accept="image/*" @change="chooseImage" />
+
+        <label><span>Title</span><input v-model="form.title" type="text" required /></label>
+        <div class="two">
+          <label><span>SKU</span><input v-model="form.sku" type="text" /></label>
+          <label>
+            <span>Type</span>
+            <input v-model="form.type" type="text" list="zfy-type-suggestions" placeholder="Art Print" />
+            <datalist id="zfy-type-suggestions"><option v-for="t in types" :key="t" :value="t" /></datalist>
+          </label>
         </div>
-      </label>
-
-      <fieldset class="variants">
-        <legend>Variants</legend>
-        <p class="hint">
-          Sizes, colours, editions. Leave the price blank to use the product price.
-        </p>
-        <div v-for="(variant, i) in variants" :key="variant.id" class="variant">
-          <input v-model="variant.name" type="text" placeholder="A3" aria-label="Variant name" />
-          <input v-model="variant.sku" type="text" placeholder="SKU" aria-label="Variant SKU" />
-          <input
-            v-model.number="variant.price"
-            type="number"
-            step="0.01"
-            min="0"
-            placeholder="Price"
-            aria-label="Variant price"
-          />
-          <button type="button" class="quiet" :aria-label="`Remove variant ${variant.name || i + 1}`" @click="removeVariant(i)">Remove</button>
+        <div class="three">
+          <label><span>Price ({{ currency }})</span><input v-model="form.price" type="number" step="0.05" min="0" inputmode="decimal" /></label>
+          <label><span>Weight (g)</span><input v-model="form.weightG" type="number" min="0" inputmode="numeric" /></label>
+          <label v-if="!form.variants.length"><span>On hand</span><input v-model.number="form.onHand" type="number" min="0" inputmode="numeric" /></label>
         </div>
-        <button type="button" @click="addVariant">Add variant</button>
-      </fieldset>
+        <label><span>Price note</span><input v-model="form.priceNote" type="text" placeholder="Shown on the price sheet, e.g. “signed”" /></label>
 
-      <div class="toggles">
-        <label class="inline"><input v-model="editing.forSale" type="checkbox" /> <span>For sale</span></label>
-        <label class="inline"><input v-model="editing.unlisted" type="checkbox" /> <span>Unlisted</span></label>
+        <details class="customs" :open="Boolean(form.tariffNo || form.originCountry || form.year || form.material)">
+          <summary>Customs details</summary>
+          <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
+          <div class="two">
+            <label><span>Tariff no. (HS code)</span><input v-model="form.tariffNo" type="text" placeholder="4911.9100" inputmode="decimal" /></label>
+            <label><span>{{ isArtwork(form.type) ? 'Artist country' : 'Origin country' }}</span><CountryPicker v-model="form.originCountry" store="code" placeholder="CH" /></label>
+          </div>
+          <label v-if="isArtwork(form.type)">
+            <span>Year produced</span>
+            <input v-model="form.year" type="number" inputmode="numeric" placeholder="2024" />
+            <small>Listed on customs documents as “{{ form.title || 'Title' }}{{ form.year ? ` (${form.year})` : '' }}”.</small>
+          </label>
+          <label v-if="isPurse(form.type)">
+            <span>Material</span>
+            <input v-model="form.material" type="text" placeholder="Genuine leather" />
+            <small>Listed on customs documents as “{{ form.title || 'Title' }}{{ form.material ? ` - ${form.material}` : '' }}”.</small>
+          </label>
+        </details>
+
+        <div class="toggles">
+          <label class="inline"><input v-model="form.forSale" type="checkbox" /> <span>For sale</span></label>
+          <label class="inline"><input v-model="form.unlisted" type="checkbox" /> <span>Unlisted (left off customs documents)</span></label>
+        </div>
+
+        <fieldset class="variants">
+          <legend>Variants <button type="button" class="quiet add" @click="addVariant">+ Add variant</button></legend>
+          <p v-if="!form.variants.length" class="hint">No variants — the product sells as-is.</p>
+          <div v-for="(v, i) in form.variants" :key="v.id" class="variant">
+            <label class="vphoto">
+              <img v-if="v.previewUrl" :src="v.previewUrl" alt="" />
+              <ProductThumb v-else-if="v.imageId && !v.removeImage" :image-id="v.imageId" :alt="v.name || 'Variant'" :size="40" />
+              <span v-else class="ph"><Icon name="upload" :size="14" /></span>
+              <input type="file" accept="image/*" hidden @change="pickVariantImage(v, $event)" />
+              <button v-if="v.previewUrl || (v.imageId && !v.removeImage)" type="button" class="rm" aria-label="Remove photo" @click.prevent.stop="dropVariantImage(v)"><Icon name="x" :size="10" /></button>
+            </label>
+            <input v-model="v.name" type="text" placeholder="Name (A3)" aria-label="Variant name" />
+            <input v-model="v.sku" type="text" placeholder="SKU" aria-label="Variant SKU" />
+            <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
+            <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
+            <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="form.variants.splice(i, 1)"><Icon name="x" :size="14" /></button>
+          </div>
+          <p v-if="form.variants.length" class="hint">Leave a variant price blank to use the product price.</p>
+        </fieldset>
       </div>
-      <div class="actions">
-        <button type="button" @click="editing = null">Cancel</button>
-        <button type="submit" class="primary">Save</button>
-      </div>
-    </form>
-
-    <p v-if="!filtered.length" class="empty">
-      {{ query ? 'Nothing matches that search.' : 'No products yet.' }}
-    </p>
-
-    <div v-else class="table-scroll">
-    <table>
-      <thead>
-        <tr><th>Title</th><th>SKU</th><th class="num">Price</th><th>Status</th><th v-if="canEdit"></th></tr>
-      </thead>
-      <tbody>
-        <tr v-for="product in filtered" :key="product.id">
-          <td class="title-cell">
-            <ProductThumb :image-id="product.imageId" :alt="product.title" :size="32" />
-            <span>{{ product.title }}<span class="variants-note">{{ variantSummary(product) }}</span></span>
-          </td>
-          <td class="mono">{{ product.sku ?? '—' }}</td>
-          <td class="num">{{ product.price.toFixed(2) }}</td>
-          <td>{{ product.forSale ? 'For sale' : 'Not for sale' }}{{ product.unlisted ? ' · unlisted' : '' }}</td>
-          <td v-if="canEdit" class="row-actions">
-            <button type="button" @click="editing = { ...product }">Edit</button>
-            <button type="button" class="danger" @click="remove(product)">Remove</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-    </div>
+      <template #footer>
+        <div class="actions">
+          <button v-if="existing" type="button" class="danger" @click="remove(existing)">Remove</button>
+          <span class="spacer"></span>
+          <button type="button" @click="editing = false">Cancel</button>
+          <button type="button" class="primary" @click="save">Save</button>
+        </div>
+      </template>
+    </ModalShell>
   </section>
 </template>
 
 <style scoped>
-.catalog { display: flex; flex-direction: column; gap: 1rem; }
+.catalog { display: flex; flex-direction: column; gap: 1rem; max-width: 60rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
-h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
-.tools { display: flex; gap: .5rem; }
-.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.tools { display: flex; gap: .5rem; flex-wrap: wrap; }
+.tools input { min-width: 14rem; }
+.tools .primary { display: inline-flex; align-items: center; gap: .4rem; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
-.editor { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .75rem; }
-label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
-label.inline { flex-direction: row; align-items: center; gap: .4rem; }
-.toggles { display: flex; gap: 1rem; }
-.customs { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
-.customs summary { cursor: pointer; font-size: .875rem; font-weight: 600; }
-.variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
-.variants legend { font-size: .8rem; padding: 0 .3rem; color: var(--zfy-muted, #5a6472); }
-.variant { display: grid; grid-template-columns: 1fr 1fr 7rem auto; gap: .4rem; width: 100%; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
-.variants-note { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
-.image-row { display: flex; align-items: center; gap: .6rem; }
-.title-cell { display: flex; align-items: center; gap: .6rem; }
-.actions { display: flex; gap: .5rem; justify-content: flex-end; }
-table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
-th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; white-space: nowrap; }
-tbody tr:last-child td { border-bottom: none; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-.mono { font-family: ui-monospace, monospace; font-size: .82rem; }
-.row-actions { display: flex; gap: .4rem; justify-content: flex-end; }
+.group { display: flex; flex-direction: column; gap: .4rem; }
+.group h2 { margin: 0; display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
+.group h2 small { color: var(--zfy-muted, #5a6472); font-weight: 400; }
+.swatch { width: .35rem; height: 1rem; border-radius: 999px; }
+.group ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); overflow: hidden; }
+.group li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }
+.row { width: 100%; display: flex; align-items: center; gap: .75rem; padding: .6rem .9rem; text-align: left; border: 0; border-radius: 0; background: none; min-height: 3.5rem; }
+.row:hover { background: var(--zfy-bg, #f1f4f6); }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
+.title { font-weight: 600; font-size: .92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.title em { font-style: normal; font-weight: 500; font-size: .68rem; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f1f4f6); border-radius: 4px; padding: .05rem .35rem; margin-left: .3rem; vertical-align: middle; }
+.sub { font-size: .76rem; color: var(--zfy-muted, #5a6472); }
+.side { display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.bad { color: var(--zfy-danger, #c6512f); }
+
+.form { display: flex; flex-direction: column; gap: .75rem; }
+label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
+label.inline { flex-direction: row; align-items: center; gap: .4rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .75rem; }
+.photo { display: flex; align-items: center; gap: .8rem; }
+.frame { width: 5rem; height: 5rem; border-radius: 12px; background: var(--zfy-bg, #f1f4f6); display: grid; place-items: center; overflow: hidden; color: var(--zfy-muted, #5a6472); flex-shrink: 0; }
+.frame img { width: 100%; height: 100%; object-fit: cover; }
+.photo-actions { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+.btn { display: inline-flex; flex-direction: row; align-items: center; gap: .35rem; cursor: pointer; min-height: 2.2rem; padding: .3rem .8rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); font-size: .82rem; font-weight: 500; }
+.customs { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .6rem; }
+.customs summary { cursor: pointer; font-size: .875rem; font-weight: 600; }
+.toggles { display: flex; gap: 1rem; flex-wrap: wrap; }
+.variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-bg, #f1f4f6); }
+.variants legend { font-size: .85rem; font-weight: 600; padding: 0 .3rem; display: flex; align-items: center; gap: .6rem; }
+.add { color: var(--zfy-accent-ink, #0a5a4a); min-height: 1.6rem; padding: 0 .4rem; font-size: .78rem; }
+.variant { display: grid; grid-template-columns: 2.5rem 1fr 6rem 5.5rem 5rem auto; gap: .4rem; align-items: center; }
+.vphoto { position: relative; width: 2.5rem; height: 2.5rem; cursor: pointer; }
+.vphoto img, .vphoto .ph { width: 2.5rem; height: 2.5rem; border-radius: 8px; object-fit: cover; }
+.vphoto .ph { display: grid; place-items: center; background: var(--zfy-surface, #fff); border: 1px dashed var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); }
+.rm { position: absolute; top: -.35rem; right: -.35rem; width: 1.1rem; height: 1.1rem; min-height: 0; padding: 0; border-radius: 999px; display: grid; place-items: center; background: var(--zfy-danger, #c6512f); color: #fff; border: 0; }
+.actions { display: flex; gap: .5rem; align-items: center; }
+.spacer { flex: 1; }
+@media (max-width: 640px) {
+  .variant { grid-template-columns: 2.5rem 1fr auto; }
+  .variant input:nth-of-type(n + 2) { grid-column: 2 / span 1; }
+}
 </style>

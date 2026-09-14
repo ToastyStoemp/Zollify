@@ -1,3 +1,4 @@
+import { booted, whenBooted } from './boot';
 import { createRouter, createWebHashHistory, type Router } from 'vue-router';
 import { getAccount, isAuthenticated } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
@@ -17,6 +18,7 @@ export const router: Router = createRouter({
     { path: '/events', name: 'events', component: () => import('./views/EventsView.vue') },
     { path: '/catalog', name: 'catalog', component: () => import('./views/CatalogView.vue') },
     { path: '/stock', name: 'stock', component: () => import('./views/StockView.vue') },
+    { path: '/discounts', name: 'discounts', component: () => import('./views/DiscountsView.vue'), meta: { minRole: 'admin' } },
     { path: '/history', name: 'history', component: () => import('./views/HistoryView.vue') },
     { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue'), meta: { minRole: 'admin' } },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
@@ -32,7 +34,10 @@ export const router: Router = createRouter({
  * server refusing the data is the actual guarantee — all three exist because
  * only the last one is load-bearing.
  */
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  // The shell mounts before the session is restored; no guard may judge a
+  // navigation until it is, or a reload would bounce a signed-in user to login.
+  if (!booted.value) await whenBooted;
   if (to.meta.public === true) return true;
 
   if (!isAuthenticated.value) {

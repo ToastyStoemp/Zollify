@@ -9,6 +9,7 @@ const canRename = computed(() => account.value?.role === 'owner');
 
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...account.value!.profile.artist });
+const currency = ref(account.value!.profile.defaultCurrency);
 const saved = ref(false);
 const error = ref<string | null>(null);
 const busy = ref(false);
@@ -19,6 +20,7 @@ async function save(): Promise<void> {
   try {
     await updateProfile({
       artist: artist.value,
+      ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
     saved.value = true;
@@ -41,7 +43,7 @@ async function save(): Promise<void> {
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <ArtistForm v-model="artist" v-model:name="name" :can-rename="canRename" />
+    <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
     <div class="row">
       <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save' }}</button>

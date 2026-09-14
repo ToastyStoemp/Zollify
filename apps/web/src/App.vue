@@ -11,7 +11,7 @@ import {
   syncState,
   toasts,
 } from '@zollify/platform';
-import { contributions, loader } from './boot';
+import { booted, contributions, loader } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import { Icon } from '@zollify/ui';
 
@@ -44,6 +44,7 @@ const coreNav: Entry[] = [
   { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115, minRole: 'admin' },
   { routeName: 'catalog', label: 'Products', icon: 'package', group: 'stock', order: 20 },
   { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
+  { routeName: 'discounts', label: 'Discounts', icon: 'tag', group: 'stock', order: 30, minRole: 'admin' },
   { routeName: 'events', label: 'Events', icon: 'calendar', group: 'events', order: 10 },
 ];
 
@@ -107,7 +108,8 @@ async function leave(): Promise<void> {
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column — otherwise the login card is squeezed into a 15rem track. -->
-  <div :class="['shell', { 'shell--bare': !account || settingUp }]">
+  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand">Zollify<span>.</span></span><small>Opening the booth…</small></div>
+  <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
     <aside v-if="account && !settingUp" class="sidebar">
       <div class="brand">Zollify<span>.</span></div>
 
@@ -166,6 +168,8 @@ async function leave(): Promise<void> {
 </template>
 
 <style scoped>
+.splash { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; color: var(--zfy-muted); }
+.splash .brand { font-size: 1.6rem; color: var(--zfy-ink); }
 .shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
 .shell--bare { grid-template-columns: 1fr; }
 .shell--bare .content { padding: 0; display: grid; }

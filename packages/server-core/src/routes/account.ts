@@ -38,6 +38,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
     const next: AccountProfile = {
       setupCompletedAt: body.setupCompleted ? (current.setupCompletedAt ?? Date.now()) : current.setupCompletedAt,
       artist: { ...current.artist, ...(body.artist ?? {}) },
+      defaultCurrency: body.defaultCurrency ?? current.defaultCurrency,
     };
 
     db.transaction(() => {

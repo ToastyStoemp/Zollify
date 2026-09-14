@@ -1,3 +1,4 @@
+import { ref } from 'vue';
 import type { Router } from 'vue-router';
 import {
   ContributionRegistry,
@@ -32,6 +33,16 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'public-events': () => import('@zollify/public-events'),
   tax: () => import('@zollify/tax'),
 };
+
+/** False until the session, core data and modules are in; the shell shows a splash meanwhile. */
+export const booted = ref(false);
+let resolveBoot: () => void = () => {};
+/** Settles when boot is done — the router's first navigation waits on it. */
+export const whenBooted = new Promise<void>((resolve) => (resolveBoot = resolve));
+export function markBooted(): void {
+  booted.value = true;
+  resolveBoot();
+}
 
 export const contributions = new ContributionRegistry();
 export const events = new PlatformEventBus();

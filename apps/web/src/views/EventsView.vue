@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { toLocalPrice } from '@zollify/shared';
 import type { SalesEvent } from '@zollify/shared';
+import { CountryPicker, CurrencyPicker } from '@zollify/ui';
 import {
   activeEventId,
   currentAccount,
@@ -40,8 +41,8 @@ function blank(): SalesEvent {
   return {
     id: crypto.randomUUID(),
     name: '',
-    venue: {} as SalesEvent['venue'],
-    currency: 'CHF',
+    venue: {},
+    currency: account.value?.profile.defaultCurrency ?? 'CHF',
     status: 'planned',
     updatedAt: Date.now(),
   } as SalesEvent;
@@ -103,11 +104,22 @@ async function remove(event: SalesEvent): Promise<void> {
         <label><span>Name</span><input v-model="editing.name" type="text" required /></label>
         <label>
           <span>Base currency</span>
-          <input v-model="editing.currency" type="text" maxlength="3" />
+          <CurrencyPicker v-model="editing.currency" />
         </label>
         <label><span>Starts</span><input v-model="editing.dateStart" type="date" /></label>
         <label><span>Ends</span><input v-model="editing.dateEnd" type="date" /></label>
       </div>
+
+      <fieldset class="local">
+        <legend>Venue</legend>
+        <p class="hint">Goes on customs paperwork and the public events page.</p>
+        <div class="grid">
+          <label><span>Street</span><input v-model="editing.venue.street" type="text" /></label>
+          <label><span>Postcode</span><input v-model="editing.venue.postcode" type="text" /></label>
+          <label><span>City</span><input v-model="editing.venue.city" type="text" /></label>
+          <label><span>Country</span><CountryPicker v-model="editing.venue.country" store="name" /></label>
+        </div>
+      </fieldset>
 
       <fieldset class="local">
         <legend>Charging in another currency</legend>
@@ -118,7 +130,7 @@ async function remove(event: SalesEvent): Promise<void> {
         <div class="grid">
           <label>
             <span>Local currency</span>
-            <input v-model="editing.localCurrency" type="text" maxlength="3" placeholder="SEK" />
+            <CurrencyPicker v-model="editing.localCurrency" placeholder="SEK" />
           </label>
           <label>
             <span>1 {{ editing.currency || 'base' }} =</span>
@@ -158,7 +170,7 @@ async function remove(event: SalesEvent): Promise<void> {
           <button type="button" :class="{ primary: activeEventId !== event.id }" @click="activate(event.id)">
             {{ activeEventId === event.id ? 'Stand down' : 'Make active' }}
           </button>
-          <button v-if="canEdit" type="button" @click="editing = { ...event }">Edit</button>
+          <button v-if="canEdit" type="button" @click="editing = { ...event, venue: { ...(event.venue ?? {}) } }">Edit</button>
           <button v-if="canEdit" type="button" class="danger" @click="remove(event)">Remove</button>
         </div>
       </li>

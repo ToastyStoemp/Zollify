@@ -10,10 +10,11 @@
     "./tokens.css": "./src/tokens.css"
   },
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
     "test": "vitest run --passWithNoTests",
     "build": "echo \"@zollify/ui is consumed as source\""
   },
+  "dependencies": { "@zollify/shared": "*" },
   "peerDependencies": { "vue": "^3.5.0" },
-  "devDependencies": { "vue": "^3.5.0" }
+  "devDependencies": { "vue": "^3.5.0", "vue-tsc": "^2.2.0" }
 }

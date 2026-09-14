@@ -136,9 +136,13 @@ export interface SaleEvent {
      * manual sale says which, because an external terminal the app never
      * talks to is still a card sale and must not land in the cash count.
      */
-    method?: 'cash' | 'card';
+    method?: 'cash' | 'card' | 'split' | (string & {});
+    /** How the total was made up when more than one way paid (a split). */
+    legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
     txRef?: string;
     cardBrand?: string;
+    /** Cash handed over, when the seller counted it; change follows from it. */
+    cashReceived?: number;
   };
 }
 
@@ -280,6 +284,8 @@ export interface TransactionApi {
   /** Most recent first, bounded to what core has loaded. */
   recent(): Transaction[];
   get(id: string): Transaction | undefined;
+  /** Marks a sale reverted. The record stays; stock is derived, so nothing else moves. */
+  revert(id: string): Promise<void>;
   /** Per-currency totals, for an event or across all of them. */
   totals(eventId?: string | null): {
     currency: string;

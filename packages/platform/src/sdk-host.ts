@@ -23,7 +23,7 @@ import {
   getProduct,
   upsertProduct,
 } from './core/catalog';
-import { getTransaction, recentTransactions, totalsFor } from './core/transactions';
+import { getTransaction, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
 import { imageUrl, importProductImage } from './core/images';
 import {
   availabilityFor,
@@ -149,6 +149,7 @@ const coreData: import('@zollify/sdk').DataApi = {
   transactions: {
     recent: () => [...recentTransactions.value],
     get: (id) => getTransaction(id),
+    revert: (id) => revertTransaction(id),
     totals: (eventId) => totalsFor(eventId),
   },
   discounts: {

@@ -165,53 +165,77 @@ export interface CheckoutOutcome {
   sale?: SaleEvent;
 }
 
+export interface CheckoutPayment {
+  /** cash · card · split · or a custom method name (TWINT, PayPal QR…). */
+  method: string;
+  /** Present for a split; otherwise one leg for the whole amount is implied. */
+  legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
+  /** Cash handed over, when counted. */
+  cashReceived?: number;
+  /** Take the card on the configured terminal rather than recording it by hand. */
+  terminal?: { providerId: string };
+}
+
+/** Units of an item already on the ticket. */
+export function inCart(productId: string, variantId: string | null = null): number {
+  return cart.lines.filter((l) => l.productId === productId && (l.variantId ?? null) === variantId).reduce((n, l) => n + l.qty, 0);
+}
+
+/** A one-off item that is not in the catalogue: no stock, no rule discounts. */
+export function addMisc(title: string, unitPrice: number, qty: number): void {
+  cart.lines.push({
+    lineId: `l${++lineSeq}`,
+    productId: `misc:${crypto.randomUUID()}`,
+    variantId: null,
+    variantLabel: null,
+    sku: null,
+    name: title.trim() || 'Misc item',
+    qty,
+    unitPrice,
+    lineTotal: (Math.round(unitPrice * 100) * qty) / 100,
+    taxRate: null,
+  });
+}
+
 /**
- * Takes payment through the selected provider and, on approval, announces the
- * sale.
+ * Records the sale and, on approval, announces it.
+ *
+ * Cash, split and custom methods are the seller's word — confirmed on screen,
+ * never through a device. Card goes to the terminal when one is configured;
+ * with none, it is the seller's word too.
  *
  * The `sale` event is the entire contract between POS and anything that cares
  * about revenue — core records it, Tax books it, and neither imports this
  * module. The cart is only cleared after the event is emitted, so a subscriber
  * that throws cannot leave a paid-for basket silently discarded.
  */
-export async function checkout(
-  providerId: string,
-  saleId: string,
-  method?: 'cash' | 'card',
-): Promise<CheckoutOutcome> {
+export async function checkout(saleId: string, pay: CheckoutPayment): Promise<CheckoutOutcome> {
   if (isEmpty.value) return { approved: false, error: 'The cart is empty.' };
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
 
   const charged = total.value;
   const base = baseTotal.value;
-  if (charged <= 0) {
-    return { approved: false, error: 'The total is zero — nothing to charge.' };
-  }
+  if (charged <= 0) return { approved: false, error: 'The total is zero — nothing to charge.' };
 
   cart.busy = true;
   try {
-    const provider = getProvider(providerId as never);
-    const result = await provider.startPayment({
-      amount: charged,
-      currency: cart.currency,
-      reference: saleId,
-    });
-
-    if (!result.approved) {
-      return { approved: false, error: result.error ?? 'The payment was declined.' };
+    let providerName = 'manual';
+    let txRef: string | undefined;
+    let cardBrand: string | undefined;
+    if (pay.terminal) {
+      const provider = getProvider(pay.terminal.providerId as never);
+      const result = await provider.startPayment({ amount: charged, currency: cart.currency, reference: saleId });
+      if (!result.approved) return { approved: false, error: result.error ?? 'The payment was declined.' };
+      providerName = result.provider;
+      txRef = result.txRef;
+      cardBrand = result.cardBrand;
     }
 
     // Discounts are spread proportionally across the lines so the recorded
-    // line totals add up to what was actually paid. Without this a discounted
-    // basket reconciles to the wrong number line by line.
-    // Distributed against the base total: line figures stay in the currency the
-    // books are kept in, so a converted sale still reconciles against the
-    // catalogue. The charged amount is recorded separately on the sale.
+    // line totals add up to what was actually paid. Distributed against the
+    // base total: line figures stay in the currency the books are kept in.
     const priced = distributeTotal(
-      cart.lines.map((line) => ({
-        ...line,
-        lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
-      })),
+      cart.lines.map((line) => ({ ...line, lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100 })),
       base,
     );
 
@@ -226,11 +250,13 @@ export async function checkout(
       exchangeRate: cart.exchangeRate ?? undefined,
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }) => line),
       payment: {
-        provider: result.provider,
+        provider: pay.method === 'card' ? providerName : pay.method,
         approved: true,
-        method,
-        txRef: result.txRef,
-        cardBrand: result.cardBrand,
+        method: pay.method,
+        legs: pay.legs,
+        cashReceived: pay.cashReceived,
+        txRef,
+        cardBrand,
       },
     };
 

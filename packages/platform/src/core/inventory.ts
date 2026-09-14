@@ -179,22 +179,35 @@ export function soldAt(eventId: string, productId: string, variantId: string | n
   return soldByEventAndKey.value.get(eventId)?.get(stockKey(productId, variantId)) ?? 0;
 }
 
+// The per-key sums below are computeds, not loops per call: a catalogue
+// screen asks for them once per row, and a row-by-row scan of every
+// transaction is what made pages crawl once the history grew.
+
+const soldTotalByKey = computed(() => {
+  const out = new Map<string, number>();
+  for (const forEvent of soldByEventAndKey.value.values()) {
+    for (const [key, qty] of forEvent) out.set(key, (out.get(key) ?? 0) + qty);
+  }
+  return out;
+});
+
 /** Every sale of this item, across every event. */
 export function soldTotal(productId: string, variantId: string | null = ''): number {
-  const key = stockKey(productId, variantId);
-  let total = 0;
-  for (const forEvent of soldByEventAndKey.value.values()) total += forEvent.get(key) ?? 0;
-  return total;
+  return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
+
+const claimedByKey = computed(() => {
+  const out = new Map<string, number>();
+  for (const claim of claims.values()) {
+    const key = stockKey(claim.productId, claim.variantId);
+    out.set(key, (out.get(key) ?? 0) + claim.broughtQty);
+  }
+  return out;
+});
 
 /** Units claimed by every event, for one item. */
 export function claimedTotal(productId: string, variantId: string | null = ''): number {
-  const key = stockKey(productId, variantId);
-  let total = 0;
-  for (const claim of claims.values()) {
-    if (stockKey(claim.productId, claim.variantId) === key) total += claim.broughtQty;
-  }
-  return total;
+  return claimedByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
 /**
@@ -206,7 +219,7 @@ export function claimedTotal(productId: string, variantId: string | null = ''): 
  * real print that left the pile, and pretending the pool is untouched would
  * let another event sell it a second time.
  */
-function poolSoldByKey(): Map<string, number> {
+const poolSoldByKey = computed(() => {
   const out = new Map<string, number>();
   for (const [soldEventId, forEvent] of soldByEventAndKey.value) {
     for (const [key, qty] of forEvent) {
@@ -217,7 +230,7 @@ function poolSoldByKey(): Map<string, number> {
     }
   }
   return out;
-}
+});
 
 /**
  * Stock nobody has claimed and nobody has sold — what an unclaimed event can
@@ -230,7 +243,7 @@ function poolSoldByKey(): Map<string, number> {
  */
 export function freeFor(productId: string, variantId: string | null = ''): number {
   const key = stockKey(productId, variantId);
-  return onHandFor(productId, variantId) - claimedTotal(productId, variantId) - (poolSoldByKey().get(key) ?? 0);
+  return onHandFor(productId, variantId) - claimedTotal(productId, variantId) - (poolSoldByKey.value.get(key) ?? 0);
 }
 
 export interface Availability {
@@ -262,7 +275,7 @@ export interface Availability {
 export function availabilityFor(eventId: string): Availability[] {
   const rows: Availability[] = [];
 
-  const poolSold = poolSoldByKey();
+  const poolSold = poolSoldByKey.value;
 
   for (const product of allProducts.value) {
     const variants = product.variants ?? [];

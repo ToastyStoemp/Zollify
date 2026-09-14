@@ -94,6 +94,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
     return {
       setupCompletedAt: typeof parsed.setupCompletedAt === 'number' ? parsed.setupCompletedAt : null,
       artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
+      defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
     };
   } catch {
     return emptyProfile();

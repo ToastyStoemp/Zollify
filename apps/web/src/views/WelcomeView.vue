@@ -57,6 +57,7 @@ const error = ref<string | null>(null);
 // ── Step 1: who ──────────────────────────────────────────────────────────────
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? blankArtist()) });
+const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
 
 function blankArtist(): ArtistDetails {
   return { companyName: '', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '' };
@@ -68,6 +69,7 @@ async function saveWho(): Promise<void> {
   try {
     await updateProfile({
       artist: artist.value,
+      ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
     step.value = 2;
@@ -174,7 +176,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         and you can change them any time under Settings.
       </p>
 
-      <ArtistForm v-model="artist" v-model:name="name" :can-rename="canRename" />
+      <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="finish()">Skip setup</button>

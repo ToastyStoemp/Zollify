@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ArtistDetails } from '@zollify/shared';
+import { CountryPicker, CurrencyPicker } from '@zollify/ui';
 
 /**
  * The booth's identity, as it appears on customs paperwork and receipts.
@@ -9,6 +10,7 @@ import type { ArtistDetails } from '@zollify/shared';
 const model = defineModel<ArtistDetails>({ required: true });
 const props = defineProps<{ canRename: boolean }>();
 const name = defineModel<string>('name', { default: '' });
+const currency = defineModel<string>('currency', { default: 'CHF' });
 </script>
 
 <template>
@@ -38,7 +40,7 @@ const name = defineModel<string>('name', { default: '' });
       </label>
       <label>
         <span>Country</span>
-        <input v-model="model.countryOfOrigin" type="text" placeholder="Switzerland" autocomplete="country-name" />
+        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Switzerland" />
       </label>
       <label>
         <span>Phone</span>
@@ -47,6 +49,11 @@ const name = defineModel<string>('name', { default: '' });
       <label>
         <span>Email</span>
         <input v-model="model.email" type="email" autocomplete="email" />
+      </label>
+      <label>
+        <span>Currency</span>
+        <CurrencyPicker v-model="currency" />
+        <small>Your books are kept in this. New events start with it.</small>
       </label>
     </div>
   </div>

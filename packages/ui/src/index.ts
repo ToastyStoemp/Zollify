@@ -20,3 +20,9 @@ export function token(name: string, fallback?: string): string {
 }
 
 export { Icon, ICON_PATHS } from './icon';
+export { typeColor } from './type-color';
+export { default as ModalShell } from './ModalShell.vue';
+export { default as TypeaheadPicker } from './TypeaheadPicker.vue';
+export type { PickerOption } from './picker';
+export { default as CountryPicker } from './CountryPicker.vue';
+export { default as CurrencyPicker } from './CurrencyPicker.vue';

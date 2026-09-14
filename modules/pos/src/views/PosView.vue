@@ -1,401 +1,687 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import type { Product, Variant } from '@zollify/shared';
+import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
+import type { SaleEvent } from '@zollify/sdk';
+import { Icon, ModalShell } from '@zollify/ui';
 import {
   addLine,
+  addMisc,
   appliedDiscounts,
   baseTotal,
   cart,
-  isConverting,
   checkout,
   clear,
-  discountTotal,
-  isEmpty,
+  inCart,
+  isConverting,
   itemCount,
-  removeLine,
   setCustomDiscount,
   setQty,
   subtotal,
+  toCharged,
   total,
 } from '../cart';
-import { useRouter } from 'vue-router';
-import type { Product, Variant } from '@zollify/shared';
+import { getProvider } from '../payments/registry';
+import { findSearchMatch, typeColor } from '../search';
 import { sdk } from '../runtime';
 import ProductThumb from '../components/ProductThumb.vue';
 
-const providerId = ref('manual');
-const message = ref<string | null>(null);
-const failed = ref(false);
-const search = ref('');
-const lastSaleId = ref<string | null>(null);
-const router = useRouter();
-
 /**
- * Products come from core through the SDK, never from core's database
- * directly — POS holds no catalogue of its own to drift out of sync.
+ * The till — ZollTool's POS, screen for screen.
+ *
+ * Products are browsed by type (one card per type, tap to drill in) or as a
+ * flat grid; a search box takes a scanner. Every payment is confirmed on
+ * screen: cash counts what was handed over and shows the change, card asks
+ * for confirmation (or drives the terminal), split takes both. The last sale
+ * can be undone from the counter.
  */
-const products = computed(() => {
-  const all = sdk().data.products.forSale();
-  const q = search.value.trim().toLowerCase();
-  if (!q) return all;
-  return all.filter(
-    (p) => p.title.toLowerCase().includes(q) || (p.sku ?? '').toLowerCase().includes(q),
-  );
-});
+
+const router = useRouter();
+const search = ref('');
+const notice = ref<{ text: string; kind: 'ok' | 'bad' } | null>(null);
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(text: string, kind: 'ok' | 'bad' = 'ok'): void {
+  notice.value = { text, kind };
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => (notice.value = null), 2800);
+}
 
 const activeEvent = computed(() => sdk().data.events.active());
-
-/**
- * What the active event can still sell of each item.
- *
- * Advisory only — the till never blocks a sale. If someone is standing there
- * with cash, the stock figure is what is wrong, not the sale.
- */
-const availability = computed(() => {
-  const event = activeEvent.value;
-  if (!event) return new Map<string, number>();
-  return new Map(
-    sdk().data.inventory.availability(event.id).map((r) => [`${r.productId}:${r.variantId}`, r.available]),
-  );
-});
-
-function remaining(productId: string, variantId: string | null = ''): number | null {
-  if (!activeEvent.value) return null;
-  return availability.value.get(`${productId}:${variantId ?? ''}`) ?? null;
-}
-
-/** Counting what is already in the cart, so the warning appears before checkout. */
-function wouldExceed(productId: string, variantId: string | null = ''): boolean {
-  const left = remaining(productId, variantId);
-  if (left === null) return false;
-  return inCart(productId, variantId) >= left;
-}
+const products = computed(() => sdk().data.products.forSale());
+const providerId = ref('manual');
+const provider = computed(() => getProvider(providerId.value as never));
+const hasTerminal = computed(() => providerId.value !== 'manual');
 
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
-
-  // The till records against whichever event is active; keep the cart in step
-  // so a sale can never be filed under the wrong one.
   const event = activeEvent.value;
   cart.eventId = event?.id ?? null;
-
   const base = event?.currency ?? 'CHF';
   cart.baseCurrency = base;
-  // An event abroad charges in its local currency while the books stay in the
-  // base one.
   const converting = Boolean(event?.localCurrency && event.exchangeRate);
   cart.currency = converting ? event!.localCurrency! : base;
   cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
   cart.roundingIncrement = event?.roundingIncrement ?? 0;
 });
+onUnmounted(() => clearTimeout(noticeTimer));
 
-/** A product with variants needs one chosen before it can be added. */
-const choosing = ref<Product | null>(null);
-const firstOption = ref<HTMLButtonElement[] | null>(null);
+const currency = computed(() => cart.currency);
+const money = (n: number): string => fmtPrice(n, currency.value);
+const price = (base: number): string => money(toCharged(base));
 
-// Focus goes to the first size so a keyboard or scanner-driven till can pick
-// with Enter, and Escape backs out like any dialog.
-watch(choosing, async (product) => {
-  if (!product) return;
-  await nextTick();
-  firstOption.value?.[0]?.focus();
+// ── Stock ───────────────────────────────────────────────────────────────────
+const availability = computed(() => {
+  const event = activeEvent.value;
+  if (!event) return new Map<string, number>();
+  return new Map(sdk().data.inventory.availability(event.id).map((r) => [`${r.productId}:${r.variantId}`, r.available]));
+});
+function remaining(pid: string, vid: string | null): number | null {
+  if (!activeEvent.value) return null;
+  const left = availability.value.get(`${pid}:${vid ?? ''}`);
+  return left === undefined ? null : left - inCart(pid, vid);
+}
+function stockLabel(pid: string, vid: string | null): { text: string; cls: string } {
+  const left = remaining(pid, vid);
+  if (left === null) return { text: '', cls: '' };
+  if (left < 0) return { text: `${-left} over stock`, cls: 'bad' };
+  if (left === 0) return { text: 'Out of stock', cls: 'bad' };
+  if (left <= 3) return { text: `${left} left`, cls: 'warn' };
+  return { text: `${left} in stock`, cls: 'muted' };
+}
+const productInCart = (p: Product): number => (p.variants?.length ? p.variants.reduce((s, v) => s + inCart(p.id, v.id), 0) : inCart(p.id, null));
+/** Units still sellable across a product's sizes; null when no event is active. */
+function productLeft(p: Product): number | null {
+  if (!activeEvent.value) return null;
+  const keys = p.variants?.length ? p.variants.map((v) => v.id) : [null];
+  return keys.reduce((s, vid) => s + Math.max(0, remaining(p.id, vid) ?? 0), 0);
+}
+
+// ── Browsing: by type, or flat ──────────────────────────────────────────────
+const VIEW_KEY = 'zollify.pos.view';
+const viewMode = ref<'flat' | 'grouped'>('grouped');
+try {
+  if (localStorage.getItem(VIEW_KEY) === 'flat') viewMode.value = 'flat';
+} catch {
+  /* no storage */
+}
+function setViewMode(mode: 'flat' | 'grouped'): void {
+  viewMode.value = mode;
+  try {
+    localStorage.setItem(VIEW_KEY, mode);
+  } catch {
+    /* no storage */
+  }
+}
+
+const filtered = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return products.value;
+  return products.value.filter((p) =>
+    [p.title, p.sku, p.type, ...(p.variants ?? []).flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q),
+  );
+});
+/** Searching always shows flat results; grouping is for browsing. */
+const grouped = computed(() => viewMode.value === 'grouped' && !search.value.trim());
+
+interface TypeGroup {
+  type: string;
+  products: Product[];
+  stock: number | null;
+  inCart: number;
+}
+const typeGroups = computed<TypeGroup[]>(() => {
+  const map = new Map<string, Product[]>();
+  for (const p of products.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
+  return [...map.entries()].map(([type, list]) => ({
+    type,
+    products: list,
+    stock: activeEvent.value ? list.reduce((s, p) => s + (productLeft(p) ?? 0), 0) : null,
+    inCart: list.reduce((s, p) => s + productInCart(p), 0),
+  }));
+});
+type Entry = { key: string; product: Product } | { key: string; group: TypeGroup };
+const entries = computed<Entry[]>(() => {
+  if (!grouped.value) return filtered.value.map((p) => ({ key: p.id, product: p }));
+  return typeGroups.value.map((g) => (g.products.length === 1 ? { key: g.products[0]!.id, product: g.products[0]! } : { key: `t:${g.type}`, group: g }));
+});
+const openType = ref<string | null>(null);
+const typeProducts = computed(() => (openType.value === null ? [] : products.value.filter((p) => (p.type || '(no type)') === openType.value)));
+
+function submitSearch(): void {
+  const match = findSearchMatch(products.value, search.value);
+  if (!match) return toast('No product found for that search.', 'bad');
+  if ('ambiguous' in match) return toast(`${match.count} matches — keep typing to narrow it down.`, 'bad');
+  add(match.productId, match.variantId);
+  toast(`Added ${match.label}`);
+  search.value = '';
+}
+
+// ── Adding ──────────────────────────────────────────────────────────────────
+const variantPicker = ref<Product | null>(null);
+
+function add(pid: string, vid: string | null): void {
+  const p = products.value.find((x) => x.id === pid);
+  if (!p) return;
+  const variants = (p.variants ?? []).filter((v) => !v.unlisted);
+  if (variants.length && !vid) {
+    variantPicker.value = p;
+    return;
+  }
+  const v = vid ? variants.find((x) => x.id === vid) : undefined;
+  addLine({
+    productId: p.id,
+    variantId: v?.id ?? null,
+    variantLabel: v?.name ?? null,
+    sku: v?.sku ?? p.sku ?? null,
+    name: v ? `${p.title} · ${v.name}` : p.title,
+    qty: 1,
+    unitPrice: v?.price ?? p.price,
+    taxRate: p.vatRate ?? null,
+    type: p.type,
+  });
+}
+
+/** Tier quantities of tiered rules on this product drive the "+3 / +5" chips. */
+function bundleQtys(p: Product, vid: string | null = null): number[] {
+  const qtys = new Set<number>();
+  for (const rule of sdk().data.discounts.active()) {
+    if (rule.type !== 'tiered' || !rule.tiers?.length || rule.hideQuickAdd) continue;
+    const matches = rule.productIds.includes(p.id) || (!!p.type && (rule.productTypes ?? []).includes(p.type)) || (vid !== null && rule.variantIds.includes(`${p.id}:${vid}`));
+    if (!matches) continue;
+    for (const t of rule.tiers) if (t.qty > 1) qtys.add(t.qty);
+  }
+  return [...qtys].sort((a, b) => a - b).slice(0, 3);
+}
+function addBundle(pid: string, vid: string | null, qty: number): void {
+  for (let i = 0; i < qty; i++) add(pid, vid);
+}
+
+const fromPrice = (p: Product): string => `from ${money(Math.min(...(p.variants ?? []).map((v) => toCharged(v.price ?? p.price))))}`;
+
+// ── Cart ────────────────────────────────────────────────────────────────────
+const showCartSheet = ref(false);
+const lines = computed(() => cart.lines.map((l) => ({ ...l, chargedUnit: toCharged(l.unitPrice), chargedTotal: toCharged(l.unitPrice * l.qty) })));
+const discountTotalCharged = computed(() => toCharged(subtotal.value) - total.value);
+
+const clearArmed = ref(false);
+let clearTimer: ReturnType<typeof setTimeout> | undefined;
+function tapClear(): void {
+  if (!clearArmed.value) {
+    clearArmed.value = true;
+    clearTimeout(clearTimer);
+    clearTimer = setTimeout(() => (clearArmed.value = false), 3000);
+    return;
+  }
+  clearTimeout(clearTimer);
+  clearArmed.value = false;
+  clear();
+}
+
+const showDiscount = ref(false);
+const discountForm = reactive({ type: 'amount' as 'amount' | 'percent', value: '', name: '' });
+function openDiscount(): void {
+  discountForm.type = cart.custom?.type ?? 'amount';
+  discountForm.value = cart.custom ? String(cart.custom.value) : '';
+  discountForm.name = cart.custom?.name ?? '';
+  showDiscount.value = true;
+}
+function applyDiscount(): void {
+  const value = Number(discountForm.value);
+  if (!Number.isFinite(value) || value <= 0) return toast('Enter a discount value.', 'bad');
+  setCustomDiscount({ type: discountForm.type, value, name: discountForm.name.trim() || (discountForm.type === 'percent' ? `${value}% off` : 'Discount') });
+  showDiscount.value = false;
+}
+
+const showMisc = ref(false);
+const miscForm = reactive({ title: '', price: '', qty: '1' });
+function openMisc(): void {
+  Object.assign(miscForm, { title: '', price: '', qty: '1' });
+  showMisc.value = true;
+}
+function addMiscItem(): void {
+  const p = Number(miscForm.price);
+  const qty = Math.max(1, Math.floor(Number(miscForm.qty)) || 1);
+  if (!Number.isFinite(p) || p <= 0) return toast('Enter a price for the item.', 'bad');
+  // Entered in the charge currency; the cart keeps base-currency lines.
+  addMisc(miscForm.title, round2(isConverting.value && cart.exchangeRate ? p / cart.exchangeRate : p), qty);
+  showMisc.value = false;
+}
+
+// ── Today ───────────────────────────────────────────────────────────────────
+const today = computed(() => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  let count = 0;
+  let revenue = 0;
+  for (const tx of sdk().data.transactions.recent()) {
+    if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
+    count++;
+    revenue += tx.baseTotal ?? tx.total;
+  }
+  return { count, revenue };
 });
 
-function onPickerKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') choosing.value = null;
+// ── Last sale: undo or reprint without leaving the counter ─────────────────
+const lastSale = ref<{ id: string; total: number; currency: string; units: number } | null>(null);
+async function undoLast(): Promise<void> {
+  if (!lastSale.value) return;
+  await sdk().data.transactions.revert(lastSale.value.id);
+  lastSale.value = null;
+  toast('Sale reverted — stock restored');
+}
+function receipt(): void {
+  if (lastSale.value) void router.push({ name: 'pos:receipt', params: { saleId: lastSale.value.id } });
 }
 
-/** Units of this item already on the ticket. */
-function inCart(productId: string, variantId: string | null = ''): number {
-  return cart.lines
-    .filter((l) => l.productId === productId && (l.variantId ?? '') === (variantId ?? ''))
-    .reduce((n, l) => n + l.qty, 0);
-}
+// ── Payment ─────────────────────────────────────────────────────────────────
+type Phase = 'idle' | 'confirm' | 'terminal' | 'failed';
+const payment = reactive({ phase: 'idle' as Phase, method: 'cash' as string, total: 0, cashReceived: '', splitCash: '', splitCard: '', error: '' });
 
-function bump(lineId: string, current: number, by: number): void {
-  const next = current + by;
-  if (next <= 0) removeLine(lineId);
-  else setQty(lineId, next);
-}
+const cashShortcuts = computed(() => (payment.method === 'cash' ? cashShortcutAmounts(payment.total, currency.value) : []));
+const splitCashShortcuts = computed(() => splitCashPortionAmounts(Math.max(0, payment.total - (Number(payment.splitCard) || 0)), currency.value));
+const change = computed(() => round2((Number(payment.cashReceived) || 0) - payment.total));
+const splitState = computed(() => {
+  const cash = Number(payment.splitCash) || 0;
+  const card = Number(payment.splitCard) || 0;
+  const rem = round2(payment.total - cash - card);
+  if (rem > 0.001) return { ok: false, label: 'Remaining', amount: rem, cls: 'bad' };
+  if (rem < -0.001) return { ok: false, label: 'Over by', amount: -rem, cls: 'warn' };
+  return { ok: cash > 0 || card > 0, label: 'Paid', amount: cash + card, cls: 'good' };
+});
+const confirmDisabled = computed(() => {
+  if (payment.method === 'cash') return (Number(payment.cashReceived) || 0) < payment.total - 0.001;
+  if (payment.method === 'split') return !splitState.value.ok;
+  return false;
+});
+const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', split: 'Split payment' })[payment.method] ?? `${payment.method} payment`);
 
-/**
- * Manual means no terminal is wired in — the money still moved, by cash or by
- * a card reader the app never talks to. Which one matters at cash-up, so the
- * seller says. A wired terminal is always card.
- */
-const asksMethod = computed(() => providerId.value === 'manual');
-
-function tap(product: Product): void {
-  const variants = (product.variants ?? []).filter((v) => !v.unlisted);
-  if (variants.length) {
-    choosing.value = product;
+function startPayment(method: string): void {
+  if (!itemCount.value) return;
+  if (!activeEvent.value) return toast('Pick an active event first (Events).', 'bad');
+  payment.method = method;
+  payment.total = total.value;
+  payment.cashReceived = payment.total.toFixed(2);
+  payment.splitCash = '';
+  payment.splitCard = '';
+  payment.error = '';
+  if (method === 'card' && hasTerminal.value) {
+    payment.phase = 'terminal';
+    void runTerminal();
     return;
   }
-  addProduct(product);
+  payment.phase = 'confirm';
 }
 
-function addProduct(product: Product): void {
-  addLine({
-    productId: product.id,
-    sku: product.sku ?? null,
-    name: product.title,
-    qty: 1,
-    unitPrice: product.price,
-    taxRate: product.vatRate ?? null,
-    type: product.type,
-  });
-}
-
-/**
- * A variant without its own price inherits the product's, so "same print,
- * three sizes, one price" stays a single number to maintain.
- */
-function addVariant(product: Product, variant: Variant): void {
-  addLine({
-    productId: product.id,
-    variantId: variant.id,
-    variantLabel: variant.name,
-    sku: variant.sku ?? product.sku ?? null,
-    name: `${product.title} · ${variant.name}`,
-    qty: 1,
-    unitPrice: variant.price ?? product.price,
-    taxRate: product.vatRate ?? null,
-    type: product.type,
-  });
-  choosing.value = null;
-}
-
-const discountInput = ref('');
-const discountKind = ref<'amount' | 'percent'>('amount');
-
-/**
- * A manual discount on top of any rules — the "do me a deal" case that every
- * booth needs and no rule can anticipate.
- */
-function applyCustomDiscount(): void {
-  const value = Number(discountInput.value);
-  if (!Number.isFinite(value) || value <= 0) {
-    setCustomDiscount(null);
-    return;
+async function runTerminal(): Promise<void> {
+  const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
+  if (payment.phase !== 'terminal') return;
+  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`);
+  else {
+    payment.error = outcome.error ?? 'Card payment declined';
+    payment.phase = 'failed';
   }
-  setCustomDiscount({
-    type: discountKind.value,
-    value,
-    name: discountKind.value === 'percent' ? `${value}% off` : 'Discount',
-  });
 }
 
-function clearCustomDiscount(): void {
-  discountInput.value = '';
-  setCustomDiscount(null);
-}
-
-async function take(method?: 'cash' | 'card'): Promise<void> {
-  message.value = null;
-  const saleId = crypto.randomUUID();
-  const outcome = await checkout(providerId.value, saleId, method);
-  failed.value = !outcome.approved;
-  lastSaleId.value = outcome.approved ? saleId : null;
-  message.value = outcome.approved
-    ? `Approved — ${outcome.sale?.currency} ${outcome.sale?.total.toFixed(2)}`
-    : (outcome.error ?? 'The payment did not complete.');
-}
-
-function openReceipt(): void {
-  if (lastSaleId.value) {
-    void router.push({ name: 'pos:receipt', params: { saleId: lastSaleId.value } });
+async function confirmPayment(): Promise<void> {
+  let legs: { kind: 'cash' | 'card'; amount: number }[] | undefined;
+  if (payment.method === 'split') {
+    legs = [
+      { kind: 'cash' as const, amount: Math.max(0, Number(payment.splitCash) || 0) },
+      { kind: 'card' as const, amount: Math.max(0, Number(payment.splitCard) || 0) },
+    ].filter((l) => l.amount > 0);
   }
+  const outcome = await checkout(crypto.randomUUID(), {
+    method: payment.method,
+    legs,
+    cashReceived: payment.method === 'cash' ? Number(payment.cashReceived) || undefined : undefined,
+  });
+  if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
+  finish(outcome.sale!, 'Payment confirmed');
+}
+
+function finish(sale: SaleEvent, message: string): void {
+  payment.phase = 'idle';
+  showCartSheet.value = false;
+  // The transaction row lands a tick later; the sale itself has all the bar needs.
+  lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
+  toast(message);
+}
+
+async function cancelPayment(): Promise<void> {
+  if (payment.phase === 'terminal') await provider.value.cancel().catch(() => {});
+  payment.phase = 'idle';
 }
 </script>
 
 <template>
-  <section class="pos">
-    <header>
-      <div>
-        <h1>Sell</h1>
-        <p class="event">
-          <template v-if="activeEvent">{{ activeEvent.name }}</template>
-          <template v-else>No active event — sales won't be filed against one.</template>
-        </p>
-      </div>
-      <p class="count">{{ itemCount }} item{{ itemCount === 1 ? '' : 's' }}</p>
-    </header>
-
-    <div v-if="choosing" class="variant-picker" @click.self="choosing = null" @keydown="onPickerKey">
-      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="variant-title">
-        <h2 id="variant-title">{{ choosing.title }}</h2>
-        <div class="options">
-          <button
-            v-for="variant in (choosing.variants ?? []).filter((v) => !v.unlisted)"
-            ref="firstOption"
-            :key="variant.id"
-            type="button"
-            @click="addVariant(choosing, variant)"
-          >
-            <span>
-              {{ variant.name }}
-              <span
-                v-if="remaining(choosing.id, variant.id) !== null"
-                :class="['left', { none: wouldExceed(choosing.id, variant.id) }]"
-              >
-                · {{ remaining(choosing.id, variant.id) }} left
-              </span>
-            </span>
-            <span class="price">{{ (variant.price ?? choosing.price).toFixed(2) }}</span>
-          </button>
+  <div class="pos">
+    <section class="floor">
+      <header class="bar">
+        <div class="event">
+          <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
+          <h1 v-else class="warn">No active event</h1>
+          <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
+          <small v-else>Pick one under Events — sales must be filed against an event.</small>
         </div>
-        <button type="button" class="cancel" @click="choosing = null">Cancel</button>
-      </div>
-    </div>
+        <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
+        <div class="modes">
+          <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
+          <button type="button" :class="['pill', { active: viewMode === 'grouped' }]" @click="setViewMode('grouped')">Types</button>
+        </div>
+      </header>
 
-    <div class="layout">
-      <div class="picker">
-        <input v-model="search" type="search" placeholder="Search products" aria-label="Search products" />
-        <p v-if="!products.length" class="empty">
-          {{ search ? 'Nothing matches that search.' : 'No products for sale yet — add some in Catalog.' }}
-        </p>
-        <div v-else class="grid">
-          <button
-            v-for="product in products"
-            :key="product.id"
-            type="button"
-            :class="['tile', { picked: inCart(product.id) > 0 }]"
-            @click="tap(product)"
-          >
-            <span v-if="inCart(product.id) > 0" class="picked-count" aria-label="in the cart">{{ inCart(product.id) }}</span>
-            <ProductThumb :image-id="product.imageId" :alt="product.title" :size="44" />
-            <span class="title">{{ product.title }}</span>
-            <span
-              v-if="!product.variants?.length && remaining(product.id) !== null"
-              :class="['left', { none: wouldExceed(product.id) }]"
-            >
-              {{ remaining(product.id) }} left
-            </span>
-            <span class="price">
-              {{ product.price.toFixed(2) }}
-              <template v-if="product.variants?.length"> · {{ product.variants.length }} sizes</template>
+      <p v-if="notice" :class="['notice', notice.kind]" role="status">{{ notice.text }}</p>
+
+      <div v-if="lastSale" class="last">
+        <Icon name="check" :size="16" />
+        <span>{{ fmtPrice(lastSale.total, lastSale.currency) }} · {{ lastSale.units }} item{{ lastSale.units === 1 ? '' : 's' }}</span>
+        <span class="spacer"></span>
+        <button type="button" class="quiet" @click="receipt"><Icon name="printer" :size="14" /> Receipt</button>
+        <button type="button" class="quiet undo" @click="undoLast"><Icon name="undo" :size="14" /> Undo</button>
+        <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
+      </div>
+
+      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet — add some under Products.' }}</p>
+      <div v-else class="grid">
+        <template v-for="e in entries" :key="e.key">
+          <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0 }" @click="openType = e.group.type">
+            <span v-if="e.group.inCart" class="count">{{ e.group.inCart }}</span>
+            <span class="title" :style="{ color: typeColor(e.group.type) }">{{ e.group.type }}</span>
+            <small>{{ e.group.products.length }} products</small>
+            <span class="foot">
+              <span :class="e.group.stock === 0 ? 'bad' : 'muted'">{{ e.group.stock === null ? '' : e.group.stock === 0 ? 'Out of stock' : `${e.group.stock} in stock` }}</span>
+              <Icon name="chevron-right" :size="14" />
             </span>
           </button>
-        </div>
+          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (remaining(e.product.id, null) ?? 1) <= 0 && !e.product.variants?.length }" @click="add(e.product.id, null)">
+            <span v-if="productInCart(e.product)" class="count">{{ productInCart(e.product) }}</span>
+            <span class="head">
+              <ProductThumb v-if="e.product.imageId" :image-id="e.product.imageId" :alt="e.product.title" :size="36" />
+              <span class="title">{{ e.product.title || '(untitled)' }}</span>
+            </span>
+            <small v-if="e.product.sku">{{ e.product.sku }}</small>
+            <span v-if="!e.product.variants?.length && bundleQtys(e.product).length" class="bundles">
+              <span v-for="q in bundleQtys(e.product)" :key="q" role="button" class="bundle" @click.stop="addBundle(e.product.id, null, q)">+{{ q }}</span>
+            </span>
+            <span class="foot">
+              <span :class="stockLabel(e.product.id, null).cls">{{ e.product.variants?.length ? `${e.product.variants.length} sizes` : stockLabel(e.product.id, null).text }}</span>
+              <strong>{{ e.product.variants?.length ? fromPrice(e.product) : price(e.product.price) }}</strong>
+            </span>
+          </button>
+        </template>
       </div>
 
-      <div class="ticket">
-        <p v-if="isEmpty" class="empty">Pick a product to start a sale.</p>
+      <button v-if="itemCount" type="button" class="primary cartbar" @click="showCartSheet = true">
+        <span><Icon name="shopping-cart" :size="16" /> {{ itemCount }} item{{ itemCount !== 1 ? 's' : '' }}</span>
+        <span>{{ money(total) }}</span>
+      </button>
+    </section>
 
-        <ul v-else class="lines">
-          <li v-for="line in cart.lines" :key="line.lineId">
-            <span class="name">{{ line.name }}</span>
-            <span class="stepper">
-              <button type="button" :aria-label="`One fewer ${line.name}`" @click="bump(line.lineId, line.qty, -1)">−</button>
-              <span class="qty">{{ line.qty }}</span>
-              <button type="button" :aria-label="`One more ${line.name}`" @click="bump(line.lineId, line.qty, 1)">+</button>
-            </span>
-            <span class="linetotal">{{ (line.unitPrice * line.qty).toFixed(2) }}</span>
+    <!-- ── Cart ─────────────────────────────────────────────────────────── -->
+    <aside :class="['cart', { sheet: showCartSheet }]">
+      <header>
+        <h2>Cart</h2>
+        <button v-if="itemCount" type="button" :class="['quiet', 'clear', { armed: clearArmed }]" @click="tapClear">{{ clearArmed ? 'Really clear?' : 'Clear' }}</button>
+        <button type="button" class="quiet close" aria-label="Close cart" @click="showCartSheet = false"><Icon name="x" :size="18" /></button>
+      </header>
+
+      <div class="lines">
+        <p v-if="!lines.length" class="empty">Cart is empty</p>
+        <ul v-else>
+          <li v-for="l in lines" :key="l.lineId">
+            <div class="row"><span class="name">{{ l.name }}</span><strong>{{ money(l.chargedTotal) }}</strong></div>
+            <div class="row qty">
+              <button type="button" :aria-label="`One fewer ${l.name}`" @click="setQty(l.lineId, l.qty - 1)">−</button>
+              <span>{{ l.qty }}</span>
+              <button type="button" :aria-label="`One more ${l.name}`" @click="setQty(l.lineId, l.qty + 1)">+</button>
+              <small>à {{ money(l.chargedUnit) }}</small>
+            </div>
           </li>
         </ul>
-
-        <footer class="checkout">
-          <div class="discount">
-            <label>
-              <span class="sr">Discount amount</span>
-              <input
-                v-model="discountInput"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Discount"
-                @input="applyCustomDiscount"
-              />
-            </label>
-            <select v-model="discountKind" aria-label="Discount kind" @change="applyCustomDiscount">
-              <option value="amount">{{ cart.currency }}</option>
-              <option value="percent">%</option>
-            </select>
-            <button v-if="cart.custom" type="button" @click="clearCustomDiscount">Clear</button>
-          </div>
-
-          <p v-if="discountTotal > 0" class="line-sub">
-            <span>Subtotal</span> <span>{{ subtotal.toFixed(2) }}</span>
-          </p>
-          <p v-for="applied in appliedDiscounts" :key="applied.rule.id" class="line-sub discount-line">
-            <span>{{ applied.rule.name }}</span> <span>−{{ applied.amount.toFixed(2) }}</span>
-          </p>
-          <p v-if="cart.custom" class="line-sub discount-line">
-            <span>Manual discount</span>
-            <span>−{{ (discountTotal - appliedDiscounts.reduce((s, a) => s + a.amount, 0)).toFixed(2) }}</span>
-          </p>
-
-          <p class="total"><span>Total</span> <strong>{{ cart.currency }} {{ total.toFixed(2) }}</strong></p>
-          <p v-if="isConverting" class="line-sub">
-            <span>{{ cart.baseCurrency }} equivalent</span>
-            <span>{{ baseTotal.toFixed(2) }}</span>
-          </p>
-          <div class="actions">
-            <button type="button" class="quiet" :disabled="isEmpty || cart.busy" @click="clear">Clear</button>
-            <template v-if="asksMethod">
-              <button type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take('cash')">
-                {{ cart.busy ? 'Recording…' : 'Cash' }}
-              </button>
-              <button type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take('card')">
-                {{ cart.busy ? 'Recording…' : 'Card' }}
-              </button>
-            </template>
-            <button v-else type="button" class="primary pay" :disabled="isEmpty || cart.busy" @click="take()">
-              {{ cart.busy ? 'Taking payment…' : 'Take payment' }}
-            </button>
-          </div>
-          <p v-if="message" :class="['result', { bad: failed }]" role="status">{{ message }}</p>
-          <button v-if="lastSaleId" type="button" class="receipt-link" @click="openReceipt">
-            Receipt
-          </button>
-        </footer>
       </div>
-    </div>
-  </section>
+
+      <footer>
+        <div class="sums">
+          <div class="row muted"><span>Subtotal</span><span>{{ money(toCharged(subtotal)) }}</span></div>
+          <div v-for="r in appliedDiscounts" :key="r.rule.id" class="row good"><span>{{ r.rule.name }}</span><span>− {{ money(toCharged(r.amount)) }}</span></div>
+          <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(Math.max(0, discountTotalCharged - toCharged(appliedDiscounts.reduce((s, a) => s + a.amount, 0)))) }}</span></div>
+          <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
+          <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
+        </div>
+        <div class="tools">
+          <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
+          <button type="button" @click="openMisc">+ Misc item</button>
+        </div>
+        <div class="pay">
+          <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
+          <button type="button" class="card" :disabled="!itemCount" @click="startPayment('card')">Card</button>
+          <button type="button" class="split" :disabled="!itemCount" @click="startPayment('split')">Split</button>
+        </div>
+      </footer>
+    </aside>
+
+    <!-- ── Type drill-down ───────────────────────────────────────────────── -->
+    <ModalShell v-if="openType" :title="openType" wide @close="openType = null">
+      <div class="grid inmodal">
+        <button v-for="p in typeProducts" :key="p.id" type="button" class="tile" :aria-label="p.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(p.type) }" @click="add(p.id, null)">
+          <span v-if="productInCart(p)" class="count">{{ productInCart(p) }}</span>
+          <span class="head">
+            <ProductThumb v-if="p.imageId" :image-id="p.imageId" :alt="p.title" :size="36" />
+            <span class="title">{{ p.title || '(untitled)' }}</span>
+          </span>
+          <small v-if="p.sku">{{ p.sku }}</small>
+          <span v-if="!p.variants?.length && bundleQtys(p).length" class="bundles">
+            <span v-for="q in bundleQtys(p)" :key="q" role="button" class="bundle" @click.stop="addBundle(p.id, null, q)">+{{ q }}</span>
+          </span>
+          <span class="foot">
+            <span :class="stockLabel(p.id, null).cls">{{ p.variants?.length ? `${p.variants.length} sizes` : stockLabel(p.id, null).text }}</span>
+            <strong>{{ p.variants?.length ? fromPrice(p) : price(p.price) }}</strong>
+          </span>
+        </button>
+      </div>
+    </ModalShell>
+
+    <!-- ── Variant picker (stays open for several sizes in a row) ────────── -->
+    <ModalShell v-if="variantPicker" :title="variantPicker.title || 'Choose a variant'" @close="variantPicker = null">
+      <div class="grid inmodal">
+        <button v-for="v in (variantPicker.variants ?? []).filter((x: Variant) => !x.unlisted)" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
+          <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
+          <span class="title">{{ v.name || '(untitled)' }}</span>
+          <small v-if="v.sku">{{ v.sku }}</small>
+          <span v-if="bundleQtys(variantPicker, v.id).length" class="bundles">
+            <span v-for="q in bundleQtys(variantPicker, v.id)" :key="q" role="button" class="bundle" @click.stop="addBundle(variantPicker!.id, v.id, q)">+{{ q }}</span>
+          </span>
+          <span class="foot">
+            <span :class="stockLabel(variantPicker.id, v.id).cls">{{ stockLabel(variantPicker.id, v.id).text }}</span>
+            <strong>{{ price(v.price ?? variantPicker.price) }}</strong>
+          </span>
+        </button>
+      </div>
+    </ModalShell>
+
+    <!-- ── Misc item ─────────────────────────────────────────────────────── -->
+    <ModalShell v-if="showMisc" title="Misc item" @close="showMisc = false">
+      <p class="hint">Sell something that isn't in the catalogue — a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
+      <div class="form">
+        <input v-model="miscForm.title" type="text" placeholder="Description (e.g. Commission)" />
+        <div class="two">
+          <label><span>Price ({{ currency }})</span><input v-model="miscForm.price" type="number" min="0" step="0.05" inputmode="decimal" /></label>
+          <label><span>Quantity</span><input v-model="miscForm.qty" type="number" min="1" inputmode="numeric" /></label>
+        </div>
+      </div>
+      <template #footer>
+        <div class="actions"><button type="button" @click="showMisc = false">Cancel</button><button type="button" class="primary" @click="addMiscItem">Add to cart</button></div>
+      </template>
+    </ModalShell>
+
+    <!-- ── Cart discount ─────────────────────────────────────────────────── -->
+    <ModalShell v-if="showDiscount" title="Cart discount" @close="showDiscount = false">
+      <div class="form">
+        <div class="two seg">
+          <button type="button" :class="{ primary: discountForm.type === 'amount' }" @click="discountForm.type = 'amount'">Amount ({{ currency }})</button>
+          <button type="button" :class="{ primary: discountForm.type === 'percent' }" @click="discountForm.type = 'percent'">Percent (%)</button>
+        </div>
+        <input v-model="discountForm.value" type="number" min="0" step="0.05" inputmode="decimal" placeholder="Value" />
+        <input v-model="discountForm.name" type="text" placeholder="Name (optional)" />
+      </div>
+      <template #footer>
+        <div class="actions between">
+          <button v-if="cart.custom" type="button" class="danger" @click="setCustomDiscount(null); showDiscount = false">Remove</button>
+          <span class="spacer"></span>
+          <button type="button" @click="showDiscount = false">Cancel</button>
+          <button type="button" class="primary" @click="applyDiscount">Apply</button>
+        </div>
+      </template>
+    </ModalShell>
+
+    <!-- ── Payment ───────────────────────────────────────────────────────── -->
+    <ModalShell v-if="payment.phase !== 'idle'" :title="title" @close="cancelPayment">
+      <div class="paybody">
+        <p class="amount">{{ money(payment.total) }}</p>
+
+        <template v-if="payment.phase === 'terminal'">
+          <p class="pulse">Present card to terminal…</p>
+          <p class="hint">{{ provider.label }}</p>
+        </template>
+
+        <template v-else-if="payment.phase === 'failed'">
+          <p class="bad strong">Card payment didn't go through</p>
+          <p v-if="payment.error" class="hint">{{ payment.error }}</p>
+          <p class="hint">Retry the card, or complete the sale by hand if it was paid another way.</p>
+        </template>
+
+        <template v-else-if="payment.method === 'cash'">
+          <div class="chips">
+            <button type="button" class="chip exact" @click="payment.cashReceived = payment.total.toFixed(2)">Exact</button>
+            <button v-for="a in cashShortcuts" :key="a" type="button" class="chip" @click="payment.cashReceived = String(a)">{{ a }}</button>
+          </div>
+          <label class="field"><span>Received</span><input v-model="payment.cashReceived" type="number" inputmode="decimal" class="big" /></label>
+          <p>Change: <strong :class="change < -0.001 ? 'bad' : 'good'">{{ change < -0.001 ? '− ' + money(-change) : change < 0.001 ? 'No change' : money(change) }}</strong></p>
+        </template>
+
+        <template v-else-if="payment.method === 'split'">
+          <div class="two">
+            <label class="field"><span>Cash</span><input v-model="payment.splitCash" type="number" inputmode="decimal" /></label>
+            <label class="field"><span>Card</span><input v-model="payment.splitCard" type="number" inputmode="decimal" /></label>
+          </div>
+          <div class="chips">
+            <button type="button" class="chip exact" @click="payment.splitCash = Math.max(0, payment.total - (Number(payment.splitCard) || 0)).toFixed(2)">Cash remainder</button>
+            <button v-for="a in splitCashShortcuts" :key="a" type="button" class="chip" @click="payment.splitCash = String(a)">{{ a }}</button>
+            <button type="button" class="chip cardc" @click="payment.splitCard = Math.max(0, payment.total - (Number(payment.splitCash) || 0)).toFixed(2)">Card remainder</button>
+          </div>
+          <p>{{ splitState.label }}: <strong :class="splitState.cls">{{ money(splitState.amount) }}</strong></p>
+        </template>
+
+        <template v-else>
+          <p>Confirm the {{ payment.method === 'card' ? 'card' : payment.method }} payment was completed{{ payment.method === 'card' && !hasTerminal ? ' on the terminal' : '' }}.</p>
+        </template>
+      </div>
+      <template #footer>
+        <div class="actions">
+          <button type="button" @click="cancelPayment">Cancel</button>
+          <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
+          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="payment.phase = 'terminal'; runTerminal()">Retry card</button>
+          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">Complete by hand</button>
+        </div>
+      </template>
+    </ModalShell>
+  </div>
 </template>
 
 <style scoped>
-.pos { display: flex; flex-direction: column; gap: 1rem; }
-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
-h1 { font-size: 1.35rem; margin: 0; }
-.event, .count, .empty { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .875rem; }
-.layout { display: grid; grid-template-columns: 1fr 22rem; gap: 1.5rem; align-items: start; }
-.picker { display: flex; flex-direction: column; gap: .75rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: .6rem; }
-.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; padding: .8rem .9rem; text-align: left; min-height: 6rem; }
-.tile.picked { border-color: var(--zfy-accent, #0e7c66); box-shadow: inset 0 0 0 1px var(--zfy-accent, #0e7c66); }
-.picked-count { position: absolute; top: .5rem; right: .5rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); font-variant-numeric: tabular-nums; }
-.tile .title { font-weight: 600; font-size: 1rem; line-height: 1.25; }
-.tile .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
-.left { font-size: .72rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
-/* Advisory, never a block: if someone is standing there with cash, the stock
-   figure is what is wrong. */
-.left.none { color: var(--zfy-danger, #c6512f); font-weight: 600; }
-.ticket { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; position: sticky; top: 1rem; }
-.lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.lines li { display: grid; grid-template-columns: 1fr auto 4.5rem; gap: .5rem; align-items: center; font-size: .9rem; }
-.stepper { display: inline-flex; align-items: center; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; overflow: hidden; }
-.stepper button { min-width: 2.5rem; min-height: 2.5rem; padding: 0; border: 0; border-radius: 0; font-size: 1.1rem; }
-.stepper .qty { min-width: 2rem; text-align: center; font-variant-numeric: tabular-nums; font-weight: 600; }
-.linetotal { text-align: right; font-variant-numeric: tabular-nums; }
-.discount { display: flex; gap: .4rem; align-items: center; }
-.discount input { width: 6rem; }
-.discount select { width: 4.5rem; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.line-sub { display: flex; justify-content: space-between; margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
-.discount-line { color: var(--zfy-accent-ink, #0a5a4a); }
-.checkout { display: flex; flex-direction: column; gap: .6rem; border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .75rem; }
-.total { display: flex; justify-content: space-between; margin: 0; font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-.actions { display: flex; gap: .5rem; justify-content: flex-end; }
-.pay { flex: 1; min-height: 3rem; font-size: 1rem; }
-.receipt-link { align-self: flex-end; }
-.variant-picker { position: fixed; inset: 0; background: var(--zfy-scrim, rgba(20,26,34,.45)); display: grid; place-items: center; padding: 1rem; z-index: 10; }
-.sheet { background: var(--zfy-surface, #fff); border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 24rem; display: flex; flex-direction: column; gap: .75rem; }
-.sheet h2 { margin: 0; font-size: 1.05rem; }
-.options { display: grid; gap: .4rem; }
-.options button { display: flex; justify-content: space-between; align-items: center; min-height: 3rem; padding: .7rem .9rem; font-size: 1rem; }
-.options .price { font-variant-numeric: tabular-nums; color: var(--zfy-muted, #5a6472); }
-.cancel { align-self: flex-end; }
-.result { margin: 0; font-size: .875rem; color: var(--zfy-accent-ink, #0a5a4a); }
-.result.bad { color: var(--zfy-danger, #c6512f); }
-@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .ticket { position: static; } }
+.pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100vh - 3rem); margin: -1.5rem; }
+.floor { display: flex; flex-direction: column; min-width: 0; }
+.bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+.event { min-width: 0; display: flex; flex-direction: column; }
+.event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
+.event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
+.search { margin-left: auto; width: 14rem; max-width: 100%; }
+.modes { display: flex; gap: .3rem; }
+.pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }
+.pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
+.notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.notice.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
+.last { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-bottom: 1px solid var(--zfy-line, #d6dde4); }
+.last .spacer, .actions .spacer { flex: 1; }
+.last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
+.last .undo { color: var(--zfy-warning-ink, #8a5a1e); }
+.empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1rem; font-size: .9rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .5rem; padding: .75rem 1rem 1.25rem; align-content: start; }
+.grid.inmodal { padding: 0; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; min-height: 6rem; padding: .7rem .8rem; text-align: left; border-left: 3px solid var(--zfy-accent, #0e7c66); border-radius: 12px; }
+.tile:active { transform: scale(.98); }
+.tile.dim { opacity: .55; }
+.tile .head { display: flex; align-items: flex-start; gap: .5rem; width: 100%; }
+.tile .title { font-weight: 600; font-size: .9rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile small { font-size: .7rem; color: var(--zfy-muted, #5a6472); }
+.tile .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: .25rem; font-size: .75rem; gap: .5rem; }
+.tile .foot strong { font-variant-numeric: tabular-nums; }
+.tile.type .foot { color: var(--zfy-muted, #5a6472); }
+.count { position: absolute; top: -.4rem; right: -.4rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .78rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); }
+.bundles { display: flex; gap: .3rem; flex-wrap: wrap; padding-top: .1rem; }
+.bundle { font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
+.muted { color: var(--zfy-muted, #5a6472); }
+.warn { color: var(--zfy-warning-ink, #8a5a1e); }
+.bad { color: var(--zfy-danger, #c6512f); }
+.good { color: var(--zfy-accent-ink, #0a5a4a); }
+.strong { font-weight: 600; }
+.cartbar { display: none; }
+
+.cart { display: flex; flex-direction: column; border-left: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; height: calc(100vh - 0px); }
+.cart header { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
+.cart h2 { margin: 0; font-size: 1rem; flex: 1; }
+.cart .clear { min-height: 1.8rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.cart .clear.armed { color: var(--zfy-danger, #c6512f); font-weight: 600; }
+.cart .close { display: none; }
+.lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem; }
+.lines ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.lines li { background: var(--zfy-bg, #f1f4f6); border-radius: 10px; padding: .55rem .7rem; display: flex; flex-direction: column; gap: .3rem; }
+.row { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: .875rem; }
+.row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row.qty { justify-content: flex-start; gap: .4rem; }
+.row.qty button { min-height: 1.9rem; min-width: 1.9rem; padding: 0; font-weight: 700; }
+.row.qty span { min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.row.qty small { margin-left: auto; color: var(--zfy-muted, #5a6472); font-size: .72rem; }
+.cart footer { border-top: 1px solid var(--zfy-line, #d6dde4); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; }
+.sums { display: flex; flex-direction: column; gap: .15rem; font-variant-numeric: tabular-nums; }
+.row.total { font-size: 1.05rem; font-weight: 700; }
+.row.small { font-size: .78rem; }
+.tools { display: flex; gap: .4rem; }
+.tools button { flex: 1; min-height: 2.1rem; font-size: .8rem; padding: .2rem .4rem; }
+.pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
+.pay button, .confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
+.pay .cash, .confirm.cash { background: #0e7c66; }
+.pay .card, .confirm.card { background: #2f6fb8; }
+.pay .split, .confirm.split { background: #b8742f; }
+.pay button:hover:not(:disabled), .confirm:hover:not(:disabled) { filter: brightness(1.08); }
+
+.form { display: flex; flex-direction: column; gap: .6rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.two.seg button { min-height: 2.5rem; }
+.field { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; text-align: left; }
+.field .big { font-size: 1.2rem; }
+.actions { display: flex; justify-content: flex-end; gap: .5rem; }
+.actions.between { justify-content: flex-start; }
+.paybody { display: flex; flex-direction: column; gap: .8rem; text-align: center; }
+.paybody p { margin: 0; }
+.amount { font-size: 2rem; font-weight: 800; letter-spacing: -.01em; }
+.pulse { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.chips { display: flex; justify-content: center; gap: .4rem; flex-wrap: wrap; }
+.chip { min-height: 2.2rem; padding: .2rem .8rem; font-weight: 600; }
+.chip.exact { color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); background: var(--zfy-accent-soft, #deeee9); }
+.chip.cardc { color: #2f6fb8; border-color: #2f6fb8; }
+
+@media (max-width: 860px) {
+  .pos { grid-template-columns: 1fr; margin: -1rem; }
+  .cart { display: none; }
+  .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
+  .cart.sheet .close { display: inline-flex; }
+  .cartbar { display: flex; justify-content: space-between; margin: .5rem 1rem 1rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: .5rem; }
+  .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
+  .search { margin-left: 0; width: 100%; order: 3; }
+}
 </style>

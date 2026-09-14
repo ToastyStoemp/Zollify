@@ -4,6 +4,7 @@ export * from './merge';
 export * from './protocol';
 export * from './money';
 export * from './currencies';
+export * from './countries';
 export * from './cash';
 export * from './flags';
 export * from './public-events';

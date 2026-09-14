@@ -129,18 +129,23 @@ export interface AccountProfile {
   /** When first-run setup was finished or skipped; null shows the wizard. */
   setupCompletedAt: number | null;
   artist: ArtistDetails;
+  /** ISO code new events and the cash-up fall back to. */
+  defaultCurrency: string;
 }
+
+export const CurrencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/);
 
 export const ProfileUpdateSchema = z.object({
   /** Renames the account; owner only. */
   name: z.string().trim().min(1).max(80).optional(),
   artist: ArtistDetailsSchema.partial().optional(),
+  defaultCurrency: CurrencyCodeSchema.optional(),
   setupCompleted: z.boolean().optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export function emptyProfile(): AccountProfile {
-  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}) };
+  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF' };
 }
 
 export interface AuthUser {

@@ -73,13 +73,21 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
     lineTotal: line.lineTotal ?? (toMinor(line.unitPrice) * line.qty) / 100,
   }));
 
-  const leg: PaymentLeg = {
-    kind: sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card'),
-    amount: sale.total,
-    provider: sale.payment.provider,
-    txRef: sale.payment.txRef,
-    cardBrand: sale.payment.cardBrand,
-  };
+  // A split sale carries its own legs; anything else is one leg for the
+  // whole amount. A custom method (TWINT, PayPal…) is card-like money: not in
+  // the cash box.
+  const method = sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card');
+  const legs: PaymentLeg[] = sale.payment.legs?.length
+    ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider }))
+    : [
+        {
+          kind: method === 'cash' ? 'cash' : 'card',
+          amount: sale.total,
+          provider: sale.payment.provider,
+          txRef: sale.payment.txRef,
+          cardBrand: sale.payment.cardBrand,
+        },
+      ];
 
   return {
     id: sale.saleId,
@@ -88,8 +96,8 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
     eventId: sale.eventId ?? '',
     deviceId: device,
     timestamp: sale.at,
-    method: leg.kind,
-    payments: [leg],
+    method,
+    payments: legs,
     items,
     discounts: [],
     total: sale.total,

@@ -20,6 +20,8 @@ vi.mock('../session', () => ({
 
 const { deleteCoreDb } = await import('../core/db');
 const inv = await import('../core/inventory');
+const events = await import('../core/sales-events');
+const EVENT = { venue: {}, currency: 'CHF', status: 'active' as const, updatedAt: 1 };
 const catalog = await import('../core/catalog');
 const tx = await import('../core/transactions');
 const device = await import('../core/device');
@@ -68,7 +70,11 @@ beforeEach(async () => {
   catalog.resetCatalogCache();
   tx.resetTransactionCache();
   device.resetDeviceCache();
+  events.resetSalesEventCache();
   await addPrint();
+  // Claims only reserve for events that are still on; both test events are.
+  await events.upsertSalesEvent({ ...EVENT, id: 'ev-a', name: 'A', dateStart: '2999-01-01' });
+  await events.upsertSalesEvent({ ...EVENT, id: 'ev-b', name: 'B', dateStart: '2999-01-01' });
 });
 
 describe('one inventory', () => {
@@ -259,5 +265,23 @@ describe('reverted sales', () => {
     // compensating write anywhere.
     expect(availability('ev-a').available).toBe(30);
     expect(inventoryRow().sold).toBe(0);
+  });
+});
+
+describe('a past event', () => {
+  const base = EVENT;
+
+  it('no longer reserves its claim once it is over, but keeps it while it runs', async () => {
+    await events.upsertSalesEvent({ ...base, id: 'ev-old', name: 'Old', dateStart: '2020-01-01', dateEnd: '2020-01-02' });
+    await events.upsertSalesEvent({ ...base, id: 'ev-now', name: 'Now', dateStart: '2999-01-01' });
+    await inv.setOnHand(PRINT, '', 10);
+    await inv.setClaim('ev-old', PRINT, '', 4);
+    await inv.setClaim('ev-now', PRINT, '', 3);
+
+    expect(inv.claimedTotal(PRINT, '')).toBe(3);
+    expect(inv.freeFor(PRINT, '')).toBe(7);
+    expect(inv.eventIsOver({ ...base, id: 'x', name: 'x', status: 'closed' })).toBe(true);
+    // A claim whose event was deleted reserves nothing either.
+    expect(inv.eventIsOver(undefined)).toBe(true);
   });
 });

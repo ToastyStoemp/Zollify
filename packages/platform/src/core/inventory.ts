@@ -1,11 +1,12 @@
 import { computed, reactive, ref } from 'vue';
-import type { EventStock, InventoryItem } from '@zollify/shared';
+import type { EventStock, InventoryItem, SalesEvent } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { recentTransactions } from './transactions';
 import { allProducts } from './catalog';
+import { getSalesEvent } from './sales-events';
 
 /**
  * One inventory, with per-event claims on top.
@@ -196,9 +197,28 @@ export function soldTotal(productId: string, variantId: string | null = ''): num
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
+/**
+ * A claim only reserves stock while its event is still to come or under way.
+ * Once the event is over (closed, or its last day has passed) whatever it
+ * took is either sold — and counted as such — or back in the pile.
+ */
+export function eventIsOver(event: SalesEvent | undefined, today = new Date().toISOString().slice(0, 10)): boolean {
+  // No event (deleted, or never synced here): nothing to reserve for.
+  if (!event) return true;
+  if (event.status === 'closed') return true;
+  const end = event.dateEnd || event.dateStart;
+  return Boolean(end && end < today);
+}
+
+/** The claim as far as reservations go: a past event's claim no longer holds anything. */
+function reservingClaimFor(eventId: string, productId: string, variantId: string | null): number | null {
+  return eventIsOver(getSalesEvent(eventId)) ? null : claimFor(eventId, productId, variantId);
+}
+
 const claimedByKey = computed(() => {
   const out = new Map<string, number>();
   for (const claim of claims.values()) {
+    if (eventIsOver(getSalesEvent(claim.eventId))) continue;
     const key = stockKey(claim.productId, claim.variantId);
     out.set(key, (out.get(key) ?? 0) + claim.broughtQty);
   }
@@ -224,7 +244,7 @@ const poolSoldByKey = computed(() => {
   for (const [soldEventId, forEvent] of soldByEventAndKey.value) {
     for (const [key, qty] of forEvent) {
       const [pid = '', vid = ''] = key.split(':');
-      const claim = claimFor(soldEventId, pid, vid);
+      const claim = reservingClaimFor(soldEventId, pid, vid);
       const fromPool = claim === null ? qty : Math.max(0, qty - claim);
       if (fromPool > 0) out.set(key, (out.get(key) ?? 0) + fromPool);
     }
@@ -286,7 +306,7 @@ export function availabilityFor(eventId: string): Availability[] {
     for (const entry of entries) {
       const key = stockKey(product.id, entry.id);
       const onHand = onHandFor(product.id, entry.id);
-      const claimed = claimFor(eventId, product.id, entry.id);
+      const claimed = reservingClaimFor(eventId, product.id, entry.id);
       const soldHere = soldAt(eventId, product.id, entry.id);
       const totalClaimed = claimedTotal(product.id, entry.id);
 

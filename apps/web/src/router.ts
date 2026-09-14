@@ -66,6 +66,18 @@ router.beforeEach(async (to) => {
   return true;
 });
 
+// Dev only: how long each page switch takes, from the click to the first
+// painted frame of the new route — the number a "this feels slow" report is about.
+if (import.meta.env.DEV) {
+  let started = 0;
+  router.beforeEach(() => {
+    started = performance.now();
+  });
+  router.afterEach((to) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => console.info(`[zollify] route ${String(to.name)} in ${Math.round(performance.now() - started)} ms`)));
+  });
+}
+
 /**
  * Stale-deploy recovery, carried over from ZollTool. Route components are lazy
  * chunks; after a new build ships, a page still running the old index requests

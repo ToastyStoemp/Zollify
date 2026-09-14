@@ -31,6 +31,9 @@ export default defineConfig({
   define: { __ZOLLIFY_VERSION__: JSON.stringify(buildStamp()) },
   plugins: [vue()],
   server: {
+    // Pre-transform every lazy screen at startup, so the first visit to a page
+    // pays only the network hop rather than a cold transform of its import graph.
+    warmup: { clientFiles: ['./src/views/*.vue', './src/components/*.vue', '../../modules/*/src/views/*.vue'] },
     port: 5180,
     proxy: {
       // Same-origin in production; proxied in dev so the session cookie and

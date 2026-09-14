@@ -52,9 +52,11 @@ const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
 const provider = computed(() => getProvider(providerId.value as never));
 const hasTerminal = computed(() => providerId.value !== 'manual');
+const customMethods = ref<string[]>([]);
 
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   const event = activeEvent.value;
   cart.eventId = event?.id ?? null;
   const base = event?.currency ?? 'CHF';
@@ -358,12 +360,14 @@ async function cancelPayment(): Promise<void> {
   <div class="pos">
     <section class="floor">
       <header class="bar">
+        <router-link :to="{ name: 'events' }" class="quiet iconbtn" aria-label="Events"><Icon name="arrow-left" :size="16" /></router-link>
         <div class="event">
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
           <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
-          <small v-else>Pick one under Events — sales must be filed against an event.</small>
+          <small v-else>Open one under Events — sales are filed against an event.</small>
         </div>
+        <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
         <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
         <div class="modes">
           <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
@@ -457,6 +461,7 @@ async function cancelPayment(): Promise<void> {
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
           <button type="button" class="card" :disabled="!itemCount" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount" @click="startPayment('split')">Split</button>
+          <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount" @click="startPayment(m)">{{ m }}</button>
         </div>
       </footer>
     </aside>
@@ -594,6 +599,8 @@ async function cancelPayment(): Promise<void> {
 .floor { display: flex; flex-direction: column; min-width: 0; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }
+.iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }
+.iconbtn:hover { background: var(--zfy-bg, #f1f4f6); color: var(--zfy-ink, #1a2230); }
 .event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
@@ -651,6 +658,7 @@ async function cancelPayment(): Promise<void> {
 .tools { display: flex; gap: .4rem; }
 .tools button { flex: 1; min-height: 2.1rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
+.pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }
 .pay button, .confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
 .pay .cash, .confirm.cash { background: #0e7c66; }
 .pay .card, .confirm.card { background: #2f6fb8; }
@@ -683,5 +691,8 @@ async function cancelPayment(): Promise<void> {
   .cartbar { display: flex; justify-content: space-between; margin: .5rem 1rem 1rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: .5rem; }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
   .search { margin-left: 0; width: 100%; order: 3; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }
+  .tile { min-height: 5.5rem; padding: .55rem .6rem; }
+  .grid.inmodal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

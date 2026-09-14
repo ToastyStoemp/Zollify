@@ -26,3 +26,4 @@ export { default as TypeaheadPicker } from './TypeaheadPicker.vue';
 export type { PickerOption } from './picker';
 export { default as CountryPicker } from './CountryPicker.vue';
 export { default as CurrencyPicker } from './CurrencyPicker.vue';
+export { default as DateRangePicker } from './DateRangePicker.vue';

@@ -7,6 +7,9 @@ import { sdk } from '../runtime';
 const available = ref<PaymentProvider[]>([]);
 const unavailable = ref<PaymentProvider[]>([]);
 const active = ref<string>('manual');
+/** Extra buttons on the till for payments handled outside the app (TWINT, PayPal QR…). */
+const customMethods = ref<string[]>([]);
+const newMethod = ref('');
 
 onMounted(async () => {
   const usable = await availableProviders();
@@ -14,7 +17,20 @@ onMounted(async () => {
   const usableIds = new Set(usable.map((p) => p.id));
   unavailable.value = allProviders().filter((p) => !usableIds.has(p.id));
   active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
 });
+
+async function addMethod(): Promise<void> {
+  const name = newMethod.value.trim();
+  if (!name || customMethods.value.some((m) => m.toLowerCase() === name.toLowerCase())) return;
+  customMethods.value = [...customMethods.value, name];
+  newMethod.value = '';
+  await sdk().config.set('customMethods', customMethods.value);
+}
+async function removeMethod(name: string): Promise<void> {
+  customMethods.value = customMethods.value.filter((m) => m !== name);
+  await sdk().config.set('customMethods', customMethods.value);
+}
 
 async function select(id: string): Promise<void> {
   active.value = id;
@@ -53,6 +69,16 @@ async function select(id: string): Promise<void> {
         <li v-for="provider in unavailable" :key="provider.id">{{ provider.label }}</li>
       </ul>
     </template>
+
+    <h3>Extra payment methods</h3>
+    <p class="hint">Extra buttons on the till for payments taken outside the app — TWINT, a PayPal QR code. Sales made with them count as non-cash.</p>
+    <ul v-if="customMethods.length" class="methods">
+      <li v-for="m in customMethods" :key="m"><span>{{ m }}</span><button type="button" class="quiet danger" @click="removeMethod(m)">Remove</button></li>
+    </ul>
+    <form class="add" @submit.prevent="addMethod">
+      <input v-model="newMethod" type="text" placeholder="TWINT" aria-label="Method name" />
+      <button type="submit" :disabled="!newMethod.trim()">Add</button>
+    </form>
   </section>
 </template>
 
@@ -64,4 +90,9 @@ h3 { font-size: .95rem; margin: .5rem 0 0; }
 .providers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .providers label { display: flex; align-items: center; gap: .5rem; }
 .muted { color: var(--zfy-muted, #5a6472); }
+.methods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.methods li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; font-size: .875rem; }
+.methods .quiet { min-height: 1.7rem; font-size: .78rem; }
+.add { display: flex; gap: .4rem; }
+.add input { flex: 1; min-width: 0; }
 </style>

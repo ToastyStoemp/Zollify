@@ -79,6 +79,7 @@ const isAdmin = computed(() => account.value?.role === 'owner' || account.value?
 /** The section holding the current page unfolds; the others stay one line each. */
 const inSection = (sec: Section): boolean =>
   sec.head.routeName === route.name || sec.children.some((c) => c.routeName === route.name);
+const openSection = computed(() => sections.value.find((sec) => inSection(sec)) ?? null);
 
 /**
  * One label that cannot contradict itself: queued work is named as such, and
@@ -156,6 +157,19 @@ async function leave(): Promise<void> {
       <router-view />
     </main>
 
+    <!-- Phone: ZollTool's bottom tab bar — thumbs reach it, and the till above
+         keeps the whole viewport. The open section's pages sit in a row above. -->
+    <nav v-if="account && !settingUp" class="bottom" aria-label="Main">
+      <div v-if="openSection?.children.length" class="subrow">
+        <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
+      </div>
+      <div class="tabs">
+        <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
+        <router-link v-for="sec in sections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
+        <router-link :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
+      </div>
+    </nav>
+
     <!-- Toast text is bound, never injected as markup: a module controls this string. -->
     <div class="toasts" aria-live="polite">
       <p v-for="toast in toasts" :key="toast.id" :class="['toast', toast.kind]">
@@ -211,32 +225,31 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .toast.error { border-color: var(--zfy-danger); }
 .toast.success { border-color: var(--zfy-accent); }
 
-/* Phone: the sidebar becomes a compact top bar with a scrolling nav row, so
-   the screen below it — usually the till — is what fills the viewport. */
+.bottom { display: none; }
+
+/* Phone: a slim top bar (brand, sync) and a bottom tab bar; the sidebar's
+   nav is hidden because the tabs carry it. */
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .sidebar {
-    display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
-    align-items: center; gap: .5rem .75rem; padding: .6rem .75rem;
-    border-right: 0; border-bottom: 1px solid var(--zfy-line);
-    height: auto; z-index: 5;
+    display: flex; flex-direction: row; align-items: center; gap: .5rem; padding: .5rem .75rem;
+    border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 5;
   }
   .brand { font-size: 1.1rem; }
-  nav {
-    grid-column: 1 / -1; flex-direction: row; gap: .25rem;
-    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-    margin: 0 -.75rem; padding: 0 .75rem;
-  }
-  nav::-webkit-scrollbar { display: none; }
-  .item { white-space: nowrap; padding: .5rem .7rem; }
-  .item.spaced { margin: 0; }
-  .section { flex-direction: row; gap: .25rem; }
-  .children { flex-direction: row; padding: 0; }
-  .item.sub { margin: 0; border-left: 0; padding: .5rem .7rem; }
-  .tail { margin: 0; flex-direction: row; align-items: center; justify-content: flex-end; gap: .5rem; }
+  .sidebar nav, .who .name, .who .role, .tail .item { display: none; }
+  .tail { margin: 0 0 0 auto; flex-direction: row; align-items: center; gap: .5rem; }
   .sync { min-height: 2rem; padding: .25rem .6rem; }
-  .who .name, .who .role { display: none; }
   .out { margin: 0; min-height: 2rem; }
-  .content { padding: 1rem; }
+  .content { padding: 1rem; padding-bottom: 1.5rem; }
+  .bottom { display: flex; flex-direction: column; position: sticky; bottom: 0; z-index: 6; background: var(--zfy-surface); border-top: 1px solid var(--zfy-line); padding-bottom: env(safe-area-inset-bottom, 0); }
+  .subrow { display: flex; gap: .3rem; padding: .4rem .6rem 0; overflow-x: auto; scrollbar-width: none; }
+  .subrow::-webkit-scrollbar { display: none; }
+  .chip { white-space: nowrap; font-size: .78rem; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--zfy-line); color: var(--zfy-muted); text-decoration: none; }
+  .chip.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); border-color: var(--zfy-accent-soft); font-weight: 600; }
+  .tabs { display: flex; }
+  .tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: .15rem; padding: .45rem 0 .4rem; font-size: .66rem; color: var(--zfy-muted); text-decoration: none; }
+  .tab.router-link-active { color: var(--zfy-accent-ink); }
+  .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
+  .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }
 }
 </style>

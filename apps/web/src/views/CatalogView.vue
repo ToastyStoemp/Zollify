@@ -4,7 +4,9 @@ import type { Product, Variant } from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, typeColor } from '@zollify/ui';
 import {
+  activeEventId,
   allProducts,
+  availabilityFor,
   currentAccount,
   deleteProduct,
   freeFor,
@@ -31,11 +33,48 @@ const canEdit = computed(() => account.value?.role === 'owner' || account.value?
 const search = ref('');
 const error = ref<string | null>(null);
 
+// ── Low stock: what needs restocking at the active event ───────────────────
+const lowOnly = ref(false);
+const lowThreshold = ref('3');
+const availability = computed(() => (activeEventId.value ? availabilityFor(activeEventId.value) : []));
+function lowRows(p: Product): { variant: string; left: number }[] {
+  const thr = Math.max(0, parseInt(lowThreshold.value) || 0);
+  return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
+}
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
-  if (!q) return allProducts.value;
-  return allProducts.value.filter((p) => [p.title, p.sku, p.type, ...p.variants.flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q));
+  let list = allProducts.value;
+  if (q) list = list.filter((p) => [p.title, p.sku, p.type, ...p.variants.flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q));
+  if (lowOnly.value && activeEventId.value) list = list.filter((p) => lowRows(p).length > 0);
+  return list;
 });
+
+/** The low-stock list as a restock CSV. */
+function exportRestockCsv(): void {
+  const rows = [['Product', 'Variant', 'Type', 'SKU', 'Left']];
+  for (const p of filtered.value) for (const r of lowRows(p)) rows.push([p.title, r.variant, p.type ?? '', p.sku ?? '', String(r.left)]);
+  const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `restock_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Reorder: the global sortOrder drives the till grid ──────────────────────
+const reordering = ref(false);
+async function move(pid: string, dir: -1 | 1): Promise<void> {
+  const list = [...allProducts.value];
+  const i = list.findIndex((p) => p.id === pid);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return;
+  const [moved] = list.splice(i, 1);
+  list.splice(j, 0, moved!);
+  // Renumber; only products whose position changed are written.
+  for (let k = 0; k < list.length; k++) if (list[k]!.sortOrder !== k) await upsertProduct({ ...list[k]!, sortOrder: k });
+}
 
 /** Always grouped by type, matching the till. */
 const groups = computed(() => {
@@ -244,6 +283,15 @@ async function remove(product: Product): Promise<void> {
 
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
+    <div class="toolbar">
+      <label v-if="activeEventId" class="inline"><input v-model="lowOnly" type="checkbox" /> <span>Low stock only</span></label>
+      <label v-if="lowOnly && activeEventId" class="inline thr">≤ <input v-model="lowThreshold" type="number" min="0" inputmode="numeric" aria-label="Threshold" /> left</label>
+      <button v-if="lowOnly && activeEventId" type="button" class="quiet" :disabled="!filtered.length" @click="exportRestockCsv"><Icon name="download" :size="14" /> Restock CSV</button>
+      <span class="spacer"></span>
+      <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
+    </div>
+    <p v-if="!activeEventId" class="hint">No active event — open one under Events to see what is running low there.</p>
+
     <p v-if="!filtered.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products yet.' }}</p>
 
     <section v-for="group in groups" :key="group.type" class="group">
@@ -264,6 +312,18 @@ async function remove(product: Product): Promise<void> {
         </li>
       </ul>
     </section>
+
+    <ModalShell v-if="reordering" title="Reorder products" @close="reordering = false">
+      <p class="hint">This order is used by the till and the catalogue. Changes sync to every device.</p>
+      <ul class="reorder">
+        <li v-for="(p, i) in allProducts" :key="p.id">
+          <ProductThumb :image-id="p.imageId" :alt="p.title" :size="32" />
+          <span class="main"><span class="title">{{ p.title || '(untitled)' }}</span><small v-if="p.type" :style="{ color: typeColor(p.type) }">{{ p.type }}</small></span>
+          <button type="button" class="quiet" :disabled="i === 0" aria-label="Move up" @click="move(p.id, -1)"><Icon name="arrow-up" :size="14" /></button>
+          <button type="button" class="quiet" :disabled="i === allProducts.length - 1" aria-label="Move down" @click="move(p.id, 1)"><Icon name="arrow-down" :size="14" /></button>
+        </li>
+      </ul>
+    </ModalShell>
 
     <ModalShell v-if="editing" :title="editId ? 'Edit product' : 'New product'" wide @close="editing = false">
       <div class="form">
@@ -362,6 +422,16 @@ h1 { margin: 0; font-size: 1.35rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
+.toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.toolbar .spacer { flex: 1; }
+.toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2rem; }
+.thr input { width: 3.5rem; min-height: 1.8rem; padding: .1rem .4rem; }
+.reorder { list-style: none; margin: .6rem 0 0; padding: 0; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; overflow: hidden; }
+.reorder li { display: flex; align-items: center; gap: .6rem; padding: .4rem .6rem; }
+.reorder li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }
+.reorder .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.reorder small { font-size: .7rem; }
+.reorder button { min-height: 1.8rem; padding: .1rem .4rem; }
 .group { display: flex; flex-direction: column; gap: .4rem; }
 .group h2 { margin: 0; display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
 .group h2 small { color: var(--zfy-muted, #5a6472); font-weight: 400; }

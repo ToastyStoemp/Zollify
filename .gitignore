@@ -32,3 +32,6 @@ modules/*/dist/
 # Built APKs — regenerate with `npm run android:apk && npm run android:pack`
 apps/server/apk/
 apps/server/deploy/
+
+# Public CA roots the compat Android flavour trusts on Android 7 — not secrets
+!android/app/src/compat/res/raw/*.pem

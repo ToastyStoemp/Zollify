@@ -20,6 +20,7 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,6 +40,10 @@ jobs:
       # downloads the exact platform/build-tools it needs once licences are
       # accepted. setup-android is avoided: it tries to install the retired
       # 'tools' package and fails.
+      # Caches ~/.gradle (wrapper, dependencies, build cache) between runs;
+      # the first run downloads everything, later ones take a few minutes.
+      - uses: gradle/actions/setup-gradle@v4
+
       - name: Accept SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
 
@@ -60,7 +65,7 @@ jobs:
         run: |
           chmod +x gradlew
           if [ -f "$RUNNER_TEMP/zollify.keystore" ]; then export ZOLLIFY_KEYSTORE="$RUNNER_TEMP/zollify.keystore"; fi
-          ./gradlew assembleRelease --no-daemon --console=plain
+          ./gradlew assembleRelease --console=plain -q
         env:
           ZOLLIFY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ZOLLIFY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

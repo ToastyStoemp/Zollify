@@ -8,6 +8,10 @@ buildscript {
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
+        // Kotlin 2.4 metadata is newer than the R8 bundled with AGP 8.13 knows;
+        // without this D8 prints a warning per class and a build log runs to
+        // megabytes. A current R8 reads it fine.
+        classpath 'com.android.tools:r8:8.11.18'
         classpath 'com.google.gms:google-services:4.4.4'
         // SumUp merchant-sdk 7.x ships Kotlin 2.4 metadata
         classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.0'

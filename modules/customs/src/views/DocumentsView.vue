@@ -210,7 +210,12 @@ watch(hasVariantProducts, (has) => {
 const safeName = (suffix: string): string => `${(event.value?.name || 'event').replace(/[^\w-]+/g, '_')}_${suffix}`;
 
 /** Opens a generated document in its own tab — that is where it gets printed or saved as PDF. */
-function openHtml(html: string): void {
+/** "Save as PDF" is the browser's print dialog: the opened document asks for it as soon as it has rendered. */
+const saveAsPdf = ref(false);
+// Assembled so the SFC compiler does not read the tag as the end of this block.
+const PRINT_ON_LOAD = `<${'script'}>addEventListener("load",function(){setTimeout(function(){print()},250)})</${'script'}>`;
+function openHtml(source: string): void {
+  const html = saveAsPdf.value ? source.replace(/<\/body>/i, `${PRINT_ON_LOAD}</body>`) : source;
   const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
   const win = window.open(url, '_blank');
   if (!win) preview.value = html;
@@ -289,12 +294,20 @@ const TRANSPORT_MODES = [
 
       <article class="card">
         <h2>Documents</h2>
-        <p class="hint">LRP: <code>{{ lrp }}</code> · Documents open in a new tab — print or save as PDF from there.</p>
+        <p class="hint">LRP: <code>{{ lrp }}</code> · Documents open in a new tab.</p>
         <div class="fmt">
           <span class="hint">Goods list format</span>
           <div class="seg">
             <button v-for="o in formatOptions" :key="o.value" type="button" :class="{ on: goodsFormat === o.value }" @click="goodsFormat = o.value">{{ o.label }}</button>
           </div>
+        </div>
+        <div class="fmt">
+          <span class="hint">On open</span>
+          <div class="seg">
+            <button type="button" :class="{ on: !saveAsPdf }" @click="saveAsPdf = false">View</button>
+            <button type="button" :class="{ on: saveAsPdf }" @click="saveAsPdf = true">Save as PDF</button>
+          </div>
+          <span v-if="saveAsPdf" class="hint">Opens the print dialog straight away — choose “Save as PDF” as the printer.</span>
         </div>
         <div class="docs">
           <button type="button" @click="openGoodsList(1)"><Icon name="download" :size="14" /> Import list</button>

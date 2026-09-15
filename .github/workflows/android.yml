@@ -35,7 +35,12 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      # The ubuntu runner ships the Android SDK (ANDROID_HOME set); Gradle
+      # downloads the exact platform/build-tools it needs once licences are
+      # accepted. setup-android is avoided: it tries to install the retired
+      # 'tools' package and fails.
+      - name: Accept SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
 
       - run: npm ci
 

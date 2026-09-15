@@ -5,6 +5,7 @@ export * from './protocol';
 export * from './money';
 export * from './currencies';
 export * from './countries';
+export * from './hs-codes';
 export * from './cash';
 export * from './flags';
 export * from './public-events';

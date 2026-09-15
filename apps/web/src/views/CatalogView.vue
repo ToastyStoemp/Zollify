@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
-import { fmtPrice } from '@zollify/shared';
-import { CountryPicker, Icon, ModalShell, typeColor } from '@zollify/ui';
+import { HS_CODES, fmtPrice } from '@zollify/shared';
+import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
 import {
   activeEventId,
   allProducts,
@@ -41,6 +41,10 @@ function lowRows(p: Product): { variant: string; left: number }[] {
   const thr = Math.max(0, parseInt(lowThreshold.value) || 0);
   return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
 }
+
+// ── HS code lookup: search by code or description, as the old customs tool did ──
+const HS_OPTIONS = HS_CODES.map((h) => ({ code: h.code, name: `${h.desc} · ${h.rate}%${h.permit ? ' · permit' : ''}` }));
+const hsHint = computed(() => HS_CODES.find((h) => h.code === form.tariffNo.trim())?.desc ?? '');
 
 // ── SKU generator ──────────────────────────────────────────────────────────
 // PN-2604-SB-PIC-02: booth initials, year+month introduced, type initials,
@@ -500,7 +504,7 @@ async function remove(product: Product): Promise<void> {
           <summary>Customs details</summary>
           <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
           <div class="two">
-            <label><span>Tariff no. (HS code)</span><input v-model="form.tariffNo" type="text" placeholder="4911.9100" inputmode="decimal" /></label>
+            <label><span>Tariff no. (HS code)</span><TypeaheadPicker v-model="form.tariffNo" :options="HS_OPTIONS" placeholder="4911.91.00 or “stickers”" /><small v-if="hsHint">{{ hsHint }}</small></label>
             <label><span>{{ isArtwork(form.type) ? 'Artist country' : 'Origin country' }}</span><CountryPicker v-model="form.originCountry" store="code" placeholder="CH" /></label>
           </div>
           <label v-if="isArtwork(form.type)">

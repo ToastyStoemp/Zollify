@@ -72,8 +72,10 @@ COPY apps/server/tsconfig.json apps/server/
 COPY --from=build /repo/apps/web/dist apps/web/dist
 COPY --from=build /repo/apps/server/modules-store apps/server/modules-store
 
-# Drop privileges. The node image ships an unprivileged `node` user; /data is
-# a volume, so ownership is set at runtime by the compose file.
+# Drop privileges. The node image ships an unprivileged `node` user. /data is
+# created here, owned by it, so a fresh named volume inherits that ownership
+# instead of coming up root-owned and unwritable.
+RUN mkdir -p /data && chown node:node /data
 USER node
 
 EXPOSE 8787

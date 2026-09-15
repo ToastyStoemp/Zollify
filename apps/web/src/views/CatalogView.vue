@@ -43,6 +43,8 @@ function lowRows(p: Product): { variant: string; left: number }[] {
   return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
 }
 
+const isArtwork = (type: string): boolean => /print|art/i.test(type);
+
 // ── HS code lookup: search by code or description, as the old customs tool did ──
 const HS_OPTIONS = HS_CODES.map((h) => ({ code: h.code, name: `${h.desc} · ${h.rate}%${h.permit ? ' · permit' : ''}` }));
 const hsHint = computed(() => HS_CODES.find((h) => h.code === form.tariffNo.trim())?.desc ?? '');
@@ -86,6 +88,9 @@ function customsIssues(p: Product): string[] {
   const weighed = p.variants.length ? p.variants.filter((v) => !v.unlisted).every((v) => (v.weightG ?? p.weightG) != null) : p.weightG != null;
   if (!weighed) out.push('no weight');
   if (!p.originCountry) out.push('no origin');
+  // Art prints are declared as artworks by title and year; everything else is identified by SKU.
+  const skuMissing = p.variants.length ? p.variants.some((v) => !v.unlisted && !(v.sku ?? p.sku)?.trim()) : !p.sku?.trim();
+  if (!isArtwork(p.type ?? '') && skuMissing) out.push('no SKU');
   return out;
 }
 
@@ -198,7 +203,6 @@ const freeOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s
 const soldOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + soldTotal(p.id, v.id), 0) : soldTotal(p.id, ''));
 
 // Customs wants title + year for art prints and the material for purses.
-const isArtwork = (type: string): boolean => /print|art/i.test(type);
 const isPurse = (type: string): boolean => /purse|wallet|bag/i.test(type);
 
 // ── Editor ──────────────────────────────────────────────────────────────────

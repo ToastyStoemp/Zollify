@@ -8,7 +8,7 @@ name: Deploy server
 on:
   workflow_run:
     workflows: ["Docker image", "Android"]
-    branches: [main]
+    branches: [master]
     types: [completed]
   workflow_dispatch:
 

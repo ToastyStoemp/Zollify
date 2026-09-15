@@ -190,7 +190,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
 
       <article class="card">
         <h3>Server</h3>
-        <p class="hint">Running commit <code>{{ overview.commit ?? 'unknown' }}</code>. Update pulls the latest image and Android builds published from <code>main</code>.</p>
+        <p class="hint">Running commit <code>{{ overview.commit ?? 'unknown' }}</code>. Update pulls the latest image and Android builds published from <code>master</code>.</p>
         <div class="row">
           <button type="button" :disabled="deploying" @click="updateServer">{{ deploying ? 'Requesting…' : 'Update server' }}</button>
           <span v-if="deployNote" class="hint">{{ deployNote }}</span>

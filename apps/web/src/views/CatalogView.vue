@@ -3,6 +3,7 @@ import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
 import { HS_CODES, fmtPrice } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
+import { loader } from '../boot';
 import {
   activeEventId,
   allProducts,
@@ -87,6 +88,9 @@ function customsIssues(p: Product): string[] {
   if (!p.originCountry) out.push('no origin');
   return out;
 }
+
+/** Issues are only worth flagging on every row when the booth actually does customs paperwork. */
+const customsOn = loader.isLoaded('customs');
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -411,7 +415,7 @@ async function remove(product: Product): Promise<void> {
           <button type="button" class="row" @click="canEdit ? openEdit(p) : undefined">
             <ProductThumb :image-id="p.imageId" :alt="p.title" :size="40" />
             <span class="main">
-              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em><em v-if="filter === 'customs'" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
+              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em><em v-if="customsOn && customsIssues(p).length" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
               <span class="sub">{{ p.sku }}<template v-if="p.sku && p.variants.length"> · </template><template v-if="p.variants.length">{{ p.variants.length }} variant{{ p.variants.length === 1 ? '' : 's' }}</template></span>
             </span>
             <span class="side">

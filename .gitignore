@@ -31,3 +31,4 @@ modules/*/dist/
 
 # Built APKs — regenerate with `npm run android:apk && npm run android:pack`
 apps/server/apk/
+apps/server/deploy/

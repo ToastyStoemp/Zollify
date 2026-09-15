@@ -6,8 +6,10 @@
 #   ./apps/server/deploy.sh --pull     git pull first, then build here
 #   ./apps/server/deploy.sh --auto     unattended: git pull, pull the GHCR image
 #                                      and the latest APKs; restart only when
-#                                      something changed (run from a timer,
-#                                      see apps/server/systemd/)
+#                                      something changed. Run by GitHub Actions
+#                                      over SSH after each push, and by the
+#                                      "Update server" button via systemd
+#                                      (apps/server/systemd/)
 #
 # Building in Docker is reproducible but slow on a small instance. To build
 # elsewhere instead:
@@ -34,15 +36,13 @@ if [[ "$mode" == "--pull" || "$mode" == "--auto" ]]; then
 fi
 
 if [[ "$mode" == "--auto" ]]; then
-  # Env for the GitHub token etc. lives next to the compose file too.
-  set -a; source "$env_file"; set +a
-  if [[ -n "${ZOLLIFY_GH_TOKEN:-}" ]]; then
-    echo "$ZOLLIFY_GH_TOKEN" | docker login ghcr.io -u "${ZOLLIFY_GH_USER:-token}" --password-stdin >/dev/null
-  fi
+  # The button's request is consumed first, so a deploy asked for mid-run is not lost.
+  rm -f "$repo_root/apps/server/deploy/requested"
   echo "→ fetching APKs"
-  # Through a node container: the host needs nothing but Docker and git.
-  mkdir -p "$repo_root/apps/server/apk"
-  docker run --rm -e ZOLLIFY_GH_TOKEN -e ZOLLIFY_GH_REPO -e ZOLLIFY_APK_DIR=/repo/apps/server/apk     -v "$repo_root:/repo" -w /repo node:22-bookworm-slim node scripts/fetch-apks.mjs     || echo "  (APK fetch failed — keeping what is there)"
+  # Through a node container: the host needs nothing but Docker and git. The
+  # repo and its packages are public, so no token is needed.
+  mkdir -p "$repo_root/apps/server/apk" "$repo_root/apps/server/deploy"
+  docker run --rm -e ZOLLIFY_APK_DIR=/repo/apps/server/apk     -v "$repo_root:/repo" -w /repo node:22-bookworm-slim node scripts/fetch-apks.mjs     || echo "  (APK fetch failed — keeping what is there)"
 
   image="$(docker compose -f "$compose_file" --env-file "$env_file" config --images | head -1)"
   running="$(docker inspect -f '{{.Image}}' zollify 2>/dev/null || true)"

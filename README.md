@@ -203,24 +203,32 @@ The host needs Docker, git and Caddy — nothing else. Images are built by
 GitHub Actions and pushed to GHCR on every push to `main`; the host only pulls.
 
 1. **Clone and configure.** `git clone` to `/home/ubuntu/zollify`, then
-   `cp apps/server/.env.example apps/server/.env` and fill in `ZOLLIFY_JWT_SECRET`,
-   `OWNER_EMAIL`/`OWNER_PASSWORD` (first boot only), and `ZOLLIFY_GH_TOKEN`
-   (a fine-grained GitHub token with read access to this repo's packages and
-   releases) plus `ZOLLIFY_GH_USER`.
+   `cp apps/server/.env.example apps/server/.env` and fill in `ZOLLIFY_JWT_SECRET`
+   and `OWNER_EMAIL`/`OWNER_PASSWORD` (first boot only). The repo and its
+   GHCR package are public, so pulling needs no token — make sure the package
+   `zollify` is set to public under the repo's Packages page once.
 2. **Caddy.** Add the block from `apps/server/Caddyfile.example` to your
    Caddyfile and reload. Caddy does TLS; the gateway listens on
    `127.0.0.1:8787` only and trusts `X-Forwarded-Proto`.
 3. **First start.** `./apps/server/deploy.sh --auto` — pulls the image, the
    Android APKs from the latest release, and starts the container. Check
    `https://<host>/health`.
-4. **Auto-updates.** `sudo cp apps/server/systemd/zollify-deploy.* /etc/systemd/system/`
-   then `sudo systemctl enable --now zollify-deploy.timer`. Every five minutes
-   it runs `deploy.sh --auto`: `git pull`, fetch APKs, pull the image, and
-   restart only when the image changed (a SQLite backup lands in `backups/`
-   before each restart). `journalctl -u zollify-deploy` shows what it did.
+4. **Deploy on push.** Add repo secrets `DEPLOY_HOST`, `DEPLOY_USER`,
+   `DEPLOY_SSH_KEY` (private key; put its public half in the server user's
+   `~/.ssh/authorized_keys`), `DEPLOY_PATH` (`/home/ubuntu/zollify`) and
+   optionally `DEPLOY_PORT`. `.github/workflows/deploy.yml` then SSHes in after
+   each image/APK build and runs `deploy.sh --auto`: `git pull`, fetch APKs,
+   pull the image, restart only when it changed (a SQLite backup lands in
+   `backups/` first).
+5. **Update button.** `sudo cp apps/server/systemd/zollify-deploy.* /etc/systemd/system/`
+   then `sudo systemctl enable --now zollify-deploy.path`. Settings → Server
+   admin → *Update server* drops `apps/server/deploy/requested`; the path
+   unit runs the same `deploy.sh --auto`. `journalctl -u zollify-deploy`
+   shows what it did.
 
-Rollback: `ZOLLIFY_IMAGE_TAG=<older sha> ./apps/server/deploy.sh --auto` after
-stopping the timer; every image is also tagged with its commit.
+Rollback: `ZOLLIFY_IMAGE_TAG=<older sha> ./apps/server/deploy.sh --auto`;
+every image is also tagged with its commit, and Server admin shows the one
+running.
 
 ## A note on verification
 

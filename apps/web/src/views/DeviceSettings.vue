@@ -3,6 +3,12 @@ import { onMounted, ref } from 'vue';
 import type { DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
+  checkForUpdate,
+  downloadUpdate,
+  installDownloadedUpdate,
+  selfUpdates,
+  updateDownload,
+  type UpdateCheck,
   currentAccount,
   deviceFlavor,
   deviceId,
@@ -46,6 +52,28 @@ onMounted(async () => {
 // ── Diagnostics: send this device's log to the server for support ──────────
 const sending = ref(false);
 const sent = ref(false);
+// ── App updates (Android, not Carbon) ───────────────────────────────────────
+const canSelfUpdate = ref(false);
+const update = ref<UpdateCheck | null>(null);
+const checking = ref(false);
+const updateError = ref<string | null>(null);
+onMounted(async () => {
+  canSelfUpdate.value = await selfUpdates().catch(() => false);
+});
+async function checkUpdate(): Promise<void> {
+  checking.value = true;
+  updateError.value = null;
+  try {
+    update.value = await checkForUpdate();
+    if (update.value?.available) await downloadUpdate(update.value);
+  } catch (err) {
+    updateError.value = err instanceof Error ? err.message : 'Could not check for updates.';
+  } finally {
+    checking.value = false;
+  }
+}
+const progressPct = (): number => (updateDownload.totalBytes > 0 ? Math.round((updateDownload.bytesWritten / updateDownload.totalBytes) * 100) : 0);
+
 async function sendLog(): Promise<void> {
   sending.value = true;
   error.value = null;
@@ -158,6 +186,21 @@ function when(ts: number): string {
       </li>
     </ul>
 
+    <template v-if="canSelfUpdate">
+      <h3>App updates</h3>
+      <p class="hint">
+        Build {{ build }}. The app checks the server on every start and downloads a newer build in the background; installing is always your tap.
+      </p>
+      <p v-if="updateError" class="error" role="alert">{{ updateError }}</p>
+      <p v-else-if="update && !update.available" class="ok" role="status">Up to date ({{ update.currentVersionName }}).</p>
+      <p v-else-if="update?.available && updateDownload.active" class="hint">Downloading {{ update.versionName }}… {{ progressPct() }}%</p>
+      <p v-else-if="update?.available && updateDownload.error" class="error" role="alert">Download failed: {{ updateDownload.error }}</p>
+      <div class="row">
+        <button type="button" :disabled="checking || updateDownload.active" @click="checkUpdate">{{ checking ? 'Checking…' : 'Check for updates' }}</button>
+        <button v-if="updateDownload.ready" type="button" class="primary" @click="installDownloadedUpdate">Install {{ updateDownload.versionName }}</button>
+      </div>
+    </template>
+
     <h3>Diagnostics</h3>
     <p class="hint">Sends this device's recent warnings, errors and payment breadcrumbs to the server so support can look at them. No sale amounts or card data are included.</p>
     <button type="button" :disabled="sending" @click="sendLog">{{ sending ? 'Sending…' : sent ? 'Log sent' : 'Send diagnostic log' }}</button>
@@ -189,4 +232,5 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .themes .body { display: flex; flex-direction: column; }
 .themes .label { font-size: .875rem; font-weight: 600; }
 .themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; }
 </style>

@@ -45,6 +45,7 @@ ENV NODE_ENV=production \
     ZOLLIFY_DATA_DIR=/data \
     ZOLLIFY_MODULE_STORE=/repo/apps/server/modules-store \
     ZOLLIFY_WEB_DIST=/repo/apps/web/dist \
+    ZOLLIFY_APK_DIR=/data/apk \
     PORT=8787 \
     HOST=0.0.0.0
 

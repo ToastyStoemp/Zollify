@@ -10,11 +10,13 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = join(root, 'apps', 'server', 'apk');
 const flavors = ['carbon', 'compat', 'full'];
+// `--release` collects the signed release build (CI); the default is the local debug build.
+const buildType = process.argv.includes('--release') ? 'release' : 'debug';
 
 mkdirSync(outDir, { recursive: true });
 let packed = 0;
 for (const flavor of flavors) {
-  const src = join(root, 'android', 'app', 'build', 'outputs', 'apk', flavor, 'debug', `app-${flavor}-debug.apk`);
+  const src = join(root, 'android', 'app', 'build', 'outputs', 'apk', flavor, buildType, `app-${flavor}-${buildType}.apk`);
   if (!existsSync(src)) {
     console.warn(`Skipping ${flavor} — ${src} not found (build it first).`);
     continue;

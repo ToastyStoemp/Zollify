@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(MyPosPlugin.class);
         registerPlugin(FileSharePlugin.class);
         registerPlugin(ThermalPrinterPlugin.class);
+        registerPlugin(UpdaterPlugin.class);
         // Flavor-specific payment plugins (SumUp + Glass on "full", CarbonPayment on "carbon")
         PaymentSdks.INSTANCE.registerPlugins(this);
         super.onCreate(savedInstanceState);

@@ -1,0 +1,80 @@
+name: Android
+
+# Every push to main produces the three APKs, signed with the release keystore
+# held in secrets, and publishes them as a GitHub Release. The server pulls
+# the latest release into its APK directory (scripts/fetch-apks.mjs) so
+# devices self-update; the carbon build is published too but installed by
+# hand through myPOS's channel.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - run: npm ci
+
+      - name: Stamp version
+        run: node scripts/bump-android-version.mjs
+
+      - name: Build web and sync
+        run: npm run android:sync
+
+      - name: Restore keystore
+        run: if [ -n "$KS" ]; then echo "$KS" | base64 -d > "$RUNNER_TEMP/zollify.keystore"; else echo "No keystore secret — debug-signed build"; fi
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+
+      - name: Assemble release APKs
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          if [ -f "$RUNNER_TEMP/zollify.keystore" ]; then export ZOLLIFY_KEYSTORE="$RUNNER_TEMP/zollify.keystore"; fi
+          ./gradlew assembleRelease --no-daemon --console=plain
+        env:
+          ZOLLIFY_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ZOLLIFY_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ZOLLIFY_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Collect
+        id: collect
+        run: |
+          node scripts/pack-apk.mjs --release
+          echo "code=$(node -p "require('./apps/server/apk/version.json').versionCode")" >> "$GITHUB_OUTPUT"
+          echo "name=$(node -p "require('./apps/server/apk/version.json').versionName")" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-${{ steps.collect.outputs.code }}
+          name: Android ${{ steps.collect.outputs.name }}
+          body: "versionCode ${{ steps.collect.outputs.code }} · ${{ github.sha }}"
+          files: |
+            apps/server/apk/zollify-compat.apk
+            apps/server/apk/zollify-full.apk
+            apps/server/apk/zollify-carbon.apk
+            apps/server/apk/version.json

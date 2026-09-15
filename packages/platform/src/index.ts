@@ -64,3 +64,4 @@ export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type C
 export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';
 export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './native';
+export { selfUpdates, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';

@@ -43,6 +43,8 @@ async function main(): Promise<void> {
   const dataDir = resolve(process.env.ZOLLIFY_DATA_DIR ?? './data');
   const moduleStoreDir = resolve(process.env.ZOLLIFY_MODULE_STORE ?? './modules-store');
   const webDistDir = process.env.ZOLLIFY_WEB_DIST ? resolve(process.env.ZOLLIFY_WEB_DIST) : undefined;
+  // Android self-update APKs (written by `npm run android:pack` or scripts/fetch-apks.mjs).
+  const apkDir = resolve(process.env.ZOLLIFY_APK_DIR ?? './apk');
   const jwtSecret = required('ZOLLIFY_JWT_SECRET');
 
   // Shopify derives its credential-encryption key from the same secret, so it
@@ -59,6 +61,7 @@ async function main(): Promise<void> {
     dataDir,
     moduleStoreDir,
     webDistDir,
+    apkDir,
     jwtSecret,
     serverModules,
     defaultModules: DEFAULT_MODULES,

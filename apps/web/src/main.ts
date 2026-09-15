@@ -2,7 +2,11 @@ import { createApp } from 'vue';
 import {
   applyStoredTheme,
   installDiagnostics,
+  checkForUpdate,
   configureApiBase,
+  createShellUi,
+  downloadUpdate,
+  updateDownload,
   getServerUrl,
   isNative,
   getAccount,
@@ -73,6 +77,24 @@ async function boot(): Promise<void> {
     startRealtime();
   }
   markBooted();
+  void autoUpdateCheck();
+}
+
+/**
+ * The Android app fetches a newer build in the background and says so once
+ * it is ready; installing stays a tap under Settings → This device, because
+ * the system's install dialog taking over mid-sale would be worse than an
+ * old build for one more shift. Carbon terminals never update from here.
+ */
+async function autoUpdateCheck(): Promise<void> {
+  try {
+    const check = await checkForUpdate();
+    if (!check?.available) return;
+    await downloadUpdate(check);
+    if (updateDownload.ready) createShellUi('shell').toast(`Update ${check.versionName} is ready — install it under Settings → This device.`, { timeoutMs: 8000 });
+  } catch {
+    /* background convenience, never an error the user has to see */
+  }
 }
 
 void start();

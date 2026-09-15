@@ -19,6 +19,7 @@ import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
+import { registerUpdateRoutes } from './routes/updates';
 import { Rooms, registerWs } from './ws';
 
 export interface GatewayOptions {
@@ -31,6 +32,8 @@ export interface GatewayOptions {
    * and proxies the API here.
    */
   webDistDir?: string;
+  /** Directory with the Android APKs + version.json for self-update; omit to serve none. */
+  apkDir?: string;
   /** Server halves compiled into this deploy. */
   serverModules: ServerModule[];
   /** Modules a new account starts with. */
@@ -188,6 +191,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerAccountRoutes(app, db);
   registerAdminRoutes(app, db);
   registerLogRoutes(app, db, opts.dataDir);
+  if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
   await registerWs(app, rooms, db);
 
   // ── Module plane ──────────────────────────────────────────────────────────

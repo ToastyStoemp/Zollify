@@ -17,10 +17,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // Release builds sign with the keystore named in the environment (CI holds
+    // it as a secret); without one they fall back to the debug key so a local
+    // build still installs. Self-update only works across builds that share
+    // a signature, so every shipped APK must come from the same keystore.
+    signingConfigs {
+        release {
+            def ks = System.getenv("ZOLLIFY_KEYSTORE")
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv("ZOLLIFY_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ZOLLIFY_KEY_ALIAS") ?: "zollify"
+                keyPassword System.getenv("ZOLLIFY_KEY_PASSWORD") ?: System.getenv("ZOLLIFY_KEYSTORE_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig System.getenv("ZOLLIFY_KEYSTORE") ? signingConfigs.release : signingConfigs.debug
         }
     }
     // "full" ships the SumUp SDK (whose whole dependency tree declares minSdk 26).
@@ -48,6 +64,8 @@ android {
         // Required by the SumUp merchant SDK (java.time etc. on older Android)
         coreLibraryDesugaringEnabled true
     }
+    // BuildConfig.FLAVOR tells the updater which APK this install is.
+    buildFeatures { buildConfig true }
 }
 
 repositories {

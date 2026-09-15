@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   activeEvent,
+  availabilityFor,
   allProducts,
   currentAccount,
   inventoryRows,
@@ -96,12 +97,18 @@ function range(e: { dateStart?: string; dateEnd?: string }): string {
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const LOW = 3;
-const lowStock = computed(() =>
-  inventoryRows()
-    .filter((r) => r.counted && r.free <= LOW)
-    .sort((a, b) => a.free - b.free)
-    .slice(0, 6),
-);
+/**
+ * With an event open: what it can still sell (its claim, or the pool). With
+ * none: what the booth owns outright. "Free" would be wrong here — a fully
+ * claimed item has nothing free and is not running low.
+ */
+const lowStock = computed(() => {
+  const ev = event.value;
+  const rows = ev
+    ? availabilityFor(ev.id).filter((r) => r.claimed !== null || r.onHand > 0).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.available }))
+    : inventoryRows().filter((r) => r.counted).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.free + r.claimed }));
+  return rows.filter((r) => r.left <= LOW).sort((a, b) => a.left - b.left).slice(0, 6);
+});
 const uncounted = computed(() => inventoryRows().filter((r) => !r.counted).length);
 const productCount = computed(() => allProducts.value.length);
 
@@ -180,11 +187,11 @@ const syncLine = computed(() => {
         <header class="chead"><h2>Stock</h2><span class="sub">{{ productCount }} product{{ productCount === 1 ? '' : 's' }}</span></header>
         <p v-if="!lowStock.length" class="empty">Nothing is running low.</p>
         <template v-else>
-          <span class="label">Running low</span>
+          <span class="label">Running low{{ event ? ` at ${event.name}` : '' }}</span>
           <ul class="list">
-            <li v-for="r in lowStock" :key="r.productId + r.variantId">
+            <li v-for="r in lowStock" :key="r.key">
               <span>{{ r.label }}</span>
-              <strong :class="{ bad: r.free <= 0 }">{{ r.free <= 0 ? 'none free' : `${r.free} free` }}</strong>
+              <strong :class="{ bad: r.left <= 0 }">{{ r.left <= 0 ? 'sold out' : `${r.left} left` }}</strong>
             </li>
           </ul>
         </template>

@@ -5,7 +5,7 @@ import type { EventStock, SalesEvent } from '@zollify/shared';
 import { CountryPicker, Icon } from '@zollify/ui';
 import { buildAllVersionsHtml } from '../engine/all-versions';
 import { buildCustomsState, readCustomsBlob } from '../engine/adapter';
-import { compute1174Groups, computeLRP, fmtWeightKg } from '../engine/calc';
+import { compute1174Groups, computeLRP, fmtWeightKg, hasCustomsInfo } from '../engine/calc';
 import { buildEdecXml } from '../engine/edec-xml';
 import { build1174Html } from '../engine/form1174';
 import { build1187Html } from '../engine/form1187';
@@ -172,6 +172,12 @@ const state = computed(() => {
   return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent());
 });
 const lrp = computed(() => (state.value ? computeLRP(state.value, documentNumber.value) : ''));
+/** Claimed for this event but without a tariff no. or VAT rate — the goods lists leave these out. */
+const missingInfo = computed(() =>
+  (state.value?.products ?? [])
+    .filter((p) => !hasCustomsInfo(p) && (p.amount ?? 0) + (p.variants ?? []).reduce((m, v) => m + (v.amount ?? 0), 0) > 0)
+    .map((p) => p.title),
+);
 const claimedUnits = computed(() => state.value?.products.reduce((n, p) => n + (p.amount ?? 0) + (p.variants ?? []).reduce((m, v) => m + (v.amount ?? 0), 0), 0) ?? 0);
 const groups = computed(() => (state.value ? compute1174Groups(JSON.parse(JSON.stringify(state.value))) : null));
 
@@ -276,6 +282,10 @@ const TRANSPORT_MODES = [
 
     <template v-else>
       <p v-if="claimedUnits === 0" class="warn" role="status">This event has no stock claimed, so the goods lists are empty. Claim what you're taking under Inventory → Claimed for an event.</p>
+      <p v-if="missingInfo.length" class="warn" role="status">
+        Claimed but left off every document — no tariff no. (HS code) or VAT rate set under Products → Customs details:
+        <strong>{{ missingInfo.join(', ') }}</strong>.
+      </p>
 
       <article class="card">
         <h2>Documents</h2>

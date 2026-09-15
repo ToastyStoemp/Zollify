@@ -142,6 +142,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
 
   if (opts.requireHttps) {
     app.addHook('onRequest', async (req, reply) => {
+      // The health probe comes from the container runtime and the deploy
+      // script over plain loopback HTTP; it carries nothing worth protecting.
+      if (req.url === '/health') return undefined;
       const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
       if (proto !== 'https') {
         return reply.code(403).send({ error: 'https_required', message: 'HTTPS is required.' });

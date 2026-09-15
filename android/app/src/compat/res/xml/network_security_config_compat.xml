@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  compat flavor only (Android 7 / API 24-25 tablets).
+
+  Android 7.0 and 7.1.0 lack ISRG Root X1 in their system trust store (it was
+  added in 7.1.1), and the DST Root CA X3 cross-signature that used to bridge
+  the gap expired 2021-09-30. As a result these tablets cannot build a trust
+  path to the Let's Encrypt certificate on the sync server and every request
+  fails in the WebView as a bare "fetch failed".
+
+  Bundle the ISRG roots and trust them in addition to the system anchors so TLS
+  to the sync server validates. cleartextTrafficPermitted stays true to preserve
+  the existing http androidScheme and LAN bridge (ws://) connections.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="@raw/isrgrootx1" />
+            <certificates src="@raw/isrg_root_x2" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

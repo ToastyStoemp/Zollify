@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Zollify</string>
+    <string name="title_activity_main">Zollify</string>
+    <string name="package_name">com.phuongninjin.zollify</string>
+    <string name="custom_url_scheme">com.phuongninjin.zollify</string>
+</resources>

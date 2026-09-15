@@ -2,7 +2,7 @@
   "name": "zollify",
   "version": "0.1.0",
   "private": true,
-  "description": "Zollify \u2014 a plugin platform for market and convention booths",
+  "description": "Zollify — a plugin platform for market and convention booths",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -20,10 +20,19 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:deps": "npm audit --audit-level=moderate",
-    "publish:modules": "node scripts/publish-modules.mjs"
+    "publish:modules": "node scripts/publish-modules.mjs",
+    "build:web": "npm run build -w @zollify/web",
+    "android:sync": "npm run build:web && npx cap sync android",
+    "android:apk": "node scripts/bump-android-version.mjs && npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:pack": "node scripts/pack-apk.mjs"
   },
   "devDependencies": {
     "typescript": "~5.9.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "@capacitor/cli": "^8.3.4"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0"
   }
 }

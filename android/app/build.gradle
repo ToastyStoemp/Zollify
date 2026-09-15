@@ -1,0 +1,88 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    namespace = "com.phuongninjin.zollify"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.phuongninjin.zollify"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 29824168
+        versionName "516f58f-dirty"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+    // "full" ships the SumUp SDK (whose whole dependency tree declares minSdk 26).
+    // "compat" leaves SumUp out so the app installs on Android 7 (API 24) tablets;
+    // every other provider (manual, MyPOS Go2/Carbon, bridge) still works there.
+    // "carbon" runs ON a myPOS Carbon/Ultra smart terminal (Android 9; myPOS
+    // AppMarket requires minSdk 28): on-device payments via the myPOS Smart SDK,
+    // no SumUp.
+    flavorDimensions = ["device"]
+    productFlavors {
+        full {
+            dimension "device"
+            minSdkVersion 26
+        }
+        compat {
+            dimension "device"
+            minSdkVersion 24
+        }
+        carbon {
+            dimension "device"
+            minSdkVersion 28
+        }
+    }
+    compileOptions {
+        // Required by the SumUp merchant SDK (java.time etc. on older Android)
+        coreLibraryDesugaringEnabled true
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+    implementation 'com.mypos:slavesdk:2.1.8'
+    fullImplementation 'com.sumup:merchant-sdk:7.1.0'
+    // myPOS Glass softPOS (tap-to-pay via the Glass app on the same phone)
+    fullImplementation 'com.mypos:glasssdk:1.0.6'
+    carbonImplementation 'com.mypos:mypossmartsdk:1.0.8'
+    // Receipt printing: PrinterCommand lists are serialized to JSON for the myPOS print broadcast
+    carbonImplementation 'com.google.code.gson:gson:2.11.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

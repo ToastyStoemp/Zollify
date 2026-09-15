@@ -28,3 +28,6 @@ coverage/
 
 # Built module bundles — regenerate with `npm run publish:modules`
 modules/*/dist/
+
+# Built APKs — regenerate with `npm run android:apk && npm run android:pack`
+apps/server/apk/

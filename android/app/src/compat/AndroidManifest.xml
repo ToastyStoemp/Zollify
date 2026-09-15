@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  compat-flavor manifest overlay. Merged into the Capacitor-generated main
+  manifest at build time, so it survives `npx cap sync`. It points the app at a
+  network security config that trusts the bundled ISRG roots (see
+  res/xml/network_security_config_compat.xml). tools:replace makes this win over
+  any networkSecurityConfig the generated main manifest may declare.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:networkSecurityConfig="@xml/network_security_config_compat"
+        tools:replace="android:networkSecurityConfig" />
+</manifest>

@@ -35,7 +35,6 @@ const search = ref('');
 const error = ref<string | null>(null);
 
 // ── Low stock: what needs restocking at the active event ───────────────────
-const lowOnly = ref(false);
 const lowThreshold = ref('3');
 const availability = computed(() => (activeEventId.value ? availabilityFor(activeEventId.value) : []));
 function lowRows(p: Product): { variant: string; left: number }[] {
@@ -43,11 +42,34 @@ function lowRows(p: Product): { variant: string; left: number }[] {
   return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
 }
 
+// ── Filter ─────────────────────────────────────────────────────────────────
+type Filter = 'all' | 'low' | 'customs' | 'notForSale' | 'unlisted';
+const filter = ref<Filter>('all');
+const lowOnly = computed(() => filter.value === 'low');
+
+/**
+ * What the customs paperwork would trip over: the goods lists leave out any
+ * product without a tariff no. or VAT rate, and weigh nothing without a weight.
+ * Unlisted products are never declared, so they cannot have issues.
+ */
+function customsIssues(p: Product): string[] {
+  if (p.unlisted) return [];
+  const out: string[] = [];
+  if (!p.tariffNo?.trim() && p.vatRate == null) out.push('no HS code');
+  const weighed = p.variants.length ? p.variants.filter((v) => !v.unlisted).every((v) => (v.weightG ?? p.weightG) != null) : p.weightG != null;
+  if (!weighed) out.push('no weight');
+  if (!p.originCountry) out.push('no origin');
+  return out;
+}
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   let list = allProducts.value;
   if (q) list = list.filter((p) => [p.title, p.sku, p.type, ...p.variants.flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q));
-  if (lowOnly.value && activeEventId.value) list = list.filter((p) => lowRows(p).length > 0);
+  if (filter.value === 'low' && activeEventId.value) list = list.filter((p) => lowRows(p).length > 0);
+  if (filter.value === 'customs') list = list.filter((p) => customsIssues(p).length > 0);
+  if (filter.value === 'notForSale') list = list.filter((p) => !p.forSale);
+  if (filter.value === 'unlisted') list = list.filter((p) => p.unlisted);
   return list;
 });
 
@@ -331,6 +353,13 @@ async function remove(product: Product): Promise<void> {
       <h1>Products</h1>
       <div class="tools">
         <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
+        <select v-model="filter" aria-label="Show">
+          <option value="all">All products</option>
+          <option value="low" :disabled="!activeEventId">Low stock at the event</option>
+          <option value="customs">Customs issues</option>
+          <option value="notForSale">Not for sale</option>
+          <option value="unlisted">Unlisted</option>
+        </select>
         <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
       </div>
     </header>
@@ -338,7 +367,6 @@ async function remove(product: Product): Promise<void> {
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
     <div class="toolbar">
-      <label v-if="activeEventId" class="inline"><input v-model="lowOnly" type="checkbox" /> <span>Low stock only</span></label>
       <label v-if="lowOnly && activeEventId" class="inline thr">≤ <input v-model="lowThreshold" type="number" min="0" inputmode="numeric" aria-label="Threshold" /> left</label>
       <button v-if="lowOnly && activeEventId" type="button" class="quiet" :disabled="!filtered.length" @click="exportRestockCsv"><Icon name="download" :size="14" /> Restock CSV</button>
       <span class="spacer"></span>
@@ -346,8 +374,9 @@ async function remove(product: Product): Promise<void> {
       <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
     </div>
     <p v-if="!activeEventId" class="hint">No active event — open one under Events to see what is running low there.</p>
+    <p v-if="filter === 'customs'" class="hint">These would be left off or mis-weighed on customs documents. Set the tariff no., weight and origin under each product's Customs details.</p>
 
-    <p v-if="!filtered.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products yet.' }}</p>
+    <p v-if="!filtered.length" class="empty">{{ search || filter !== 'all' ? 'Nothing matches.' : 'No products yet.' }}</p>
 
     <section v-for="group in groups" :key="group.type" class="group">
       <h2><span class="swatch" :style="{ background: typeColor(group.type) }"></span><span :style="{ color: typeColor(group.type) }">{{ group.type }}</span><small>{{ group.products.length }}</small></h2>
@@ -356,7 +385,7 @@ async function remove(product: Product): Promise<void> {
           <button type="button" class="row" @click="canEdit ? openEdit(p) : undefined">
             <ProductThumb :image-id="p.imageId" :alt="p.title" :size="40" />
             <span class="main">
-              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em></span>
+              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em><em v-if="filter === 'customs'" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
               <span class="sub">{{ p.sku }}<template v-if="p.sku && p.variants.length"> · </template><template v-if="p.variants.length">{{ p.variants.length }} variant{{ p.variants.length === 1 ? '' : 's' }}</template></span>
             </span>
             <span class="side">
@@ -502,6 +531,8 @@ async function remove(product: Product): Promise<void> {
 </template>
 
 <style scoped>
+.title em { font-style: normal; font-weight: 500; font-size: .68rem; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f1f4f6); border-radius: 4px; padding: .05rem .35rem; margin-left: .3rem; vertical-align: middle; }
+.title em.issue { color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); }
 .toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
 .toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2rem; }
@@ -527,7 +558,6 @@ async function remove(product: Product): Promise<void> {
 .row:hover { background: var(--zfy-bg, #f1f4f6); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1rem; }
 .title { font-weight: 600; font-size: .92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title em { font-style: normal; font-weight: 500; font-size: .68rem; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f1f4f6); border-radius: 4px; padding: .05rem .35rem; margin-left: .3rem; vertical-align: middle; }
 .sub { font-size: .76rem; color: var(--zfy-muted, #5a6472); }
 .side { display: flex; flex-direction: column; align-items: flex-end; gap: .1rem; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .bad { color: var(--zfy-danger, #c6512f); }

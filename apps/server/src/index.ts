@@ -1,4 +1,7 @@
-import { resolve } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { EOL } from 'node:os';
+import { join, resolve } from 'node:path';
 import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-core';
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
@@ -22,15 +25,22 @@ loadDotEnv();
 /** What a brand-new account starts with, so it isn't an empty shell. */
 const DEFAULT_MODULES = ['pos', 'customs'];
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    // Failing at boot is the point: a server that silently generates its own
-    // signing key would invalidate every session on each restart, and a
-    // predictable fallback would be far worse.
-    throw new Error(`${name} is not set. Copy .env.example to .env and fill it in.`);
+/**
+ * The signing secret, minted once and kept in the data volume when the
+ * environment does not set one. It lives next to the database it signs for,
+ * so backups and restores carry it along; regenerating it would sign every
+ * device out and make the encrypted Shopify credentials unreadable.
+ */
+function persistentSecret(dataDir: string): string {
+  const file = join(dataDir, 'jwt-secret');
+  if (existsSync(file)) {
+    const stored = readFileSync(file, 'utf8').trim();
+    if (stored) return stored;
   }
-  return value;
+  mkdirSync(dataDir, { recursive: true });
+  const fresh = randomBytes(48).toString('base64url');
+  writeFileSync(file, fresh + EOL, { mode: 0o600 });
+  return fresh;
 }
 
 function flag(name: string, fallback: boolean): boolean {
@@ -45,7 +55,7 @@ async function main(): Promise<void> {
   const webDistDir = process.env.ZOLLIFY_WEB_DIST ? resolve(process.env.ZOLLIFY_WEB_DIST) : undefined;
   // Android self-update APKs (written by `npm run android:pack` or scripts/fetch-apks.mjs).
   const apkDir = resolve(process.env.ZOLLIFY_APK_DIR ?? './apk');
-  const jwtSecret = required('ZOLLIFY_JWT_SECRET');
+  const jwtSecret = process.env.ZOLLIFY_JWT_SECRET || persistentSecret(dataDir);
 
   // Shopify derives its credential-encryption key from the same secret, so it
   // is constructed here rather than importing config of its own.

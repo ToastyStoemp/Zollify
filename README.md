@@ -203,8 +203,10 @@ The host needs Docker, git and Caddy — nothing else. Images are built by
 GitHub Actions and pushed to GHCR on every push to `master`; the host only pulls.
 
 1. **Clone and configure.** `git clone` to `/home/ubuntu/zollify`, then
-   `cp apps/server/.env.example apps/server/.env` and fill in `ZOLLIFY_JWT_SECRET`
-   and `OWNER_EMAIL`/`OWNER_PASSWORD` (first boot only). The repo and its
+   `cp apps/server/.env.example apps/server/.env`. Nothing in it is required:
+   the signing secret is minted into the data volume on first start, and the
+   first account created on the fresh server becomes its owner — open the
+   site once it is up and pick *Set up this server*. The repo and its
    GHCR package are public, so pulling needs no token — make sure the package
    `zollify` is set to public under the repo's Packages page once.
 2. **Caddy.** Add the block from `apps/server/Caddyfile.example` to your

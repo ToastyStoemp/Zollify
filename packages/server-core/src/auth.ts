@@ -207,6 +207,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   // Public proof-of-work CAPTCHA challenge (the client solves it before register).
   app.get('/api/captcha/challenge', async () => issueChallenge());
 
+  /**
+   * First run: a server with no users lets its first registration create the
+   * owner without an invite. The sign-in screen asks this to decide whether to
+   * show "Set up this server" instead of the usual invite-gated form.
+   */
+  const userCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  app.get('/api/setup', async () => ({ needsOwner: userCount() === 0 }));
+
   app.post('/api/auth/register', AUTH_RATE_LIMIT, async (req, reply) => {
     const parsed = RegisterRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid request' });
@@ -226,13 +234,16 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     }
 
     const open = process.env.REGISTRATION_OPEN === '1';
+    // The very first user becomes the server owner; re-checked inside the
+    // transaction below so two racing first registrations cannot both win.
+    const firstUser = userCount() === 0;
     let invite: { code: string; accountId: string | null; role: UserRole; allowedEventIds: string | null } | undefined;
     if (inviteCode) {
       invite = db
         .prepare('SELECT code, accountId, role, allowedEventIds FROM invites WHERE code = ? AND usedBy IS NULL AND expiresAt > ?')
         .get(inviteCode.trim().toUpperCase(), Date.now()) as typeof invite;
       if (!invite && !open) return reply.code(403).send({ error: 'Invalid or expired invite code' });
-    } else if (!open) {
+    } else if (!open && !firstUser) {
       return reply.code(403).send({ error: 'An invite code is required' });
     }
 
@@ -242,11 +253,12 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // even by two registrations racing on the same code.
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const userId = randomUUID();
-    const role: UserRole = invite ? (invite.accountId ? invite.role : 'admin') : 'admin';
+    const role: UserRole = invite ? (invite.accountId ? invite.role : 'admin') : firstUser ? 'owner' : 'admin';
     let accountId = invite?.accountId ?? null;
 
     try {
       db.transaction(() => {
+        if (firstUser && userCount() !== 0) throw new Error('NOT_FIRST');
         if (!accountId) {
           accountId = randomUUID();
           db.prepare('INSERT INTO accounts (id, name, createdAt) VALUES (?, ?, ?)').run(
@@ -278,6 +290,9 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     } catch (e) {
       if (e instanceof Error && e.message === 'INVITE_USED') {
         return reply.code(409).send({ error: 'This invite code has already been used' });
+      }
+      if (e instanceof Error && e.message === 'NOT_FIRST') {
+        return reply.code(403).send({ error: 'This server already has an owner — ask them for an invite code.' });
       }
       throw e;
     }

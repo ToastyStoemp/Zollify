@@ -57,9 +57,22 @@ const TRUST_KEY = 'zollify.deviceTrust';
 let myDeviceId = '';
 let myDeviceName = '';
 
+/** A server with no users yet: the first registration creates its owner, no invite needed. */
+const firstRun = ref(false);
+async function checkFirstRun(): Promise<void> {
+  try {
+    const res = await fetch(`${getApiBase()}/setup`);
+    firstRun.value = res.ok && ((await res.json()) as { needsOwner?: boolean }).needsOwner === true;
+  } catch {
+    firstRun.value = false;
+  }
+  if (firstRun.value) mode.value = 'register';
+}
+
 onMounted(async () => {
   myDeviceId = await deviceId();
   myDeviceName = (await deviceName()) ?? '';
+  if (!native || getServerUrl()) await checkFirstRun();
 });
 
 async function afterLogin(body: unknown): Promise<void> {
@@ -167,12 +180,13 @@ async function register(): Promise<void> {
   <div class="login">
     <form @submit.prevent="mode === 'login' ? login() : register()">
       <h1>Zollify<span>.</span></h1>
-      <div class="seg" role="tablist">
+      <p v-if="firstRun" class="hint setup">First run — the account you create now owns this server.</p>
+      <div v-if="!firstRun" class="seg" role="tablist">
         <button type="button" role="tab" :aria-selected="mode === 'login'" :class="{ on: mode === 'login' }" @click="mode = 'login'; error = null">Sign in</button>
         <button type="button" role="tab" :aria-selected="mode === 'register'" :class="{ on: mode === 'register' }" @click="mode = 'register'; error = null">Create account</button>
       </div>
 
-      <label v-if="native"><span>Server</span><input v-model="server" type="url" inputmode="url" autocomplete="url" placeholder="https://zollify.example.com" required /></label>
+      <label v-if="native"><span>Server</span><input v-model="server" type="url" inputmode="url" autocomplete="url" placeholder="https://zollify.example.com" required @change="pointAtServer() && checkFirstRun()" /></label>
       <label><span>Email</span><input v-model="email" type="email" autocomplete="username" autofocus required /></label>
       <label><span>Password</span><input v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :minlength="mode === 'register' ? 8 : undefined" required /></label>
 
@@ -184,10 +198,10 @@ async function register(): Promise<void> {
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
       </template>
       <template v-else>
-        <label><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" /></label>
-        <label><span>Booth name</span><input v-model="accountName" type="text" placeholder="Only for a brand-new account" /></label>
-        <p class="hint">Joining an existing booth? The invite code puts you in it — the booth name is ignored.</p>
-        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Creating…' : 'Create account' }}</button>
+        <label v-if="!firstRun"><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" /></label>
+        <label><span>Booth name</span><input v-model="accountName" type="text" :placeholder="firstRun ? 'Your booth or studio' : 'Only for a brand-new account'" /></label>
+        <p v-if="!firstRun" class="hint">Joining an existing booth? The invite code puts you in it — the booth name is ignored.</p>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Creating…' : firstRun ? 'Set up this server' : 'Create account' }}</button>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
@@ -202,6 +216,7 @@ h1 span { color: var(--zfy-accent, #0e7c66); }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .78rem; }
+.setup { color: var(--zfy-accent-ink, #0a5a4a); font-size: .85rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
 .seg { display: flex; }
 .seg button { flex: 1; }

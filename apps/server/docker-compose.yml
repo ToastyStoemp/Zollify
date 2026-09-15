@@ -1,9 +1,9 @@
 # Run from the repo root:
 #   docker compose -f apps/server/docker-compose.yml up -d --build
 #
-# Secrets come from apps/server/.env, which is gitignored. The `:?` defaults
-# make a missing secret a startup failure rather than a server that quietly
-# runs with no signing key.
+# Settings come from apps/server/.env, which is gitignored. Nothing in it is
+# required for a first start: the signing secret is minted into the data
+# volume and the first account registered becomes the owner.
 services:
   zollify:
     container_name: zollify
@@ -24,9 +24,8 @@ services:
       # "Update server" drops a flag here; the host's zollify-deploy.path unit acts on it.
       - ./deploy:/data/deploy
     environment:
-      ZOLLIFY_JWT_SECRET: ${ZOLLIFY_JWT_SECRET:?set ZOLLIFY_JWT_SECRET in apps/server/.env}
-      OWNER_EMAIL: ${OWNER_EMAIL:-}
-      OWNER_PASSWORD: ${OWNER_PASSWORD:-}
+      # Optional: left empty, the server mints one on first start and keeps it in /data.
+      ZOLLIFY_JWT_SECRET: ${ZOLLIFY_JWT_SECRET:-}
       # Terminated by the reverse proxy in front, which sets x-forwarded-proto.
       ZOLLIFY_REQUIRE_HTTPS: ${ZOLLIFY_REQUIRE_HTTPS:-1}
       ZOLLIFY_TRUST_PROXY: ${ZOLLIFY_TRUST_PROXY:-1}

@@ -42,6 +42,28 @@ function lowRows(p: Product): { variant: string; left: number }[] {
   return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
 }
 
+// ── SKU generator ──────────────────────────────────────────────────────────
+// PN-2604-SB-PIC-02: booth initials, year+month introduced, type initials,
+// first three letters of the variant (or title), then the edition — one more
+// than any SKU already using that stem.
+const initials = (text: string, single = 2): string => {
+  const words = text.trim().split(/[\s-]+/).filter(Boolean);
+  const raw = words.length > 1 ? words.map((w) => w[0]).join('') : (words[0] ?? '').slice(0, single);
+  return raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+};
+const boothCode = computed(() => initials(account.value?.profile.artist.companyName || account.value?.profile.artist.fullName || account.value?.accountName || 'ZF'));
+function generateSku(variantName?: string): string {
+  const now = new Date();
+  const yy = String(form.year && form.year.length === 4 ? form.year.slice(2) : now.getFullYear() % 100).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const type = initials(form.type || 'XX');
+  const name = initials(variantName || form.title || 'XXX', 3).slice(0, 3);
+  const stem = `${boothCode.value}-${yy}${mm}-${type}-${name}-`;
+  const taken = allProducts.value.flatMap((p) => [p.sku, ...p.variants.map((v) => v.sku)]).concat(form.sku, ...form.variants.map((v) => v.sku));
+  const edition = taken.reduce((max, sku) => (sku?.startsWith(stem) ? Math.max(max, parseInt(sku.slice(stem.length), 10) || 0) : max), 0) + 1;
+  return `${stem}${String(edition).padStart(2, '0')}`;
+}
+
 // ── Filter ─────────────────────────────────────────────────────────────────
 type Filter = 'all' | 'low' | 'customs' | 'notForSale' | 'unlisted';
 const filter = ref<Filter>('all');
@@ -460,7 +482,7 @@ async function remove(product: Product): Promise<void> {
 
         <label><span>Title</span><input v-model="form.title" type="text" required /></label>
         <div class="two">
-          <label><span>SKU</span><input v-model="form.sku" type="text" /></label>
+          <label><span>SKU</span><span class="withbtn"><input v-model="form.sku" type="text" /><button type="button" class="quiet gen" title="Generate a SKU" @click="form.sku = generateSku()"><Icon name="sparkles" :size="14" /></button></span></label>
           <label>
             <span>Type</span>
             <input v-model="form.type" type="text" list="zfy-type-suggestions" placeholder="Art Print" />
@@ -510,7 +532,7 @@ async function remove(product: Product): Promise<void> {
               <button v-if="v.previewUrl || (v.imageId && !v.removeImage)" type="button" class="rm" aria-label="Remove photo" @click.prevent.stop="dropVariantImage(v)"><Icon name="x" :size="10" /></button>
             </label>
             <input v-model="v.name" type="text" placeholder="Name (A3)" aria-label="Variant name" />
-            <input v-model="v.sku" type="text" placeholder="SKU" aria-label="Variant SKU" />
+            <span class="withbtn"><input v-model="v.sku" type="text" placeholder="SKU" aria-label="Variant SKU" /><button type="button" class="quiet gen" title="Generate a SKU" @click="v.sku = generateSku(v.name)"><Icon name="sparkles" :size="14" /></button></span>
             <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
             <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
             <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="form.variants.splice(i, 1)"><Icon name="x" :size="14" /></button>
@@ -579,7 +601,10 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-bg, #f1f4f6); }
 .variants legend { font-size: .85rem; font-weight: 600; padding: 0 .3rem; display: flex; align-items: center; gap: .6rem; }
 .add { color: var(--zfy-accent-ink, #0a5a4a); min-height: 1.6rem; padding: 0 .4rem; font-size: .78rem; }
-.variant { display: grid; grid-template-columns: 2.5rem 1fr 6rem 5.5rem 5rem auto; gap: .4rem; align-items: center; }
+.variant { display: grid; grid-template-columns: 2.5rem 1fr 8rem 5.5rem 5rem auto; gap: .4rem; align-items: center; }
+.withbtn { display: flex; align-items: center; gap: .2rem; }
+.withbtn input { flex: 1; min-width: 0; }
+.gen { min-height: 2rem; padding: .2rem .4rem; color: var(--zfy-muted, #5a6472); }
 .vphoto { position: relative; width: 2.5rem; height: 2.5rem; cursor: pointer; }
 .vphoto img, .vphoto .ph { width: 2.5rem; height: 2.5rem; border-radius: 8px; object-fit: cover; }
 .vphoto .ph { display: grid; place-items: center; background: var(--zfy-surface, #fff); border: 1px dashed var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); }

@@ -70,9 +70,15 @@ async function checkFirstRun(): Promise<void> {
 }
 
 onMounted(async () => {
-  myDeviceId = await deviceId();
-  myDeviceName = (await deviceName()) ?? '';
   if (!native || getServerUrl()) await checkFirstRun();
+  // The device identity lives in the account's database, so before the first
+  // sign-in on this device there is none yet; the server assigns one then.
+  try {
+    myDeviceId = await deviceId();
+    myDeviceName = (await deviceName()) ?? '';
+  } catch {
+    /* signed out on a fresh device */
+  }
 });
 
 async function afterLogin(body: unknown): Promise<void> {

@@ -53,8 +53,17 @@ export function buildCustomsState(
     }
   }
 
-  const customsProducts: CustomsProduct[] = products
+  // Documents read best with items of one type together: group by type
+  // (catalogue order within), so a customs officer sees all prints, then all
+  // pins, rather than the booth's own display order.
+  const typeRank = new Map<string, number>();
+  for (const p of products) {
+    const t = p.type?.trim() || '￿';
+    if (!typeRank.has(t)) typeRank.set(t, typeRank.size);
+  }
+  const customsProducts: CustomsProduct[] = [...products]
     .filter((p) => !p.deletedAt)
+    .sort((a, b) => (typeRank.get(a.type?.trim() || '￿') ?? 0) - (typeRank.get(b.type?.trim() || '￿') ?? 0))
     .map((p) => {
       const plainSold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
       // Duty + VAT rate follow the HS code (customs tariff table) unless the

@@ -180,13 +180,13 @@ module halves mount under `/p/` with no session; the module resolves the account
 from the slug and refuses unless the module is enabled for it.
 
 *Deployment* — multi-stage Dockerfile, compose, `deploy.sh` that backs up before
-restarting, `/health`, and the gateway serving the built shell.
+restarting (and `--auto` for an unattended timer), `/health`, and the gateway
+serving the built shell. See *Deploying on a VPS* below.
 
 **Not built:**
 
-- **Android shell** — deferred. Costs the four terminal providers that need
-  native plugins (myPOS GO2/Carbon/Glass, SumUp) until it lands; manual, bridge
-  and Carbon-remote work on the web today.
+- **Android shell** — built (`android/`, three flavours, self-update for
+  compat/full via `/api/updates/*`; see `.github/workflows/android.yml`).
 - **Billing** — deferred. The per-account enabled-modules list is its seam.
 - Smaller carry-overs from ZollTool: customer display mode, QR scanning, price
   comparison, PIN lock, cost tracking and PDF reports.
@@ -196,6 +196,31 @@ with each control pointing at where it is enforced. Two items remain open, both
 genuinely not-yet-needed: **file upload limits** (product images are stored
 locally and never uploaded) and **response schemas**, which would make response
 trimming structural rather than a per-route convention.
+
+## Deploying on a VPS (EC2 + Caddy)
+
+The host needs Docker, git and Caddy — nothing else. Images are built by
+GitHub Actions and pushed to GHCR on every push to `main`; the host only pulls.
+
+1. **Clone and configure.** `git clone` to `/home/ubuntu/zollify`, then
+   `cp apps/server/.env.example apps/server/.env` and fill in `ZOLLIFY_JWT_SECRET`,
+   `OWNER_EMAIL`/`OWNER_PASSWORD` (first boot only), and `ZOLLIFY_GH_TOKEN`
+   (a fine-grained GitHub token with read access to this repo's packages and
+   releases) plus `ZOLLIFY_GH_USER`.
+2. **Caddy.** Add the block from `apps/server/Caddyfile.example` to your
+   Caddyfile and reload. Caddy does TLS; the gateway listens on
+   `127.0.0.1:8787` only and trusts `X-Forwarded-Proto`.
+3. **First start.** `./apps/server/deploy.sh --auto` — pulls the image, the
+   Android APKs from the latest release, and starts the container. Check
+   `https://<host>/health`.
+4. **Auto-updates.** `sudo cp apps/server/systemd/zollify-deploy.* /etc/systemd/system/`
+   then `sudo systemctl enable --now zollify-deploy.timer`. Every five minutes
+   it runs `deploy.sh --auto`: `git pull`, fetch APKs, pull the image, and
+   restart only when the image changed (a SQLite backup lands in `backups/`
+   before each restart). `journalctl -u zollify-deploy` shows what it did.
+
+Rollback: `ZOLLIFY_IMAGE_TAG=<older sha> ./apps/server/deploy.sh --auto` after
+stopping the timer; every image is also tagged with its commit.
 
 ## A note on verification
 

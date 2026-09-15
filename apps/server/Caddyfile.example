@@ -1,0 +1,7 @@
+# Add to your existing Caddyfile. Caddy terminates TLS (automatic Let's Encrypt)
+# and sets X-Forwarded-Proto, which the gateway requires (ZOLLIFY_TRUST_PROXY=1).
+# WebSockets (/api/sync/ws) pass through reverse_proxy unchanged.
+zollify.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8787
+}

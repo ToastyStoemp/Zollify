@@ -145,9 +145,13 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     });
   }
 
+  // The Android shell runs from http://localhost (Capacitor) and authenticates
+  // with a bearer token in the body, never a cookie, so letting it in adds no
+  // cookie-based cross-site surface.
+  const NATIVE_ORIGINS = ['http://localhost', 'https://localhost', 'capacitor://localhost'];
   await app.register(cors, {
     // An empty allow-list means same-origin only, which is the deployed shape.
-    origin: opts.allowedOrigins.length ? opts.allowedOrigins : false,
+    origin: [...NATIVE_ORIGINS, ...opts.allowedOrigins],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   });

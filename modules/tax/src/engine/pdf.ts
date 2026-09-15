@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { monthKey, type Cluster, type Txn } from './types';
+import { sdk } from '../runtime';
 
 /**
  * The revenue and fees reports, as PDFs: one per cluster, and one per month
@@ -263,10 +264,5 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 export function download(bytes: Uint8Array, filename: string): void {
-  const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void sdk().ui.saveFile(filename, new Blob([bytes.buffer as ArrayBuffer], { type: 'application/pdf' }), 'application/pdf');
 }

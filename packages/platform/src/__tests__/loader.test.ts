@@ -9,7 +9,7 @@ import {
   type ModuleResolver,
 } from '../loader';
 
-const ui: ShellUi = { toast: () => {}, confirm: async () => true };
+const ui: ShellUi = { toast: () => {}, confirm: async () => true, saveFile: async () => {}, openDocument: async () => true };
 
 /** Resolver over an in-memory map, standing in for the registry. */
 class FakeResolver implements ModuleResolver {

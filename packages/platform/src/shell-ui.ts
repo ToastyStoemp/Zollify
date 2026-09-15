@@ -1,4 +1,5 @@
 import { reactive } from 'vue';
+import { openDocument, saveFile } from './native';
 import type { ShellUi, ToastOptions } from '@zollify/sdk';
 
 export interface Toast {
@@ -50,6 +51,9 @@ export function createShellUi(moduleId: string): ShellUi {
         }, timeout);
       }
     },
+
+    saveFile: (filename, content, mimeType) => saveFile(filename, content, mimeType),
+    openDocument: (filename, content, mimeType) => openDocument(filename, content, mimeType),
 
     confirm(message: string, title = 'Confirm') {
       // Queue-free by design: a second confirm while one is open resolves the

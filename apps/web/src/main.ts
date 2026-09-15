@@ -3,6 +3,8 @@ import {
   applyStoredTheme,
   installDiagnostics,
   configureApiBase,
+  getServerUrl,
+  isNative,
   getAccount,
   loadCatalog,
   loadInventory,
@@ -24,7 +26,9 @@ import { connectRouter, loadEnabledModules, markBooted } from './boot';
 applyStoredTheme();
 installDiagnostics();
 
-configureApiBase(import.meta.env.VITE_API_BASE ?? '/api');
+// The Android shell runs from local assets and talks to the server the user
+// named at first launch; on the web the API is same-origin.
+configureApiBase(isNative() && getServerUrl() ? `${getServerUrl()}/api` : (import.meta.env.VITE_API_BASE ?? '/api'));
 
 /**
  * Boot order matters: restore the session first, because which modules load

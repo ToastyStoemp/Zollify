@@ -123,12 +123,7 @@ async function pick(e: Event, kind: 'design' | 'proof'): Promise<void> {
 }
 async function download(f: SourcingFile): Promise<void> {
   const { bytes, mime } = await fileBytes(f.id);
-  const url = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: mime }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = f.filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  await sdk().ui.saveFile(f.filename, new Blob([bytes.buffer as ArrayBuffer], { type: mime }), mime);
 }
 const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 </script>

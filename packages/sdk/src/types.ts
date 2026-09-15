@@ -339,6 +339,10 @@ export interface ToastOptions {
 export interface ShellUi {
   toast(message: string, options?: ToastOptions): void;
   confirm(message: string, title?: string): Promise<boolean>;
+  /** Hands the user a file: a download on the web, the save dialog in the Android app. */
+  saveFile(filename: string, content: string | Blob, mimeType: string): Promise<void>;
+  /** Opens a document to read or print: a new tab on the web, the device viewer in the app. False if a pop-up was blocked. */
+  openDocument(filename: string, content: string, mimeType?: string): Promise<boolean>;
 }
 
 // ── The SDK surface ─────────────────────────────────────────────────────────

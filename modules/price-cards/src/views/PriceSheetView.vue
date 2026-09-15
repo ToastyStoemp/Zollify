@@ -88,9 +88,7 @@ function open(): void {
     subtitle: brand ? ['Price list', eventName].filter(Boolean).join(' · ') + ` · prices in ${currency.value}` : `${shownLines.value} lines · prices in ${currency.value}`,
     currency: currency.value,
   });
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-  window.open(url, '_blank');
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  void sdk().ui.openDocument('price-sheet.html', html);
 }
 </script>
 

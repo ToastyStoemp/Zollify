@@ -82,12 +82,7 @@ async function downloadZip(r: Reorder): Promise<void> {
   }
   if (!Object.keys(entries).length) return emit('error', 'No design files on this reorder.');
   const zip = zipSync(entries, { level: 6 });
-  const url = URL.createObjectURL(new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `reorder-${r.ref}.zip`;
-  a.click();
-  URL.revokeObjectURL(url);
+  await sdk().ui.saveFile(`reorder-${r.ref}.zip`, new Blob([zip.buffer as ArrayBuffer], { type: 'application/zip' }), 'application/zip');
 }
 
 // ── Shipment ────────────────────────────────────────────────────────────────

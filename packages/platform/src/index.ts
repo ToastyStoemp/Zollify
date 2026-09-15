@@ -63,3 +63,4 @@ export {
 export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';
 export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';
+export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './native';

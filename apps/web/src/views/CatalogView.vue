@@ -18,6 +18,7 @@ import {
   shellConfirm,
   soldTotal,
   upsertProduct,
+  saveFile,
 } from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
 
@@ -113,12 +114,7 @@ function exportRestockCsv(): void {
   const rows = [['Product', 'Variant', 'Type', 'SKU', 'Left']];
   for (const p of filtered.value) for (const r of lowRows(p)) rows.push([p.title, r.variant, p.type ?? '', p.sku ?? '', String(r.left)]);
   const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\r\n');
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `restock_${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  void saveFile(`restock_${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 // ── Merge: fold plain products into one product with a variant each ─────────

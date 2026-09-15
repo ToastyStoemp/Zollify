@@ -9,6 +9,8 @@ import {
   authFetch,
   createShellUi,
   getAccount,
+  getServerUrl,
+  isNative,
   recordSale,
   type LoadOutcome,
   type ModuleDescriptor,
@@ -91,7 +93,9 @@ export function connectRouter(router: Router): void {
 function resolverFor(mode: 'bundled' | 'remote'): ModuleResolver {
   if (mode === 'bundled') return new StaticResolver(BUNDLED_MODULES);
   return new RemoteResolver(async (url) => {
-    const res = await fetch(url, { credentials: 'same-origin' });
+    // Bundle paths are server-relative; the Android shell must reach across to the server.
+    const abs = isNative() && getServerUrl() && url.startsWith('/') ? `${getServerUrl()}${url}` : url;
+    const res = await fetch(abs, { credentials: 'same-origin' });
     if (!res.ok) throw new Error(`Could not download module bundle (${res.status}).`);
     return res.text();
   });

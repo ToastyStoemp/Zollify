@@ -214,20 +214,13 @@ const safeName = (suffix: string): string => `${(event.value?.name || 'event').r
 const saveAsPdf = ref(false);
 // Assembled so the SFC compiler does not read the tag as the end of this block.
 const PRINT_ON_LOAD = `<${'script'}>addEventListener("load",function(){setTimeout(function(){print()},250)})</${'script'}>`;
-function openHtml(source: string): void {
+async function openHtml(source: string, name = 'customs'): Promise<void> {
   const html = saveAsPdf.value ? source.replace(/<\/body>/i, `${PRINT_ON_LOAD}</body>`) : source;
-  const url = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-  const win = window.open(url, '_blank');
-  if (!win) preview.value = html;
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  const opened = await sdk().ui.openDocument(`${name}.html`, html);
+  if (!opened) preview.value = html;
 }
 function download(filename: string, text: string, type: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  void sdk().ui.saveFile(filename, text, type);
 }
 const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value));
 const openAll = () => state.value && openHtml(buildAllVersionsHtml(state.value));

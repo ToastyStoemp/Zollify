@@ -14,6 +14,7 @@ import {
   revertTransaction,
   transactionsToCsv,
   visibleEvents,
+  saveFile,
 } from '@zollify/platform';
 
 /**
@@ -215,25 +216,14 @@ async function exportPdf(): Promise<void> {
   try {
     const { buildSalesReportPdf } = await import('../lib/pdf-report');
     const { bytes, filename } = buildSalesReportPdf(scopeEvent.value, scoped.value);
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveFile(filename, new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }), 'application/pdf');
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not build the PDF.';
   }
 }
 
 function exportCsv(): void {
-  const blob = new Blob([transactionsToCsv(scoped.value)], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = csvFilename(scopeEvent.value?.name ?? null);
-  link.click();
-  URL.revokeObjectURL(url);
+  void saveFile(csvFilename(scopeEvent.value?.name ?? null), transactionsToCsv(scoped.value), 'text/csv;charset=utf-8');
 }
 
 const fmtTime = (ts: number): string => new Date(ts).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });

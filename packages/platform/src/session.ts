@@ -1,4 +1,5 @@
 import { computed, ref, shallowRef } from 'vue';
+import { getStoredRefreshToken, isNative, storeRefreshToken } from './native';
 import type { AccountSnapshot, HttpError, Role } from '@zollify/sdk';
 import { emptyProfile, type ProfileUpdate, type TokenResponse } from '@zollify/shared';
 
@@ -99,6 +100,7 @@ function setAccount(next: AccountSnapshot | null): void {
 
 export function applyLogin(result: LoginResult): void {
   accessToken.value = result.accessToken;
+  if (result.refreshToken) storeRefreshToken(result.refreshToken);
   // Fall back to a conservative minute if the token carries no usable exp, so a
   // malformed claim means "refresh soon" rather than "never refresh".
   expiresAt.value = expiryFromJwt(result.accessToken) || Date.now() + 60_000;
@@ -118,16 +120,33 @@ export function clearSession(): void {
  */
 export async function signOut(): Promise<void> {
   try {
-    await fetch(`${apiBase}/auth/logout`, { method: 'POST', credentials: 'same-origin' });
+    await fetch(`${apiBase}/auth/logout`, { method: 'POST', credentials: 'same-origin', ...nativeAuthInit() });
   } catch {
     // Offline: the cookie stays until it expires, which is the honest outcome.
   }
+  storeRefreshToken(null);
   clearSession();
 }
 
 // ── API base ────────────────────────────────────────────────────────────────
 
 let apiBase = '/api';
+
+/**
+ * In the Android shell the refresh token travels in the body instead of a
+ * cookie: the header tells the server so, and the stored token rides along.
+ */
+export function nativeHeaders(): Record<string, string> {
+  return isNative() ? { 'x-zollify-client': 'native' } : {};
+}
+function nativeAuthInit(): RequestInit {
+  if (!isNative()) return {};
+  const refreshToken = getStoredRefreshToken();
+  return {
+    headers: { ...nativeHeaders(), 'content-type': 'application/json' },
+    body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+  };
+}
 
 export function configureApiBase(base: string): void {
   apiBase = base.replace(/\/+$/, '');
@@ -151,10 +170,12 @@ export async function refreshAccessToken(): Promise<boolean> {
 
   refreshInFlight = (async () => {
     try {
+      const native = nativeAuthInit();
       const res = await fetch(`${apiBase}/auth/refresh`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { accept: 'application/json' },
+        ...native,
+        headers: { accept: 'application/json', ...(native.headers as Record<string, string> | undefined) },
       });
       if (!res.ok) {
         // Only a refusal ends the session. A 5xx is the gateway restarting or
@@ -207,6 +228,7 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<u
   const send = async (): Promise<Response> => {
     const headers = new Headers(init.headers ?? {});
     headers.set('accept', 'application/json');
+    for (const [k, v] of Object.entries(nativeHeaders())) headers.set(k, v);
     if (accessToken.value) headers.set('authorization', `Bearer ${accessToken.value}`);
     if (init.body !== undefined && !headers.has('content-type')) {
       headers.set('content-type', 'application/json');

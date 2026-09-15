@@ -151,12 +151,7 @@ async function openInvoice(e: Expense): Promise<void> {
   try {
     const { base64, filename } = await api.invoice(e.id);
     const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    await sdk().ui.saveFile(filename, new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }), 'application/pdf');
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not open the invoice.';
   }

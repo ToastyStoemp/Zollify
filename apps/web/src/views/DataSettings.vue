@@ -6,6 +6,7 @@ import {
   createBackup,
   inspectBackup,
   restoreBackup,
+  saveFile,
   shellConfirm,
   syncNow,
   wipeAccountData,
@@ -47,13 +48,7 @@ async function exportBackup(): Promise<void> {
   status.value = null;
   try {
     const backup = await createBackup();
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = backupFilename(backup);
-    link.click();
-    URL.revokeObjectURL(url);
+    await saveFile(backupFilename(backup), JSON.stringify(backup, null, 2), 'application/json');
 
     status.value =
       `Exported ${backup.products.length} products, ${backup.events.length} events and ` +

@@ -21,6 +21,8 @@ services:
       - zollify-data:/data
       # Android APKs for self-update, fetched on the host by scripts/fetch-apks.mjs.
       - ./apk:/data/apk:ro
+      # "Update server" drops a flag here; the host's zollify-deploy.path unit acts on it.
+      - ./deploy:/data/deploy
     environment:
       ZOLLIFY_JWT_SECRET: ${ZOLLIFY_JWT_SECRET:?set ZOLLIFY_JWT_SECRET in apps/server/.env}
       OWNER_EMAIL: ${OWNER_EMAIL:-}

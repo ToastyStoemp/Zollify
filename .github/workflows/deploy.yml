@@ -1,0 +1,33 @@
+name: Deploy server
+
+# Once the image and the APKs for a push to main are published, SSH into the
+# server and run the deploy script. Add the secrets to opt in: DEPLOY_HOST,
+# DEPLOY_USER, DEPLOY_SSH_KEY (private key whose public half is in the
+# server user's authorized_keys), DEPLOY_PATH (the checkout, e.g.
+# /home/ubuntu/zollify) and optionally DEPLOY_PORT.
+on:
+  workflow_run:
+    workflows: ["Docker image", "Android"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            set -e
+            cd "${{ secrets.DEPLOY_PATH }}"
+            ./apps/server/deploy.sh --auto

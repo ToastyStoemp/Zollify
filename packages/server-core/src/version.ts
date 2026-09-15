@@ -9,7 +9,8 @@ import { join } from 'node:path';
  * suffix flags a build/run made with uncommitted changes.
  */
 export function resolveCommit(dataDir: string): string {
-  if (process.env.ZOLLTOOL_COMMIT_SHA) return process.env.ZOLLTOOL_COMMIT_SHA;
+  const fromEnv = process.env.ZOLLIFY_COMMIT_SHA;
+  if (fromEnv && fromEnv !== 'unknown') return fromEnv.slice(0, 7);
   try {
     const f = readFileSync(join(dataDir, 'commit'), 'utf8').trim();
     if (f) return f;

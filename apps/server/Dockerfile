@@ -41,11 +41,15 @@ RUN node scripts/publish-modules.mjs
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /repo
 
+# The commit being shipped, stamped by the image workflow so Server admin can show it.
+ARG ZOLLIFY_COMMIT=unknown
+ENV ZOLLIFY_COMMIT_SHA=$ZOLLIFY_COMMIT
+
 ENV NODE_ENV=production \
     ZOLLIFY_DATA_DIR=/data \
     ZOLLIFY_MODULE_STORE=/repo/apps/server/modules-store \
     ZOLLIFY_WEB_DIST=/repo/apps/web/dist \
-    ZOLLIFY_APK_DIR=/data/apk \
+    ZOLLIFY_APK_DIR=/data/apk \n    ZOLLIFY_DEPLOY_DIR=/data/deploy \
     PORT=8787 \
     HOST=0.0.0.0
 

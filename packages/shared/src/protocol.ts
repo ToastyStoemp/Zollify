@@ -236,6 +236,8 @@ export interface AdminOverview {
   ops: number;
   transactions: number;
   activeToday: number;
+  /** Commit this server runs, when known. */
+  commit?: string;
 }
 
 export interface AdminAccount {

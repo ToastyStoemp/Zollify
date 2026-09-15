@@ -41,5 +41,6 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          build-args: ZOLLIFY_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

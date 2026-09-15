@@ -32,6 +32,8 @@ export interface GatewayOptions {
    * and proxies the API here.
    */
   webDistDir?: string;
+  /** Directory the host watches for a deploy request (Settings → Server admin → Update server). */
+  deployDir?: string;
   /** Directory with the Android APKs + version.json for self-update; omit to serve none. */
   apkDir?: string;
   /** Server halves compiled into this deploy. */
@@ -189,7 +191,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerSyncRoutes(app, db, rooms);
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
-  registerAdminRoutes(app, db);
+  registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
   await registerWs(app, rooms, db);

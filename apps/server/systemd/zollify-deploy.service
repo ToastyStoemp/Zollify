@@ -1,7 +1,6 @@
-# Unattended deploy: git pull, pull the latest image and APKs, restart if changed.
-# Install:
-#   sudo cp apps/server/systemd/zollify-deploy.* /etc/systemd/system/
-#   sudo systemctl daemon-reload && sudo systemctl enable --now zollify-deploy.timer
+# One deploy run: git pull, pull the latest image and APKs, restart if changed.
+# Triggered by zollify-deploy.path (the "Update server" button); GitHub Actions
+# runs the same script over SSH after each push to main.
 [Unit]
 Description=Zollify unattended deploy
 After=docker.service network-online.target

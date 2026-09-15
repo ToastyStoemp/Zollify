@@ -3,9 +3,11 @@ import type Database from 'better-sqlite3';
 import type { AdminAccount, AdminAccountDetail, AdminMetricRow, AdminOverview } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { geoEnabled } from '../session-info';
+import { resolveCommit } from '../version';
 
 /** Owner-only usage/health endpoints backing the /admin panel in the app. */
-export function registerAdminRoutes(app: FastifyInstance, db: Database.Database): void {
+export function registerAdminRoutes(app: FastifyInstance, db: Database.Database, deployDir?: string, dataDir = '.'): void {
+  const commit = resolveCommit(dataDir);
   const requireOwner = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if ((req.user as JwtClaims).role !== 'owner') {
       reply.code(403).send({ error: 'Owner only' });
@@ -28,8 +30,26 @@ export function registerAdminRoutes(app: FastifyInstance, db: Database.Database)
     lastActivityAt: Math.max(lastOpAt, lastSeenAt),
   });
 
+  /**
+   * "Update server": the container cannot run Docker, so it leaves a flag in
+   * a directory the host bind-mounts, and a systemd path unit there runs
+   * deploy.sh --auto (see apps/server/systemd/). 503 when nobody is watching.
+   */
+  app.post('/api/admin/deploy', guard, async (_req, reply) => {
+    if (!deployDir) return reply.code(503).send({ error: 'Deploys are not wired on this server.' });
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    try {
+      mkdirSync(deployDir, { recursive: true });
+      writeFileSync(join(deployDir, 'requested'), new Date().toISOString());
+    } catch (err) {
+      return reply.code(503).send({ error: `Could not request a deploy: ${(err as Error).message}` });
+    }
+    return { ok: true };
+  });
+
   app.get('/api/admin/overview', guard, async (): Promise<AdminOverview> => {
-    return db
+    const row = db
       .prepare(
         `SELECT
            (SELECT COUNT(*) FROM accounts) AS accounts,
@@ -40,6 +60,7 @@ export function registerAdminRoutes(app: FastifyInstance, db: Database.Database)
            (SELECT COUNT(DISTINCT accountId) FROM metrics WHERE day = date('now')) AS activeToday`,
       )
       .get() as AdminOverview;
+    return { ...row, commit };
   });
 
   app.get('/api/admin/accounts', guard, async (): Promise<AdminAccount[]> => {

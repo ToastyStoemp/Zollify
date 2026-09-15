@@ -80,6 +80,23 @@ const daily = computed(() => {
 // ── Invites ─────────────────────────────────────────────────────────────────
 const inviteCode = ref('');
 const inviteBusy = ref(false);
+
+// ── Update server ───────────────────────────────────────────────────────────
+const deploying = ref(false);
+const deployNote = ref<string | null>(null);
+async function updateServer(): Promise<void> {
+  if (!(await shellConfirm('Pull the latest release and restart the server? Devices keep working offline during the restart (about a minute).', 'Update server'))) return;
+  deploying.value = true;
+  deployNote.value = null;
+  try {
+    await authFetch('/admin/deploy', { method: 'POST' });
+    deployNote.value = 'Requested — the server restarts within a minute if a newer release exists.';
+  } catch (err) {
+    deployNote.value = err instanceof Error ? err.message : 'Could not request the update.';
+  } finally {
+    deploying.value = false;
+  }
+}
 async function invite(newAccount: boolean): Promise<void> {
   inviteBusy.value = true;
   error.value = null;
@@ -168,6 +185,15 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
             <div class="bar"><div :style="{ width: d.pct + '%' }"></div></div>
             <small class="muted">{{ d.ops }} ops · {{ d.tx }} sales · {{ d.logins }} logins</small>
           </div>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Server</h3>
+        <p class="hint">Running commit <code>{{ overview.commit ?? 'unknown' }}</code>. Update pulls the latest image and Android builds published from <code>main</code>.</p>
+        <div class="row">
+          <button type="button" :disabled="deploying" @click="updateServer">{{ deploying ? 'Requesting…' : 'Update server' }}</button>
+          <span v-if="deployNote" class="hint">{{ deployNote }}</span>
         </div>
       </article>
 

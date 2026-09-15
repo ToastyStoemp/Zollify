@@ -62,6 +62,7 @@ async function main(): Promise<void> {
     moduleStoreDir,
     webDistDir,
     apkDir,
+    deployDir: process.env.ZOLLIFY_DEPLOY_DIR ? resolve(process.env.ZOLLIFY_DEPLOY_DIR) : undefined,
     jwtSecret,
     serverModules,
     defaultModules: DEFAULT_MODULES,

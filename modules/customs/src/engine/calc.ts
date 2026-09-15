@@ -1,5 +1,5 @@
 /**
- * Customs calculation core — exact port of the legacy www/app.js functions.
+ * Customs calculation core - exact port of the legacy www/app.js functions.
  * Do not "improve" rounding or formatting here: outputs are golden-tested
  * byte-for-byte against the legacy generators.
  */
@@ -17,7 +17,7 @@ export function fmtEventDates(start: string, end: string): string {
   if (!end) return `${d1}.${mm}.${yyyy}`;
   const e = new Date(end + 'T00:00:00');
   const d2 = e.getDate();
-  return `${d1}. – ${d2}.${mm}.${yyyy}`;
+  return `${d1}. - ${d2}.${mm}.${yyyy}`;
 }
 
 export function formatNum(n: NumLike, decimals: number): string {
@@ -190,7 +190,7 @@ export function calcProduct(p: CustomsProduct, skipUnlistedVariants = false): Pr
   const amount = p.amount || 0;
   // Weight: round to nearest gram first to eliminate floating-point noise, then convert to kg
   const totalWeightKg = Math.round(amount * ((p.weightG as number) || 0)) / 1000;
-  // Value: round to whole CHF — the total is the authoritative number
+  // Value: round to whole CHF - the total is the authoritative number
   let totalValue = p.totalValueCHF != null ? Math.round(parseFloat(p.totalValueCHF as string)) : null;
   if (totalValue == null && p.price != null && p.price !== '') {
     totalValue = Math.round(parseFloat(p.price as string) * amount);
@@ -270,9 +270,9 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
   if (asn.length > state.products.length) asn.length = state.products.length;
 
   function makeGroup(products: CustomsProduct[]): Form1174Group {
-    let tariffNo = '—',
+    let tariffNo = '-',
       maxVal = -1;
-    const g: Form1174Group = { tariffNo: '—', qty: 0, weightKg: 0, value: 0, retQty: 0, retWeightKg: 0, retValue: 0 };
+    const g: Form1174Group = { tariffNo: '-', qty: 0, weightKg: 0, value: 0, retQty: 0, retWeightKg: 0, retValue: 0 };
     products.forEach((p) => {
       const c = calcProduct(p);
       g.qty += c.amount || 0;
@@ -299,17 +299,17 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
     return { g1, g2, hasG2: g2.qty > 0, g1prods, g2prods };
   }
 
-  // auto mode — group by tariff code, top value = g1, rest = g2
+  // auto mode - group by tariff code, top value = g1, rest = g2
   const tariffValues: Record<string, number> = {};
   state.products.forEach((p) => {
-    const key = (p.tariffNo || '').trim() || '—';
+    const key = (p.tariffNo || '').trim() || '-';
     const c = calcProduct(p);
     if (!tariffValues[key]) tariffValues[key] = 0;
     if (c.totalValue != null) tariffValues[key] += c.totalValue;
   });
   const topKey = Object.entries(tariffValues).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const g1prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '—') === topKey);
-  const g2prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '—') !== topKey);
+  const g1prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '-') === topKey);
+  const g2prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '-') !== topKey);
   const g1 = makeGroup(g1prods);
   const g2 = makeGroup(g2prods);
   return { g1, g2, hasG2: g2.qty > 0, g1prods, g2prods };

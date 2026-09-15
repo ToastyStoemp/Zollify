@@ -1,7 +1,7 @@
 import type { PaymentProvider, PaymentRequest, PaymentResult, ProviderStatus } from './provider';
 
 /**
- * ZollBridge desktop app (bridge/Program.cs) over WebSocket — protocol v1,
+ * ZollBridge desktop app (bridge/Program.cs) over WebSocket - protocol v1,
  * frozen: identify → {status:'connected'|'primary_taken'}, pay → result
  * message with {approved, card_brand, auth_code}. The "v":1 field is ignored
  * by the current bridge and reserves room for future protocol changes.
@@ -115,7 +115,7 @@ class BridgeConnection {
       setTimeout(() => {
         if (this.pendingResolve === resolve) {
           this.pendingResolve = this.pendingReject = null;
-          reject(new Error('Payment timed out — no response from terminal'));
+          reject(new Error('Payment timed out - no response from terminal'));
         }
       }, PAYMENT_TIMEOUT_MS);
     });

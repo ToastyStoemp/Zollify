@@ -5,7 +5,7 @@ import type { Issue } from '../engine';
 import { remove, save, snap, supplierName } from '../api';
 
 /**
- * Issue log — production problems per supplier and product. Open issues
+ * Issue log - production problems per supplier and product. Open issues
  * flagged "remind" are written into the next reorder's spec so the supplier
  * is told not to repeat them.
  */
@@ -59,7 +59,7 @@ const dossierTitle = (id: string | null) => (id ? (snap.value.dossiers.find((d) 
           </label>
           <label>
             <span>Product (optional)</span>
-            <select v-model="editing.dossierId"><option :value="null">— whole supplier —</option><option v-for="d in snap.dossiers.filter((x) => x.supplierId === editing!.supplierId)" :key="d.id" :value="d.id">{{ d.title }}</option></select>
+            <select v-model="editing.dossierId"><option :value="null">- whole supplier -</option><option v-for="d in snap.dossiers.filter((x) => x.supplierId === editing!.supplierId)" :key="d.id" :value="d.id">{{ d.title }}</option></select>
           </label>
         </div>
         <label><span>What went wrong</span><input v-model="editing.title" type="text" placeholder="Plating flaked on the gold pins" /></label>

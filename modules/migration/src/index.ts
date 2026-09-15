@@ -2,7 +2,7 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Migration — a single-use importer for one ZollTool backup.
+ * Migration - a single-use importer for one ZollTool backup.
  *
  * Deliberately a module rather than a core feature, so no legacy compatibility
  * leaks into the platform permanently. Install it, run the import once, switch
@@ -28,7 +28,7 @@ export default defineModule({
       component: () => import('./views/ImportView.vue'),
     });
     sdk.nav.add({ routeName: 'index', group: 'account', label: 'Import', icon: 'upload', order: 800 });
-    sdk.log.info('migration module ready — remember to switch it off once the import is done');
+    sdk.log.info('migration module ready - remember to switch it off once the import is done');
   },
 
   teardown() {

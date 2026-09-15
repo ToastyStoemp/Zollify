@@ -4,7 +4,7 @@ import type { DeviceSummary } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 
 /**
- * The account's known devices (name, flavor, lastSeenAt) — backs pickers
+ * The account's known devices (name, flavor, lastSeenAt) - backs pickers
  * like "which Carbon terminal to target" for the remote payment trigger.
  * Scoped to the caller's own account; any logged-in member can list these
  * (unlike /api/admin/*, which is owner-only across every account).

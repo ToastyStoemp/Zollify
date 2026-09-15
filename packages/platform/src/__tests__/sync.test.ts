@@ -89,7 +89,7 @@ describe('sync', () => {
 
   it('applies a newer incoming product and ignores a stale one', async () => {
     // upsertProduct stamps updatedAt with Date.now(), so incoming fixtures are
-    // anchored to now too — a peer's clock is in the same era, not in 1970.
+    // anchored to now too - a peer's clock is in the same era, not in 1970.
     await catalog.upsertProduct(product('p1', 'Local title', 0));
     const localAt = (await openCoreDb(account.accountId).products.get('p1'))!.updatedAt!;
 

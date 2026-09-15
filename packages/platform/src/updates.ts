@@ -6,7 +6,7 @@ import { getServerUrl, isNative } from './native';
  *
  * The server publishes one version and an APK per flavour; the app compares
  * that with its own build, downloads in the background, and installs only
- * when the user taps — the system's "install unknown app" dialog would be
+ * when the user taps - the system's "install unknown app" dialog would be
  * disruptive mid-sale otherwise. The carbon flavour never updates from here:
  * a myPOS Carbon terminal takes its apps through myPOS's own channel.
  */

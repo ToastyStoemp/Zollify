@@ -18,7 +18,7 @@ const rateOf = (p: Product) => {
   return { vatRate: cp.vatRate, tariffRate: cp.tariffRate };
 };
 
-describe('buildCustomsState — HS-code-derived rates', () => {
+describe('buildCustomsState - HS-code-derived rates', () => {
   it('fills VAT + duty rate from the HS code when the product has no override', () => {
     // 4901.99.00 (books) is the reduced-rate line: 2.6%.
     expect(rateOf(product({ tariffNo: '4901.99.00' }))).toEqual({ vatRate: 2.6, tariffRate: 2.6 });

@@ -56,7 +56,7 @@ jobs:
         run: npm run android:sync
 
       - name: Restore keystore
-        run: if [ -n "$KS" ]; then echo "$KS" | base64 -d > "$RUNNER_TEMP/zollify.keystore"; else echo "No keystore secret — debug-signed build"; fi
+        run: if [ -n "$KS" ]; then echo "$KS" | base64 -d > "$RUNNER_TEMP/zollify.keystore"; else echo "No keystore secret - debug-signed build"; fi
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
 

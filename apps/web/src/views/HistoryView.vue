@@ -18,7 +18,7 @@ import {
 } from '@zollify/platform';
 
 /**
- * Sales history — ZollTool's, screen for screen: one event or all, stat
+ * Sales history - ZollTool's, screen for screen: one event or all, stat
  * tiles, a comparison with another edition, best sellers, revenue per day
  * and per hour, then the sales themselves.
  *
@@ -210,7 +210,7 @@ async function doRevert(): Promise<void> {
   }
 }
 
-/** jsPDF is heavy — loaded only when a report is actually asked for. */
+/** jsPDF is heavy - loaded only when a report is actually asked for. */
 async function exportPdf(): Promise<void> {
   if (!scopeEvent.value) return;
   try {
@@ -273,7 +273,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
               <td class="muted">{{ m.label }}</td>
               <td>{{ m.money ? money(m.cur, baseCurrency) : m.cur }}</td>
               <td class="muted">{{ m.money ? money(m.other, baseCurrency) : m.other }}</td>
-              <td :class="m.delta == null ? 'muted' : m.delta > 0 ? 'good' : m.delta < 0 ? 'bad' : 'muted'">{{ m.delta == null ? '—' : (m.delta > 0 ? '+' : '') + m.delta + '%' }}</td>
+              <td :class="m.delta == null ? 'muted' : m.delta > 0 ? 'good' : m.delta < 0 ? 'bad' : 'muted'">{{ m.delta == null ? '-' : (m.delta > 0 ? '+' : '') + m.delta + '%' }}</td>
             </tr>
           </tbody>
         </table>
@@ -326,8 +326,8 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       <div v-else class="hours">
         <div v-for="b in hourly" :key="b.h" class="hour">
           <div class="col">
-            <div class="fill" :style="{ height: b.pct + '%' }" :title="`${b.h}:00 — ${money(b.v, baseCurrency)}`"></div>
-            <div v-if="compareHourly && b.prevPct != null" class="prev" :style="{ bottom: b.prevPct + '%' }" :title="`${b.h}:00 day before — ${money(b.prevV ?? 0, baseCurrency)}`"></div>
+            <div class="fill" :style="{ height: b.pct + '%' }" :title="`${b.h}:00 - ${money(b.v, baseCurrency)}`"></div>
+            <div v-if="compareHourly && b.prevPct != null" class="prev" :style="{ bottom: b.prevPct + '%' }" :title="`${b.h}:00 day before - ${money(b.prevV ?? 0, baseCurrency)}`"></div>
           </div>
           <span :class="{ hide: !b.showLabel }">{{ b.h }}</span>
         </div>
@@ -363,7 +363,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     </ul>
 
     <ModalShell v-if="revertId" title="Revert sale?" @close="revertId = null">
-      <p class="body">The sale is marked as reverted and the items return to stock. The record stays in history — a till record is never deleted.</p>
+      <p class="body">The sale is marked as reverted and the items return to stock. The record stays in history - a till record is never deleted.</p>
       <template #footer>
         <div class="footer"><button type="button" @click="revertId = null">Cancel</button><button type="button" class="danger" @click="doRevert">Revert sale</button></div>
       </template>

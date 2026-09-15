@@ -5,7 +5,7 @@ import { authFetch, shellConfirm } from '@zollify/platform';
 import { Icon } from '@zollify/ui';
 
 /**
- * Server admin — ported from ZollTool. Owner only: usage overview, activity
+ * Server admin - ported from ZollTool. Owner only: usage overview, activity
  * over the last 30 days, new-account invites, every account with its users
  * and devices, uploaded diagnostic logs, and every login session on the
  * server with remote sign-out.
@@ -90,7 +90,7 @@ async function updateServer(): Promise<void> {
   deployNote.value = null;
   try {
     await authFetch('/admin/deploy', { method: 'POST' });
-    deployNote.value = 'Requested — the server restarts within a minute if a newer release exists.';
+    deployNote.value = 'Requested - the server restarts within a minute if a newer release exists.';
   } catch (err) {
     deployNote.value = err instanceof Error ? err.message : 'Could not request the update.';
   } finally {
@@ -113,7 +113,7 @@ async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    /* clipboard blocked — the code is on screen */
+    /* clipboard blocked - the code is on screen */
   }
 }
 
@@ -177,7 +177,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
       </div>
 
       <article class="card">
-        <h3>Activity — last 30 days</h3>
+        <h3>Activity - last 30 days</h3>
         <p v-if="!daily.length" class="hint">No activity recorded yet.</p>
         <div v-else class="days">
           <div v-for="d in daily" :key="d.day" class="dayrow">

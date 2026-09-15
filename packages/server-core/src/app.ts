@@ -49,7 +49,7 @@ export interface GatewayOptions {
 }
 
 /**
- * Derives the acting identity from the verified token — never from anything the
+ * Derives the acting identity from the verified token - never from anything the
  * client sent in a body or query. Every module route receives the result of
  * this function, so a module cannot act for an account other than the caller's.
  */
@@ -117,8 +117,8 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       directives: {
         defaultSrc: ["'self'"],
         // blob: is required: runtime modules are executed as ES modules from a
-        // blob URL. It is deliberately the only addition — no CDNs, no inline
-        // script — so the only code that can run is code this server published
+        // blob URL. It is deliberately the only addition - no CDNs, no inline
+        // script - so the only code that can run is code this server published
         // and the client hash-verified.
         scriptSrc: ["'self'", 'blob:'],
         workerSrc: ["'self'", 'blob:'],

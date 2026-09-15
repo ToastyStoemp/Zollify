@@ -2,14 +2,14 @@
 
 Status of the twenty-point checklist against what is actually in the repository.
 Each item says **where** it is enforced, so a claim can be checked rather than
-taken on trust. Items that are only partly done say so — an overstated control
+taken on trust. Items that are only partly done say so - an overstated control
 is worse than a missing one, because nobody goes back to finish it.
 
-Legend: **Done** · **Partial** — works but has a named gap · **Open** — not built yet.
+Legend: **Done** · **Partial** - works but has a named gap · **Open** - not built yet.
 
 ---
 
-## 1. Hide API keys — Done (by architecture)
+## 1. Hide API keys - Done (by architecture)
 
 No integration key ever reaches a browser. Tenant credentials (Lexware, Shopify,
 myPOS, SumUp, Anthropic) live server-side and are used only by server module
@@ -19,7 +19,7 @@ process that holds them.
 
 `apps/server/.env.example` documents every variable; `.env` is gitignored.
 
-## 2. Purge Git secrets — Done (for this repo)
+## 2. Purge Git secrets - Done (for this repo)
 
 Zollify starts as a fresh repository with no imported history, so there is no
 secret-bearing past to purge. `.gitignore` excludes `.env*` (except the example),
@@ -29,31 +29,31 @@ secret-bearing past to purge. `.gitignore` excludes `.env*` (except the example)
 > those before archiving, and rotate anything found. Zollify re-enters all keys
 > fresh, so rotation costs nothing here.
 
-## 3. Use public DB key — Done (not applicable in this shape)
+## 3. Use public DB key - Done (not applicable in this shape)
 
 There is no browser-accessible database. The client holds no database
 credentials at all; it reaches SQLite only through authenticated gateway routes.
-The equivalent risk — a privileged key shipped to the client — cannot occur.
+The equivalent risk - a privileged key shipped to the client - cannot occur.
 
-## 4. Row-level security — Done
+## 4. Row-level security - Done
 
 `accountId` is the row-level boundary and is taken from the **verified token**,
 never from a request body or query:
 
 - `packages/server-core/src/app.ts` → `identityOf()` derives `{ userId, accountId, role, allowedEventIds }` from JWT claims.
 - Every module route receives that identity via `ModuleContext.identity(req)`.
-- Queries filter on it — see `apps/server/src/modules/tax.ts`, where both routes scope by `accountId`.
+- Queries filter on it - see `apps/server/src/modules/tax.ts`, where both routes scope by `accountId`.
 
 Helper scoping (`allowedEventIds`) rides along in the same object.
 
-## 5. Encrypt sensitive data — Done
+## 5. Encrypt sensitive data - Done
 
 `packages/server-core/src/secretbox.ts` (AES-256-GCM, key derived from the JWT
 secret) encrypts secrets at rest. Password hashes are argon2id, not encryption,
 which is correct.
 
 `makeSecretBox` now takes a salt, so each domain derives a **different key from
-the same secret** — the TOTP key and a module's credential key are not the same
+the same secret** - the TOTP key and a module's credential key are not the same
 key. The default salt is the original one, since changing it would make existing
 TOTP blobs undecryptable.
 
@@ -64,7 +64,7 @@ never returned to the client, and never leaves the server process.
 > **Standing rule:** anything credential-shaped a server module stores goes
 > through `secretbox`. Plain config (a shop domain, an API version) does not.
 
-## 6. Enforce server-side auth — Done
+## 6. Enforce server-side auth - Done
 
 Authentication is a gateway-level hook, not a per-route decision:
 
@@ -79,7 +79,7 @@ app.register(async (api) => {
 The client's route guards (`apps/web/src/router.ts`) exist for UX. They are not
 a control, and the code says so.
 
-## 7. Lock record access — Done
+## 7. Lock record access - Done
 
 `packages/server-core/src/modules/mount.ts` gates every module route **once,
 centrally**, before any module code runs:
@@ -91,14 +91,14 @@ centrally**, before any module code runs:
 A module physically cannot forget these, which is the only way the property
 survives new modules being added.
 
-## 8. Block field tampering — Done
+## 8. Block field tampering - Done
 
 - Input is parsed with zod schemas (`routes/modules.ts`, `modules/tax.ts`); unknown fields are dropped rather than trusted.
 - Identity fields (`accountId`, `role`, `userId`) are never read from client input.
 - The module-toggle route additionally requires `admin`, so a helper cannot enable a module for themselves.
-- Client-declared module ids are validated against the server's published store — a request cannot invent one.
+- Client-declared module ids are validated against the server's published store - a request cannot invent one.
 
-## 9. Secure session cookies — Done
+## 9. Secure session cookies - Done
 
 The access token is held in memory only and never written to `localStorage`.
 The refresh token never reaches JavaScript: `refresh-cookie.ts` moves it out of
@@ -113,7 +113,7 @@ auth route cannot forget to participate.
 
 On the client, `credentials: 'same-origin'` is forced on every request so the
 cookie can never be attached cross-origin, and concurrent refreshes are
-coalesced — otherwise a page load firing six requests would rotate the token six
+coalesced - otherwise a page load firing six requests would rotate the token six
 times and invalidate its own session.
 
 This matters more here than in a typical app: runtime-loaded modules execute in
@@ -128,17 +128,17 @@ flag following the HTTPS setting.
 > A native shell opts out with `x-zollify-client: native` and keeps the token in
 > platform secure storage, which is a better fit than a cookie in a WebView.
 
-## 10. Hash passwords — Done
+## 10. Hash passwords - Done
 
 argon2id via the `argon2` package, ported unchanged. Login verifies against a
 constant dummy hash when the email is unknown, so a missing user costs the same
 time as a wrong password and the timing side-channel that would reveal which
 emails exist stays closed.
 
-## 11. Rate limit login — Done
+## 11. Rate limit login - Done
 
 `@fastify/rate-limit` is registered globally (300/min) with `keyGenerator` set to
-the real client IP — behind a proxy, the default would put every request in one
+the real client IP - behind a proxy, the default would put every request in one
 bucket and the limiter would protect nothing. `trustProxy` is configurable so the
 forwarded address is only believed when a proxy is genuinely in front.
 
@@ -146,18 +146,18 @@ forwarded address is only believed when a proxy is genuinely in front.
 > `auth.ts` has its own attempt handling, which should be reviewed against the
 > new limiter rather than assumed to compose.
 
-## 12. Bot protection — Done
+## 12. Bot protection - Done
 
 `packages/server-core/src/captcha.ts` is ported and issues/verifies challenges on
 the auth paths.
 
-## 13. Parameterise queries — Done
+## 13. Parameterise queries - Done
 
 Every query uses `better-sqlite3` prepared statements with bound parameters.
 There is no string-concatenated SQL anywhere in the repository, including the
 new entitlements and Tax code.
 
-## 14. Validate all input — Done (new code) / ongoing
+## 14. Validate all input - Done (new code) / ongoing
 
 zod schemas guard new route boundaries. `bodyLimit` is 2 MB. Module ids are
 constrained by pattern (`/^[a-z][a-z0-9-]*$/`) both in `defineModule` and at the
@@ -166,33 +166,33 @@ toggle route.
 > Ported routes (`sync`, `devices`, `admin`) carry ZollTool's own validation;
 > they should be re-reviewed as each is brought into use.
 
-## 15. Escape user content — Done
+## 15. Escape user content - Done
 
 - Vue escapes interpolated text; there is no `v-html` anywhere in the repository.
 - Toast messages come from modules and are bound as text, never markup.
 - Generated customs documents are rendered in a **sandboxed iframe** via `srcdoc`
   (`modules/customs/src/views/DocumentsView.vue`) rather than injected into the
-  shell's DOM — so even self-generated HTML cannot reach the session.
+  shell's DOM - so even self-generated HTML cannot reach the session.
 
-## 16. Restrict file uploads — Done
+## 16. Restrict file uploads - Done
 
 Two upload paths exist, both authenticated and account-scoped:
 
 - **Ledger invoices** (`POST /api/m/tax/ledger/expenses/:id/invoice`, Tax
   module): base64 in JSON, capped at 10 MB, stored as a BLOB in SQLite keyed by
-  account and expense — never on the served static root, never by a caller-
+  account and expense - never on the served static root, never by a caller-
   chosen filename. Served back as base64 JSON to the authenticated caller only.
 - **Product photos** never reach the server as files. The device re-encodes any
   picked image to a bounded JPEG + WebP thumbnail; only the thumbnail (~20 KB)
   travels, as an `image.meta` sync op, and it is stored as bytes, never
   executed or served with a caller-chosen type.
 
-The gateway body limit is 32 MB — deliberately generous for a single-operator
+The gateway body limit is 32 MB - deliberately generous for a single-operator
 deployment (a backup restore pushes hundreds of thumbnails); the client splits
 pushes into batches under 4 MB. Authentication and the per-IP rate limit bound
 who can send that much, not the size itself.
 
-## 17. Trim API responses — Partial
+## 17. Trim API responses - Partial
 
 `toAuthUser()` maps database rows to a narrow shape, so `passwordHash`,
 `totpSecret` and `recoveryCodes` never leave the server. `PublishedModule.filePath`
@@ -202,7 +202,7 @@ is stripped by `toDescriptor()` so server paths are not disclosed. Logs redact
 > **Gap:** there are no response schemas yet. Adding Fastify serialiser schemas
 > would make trimming structural instead of a convention each route must follow.
 
-## 18. Security headers — Done
+## 18. Security headers - Done
 
 `@fastify/helmet` in `app.ts` sets CSP, HSTS, referrer policy, COOP and CORP.
 The CSP is worth reading closely:
@@ -212,29 +212,29 @@ scriptSrc: ["'self'", 'blob:']
 ```
 
 `blob:` is required because runtime modules are executed as ES modules from a
-blob URL. It is deliberately the **only** relaxation — no CDNs, no `unsafe-inline`
+blob URL. It is deliberately the **only** relaxation - no CDNs, no `unsafe-inline`
 script, no `unsafe-eval`. Combined with §20 below, the only code that can run is
 code this server published and the client hash-verified.
 
-## 19. Force HTTPS — Done
+## 19. Force HTTPS - Done
 
 An `onRequest` hook rejects non-HTTPS requests (honouring `x-forwarded-proto`
 when behind a proxy), and HSTS is set with `includeSubDomains` and `preload`.
 Disabling it is an explicit opt-out (`ZOLLIFY_REQUIRE_HTTPS=0`) intended only for
 local HTTP development.
 
-## 20. Scan dependencies — Done
+## 20. Scan dependencies - Done
 
 `npm run audit:deps` runs `npm audit --audit-level=moderate`, and
 `.github/workflows/ci.yml` runs it on every push and pull request as its own
-job — so a newly-disclosed advisory reports as an audit failure rather than
+job - so a newly-disclosed advisory reports as an audit failure rather than
 masking a real regression in the build.
 
 CI also typechecks, tests, and builds both the module bundles and the web app.
 Building the modules in CI is deliberate: a module that compiles but fails to
 bundle would otherwise only be discovered when someone tried to publish it.
 
-This matters more than usual here — a compromised dependency inside a module
+This matters more than usual here - a compromised dependency inside a module
 bundle executes in the user's session, in the same origin as their access
 token.
 
@@ -249,7 +249,7 @@ own controls:
 2. **Verify before store.** `putCached()` refuses to write a bundle whose content does not match the published hash.
 3. **Verify before execute.** `verifyCached()` re-checks on every load, so tampering with IndexedDB after the fact is caught too.
 4. **Immutable per version.** Cache keys are `<moduleId>@<version>` and are never overwritten, so a half-written update cannot replace a working module mid-convention.
-5. **Identity check.** The loader refuses a bundle whose declared `id` differs from the one the registry served it as — otherwise a swapped bundle could mount under another module's namespace, and therefore its database and HTTP prefix.
+5. **Identity check.** The loader refuses a bundle whose declared `id` differs from the one the registry served it as - otherwise a swapped bundle could mount under another module's namespace, and therefore its database and HTTP prefix.
 6. **No traversal.** Bundle file paths are resolved from the in-memory store, never from the request URL.
 
 **Known and accepted:** a loaded module runs with full application privileges,

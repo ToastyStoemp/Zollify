@@ -92,14 +92,14 @@ function daysUntil(iso: string): string {
 function range(e: { dateStart?: string; dateEnd?: string }): string {
   const f = (s: string): string => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   if (!e.dateStart) return '';
-  return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} – ${f(e.dateEnd)}` : f(e.dateStart);
+  return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} - ${f(e.dateEnd)}` : f(e.dateStart);
 }
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const LOW = 3;
 /**
  * With an event open: what it can still sell (its claim, or the pool). With
- * none: what the booth owns outright. "Free" would be wrong here — a fully
+ * none: what the booth owns outright. "Free" would be wrong here - a fully
  * claimed item has nothing free and is not running low.
  */
 const lowStock = computed(() => {
@@ -113,8 +113,8 @@ const uncounted = computed(() => inventoryRows().filter((r) => !r.counted).lengt
 const productCount = computed(() => allProducts.value.length);
 
 const syncLine = computed(() => {
-  if (syncState.value === 'offline') return 'Offline — sales are kept on this device and sent when the connection returns.';
-  if (syncState.value === 'error') return 'Last sync failed — tap Sync in the sidebar to retry.';
+  if (syncState.value === 'offline') return 'Offline - sales are kept on this device and sent when the connection returns.';
+  if (syncState.value === 'error') return 'Last sync failed - tap Sync in the sidebar to retry.';
   return lastSyncAt.value ? `Synced ${new Date(lastSyncAt.value).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}.` : '';
 });
 </script>
@@ -139,7 +139,7 @@ const syncLine = computed(() => {
         <header class="chead">
           <h2>Today</h2>
           <router-link v-if="event" :to="{ name: 'events' }" class="sub">at {{ event.name }}</router-link>
-          <router-link v-else :to="{ name: 'events' }" class="sub warn"><Icon name="alert-triangle" :size="14" /> No active event — sales won't be filed against one</router-link>
+          <router-link v-else :to="{ name: 'events' }" class="sub warn"><Icon name="alert-triangle" :size="14" /> No active event - sales won't be filed against one</router-link>
         </header>
         <div class="figures">
           <div class="figure big">

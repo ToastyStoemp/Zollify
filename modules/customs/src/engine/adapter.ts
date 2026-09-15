@@ -2,7 +2,7 @@
  * Builds the v1-shaped CustomsState the (golden-tested) generators expect
  * from live v2 data: event + products + per-event stock + transactions.
  * Brought quantities come from EventStock; sold quantities/values are derived
- * from non-reverted transactions — never stored.
+ * from non-reverted transactions - never stored.
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
@@ -67,7 +67,7 @@ export function buildCustomsState(
     .map((p) => {
       const plainSold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
       // Duty + VAT rate follow the HS code (customs tariff table) unless the
-      // product carries an explicit override — mirrors how permit is derived,
+      // product carries an explicit override - mirrors how permit is derived,
       // so setting a Tariff no. is enough to fill the rates on every document.
       const hs = p.tariffNo?.trim() ? HS_CODES.find((h) => h.code === p.tariffNo!.trim()) : undefined;
       return {

@@ -38,7 +38,7 @@ async function save(): Promise<void> {
     <h2>Customs declarant</h2>
     <p class="hint">
       Who is declaring the goods, on the EDEC declaration, the proforma invoice and the printed
-      forms. Your booth profile is used by default — fill in a field here only when the declarant
+      forms. Your booth profile is used by default - fill in a field here only when the declarant
       differs from it.
     </p>
 

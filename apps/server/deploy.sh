@@ -49,7 +49,7 @@ if [[ "$mode" == "--auto" ]]; then
   # Through a node container: the host needs nothing but Docker and git. The
   # repo and its packages are public, so no token is needed.
   mkdir -p "$repo_root/apps/server/apk" "$repo_root/apps/server/deploy"
-  docker run --rm -e ZOLLIFY_APK_DIR=/repo/apps/server/apk     -v "$repo_root:/repo" -w /repo node:22-bookworm-slim node scripts/fetch-apks.mjs     || echo "  (APK fetch failed — keeping what is there)"
+  docker run --rm -e ZOLLIFY_APK_DIR=/repo/apps/server/apk     -v "$repo_root:/repo" -w /repo node:22-bookworm-slim node scripts/fetch-apks.mjs     || echo "  (APK fetch failed - keeping what is there)"
 
   image="$(docker compose "${compose_args[@]}" config --images | head -1)"
   running="$(docker inspect -f '{{.Image}}' zollify 2>/dev/null || true)"
@@ -73,7 +73,7 @@ if docker compose "${compose_args[@]}" ps --status running --quiet zollify >/dev
     && docker compose "${compose_args[@]}" exec -T zollify rm -f /data/backup.tmp \
     && echo "  saved backups/zollify-$stamp.db"
 else
-  echo "  (not running yet — nothing to back up)"
+  echo "  (not running yet - nothing to back up)"
 fi
 
 if [[ "$mode" == "--auto" ]]; then
@@ -94,6 +94,6 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-echo "✗ did not become healthy in 60s — recent logs:" >&2
+echo "✗ did not become healthy in 60s - recent logs:" >&2
 docker compose "${compose_args[@]}" logs --tail 40 zollify >&2
 exit 1

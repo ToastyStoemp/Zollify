@@ -5,7 +5,7 @@ import android.content.Intent
 import com.getcapacitor.BridgeActivity
 
 /**
- * Flavor hook — the "compat" flavor (minSdk 24, Android 7 tablets) ships
+ * Flavor hook - the "compat" flavor (minSdk 24, Android 7 tablets) ships
  * without the SumUp SDK. No SumUp plugin is registered, so the web app's
  * SumUp provider reports itself as unavailable.
  */

@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * installer once asked to. Split into download()/install() rather than one
  * call so the download can run in the background (e.g. right after an
  * update-available check) while install stays a deliberate, user-triggered
- * step — Android requires the "install unknown app" consent dialog either
+ * step - Android requires the "install unknown app" consent dialog either
  * way, so this can never be fully silent.
  */
 @CapacitorPlugin(name = "Updater")
@@ -39,7 +39,7 @@ class UpdaterPlugin : Plugin() {
         val result = JSObject()
         result.put("versionCode", PackageInfoCompat.getLongVersionCode(pInfo))
         result.put("versionName", pInfo.versionName)
-        // Which build this is decides which APK to fetch — and that the carbon
+        // Which build this is decides which APK to fetch - and that the carbon
         // build is updated through the terminal's own channel, never from here.
         result.put("flavor", BuildConfig.FLAVOR)
         call.resolve(result)
@@ -59,7 +59,7 @@ class UpdaterPlugin : Plugin() {
             try {
                 val connection = URL(urlString).openConnection() as HttpURLConnection
                 // Without explicit timeouts a stalled connection (bad wifi, server
-                // hiccup) hangs the download indefinitely with no feedback — this
+                // hiccup) hangs the download indefinitely with no feedback - this
                 // was the "sometimes it just sits there for minutes" report.
                 // readTimeout resets on every byte received, so it only fires on a
                 // true stall, not a merely slow-but-flowing transfer.

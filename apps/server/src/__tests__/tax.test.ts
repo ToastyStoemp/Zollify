@@ -41,7 +41,7 @@ beforeAll(async () => {
   const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: OWNER_EMAIL, password: OWNER_PASSWORD, deviceName: 'Test' } });
   token = login.json().accessToken;
 
-  // One event and two sales — one cash, one card, one reverted — through the real sync path.
+  // One event and two sales - one cash, one card, one reverted - through the real sync path.
   const op = (opId: string, type: string, payload: unknown) => ({ opId: opId.padEnd(16, '0'), deviceId: 'dev-1', ts: 1, type, payload });
   const tx = (id: string, kind: 'cash' | 'card', amount: number) => ({
     id, eventId: 'ev-1', deviceId: 'dev-1', timestamp: 1, method: kind, payments: [{ kind, amount }], items: [], discounts: [], total: amount, currency: 'EUR',

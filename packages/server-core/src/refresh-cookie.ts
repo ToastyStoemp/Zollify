@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
  *
  * The ported `auth.ts` issues and rotates refresh tokens in the body, which is
  * ZollTool's original design. Rewriting that logic would mean re-deriving
- * single-use rotation, per-flavor TTLs and device carry-forward — all of which
+ * single-use rotation, per-flavor TTLs and device carry-forward - all of which
  * already work. So this adapts the *transport* instead and leaves the proven
  * code alone:
  *
@@ -16,7 +16,7 @@ import type { FastifyInstance } from 'fastify';
  *
  * Why it matters here more than usual: runtime-loaded modules execute in this
  * origin. An XSS bug should at worst borrow a 15-minute access token, never
- * exfiltrate a 90-day refresh token — and JavaScript cannot read an httpOnly
+ * exfiltrate a 90-day refresh token - and JavaScript cannot read an httpOnly
  * cookie at all.
  */
 
@@ -30,7 +30,7 @@ const COOKIE_PATH = '/api/auth';
 
 /**
  * The cookie outlives the shortest server-side TTL on purpose. The
- * `refresh_tokens` row is the authority on validity — a cookie that survives
+ * `refresh_tokens` row is the authority on validity - a cookie that survives
  * its row simply yields a 401, which is the correct outcome and avoids
  * duplicating the per-flavor TTL logic out here.
  */
@@ -78,7 +78,7 @@ export function registerRefreshCookie(app: FastifyInstance, opts: RefreshCookieO
    * Outbound: bank the token in a cookie and take it out of the body.
    *
    * Runs on the serialised payload rather than in each route, so a new auth
-   * route cannot forget to do it — the same reasoning as gating modules
+   * route cannot forget to do it - the same reasoning as gating modules
    * centrally rather than per-module.
    */
   app.addHook('onSend', async (req, reply, payload) => {

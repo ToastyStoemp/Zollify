@@ -14,7 +14,7 @@ const PAYMENT_TIMEOUT_MS = 90_000;
 
 /**
  * Triggers a card payment on a satellite myPOS Carbon terminal instead of
- * this device — sends over the sync WS (and Bluetooth, if a customer display
+ * this device - sends over the sync WS (and Bluetooth, if a customer display
  * is paired, since it's likely the same physical Carbon) and waits for the
  * matching payment.result, correlated by requestId. See CarbonPaymentPlugin
  * on the Carbon side for the actual on-device payment.
@@ -58,7 +58,7 @@ class RemoteCarbonConnection {
         resolve,
         timer: setTimeout(() => {
           this.pending = null;
-          reject(new Error('No response from the Carbon — check it is on, connected, and the Device ID is correct.'));
+          reject(new Error('No response from the Carbon - check it is on, connected, and the Device ID is correct.'));
         }, PAYMENT_TIMEOUT_MS),
       };
     });
@@ -89,7 +89,7 @@ export const myposCarbonRemoteProvider: PaymentProvider = {
   label: 'MyPOS Carbon (remote)',
 
   async isAvailable(): Promise<boolean> {
-    // Works from any device with sync configured — the target is a setting,
+    // Works from any device with sync configured - the target is a setting,
     // not a platform capability, so this always shows in the provider list;
     // an unset target just surfaces as "not connected" in getStatus().
     return true;
@@ -109,7 +109,7 @@ export const myposCarbonRemoteProvider: PaymentProvider = {
       return {
         approved: false,
         provider: 'mypos-carbon-remote',
-        error: 'No remote Carbon device configured — set its Device ID in Settings.',
+        error: 'No remote Carbon device configured - set its Device ID in Settings.',
       };
     }
     try {

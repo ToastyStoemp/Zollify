@@ -33,7 +33,7 @@ function fmtEU(iso: string): string {
   const p = parseISO(iso);
   return p ? `${String(p.d).padStart(2, '0')}/${String(p.m + 1).padStart(2, '0')}/${p.y}` : '';
 }
-/** Days since epoch — a timezone-free integer for ordering. */
+/** Days since epoch - a timezone-free integer for ordering. */
 const ord = (y: number, m: number, d: number): number => Math.floor(Date.UTC(y, m, d) / 86400000);
 function ordISO(iso: string): number | null {
   const p = parseISO(iso);

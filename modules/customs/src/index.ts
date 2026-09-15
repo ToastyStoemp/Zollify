@@ -2,7 +2,7 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Customs — Swiss customs paperwork for a booth crossing a border.
+ * Customs - Swiss customs paperwork for a booth crossing a border.
  *
  * The engine under `src/engine` is ported verbatim from ZollTool and is covered
  * by golden-file tests that diff its output against the original implementation.

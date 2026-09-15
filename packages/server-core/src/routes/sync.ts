@@ -66,7 +66,7 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     const { deviceId, deviceName, flavor, ops: rawOps } = parsed.data;
 
     // Restricted "helper" members may only write sales/stock for their events.
-    // Disallowed ops are DROPPED (not stored), never rejected with 403 — a 403
+    // Disallowed ops are DROPPED (not stored), never rejected with 403 - a 403
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
     const ops = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;

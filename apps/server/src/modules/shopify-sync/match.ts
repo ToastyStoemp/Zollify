@@ -63,7 +63,7 @@ export function computeIdf(refs: ShopVariantRef[]): Map<string, number> {
 }
 
 // Tokens absent from the Shopify corpus carry no matching value (e.g. ZollTool
-// says "hat" where Shopify says "cap") — weight 0, so they never inflate the
+// says "hat" where Shopify says "cap") - weight 0, so they never inflate the
 // norm and drown out a genuine distinctive-word overlap.
 const weight = (idf: Map<string, number>, tok: string): number => idf.get(tok) ?? 0;
 

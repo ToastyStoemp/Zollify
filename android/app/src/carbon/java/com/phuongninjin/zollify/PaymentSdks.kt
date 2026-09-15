@@ -5,7 +5,7 @@ import android.content.Intent
 import com.getcapacitor.BridgeActivity
 
 /**
- * Flavor hook — the "carbon" flavor runs ON a myPOS Carbon/Ultra terminal and
+ * Flavor hook - the "carbon" flavor runs ON a myPOS Carbon/Ultra terminal and
  * ships the myPOS Smart SDK for on-device payments. No SumUp here.
  */
 object PaymentSdks {

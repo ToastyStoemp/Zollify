@@ -119,14 +119,14 @@ function when(ts: number): string {
         <input v-model="name" type="text" placeholder="Front counter iPad" />
       </label>
       <p class="hint">
-        Shown on your other devices — it's how you pick which register to send a remote payment to.
+        Shown on your other devices - it's how you pick which register to send a remote payment to.
       </p>
       <button type="submit">Save</button>
       <p v-if="saved" class="ok" role="status">Saved.</p>
     </form>
 
     <h3>Customer display</h3>
-    <p class="hint">Turn this device into a second screen that mirrors another register's cart live — a tablet facing the customer. Sales still happen on the register.</p>
+    <p class="hint">Turn this device into a second screen that mirrors another register's cart live - a tablet facing the customer. Sales still happen on the register.</p>
     <router-link :to="{ name: 'display' }" class="btn">Open customer display</router-link>
 
     <h3>Appearance</h3>

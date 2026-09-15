@@ -32,7 +32,7 @@ export const CURRENCY_COINS: Record<string, number[]> = {
   HKD: [0.1, 0.2, 0.5, 1, 2, 5, 10],
 };
 
-/** Every denomination for a currency, largest first — the order a box is counted in. */
+/** Every denomination for a currency, largest first - the order a box is counted in. */
 export function denominationsFor(currency: string): number[] {
   const all = [...(CURRENCY_BILLS[currency] ?? FALLBACK_BILLS), ...(CURRENCY_COINS[currency] ?? [])];
   return all.sort((a, b) => b - a);

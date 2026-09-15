@@ -7,7 +7,7 @@ import { deleteFile, fileBytes, remove, save, setApproval, snap, supplierName, u
 import { sdk } from '../runtime';
 
 /**
- * Product dossiers — per product: production specs, last unit price, a
+ * Product dossiers - per product: production specs, last unit price, a
  * home-print recipe, and versioned design files with proofs.
  */
 const emit = defineEmits<{ error: [message: string] }>();
@@ -162,7 +162,7 @@ const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB
         <p class="hint">One dossier per sellable item, so reorders and restock maths know which product is which. Already-linked items are skipped.</p>
         <label>
           <span>Supplier for all of them (optional)</span>
-          <select v-model="linkSupplier"><option value="">— pick later —</option><option v-for="s in snap.suppliers" :key="s.id" :value="s.id">{{ s.name }}</option></select>
+          <select v-model="linkSupplier"><option value="">- pick later -</option><option v-for="s in snap.suppliers" :key="s.id" :value="s.id">{{ s.name }}</option></select>
         </label>
         <div class="picks">
           <label v-for="u in unlinked" :key="u.pid + ':' + u.vid" class="inline">
@@ -180,13 +180,13 @@ const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB
           <label><span>Title</span><input v-model="editing.title" type="text" required /></label>
           <label>
             <span>Supplier</span>
-            <select v-model="editing.supplierId"><option :value="null">— none —</option><option v-for="s in snap.suppliers" :key="s.id" :value="s.id">{{ s.name }}</option></select>
+            <select v-model="editing.supplierId"><option :value="null">- none -</option><option v-for="s in snap.suppliers" :key="s.id" :value="s.id">{{ s.name }}</option></select>
           </label>
         </div>
         <label>
           <span>Catalogue product</span>
           <select v-model="editing.pid" @change="editing.vid = null">
-            <option :value="null">— not linked —</option>
+            <option :value="null">- not linked -</option>
             <option v-for="p in sdk().data.products.list()" :key="p.id" :value="p.id">{{ p.title }}</option>
           </select>
         </label>
@@ -216,7 +216,7 @@ const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB
           <legend>Home-print recipe <em v-if="recipeCost && editing.recipe.length">{{ fmtPrice(recipeCost.total, currency) }} per print</em></legend>
           <p class="hint">For prints you make yourself: how much of each material one print uses, valued at what you paid for the materials.</p>
           <div v-for="(r, i) in editing.recipe" :key="i" class="rline">
-            <select v-model="r.materialId"><option value="">— material —</option><option v-for="m in snap.materials" :key="m.id" :value="m.id">{{ m.name }} ({{ m.unit }})</option></select>
+            <select v-model="r.materialId"><option value="">- material -</option><option v-for="m in snap.materials" :key="m.id" :value="m.id">{{ m.name }} ({{ m.unit }})</option></select>
             <input v-model.number="r.qty" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Qty" aria-label="Quantity" />
             <button type="button" class="quiet" aria-label="Remove" @click="editing.recipe.splice(i, 1)"><Icon name="x" :size="14" /></button>
           </div>

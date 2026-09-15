@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
     androidScheme: 'http',
   },
   plugins: {
-    // The app UI is always dark — light system-bar icons regardless of device theme.
+    // The app UI is always dark - light system-bar icons regardless of device theme.
     SystemBars: { style: 'DARK' },
   },
 };

@@ -27,7 +27,7 @@ function when(event: { dateStart?: string; dateEnd?: string }): string {
   <section class="page customs-index">
     <header><h1>Customs</h1></header>
     <p class="lede">
-      EDEC XML, Forms 1174 and 1187, a proforma invoice and goods lists — generated from an event's
+      EDEC XML, Forms 1174 and 1187, a proforma invoice and goods lists - generated from an event's
       claimed stock and its sales.
     </p>
 

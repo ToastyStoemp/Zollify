@@ -16,7 +16,7 @@ const failed = ref(false);
  * Rendered from the recorded transaction rather than the cart.
  *
  * The cart is cleared the moment a sale completes, and a receipt reprinted
- * later must show what was actually sold — so the stored row is the only
+ * later must show what was actually sold - so the stored row is the only
  * honest source.
  */
 onMounted(async () => {
@@ -40,7 +40,7 @@ const paidWith = computed(() =>
 
 /**
  * Prints through the thermal printer when there is one, and falls back to the
- * browser otherwise — a booth on a laptop still needs to hand over a receipt.
+ * browser otherwise - a booth on a laptop still needs to hand over a receipt.
  */
 async function print(): Promise<void> {
   message.value = null;

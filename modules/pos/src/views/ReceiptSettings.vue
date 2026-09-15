@@ -8,7 +8,7 @@ import { sdk } from '../runtime';
 import ReceiptPreview from '../components/ReceiptPreview.vue';
 
 /**
- * Receipts — ZollTool's settings: who is on the receipt, the default VAT
+ * Receipts - ZollTool's settings: who is on the receipt, the default VAT
  * number plus per-country registrations (the event's country picks one), a
  * footer, the logo, auto-print, and a live preview of a sample sale so the
  * effect of every field is visible before anything is printed.
@@ -103,7 +103,7 @@ const sampleTx = computed<Transaction>(() => ({
   currency: currency.value,
   total: 47,
   items: [
-    { pid: 'p1', vid: null, title: 'Enamel pin — Dragon', qty: 2, unitPrice: 12, lineTotal: 24 },
+    { pid: 'p1', vid: null, title: 'Enamel pin - Dragon', qty: 2, unitPrice: 12, lineTotal: 24 },
     { pid: 'p2', vid: 'v1', title: 'Art print A4', variantLabel: 'Forest', qty: 1, unitPrice: 25, lineTotal: 25 },
   ],
   discounts: [{ name: 'Bundle deal', amount: 2 }],

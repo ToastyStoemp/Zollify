@@ -14,7 +14,7 @@ import { queueOp } from './outbox';
 /**
  * Local backup and restore.
  *
- * The authoritative copy of a booth's data is the device it was entered on —
+ * The authoritative copy of a booth's data is the device it was entered on -
  * sync is a convenience, not a guarantee, and a booth often works a whole
  * convention offline. Without an export there is no recovery from a lost or
  * wiped device, which makes this a data-safety feature rather than a
@@ -172,7 +172,7 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   for (const entry of stock) await queueOp({ type: 'stock.set', payload: entry });
   for (const tx of transactions) await queueOp({ type: 'tx.create', payload: tx });
 
-  // Rebuilt rather than patched — a restore touches everything, and reloading
+  // Rebuilt rather than patched - a restore touches everything, and reloading
   // from the database is both simpler and impossible to get subtly wrong.
   resetCatalogCache();
   resetSalesEventCache();

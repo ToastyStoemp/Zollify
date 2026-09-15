@@ -205,7 +205,7 @@ export function revertOnline(clusters: Cluster[], uid: string): Cluster[] {
   return replace(clusters, { ...rest, isOnlineCluster: false, manualOnline: false });
 }
 
-/** Other devices' clusters overlapping these dates — probably the same event. */
+/** Other devices' clusters overlapping these dates - probably the same event. */
 export function overlapping(clusters: Cluster[], c: Cluster): Cluster[] {
   if (c.isOnlineCluster) return [];
   return clusters.filter((o) => o.uid !== c.uid && o.device !== c.device && !o.isOnlineCluster && o.start <= c.end && o.end >= c.start);
@@ -283,7 +283,7 @@ export function autoMergeAndMatch(clusters: Cluster[], events: MatchedEvent[]): 
   return { clusters: assignIds(next), matched, merged, ambiguous };
 }
 
-/** Bookable once it is online, matched, or simply named — dates always exist. */
+/** Bookable once it is online, matched, or simply named - dates always exist. */
 export function ready(c: Cluster): boolean {
   return Boolean(c.isOnlineCluster || c.matchedEvent || c.customName.trim());
 }
@@ -301,9 +301,9 @@ export function renderTemplate(str: string, vars: Record<string, string>): strin
   if (!str) return '';
   return str
     .replace(/\[(\w+)\]/g, (_, k: string) => vars[k] ?? '')
-    .replace(/\s*[-–—]\s*[-–—]\s*/g, ' - ')
-    .replace(/^\s*[-–—]\s*/, '')
-    .replace(/\s*[-–—]\s*$/, '')
+    .replace(/\s*[---]\s*[---]\s*/g, ' - ')
+    .replace(/^\s*[---]\s*/, '')
+    .replace(/\s*[---]\s*$/, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 }

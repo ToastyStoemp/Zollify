@@ -1,7 +1,7 @@
 ext {
     // Library modules build against 24 (Android 7) so the "compat" flavor can
     // install there. Only the app's "full" flavor (which ships the SumUp SDK,
-    // minSdk 26) raises it — see app/build.gradle productFlavors.
+    // minSdk 26) raises it - see app/build.gradle productFlavors.
     minSdkVersion = 24
     compileSdkVersion = 36
     targetSdkVersion = 36

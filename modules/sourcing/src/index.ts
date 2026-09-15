@@ -2,11 +2,11 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Sourcing — the reorder cockpit.
+ * Sourcing - the reorder cockpit.
  *
  * Suppliers and reorder drafts live server-side, because supplier contacts and
  * any future Alibaba credentials must not sit in a browser. The client half is
- * a face over that service; what it needs from core — which products exist —
+ * a face over that service; what it needs from core - which products exist -
  * it reads through the SDK.
  */
 export default defineModule({

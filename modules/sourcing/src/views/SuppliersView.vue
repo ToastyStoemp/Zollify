@@ -6,7 +6,7 @@ import { loaded, refresh, remove, save, snap } from '../api';
 import { sdk } from '../runtime';
 
 /**
- * Suppliers and their reps — the companies that make the products, each
+ * Suppliers and their reps - the companies that make the products, each
  * with a sales rep (email, Alibaba chat link, preferred channel) and the
  * shipping modes to ask a quote for. Ported from ZollSource.
  */
@@ -46,7 +46,7 @@ async function saveSupplier(): Promise<void> {
 async function removeSupplier(s: Supplier): Promise<void> {
   const used = snap.value.dossiers.some((d) => d.supplierId === s.id) || snap.value.reorders.some((r) => r.supplierId === s.id);
   if (used) {
-    error.value = `${s.name} still has products or reorders — move those first.`;
+    error.value = `${s.name} still has products or reorders - move those first.`;
     return;
   }
   if (!(await sdk().ui.confirm(`Remove ${s.name} and its reps?`, 'Remove supplier?'))) return;

@@ -14,7 +14,7 @@ export interface CostComputation {
   productionSum: number;
   /** total − productionSum, clamped to ≥ 0 (the shipping/import/fees to spread). */
   overhead: number;
-  /** Σ line totals — should land on `total` once fully allocated. */
+  /** Σ line totals - should land on `total` once fully allocated. */
   allocated: number;
 }
 
@@ -24,7 +24,7 @@ const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 1
  * Distribute a batch's single lump total across its units. Any per-line unit
  * cost that's already known is kept as-is; the remainder (shipping + import +
  * fees, or the whole total when no unit costs are given) is spread by the chosen
- * weighting — evenly per unit, or by each line's sell value (price × qty) so
+ * weighting - evenly per unit, or by each line's sell value (price × qty) so
  * pricier items carry more of the overhead.
  */
 export function computeBatch(batch: CostBatch, priceOf: (pid: string, vid: string) => number): CostComputation {

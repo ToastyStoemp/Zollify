@@ -1,8 +1,8 @@
 /**
- * @zollify/ui — the shared visual layer.
+ * @zollify/ui - the shared visual layer.
  *
  * Components read `--zfy-*` tokens from tokens.css and never hard-code a
- * colour — that is the whole mechanism by which a restyle stays a token
+ * colour - that is the whole mechanism by which a restyle stays a token
  * change rather than a component rewrite.
  */
 

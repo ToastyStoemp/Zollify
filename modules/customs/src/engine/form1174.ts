@@ -1,4 +1,4 @@
-/** Formular 11.74 (temporary admission) — exact port of legacy print1174() (golden-tested). */
+/** Formular 11.74 (temporary admission) - exact port of legacy print1174() (golden-tested). */
 import { compute1174Groups, countryToCode, esc } from './calc';
 import { COUNTRY_BY_CODE } from './data';
 import type { CustomsState } from './model';
@@ -38,8 +38,8 @@ export function build1174Html(state: CustomsState, now: Date = new Date()): stri
 
   // ── Helpers ──
   const fv = (v: string, warn = false) =>
-    v ? `<span class="fv${warn ? ' warn' : ''}">${esc(v)}</span>` : `<span class="ev">——</span>`;
-  const fvP = (v: string) => (v ? `<span class="fv pre">${esc(v)}</span>` : `<span class="ev">——</span>`);
+    v ? `<span class="fv${warn ? ' warn' : ''}">${esc(v)}</span>` : `<span class="ev">--</span>`;
+  const fvP = (v: string) => (v ? `<span class="fv pre">${esc(v)}</span>` : `<span class="ev">--</span>`);
 
   function cellHead(num: string, label: string): string {
     return `<div class="ch"><span class="cn">${esc(num)}</span><span class="cl">${esc(label)}</span></div>`;
@@ -178,7 +178,7 @@ col.d-rn { width: 3%; }
 col.d-16 { width: 14%; }
 /* col.d-17 fills remaining */
 
-/* Numeric table (18–27) column widths -must total 100% */
+/* Numeric table (18-27) column widths -must total 100% */
 col.n-rn { width: 3%; }
 col.n-18 { width: 5%; }
 col.n-19 { width: 5%; }
@@ -251,7 +251,7 @@ col.n-27 { width: 7.5%; }
       </div>
     </div>
 
-    <!-- Fields 1–13 -->
+    <!-- Fields 1-13 -->
     <div class="top">
       <div class="lc">
         <div class="cell">
@@ -275,7 +275,7 @@ col.n-27 { width: 7.5%; }
           </div>
           <div class="cell">
             ${cellHead('7', 'Konto-Nr. / Compte No / Conto N.')}
-            <div class="cv"><span class="ev">——</span></div>
+            <div class="cv"><span class="ev">--</span></div>
           </div>
         </div>
         <div class="cell" style="min-height:7mm">
@@ -288,7 +288,7 @@ col.n-27 { width: 7.5%; }
         </div>
         <div class="cell" style="min-height:7mm">
           ${cellHead('9', 'Verfalldatum / Echéance / Scadenza')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell hfield" style="min-height:7mm">
           <div class="hfield-label">${cellHead('10', "Ursprungsland / Pays d'origine / Paese d'origine")}</div>
@@ -353,7 +353,7 @@ col.n-27 { width: 7.5%; }
         </div>
         <div class="cell">
           ${cellHead('15', "Abschlusszollstelle / Bureau de douane d'apurement / Ufficio doganale della conclusione")}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
       </div>
     </div>
@@ -370,13 +370,13 @@ col.n-27 { width: 7.5%; }
           <th>17 Genaue Warenbezeichnung (Material, Typ, Nummern, etc.), die eine Identifikation der Ware sicherstellt<br>Désignation exacte de la marchandise (matière, type, numéros, etc.) garantissant son identification<br>Designazione esatta della merce (materiale, tipo, numeri, ecc.), che garantisce l'identificazione della merce</th>
         </tr></thead>
         <tbody>
-          ${gtDescRow(1, 'see attached list', allTitles || '—')}
+          ${gtDescRow(1, 'see attached list', allTitles || '-')}
           ${hasG2 ? gtDescRow(2, '', '') : ''}
         </tbody>
       </table>
     </div>
 
-    <!-- Goods table: 18–27 (numeric columns) -->
+    <!-- Goods table: 18-27 (numeric columns) -->
     <div class="gt-wrap">
       <table class="gt">
         <colgroup>
@@ -400,7 +400,7 @@ col.n-27 { width: 7.5%; }
         <tbody>
           ${gtNumRow(
             1,
-            g1.tariffNo !== '—' ? g1.tariffNo : '',
+            g1.tariffNo !== '-' ? g1.tariffNo : '',
             String(Math.round(g1.weightKg)),
             String(g1.qty),
             String(Math.round(g1.weightKg)),
@@ -410,7 +410,7 @@ col.n-27 { width: 7.5%; }
             hasG2
               ? gtNumRow(
                   2,
-                  g2.tariffNo !== '—' ? g2.tariffNo : '',
+                  g2.tariffNo !== '-' ? g2.tariffNo : '',
                   String(Math.round(g2.weightKg)),
                   String(g2.qty),
                   String(Math.round(g2.weightKg)),
@@ -422,20 +422,20 @@ col.n-27 { width: 7.5%; }
       </table>
     </div>
 
-    <!-- Bottom: 28–31 + 32 -->
+    <!-- Bottom: 28-31 + 32 -->
     <div class="bot">
       <div class="bl">
         <div class="cell" style="min-height:8mm">
           ${cellHead('28', 'Verwender der Ware / Utilisateur de la marchandise / Utilizzatore della merce')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell" style="min-height:8mm">
           ${cellHead('29', 'MWST-Nr. / No TVA / N. IVA &nbsp;&nbsp; MWST-Code / Code-TVA / Codice-IVA')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell" style="min-height:8mm">
           ${cellHead('30', 'Bewilligung usw. / Permis, etc. / Permesso, ecc.')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell">
           ${cellHead('31', 'Ort/Datum · Lieu/date · Luogo/data &nbsp;&nbsp; Der Anmelder / Le déclarant / Il dichiarante &nbsp;&nbsp; Ref. / Réf. / Rif.')}
@@ -446,7 +446,7 @@ col.n-27 { width: 7.5%; }
             </div>
             <div style="flex:1">
               <div style="font-size:4.8pt;color:#555">Der Anmelder / Le déclarant / Il dichiarante</div>
-              <div class="fv" style="font-size:7pt">${esc(a.fullName || '—')}</div>
+              <div class="fv" style="font-size:7pt">${esc(a.fullName || '-')}</div>
               <div class="sig-note">→ Recommended: person paying the customs deposit</div>
             </div>
             <div style="flex:1">
@@ -460,15 +460,15 @@ col.n-27 { width: 7.5%; }
       <div class="br">
         <div class="cell" style="min-height:14mm">
           ${cellHead('32', 'Zollabgaben / Droits de douane / Tributi doganali')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell">
           <div class="subtotal-label">Subtotal / Total int. / Subtotale</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
           <div class="subtotal-label">Einfuhrabgaben / Redevances d'entrée / Diritti d'entrata</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
           <div class="subtotal-label">Annahme / Acceptation / Accettazione</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
       </div>
     </div>

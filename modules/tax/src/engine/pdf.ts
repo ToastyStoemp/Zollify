@@ -133,7 +133,7 @@ export function clusterPdf(c: Cluster, mode: ReportMode): { bytes: Uint8Array; f
     ? [{ header: 'Date & Time', dataKey: 'dt' }, { header: 'Card', dataKey: 'card' }, { header: 'Reference', dataKey: 'ref' }, { header: 'Amount (EUR)', dataKey: 'amt' }]
     : [{ header: 'Date & Time', dataKey: 'dt' }, { header: 'Reference', dataKey: 'ref' }, { header: 'Description', dataKey: 'desc' }, { header: 'Fee (EUR)', dataKey: 'amt' }];
   const body = txns.map((t) => ({ dt: fmtDateTime(t.at), card: t.card || '-', ref: t.ref ? t.ref.slice(0, 22) : '-', desc: t.desc ? t.desc.slice(0, 50) : '-', amt: n2(Math.abs(t.amount)) }));
-  if (isPay && cash) body.push({ dt: c.cashNote ? `Cash — ${c.cashNote}` : 'Cash sales', card: 'Cash', ref: 'Manual entry', desc: '-', amt: n2(cash) });
+  if (isPay && cash) body.push({ dt: c.cashNote ? `Cash - ${c.cashNote}` : 'Cash sales', card: 'Cash', ref: 'Manual entry', desc: '-', amt: n2(cash) });
 
   autoTable(doc, {
     startY: tableY,
@@ -174,7 +174,7 @@ export function monthPdf(key: string, all: Cluster[], mode: ReportMode): { bytes
   const totalFee = clusters.reduce((s, c) => s + c.totalFee, 0);
   const allTxns = clusters.flatMap((c) => (isPay ? c.payments : c.fees)).sort((a, b) => a.at - b.at);
 
-  header(doc, accent, docId, `${isPay ? 'PAYMENTS' : 'FEES'} — ${monthLabel}`, `${clusters.length} cluster${clusters.length !== 1 ? 's' : ''}  |  ${allTxns.length} transactions`, '');
+  header(doc, accent, docId, `${isPay ? 'PAYMENTS' : 'FEES'} - ${monthLabel}`, `${clusters.length} cluster${clusters.length !== 1 ? 's' : ''}  |  ${allTxns.length} transactions`, '');
 
   let y = 42;
   const bW = (CW - 8) / 3;
@@ -229,7 +229,7 @@ export function monthPdf(key: string, all: Cluster[], mode: ReportMode): { bytes
   if (isPay) {
     for (const c of [...clusters].sort((a, b) => a.start - b.start)) {
       if (!c.cashAmount) continue;
-      body.push({ dt: c.cashNote ? `Cash — ${c.cashNote}` : 'Cash sales', cid: c.clusterID, dev: 'Cash', card: 'Cash', ref: 'Manual entry', amt: n2(c.cashAmount) });
+      body.push({ dt: c.cashNote ? `Cash - ${c.cashNote}` : 'Cash sales', cid: c.clusterID, dev: 'Cash', card: 'Cash', ref: 'Manual entry', amt: n2(c.cashAmount) });
       cashRows.add(body.length - 1);
     }
   }

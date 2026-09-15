@@ -54,8 +54,8 @@ export interface LoaderOptions {
   sdkVersion?: string;
   /**
    * Capabilities the host itself provides, which a module may name in
-   * `requires` without a module supplying them. Core is not a module — it is
-   * always present — so `catalog` and `events` resolve here rather than
+   * `requires` without a module supplying them. Core is not a module - it is
+   * always present - so `catalog` and `events` resolve here rather than
    * causing every module that depends on them to be skipped.
    */
   provided?: string[];
@@ -94,7 +94,7 @@ export class ModuleLoader {
   }
 
   /**
-   * Loads a set of modules for a role. Returns one outcome per descriptor —
+   * Loads a set of modules for a role. Returns one outcome per descriptor -
    * callers surface failures rather than the loader throwing, because partial
    * success is the normal, acceptable result.
    */
@@ -268,7 +268,7 @@ export function orderByDependencies(
 
 /**
  * Resolves modules bundled with the shell. Used in development and for
- * first-party modules that ship in the app build — the same loader path, minus
+ * first-party modules that ship in the app build - the same loader path, minus
  * the network.
  */
 export class StaticResolver implements ModuleResolver {
@@ -285,7 +285,7 @@ export class StaticResolver implements ModuleResolver {
  * Resolves modules from the registry, via the offline cache.
  *
  * The cache is consulted first and the network is only reached when a version
- * is genuinely absent — that is what lets a booth with no signal boot every
+ * is genuinely absent - that is what lets a booth with no signal boot every
  * module it already has.
  */
 export class RemoteResolver implements ModuleResolver {
@@ -298,7 +298,7 @@ export class RemoteResolver implements ModuleResolver {
     let entry = await getCached(descriptor.moduleId, descriptor.version);
 
     if (entry && !(await verifyCached(entry))) {
-      // Stored bytes no longer match the published hash — treat as absent and
+      // Stored bytes no longer match the published hash - treat as absent and
       // re-fetch rather than executing something we can't vouch for.
       entry = undefined;
     }
@@ -335,7 +335,7 @@ function asDefinition(mod: unknown, moduleId: string): ModuleDefinition {
   const candidate = (mod as { default?: unknown } | null)?.default;
   if (!isModuleDefinition(candidate)) {
     throw new Error(
-      `"${moduleId}" did not default-export a defineModule() result — got ${describe(candidate)}`,
+      `"${moduleId}" did not default-export a defineModule() result - got ${describe(candidate)}`,
     );
   }
   return candidate;

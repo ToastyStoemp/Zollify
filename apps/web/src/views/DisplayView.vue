@@ -5,7 +5,7 @@ import { currentAccount, displayCarts, realtimeConnected } from '@zollify/platfo
 import { Icon } from '@zollify/ui';
 
 /**
- * Customer display — ZollTool's. This device mirrors another register's cart
+ * Customer display - ZollTool's. This device mirrors another register's cart
  * live, fed by the server's realtime relay. With several registers
  * broadcasting, pick one; otherwise the newest is followed.
  */
@@ -23,7 +23,7 @@ const boothName = computed(() => account.value?.profile.artist.companyName || ac
 const sources = computed(() => Object.values(displayCarts).sort((a, b) => b.receivedAt - a.receivedAt));
 const selectedId = ref('');
 const current = computed(() => (selectedId.value && displayCarts[selectedId.value]) || sources.value[0] || null);
-/** No update for a while — the register is gone or offline. */
+/** No update for a while - the register is gone or offline. */
 const stale = computed(() => !!current.value && now.value - current.value.receivedAt > 90_000);
 
 // "Thank you!" clears itself even if the register never starts the next sale.
@@ -90,7 +90,7 @@ const amount = (n: number): string => n.toFixed(2);
 
     <div v-if="screen === 'idle'" class="idle">
       <p v-if="boothName" class="brand">{{ boothName }}</p>
-      <p v-if="!realtimeConnected" class="hint">Not connected — waiting for the server…</p>
+      <p v-if="!realtimeConnected" class="hint">Not connected - waiting for the server…</p>
       <p v-else class="hint pulse">Waiting for the next sale…</p>
     </div>
 

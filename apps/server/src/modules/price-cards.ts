@@ -4,7 +4,7 @@ import { CURRENCIES, priceRows } from '@zollify/shared';
 import { reduceDiscounts, reduceProducts, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
 
 /**
- * Price cards — the server half, ported from ZollPriceCards.
+ * Price cards - the server half, ported from ZollPriceCards.
  *
  * Serves the catalogue as card-ready price rows to the Photoshop plugin at
  * `/p/price-cards/prices.json`, gated by a per-account plugin token. The

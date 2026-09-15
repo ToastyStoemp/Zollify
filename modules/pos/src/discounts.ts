@@ -7,7 +7,7 @@ export interface CartLine {
   vid: string | null;
   title: string;
   variantLabel: string | null;
-  /** Product type (Product.type) — used by type-targeted discount rules. */
+  /** Product type (Product.type) - used by type-targeted discount rules. */
   type?: string;
   qty: number;
   unitPrice: number;
@@ -37,7 +37,7 @@ function ruleTargetsLine(rule: DiscountRule, line: CartLine): boolean {
  * matching item in the cart. Scales by the minimum available count across all
  * members (2 purses + 3 wallets = 2 complete bundles, one wallet left over
  * unbundled), each worth comboDiscountAmount off. Needs >= 2 distinct members
- * — a single-item "bundle" isn't one.
+ * - a single-item "bundle" isn't one.
  */
 function computeComboDiscount(lines: CartLine[], rule: DiscountRule): number {
   if (!rule.comboDiscountAmount || rule.comboDiscountAmount <= 0) return 0;
@@ -68,13 +68,13 @@ function computeComboDiscount(lines: CartLine[], rule: DiscountRule): number {
  * - bxgy: floor(n / (buy+free)) * free cheapest items go free
  * - nth_pct: for every full group of nth items, the cheapest gets percent off
  *   (v2 change: legacy discounted the nth-cheapest, which for a cart of
- *   exactly n items was the most expensive one — inconsistent with bxgy)
+ *   exactly n items was the most expensive one - inconsistent with bxgy)
  * - tiered: greedy largest-tier grouping; remainder at avg unit price, or at
  *   the best tier's unit price when tierContinue is set; needs >= 2 items
  *   (v2 change: tierContinue only prices the remainder once at least one full
- *   tier group is reached — legacy handed out the bundle unit price even when
+ *   tier group is reached - legacy handed out the bundle unit price even when
  *   the customer never hit any tier)
- * - combo: not a pooled-items rule (see computeComboDiscount) — every listed
+ * - combo: not a pooled-items rule (see computeComboDiscount) - every listed
  *   member must be present at least once; flat amount off per complete set
  */
 export function computeRuleDiscounts(lines: CartLine[], rules: DiscountRule[]): RuleDiscountResult[] {

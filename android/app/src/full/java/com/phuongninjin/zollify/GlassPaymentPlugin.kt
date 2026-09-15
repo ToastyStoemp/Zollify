@@ -18,7 +18,7 @@ import java.util.UUID
  * flavor only). MyPOSAPI.openPaymentActivity hands the amount to the Glass
  * app (package com.mypos.top), the customer taps their card on the phone,
  * and the result returns through MainActivity.onActivityResult, routed here
- * by PaymentSdks.handleActivityResult — the same pattern as the Carbon.
+ * by PaymentSdks.handleActivityResult - the same pattern as the Carbon.
  *
  * Requires the Glass app installed and activated on this device; going live
  * additionally needs the app approved by myPOS (integrations@mypos.com).

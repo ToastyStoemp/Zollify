@@ -26,7 +26,7 @@ import java.util.UUID
 /**
  * Generic Bluetooth ESC/POS thermal printer support (58mm / 384-dot class),
  * available in every flavor. The user pairs the printer in Android's Bluetooth
- * settings; we only list bonded devices and open an RFCOMM (SPP) socket — no
+ * settings; we only list bonded devices and open an RFCOMM (SPP) socket - no
  * discovery, so no location permission and none of the scan crash surface.
  *
  * Takes the same pre-formatted 32-char receipt lines as CarbonPaymentPlugin
@@ -134,10 +134,10 @@ class ThermalPrinterPlugin : Plugin() {
         val out = ByteArrayOutputStream()
         // CP437 is the near-universal thermal default; ISO-8859-1 as a fallback
         // keeps Western European characters at the right code points on many
-        // clones. Anything beyond that prints approximately — acceptable here.
+        // clones. Anything beyond that prints approximately - acceptable here.
         val charset = try { Charset.forName("IBM437") } catch (_: Exception) { Charsets.ISO_8859_1 }
 
-        out.write(byteArrayOf(0x1B, 0x40)) // ESC @ — initialize
+        out.write(byteArrayOf(0x1B, 0x40)) // ESC @ - initialize
         for (i in 0 until lines.length()) {
             val line = lines.getJSONObject(i)
             when (line.optString("kind")) {
@@ -158,9 +158,9 @@ class ThermalPrinterPlugin : Plugin() {
                     val align: Byte = when (line.optString("align")) {
                         "center" -> 0x01; "right" -> 0x02; else -> 0x00
                     }
-                    out.write(byteArrayOf(0x1B, 0x61, align)) // ESC a — alignment
+                    out.write(byteArrayOf(0x1B, 0x61, align)) // ESC a - alignment
                     val doubleHeight = line.optBoolean("doubleHeight")
-                    if (doubleHeight) out.write(byteArrayOf(0x1D, 0x21, 0x01)) // GS ! — double height
+                    if (doubleHeight) out.write(byteArrayOf(0x1D, 0x21, 0x01)) // GS ! - double height
                     var text = line.optString("text", "")
                     if (!text.endsWith("\n")) text += "\n"
                     out.write(text.toByteArray(charset))
@@ -168,7 +168,7 @@ class ThermalPrinterPlugin : Plugin() {
                 }
             }
         }
-        out.write(byteArrayOf(0x1B, 0x64, 0x03)) // ESC d — feed 3 lines clear of the tear bar
+        out.write(byteArrayOf(0x1B, 0x64, 0x03)) // ESC d - feed 3 lines clear of the tear bar
         return out.toByteArray()
     }
 

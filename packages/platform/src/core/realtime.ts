@@ -5,7 +5,7 @@ import { deviceFlavor, deviceId } from './device';
 import { syncNow } from './sync';
 
 /**
- * The account's live channel. Sync data never travels here — the socket is a
+ * The account's live channel. Sync data never travels here - the socket is a
  * doorbell (another device pushed, pull now) and a relay for ephemeral
  * customer-display cart snapshots. Without it the app still works, just on
  * the polling interval.

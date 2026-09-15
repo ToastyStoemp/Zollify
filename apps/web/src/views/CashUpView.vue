@@ -14,7 +14,7 @@ import {
  *
  * The question at the end of a convention is narrow: how much cash should be
  * in the box, how much actually is, and what is the difference. Card takings
- * are shown for completeness but never counted — the terminal's own settlement
+ * are shown for completeness but never counted - the terminal's own settlement
  * is the authority there, not this screen.
  */
 

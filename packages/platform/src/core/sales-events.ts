@@ -6,7 +6,7 @@ import { queueOp } from './outbox';
 import { toPlain } from './plain';
 
 /**
- * Sales events — the conventions and markets a booth trades at.
+ * Sales events - the conventions and markets a booth trades at.
  *
  * Almost everything hangs off these: POS records sales against the active
  * event, Customs generates paperwork per event, and a helper's access is
@@ -33,7 +33,7 @@ export async function loadSalesEvents(): Promise<void> {
   }
   const stored = await db.settings.get(ACTIVE_KEY);
   const candidate = stored?.value as string | undefined;
-  // Only restore an active event that still exists and is still visible —
+  // Only restore an active event that still exists and is still visible -
   // otherwise a deleted event leaves the till pointed at nothing.
   activeId.value = candidate && events.has(candidate) ? candidate : null;
 }
@@ -92,7 +92,7 @@ export async function deleteSalesEvent(id: string): Promise<void> {
   await db.events.put(tombstoned);
   events.delete(id);
   if (activeId.value === id) await setActiveEvent(null);
-  // The protocol has no event.delete — a tombstoned upsert is the delete,
+  // The protocol has no event.delete - a tombstoned upsert is the delete,
   // which is also exactly how the local soft delete already works.
   await queueOp({ type: 'event.upsert', payload: tombstoned });
 }

@@ -60,7 +60,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <!-- BLE device discovery requires location on API <= 30, and the myPOS slave
          SDK's own permission gate additionally insists on ACCESS_COARSE_LOCATION on
-         EVERY Android version before it shows the terminal picker — so declare
+         EVERY Android version before it shows the terminal picker - so declare
          location unrestricted. Without it the picker silently never appears. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -74,7 +74,7 @@
          RECEIVER_NOT_EXPORTED backport for pre-API-33 registerReceiver calls) in
          every app that depends on it. Every registerReceiver call in this app
          explicitly uses RECEIVER_EXPORTED, not RECEIVER_NOT_EXPORTED, so it's
-         unused here — strip it from the merged manifest. -->
+         unused here - strip it from the merged manifest. -->
     <permission
         android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tools:node="remove" />

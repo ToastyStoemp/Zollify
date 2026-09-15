@@ -30,7 +30,7 @@ async function pay(target: string, req: PaymentRequest): Promise<PaymentResultMe
     });
     const timer = setTimeout(() => {
       done();
-      reject(new Error('No response from the Carbon — check it is on, connected, and the device id is correct.'));
+      reject(new Error('No response from the Carbon - check it is on, connected, and the device id is correct.'));
     }, PAYMENT_TIMEOUT_MS);
     done = (): void => {
       clearTimeout(timer);
@@ -42,7 +42,7 @@ async function pay(target: string, req: PaymentRequest): Promise<PaymentResultMe
   logDiagnostic(`RemoteCarbon trigger to=${target} amount=${req.amount} currency=${req.currency}`);
   if (!sdk().realtime.sendPayment(trigger)) {
     done();
-    throw new Error('Not connected to the server — the Carbon cannot be reached.');
+    throw new Error('Not connected to the server - the Carbon cannot be reached.');
   }
   const msg = await result;
   logDiagnostic(`RemoteCarbon result approved=${msg.approved}${msg.error ? ` error=${msg.error}` : ''}`);
@@ -59,12 +59,12 @@ export const myposCarbonRemoteProvider: PaymentProvider = {
   },
   async getStatus(): Promise<ProviderStatus> {
     const target = await getSetting<string>(REMOTE_CARBON_DEVICE_KEY);
-    if (!target) return { connected: false, detail: 'No remote Carbon chosen — pick one under Payments' };
+    if (!target) return { connected: false, detail: 'No remote Carbon chosen - pick one under Payments' };
     return sdk().realtime.connected() ? { connected: true, detail: 'Ready (online)' } : { connected: false, detail: 'Not connected to the server' };
   },
   async startPayment(req: PaymentRequest): Promise<PaymentResult> {
     const target = await getSetting<string>(REMOTE_CARBON_DEVICE_KEY);
-    if (!target) return { approved: false, provider: 'mypos-carbon-remote', error: 'No remote Carbon configured — pick one under Payments.' };
+    if (!target) return { approved: false, provider: 'mypos-carbon-remote', error: 'No remote Carbon configured - pick one under Payments.' };
     try {
       const msg = await pay(target, req);
       return { approved: msg.approved, provider: 'mypos-carbon-remote', txRef: msg.txRef, cardBrand: msg.cardBrand, authCode: msg.authCode, error: msg.error };

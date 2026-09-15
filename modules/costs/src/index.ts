@@ -2,7 +2,7 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Costs — what each item cost to make and bring in.
+ * Costs - what each item cost to make and bring in.
  *
  * A shipment or order is recorded as a batch: its total (production, import,
  * shipping) and how many of each item arrived. The total is spread across the

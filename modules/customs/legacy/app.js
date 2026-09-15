@@ -376,7 +376,7 @@ function el(tag, attrs, ...children) {
    FORMATTING
    ========================================================= */
 function fmtEventDates(start, end) {
-  // Returns e.g. "14. – 16.05.2026" from ISO date strings
+  // Returns e.g. "14. - 16.05.2026" from ISO date strings
   if (!start) return '';
   const s = new Date(start + 'T00:00:00');
   const d1 = s.getDate();
@@ -389,7 +389,7 @@ function fmtEventDates(start, end) {
 }
 
 function fmtWeight(grams) {
-  if (grams == null || grams === '' || isNaN(grams)) return '—';
+  if (grams == null || grams === '' || isNaN(grams)) return '-';
   const kg = grams / 1000;
   if (kg < 0.001) return grams + ' g';
   return formatNum(kg, 3).replace('.', ',') + ' kg';
@@ -405,7 +405,7 @@ function getCurrency() {
 }
 
 function fmtCHF(val) {
-  if (val == null || isNaN(val)) return '—';
+  if (val == null || isNaN(val)) return '-';
   return getCurrency() + ' ' + formatNum(val, 2);
 }
 
@@ -420,7 +420,7 @@ function floorN(value, decimals) {
 }
 
 function fmtRate(r) {
-  if (r == null || r === '' || isNaN(r)) return '—';
+  if (r == null || r === '' || isNaN(r)) return '-';
   return parseFloat(r).toFixed(1) + '%';
 }
 
@@ -481,7 +481,7 @@ function calcProduct(p, skipUnlistedVariants = false) {
   const amount = p.amount || 0;
   // Weight: round to nearest gram first to eliminate floating-point noise, then convert to kg
   const totalWeightKg = Math.round(amount * (p.weightG || 0)) / 1000;
-  // Value: round to whole CHF — the total is the authoritative number
+  // Value: round to whole CHF - the total is the authoritative number
   let totalValue = p.totalValueCHF != null ? Math.round(parseFloat(p.totalValueCHF)) : null;
   if (totalValue == null && p.price != null && p.price !== '') {
     totalValue = Math.round(parseFloat(p.price) * amount);
@@ -727,16 +727,16 @@ function buildProductRow(p, idx) {
     });
     titleDiv.appendChild(expandBtn);
     const titleSpan = document.createElement('span');
-    titleSpan.textContent = p.title || '—';
+    titleSpan.textContent = p.title || '-';
     titleDiv.appendChild(titleSpan);
     titleCell.appendChild(titleDiv);
   } else {
-    titleCell.textContent = p.title || '—';
+    titleCell.textContent = p.title || '-';
   }
   tr.appendChild(titleCell);
 
   // SKU
-  tr.appendChild(td('col-sku', p.sku || '—'));
+  tr.appendChild(td('col-sku', p.sku || '-'));
 
   // For Sale badge (+ Unlisted indicator)
   const saleBadge = document.createElement('span');
@@ -755,20 +755,20 @@ function buildProductRow(p, idx) {
   tr.appendChild(saleCell);
 
   // Type
-  tr.appendChild(td('col-type', p.type || '—'));
+  tr.appendChild(td('col-type', p.type || '-'));
 
   // Amount
   const amtCell = document.createElement('td');
   amtCell.className = 'col-amount';
   amtCell.style.textAlign = 'right';
-  amtCell.textContent = c.amount != null ? c.amount.toLocaleString() : '—';
+  amtCell.textContent = c.amount != null ? c.amount.toLocaleString() : '-';
   tr.appendChild(amtCell);
 
   // Unit weight
   const uwCell = document.createElement('td');
   uwCell.className = 'col-weight';
   uwCell.style.textAlign = 'right';
-  uwCell.textContent = p.weightG != null ? p.weightG + ' g' : '—';
+  uwCell.textContent = p.weightG != null ? p.weightG + ' g' : '-';
   tr.appendChild(uwCell);
 
   // Total weight
@@ -791,7 +791,7 @@ function buildProductRow(p, idx) {
     // Show per-unit derived from rounded total so it stays consistent with the total column
     priceCell.textContent = getCurrency() + ' ' + formatNum(floorN(c.effectiveUnitPrice, 2), 2);
   } else {
-    priceCell.textContent = '—';
+    priceCell.textContent = '-';
   }
   tr.appendChild(priceCell);
 
@@ -802,7 +802,7 @@ function buildProductRow(p, idx) {
   if (c.totalValue != null) {
     valCell.textContent = getCurrency() + ' ' + c.totalValue;
   } else {
-    valCell.textContent = '—';
+    valCell.textContent = '-';
   }
   tr.appendChild(valCell);
 
@@ -815,7 +815,7 @@ function buildProductRow(p, idx) {
     span.textContent = p.tariffNo;
     tariffCell.appendChild(span);
   } else {
-    tariffCell.textContent = '—';
+    tariffCell.textContent = '-';
   }
   tr.appendChild(tariffCell);
 
@@ -836,7 +836,7 @@ function buildProductRow(p, idx) {
   // Origin Country
   const effectiveOrigin = (p.originCountry && p.originCountry.trim())
     ? p.originCountry.trim().toUpperCase()
-    : countryToCode(state.artist.countryOfOrigin) || '—';
+    : countryToCode(state.artist.countryOfOrigin) || '-';
   tr.appendChild(td('col-origin', effectiveOrigin));
 
   // --- Sold columns ---
@@ -955,11 +955,11 @@ function buildVariantRow(parentProduct, variant) {
   // Variant name with indent
   const nameCell = document.createElement('td');
   nameCell.className = 'col-title variant-title';
-  nameCell.textContent = '→ ' + (variant.name || '—');
+  nameCell.textContent = '→ ' + (variant.name || '-');
   tr.appendChild(nameCell);
 
   // Variant SKU
-  tr.appendChild(td('col-sku', variant.sku || '—'));
+  tr.appendChild(td('col-sku', variant.sku || '-'));
 
   // For Sale (inherited from parent) + optional variant-level Unlisted badge
   const saleBadge = document.createElement('span');
@@ -978,7 +978,7 @@ function buildVariantRow(parentProduct, variant) {
   tr.appendChild(saleCell);
 
   // Type (inherited from parent)
-  tr.appendChild(td('col-type', parentProduct.type || '—'));
+  tr.appendChild(td('col-type', parentProduct.type || '-'));
 
   // Amount (variant-specific)
   const amtCell = document.createElement('td');
@@ -992,7 +992,7 @@ function buildVariantRow(parentProduct, variant) {
   uwCell.className = 'col-weight';
   uwCell.style.textAlign = 'right';
   const varWg = variant.weightG != null ? variant.weightG : parentProduct.weightG;
-  uwCell.textContent = varWg != null ? varWg + ' g' : '—';
+  uwCell.textContent = varWg != null ? varWg + ' g' : '-';
   tr.appendChild(uwCell);
 
   // Total weight
@@ -1016,7 +1016,7 @@ function buildVariantRow(parentProduct, variant) {
   } else if (varPrice != null) {
     priceCell.textContent = getCurrency() + ' ' + formatNum(floorN(varPrice, 2), 2);
   } else {
-    priceCell.textContent = '—';
+    priceCell.textContent = '-';
   }
   tr.appendChild(priceCell);
 
@@ -1025,7 +1025,7 @@ function buildVariantRow(parentProduct, variant) {
   valCell.className = 'col-totalval';
   valCell.style.textAlign = 'right';
   const totalVal = varPrice != null ? Math.round(varPrice * (variant.amount || 0)) : null;
-  valCell.textContent = totalVal != null ? getCurrency() + ' ' + totalVal : '—';
+  valCell.textContent = totalVal != null ? getCurrency() + ' ' + totalVal : '-';
   tr.appendChild(valCell);
 
   // Tariff No. (inherited from parent)
@@ -1037,20 +1037,20 @@ function buildVariantRow(parentProduct, variant) {
     span.textContent = parentProduct.tariffNo;
     tariffCell.appendChild(span);
   } else {
-    tariffCell.textContent = '—';
+    tariffCell.textContent = '-';
   }
   tr.appendChild(tariffCell);
 
   // Tariff Rate (inherited from parent)
-  tr.appendChild(td('col-tariffrate', parentProduct.tariffRate != null ? parentProduct.tariffRate + '%' : '—'));
+  tr.appendChild(td('col-tariffrate', parentProduct.tariffRate != null ? parentProduct.tariffRate + '%' : '-'));
 
   // VAT Rate (inherited from parent)
-  tr.appendChild(td('col-vat', parentProduct.vatRate != null ? parentProduct.vatRate + '%' : '—'));
+  tr.appendChild(td('col-vat', parentProduct.vatRate != null ? parentProduct.vatRate + '%' : '-'));
 
   // Origin (inherited from parent)
   const effectiveOrigin = (parentProduct.originCountry && parentProduct.originCountry.trim())
     ? parentProduct.originCountry.trim().toUpperCase()
-    : countryToCode(state.artist.countryOfOrigin) || '—';
+    : countryToCode(state.artist.countryOfOrigin) || '-';
   tr.appendChild(td('col-origin', effectiveOrigin));
 
   // --- Sold columns ---
@@ -1598,14 +1598,14 @@ function updateModalPreview() {
   const valueEl  = document.getElementById('preview-value');
 
   weightEl.textContent = (totalWeightKg != null && totalWeightKg > 0)
-    ? fmtWeightKg(totalWeightKg) : '— kg';
+    ? fmtWeightKg(totalWeightKg) : '- kg';
 
   if (!isNaN(price) && price >= 0 && amount > 0) {
     valueEl.textContent = fmtCHF(price * amount);
   } else if (priceNote) {
     valueEl.textContent = priceNote;
   } else {
-    valueEl.textContent = 'CHF —';
+    valueEl.textContent = 'CHF -';
   }
 }
 
@@ -1926,10 +1926,10 @@ function syncFormFields() {
    ========================================================= */
 function parseDateFromEventDates(str) {
   if (!str) return null;
-  // "14. – 16.05.2026" → month=5, year=2026
+  // "14. - 16.05.2026" → month=5, year=2026
   let m = str.match(/(\d{2})\.(20\d{2})/);
   if (m) return { month: parseInt(m[1], 10), year: parseInt(m[2], 10) };
-  // "14-16 May 2026" or "14–16 May 2026"
+  // "14-16 May 2026" or "14-16 May 2026"
   const monthNames = { jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12 };
   m = str.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s*(20\d{2})/i);
   if (m) return { month: monthNames[m[1].toLowerCase().slice(0,3)], year: parseInt(m[2], 10) };
@@ -2025,7 +2025,7 @@ function showDocumentFormatDialog(docNum) {
 }
 
 /* =========================================================
-   FORMAT DIALOG — TEMPORARY ADMISSION FORMS (11.74 / 11.87)
+   FORMAT DIALOG - TEMPORARY ADMISSION FORMS (11.74 / 11.87)
    The form itself is fixed-format, so the dialog controls the
    goods-list attachment that is printed alongside the form.
    ========================================================= */
@@ -2115,7 +2115,7 @@ function printAllVersions(onlyDocNum = null) {
   </div>
   <div class="doc-top-right">
     <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">LRP: ${esc(lrp || '—')}</div>
+    <div class="lrp">LRP: ${esc(lrp || '-')}</div>
   </div>
 </div>
 <table class="info-table">
@@ -2154,7 +2154,7 @@ function printAllVersions(onlyDocNum = null) {
           if(c.totalValue!=null) totVal+=c.totalValue;
         });
         Object.values(groups).forEach((g,i)=>{
-          rows.push(`<tr><td class="c">${i+1}</td><td><strong>${esc(g.type)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate!=null?g.tariffRate+'%':''}</td><td class="r">${g.vatRate!=null?g.vatRate+'%':''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal?g.val:'—'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i+1}</td><td><strong>${esc(g.type)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate!=null?g.tariffRate+'%':''}</td><td class="r">${g.vatRate!=null?g.vatRate+'%':''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal?g.val:'-'}</td></tr>`);
         });
         tableHtml = `<div class="section-title">List of goods (By Type)</div>
 <table class="goods"><thead><tr><th>#</th><th>Type</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Total Amount</th><th class="r">Total Weight</th><th class="r">Total Value (${cur})</th></tr></thead>
@@ -2168,12 +2168,12 @@ function printAllVersions(onlyDocNum = null) {
               const i=rowNum++; const varWg=v.weightG!=null?v.weightG:p.weightG; const varPrice=v.price!=null?v.price:p.price;
               const varAmt=v.amount||0; const varTWkg=Math.round(varAmt*(varWg||0))/1000; const varTV=varPrice!=null?Math.round(varPrice*varAmt):null;
               totAmt+=varAmt; totWkg+=varTWkg; if(varTV!=null)totVal+=varTV;
-              rows.push(`<tr><td class="c">${i+1}</td><td>${esc(v.sku||p.sku||'')}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td><td>${p.forSale?'For Sale':'Not For Sale'}</td><td>${esc(p.type||'')}</td><td class="r">${varAmt}</td><td class="r">${varWg!=null?varWg+' g':''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote||(varPrice!=null?formatNum(floorN(varPrice,2),2):'—')}</td><td class="r">${varTV!=null?varTV:'—'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${i+1}</td><td>${esc(v.sku||p.sku||'')}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td><td>${p.forSale?'For Sale':'Not For Sale'}</td><td>${esc(p.type||'')}</td><td class="r">${varAmt}</td><td class="r">${varWg!=null?varWg+' g':''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote||(varPrice!=null?formatNum(floorN(varPrice,2),2):'-')}</td><td class="r">${varTV!=null?varTV:'-'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const i=rowNum++; totAmt+=(c.amount||0); totWkg+=c.totalWeightKg; if(c.totalValue!=null)totVal+=c.totalValue;
             const td=hasVariants(p)?`${esc(p.title||'')} (${p.variants.length} variants)`:`${esc(p.title||'')}`;
-            rows.push(`<tr><td class="c">${i+1}</td><td>${esc(p.sku||'')}</td><td>${td}</td><td>${p.forSale?'For Sale':'Not For Sale'}</td><td>${esc(p.type||'')}</td><td class="r">${c.amount??''}</td><td class="r">${c.effectiveUnitWeightG!=null?Math.round(c.effectiveUnitWeightG)+' g':''}</td><td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${p.priceNote||(c.effectiveUnitPrice!=null?formatNum(floorN(c.effectiveUnitPrice,2),2):'—')}</td><td class="r">${c.totalValue!=null?c.totalValue:'—'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+            rows.push(`<tr><td class="c">${i+1}</td><td>${esc(p.sku||'')}</td><td>${td}</td><td>${p.forSale?'For Sale':'Not For Sale'}</td><td>${esc(p.type||'')}</td><td class="r">${c.amount??''}</td><td class="r">${c.effectiveUnitWeightG!=null?Math.round(c.effectiveUnitWeightG)+' g':''}</td><td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${p.priceNote||(c.effectiveUnitPrice!=null?formatNum(floorN(c.effectiveUnitPrice,2),2):'-')}</td><td class="r">${c.totalValue!=null?c.totalValue:'-'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });
         const fl = format==='detailed'?' (Detailed)':' (Compressed)';
@@ -2246,7 +2246,7 @@ function printAllVersions(onlyDocNum = null) {
           totRQ+=retQty; totRWkg+=retWkg; if(retVal!=null)totRVal+=retVal;
         });
         Object.values(groups).forEach((g,i)=>{
-          rows.push(`<tr><td class="c">${i+1}</td><td><strong>${esc(g.type)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate!=null?g.tariffRate+'%':''}</td><td class="r">${g.vatRate!=null?g.vatRate+'%':''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal?g.retVal:'—'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i+1}</td><td><strong>${esc(g.type)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate!=null?g.tariffRate+'%':''}</td><td class="r">${g.vatRate!=null?g.vatRate+'%':''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal?g.retVal:'-'}</td></tr>`);
         });
         tableHtml=`<div class="section-title">Return goods list (re-export) (By Type)</div>
 <table class="goods"><thead><tr><th>#</th><th>Type</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Return Qty</th><th class="r">Return Weight</th><th class="r">Return Value (${cur})</th></tr></thead>
@@ -2262,7 +2262,7 @@ function printAllVersions(onlyDocNum = null) {
               const varWg=v.weightG!=null?v.weightG:p.weightG; const varPrice=v.price!=null?v.price:p.price;
               const varRWkg=Math.round(varRetQty*(varWg||0))/1000; const varRVal=varPrice!=null?Math.round(varPrice*varRetQty):null;
               totRQ+=varRetQty; totRWkg+=varRWkg; if(varRVal!=null)totRVal+=varRVal;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td><td>${esc(p.type||'')}</td><td class="r">${v.amount||0}</td><td class="r">${v.soldQty||0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg!=null?varWg+' g':''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote||(varPrice!=null?formatNum(floorN(varPrice,2),2):'—')}</td><td class="r">${varRVal!=null?varRVal:'—'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td><td>${esc(p.type||'')}</td><td class="r">${v.amount||0}</td><td class="r">${v.soldQty||0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg!=null?varWg+' g':''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote||(varPrice!=null?formatNum(floorN(varPrice,2),2):'-')}</td><td class="r">${varRVal!=null?varRVal:'-'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const rs=calcReturnStats(p); if(rs.retQty<=0)return; rowNum++;
@@ -2270,7 +2270,7 @@ function printAllVersions(onlyDocNum = null) {
             const c=calcProduct(p);
             totRQ+=retQty; totRWkg+=retWkg; if(retVal!=null)totRVal+=retVal;
             const td=hasVariants(p)?`${esc(p.title||'')} (${p.variants.filter(v=>!v.unlisted).length} variants)`:esc(p.title||'');
-            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type||'')}</td><td class="r">${c.amount??''}</td><td class="r">${c.soldQty||0}</td><td class="r"><strong>${retQty}</strong></td><td class="r">${c.effectiveUnitWeightG!=null?Math.round(c.effectiveUnitWeightG)+' g':''}</td><td class="r">${fmtWeightKg(retWkg)}</td><td class="r">${p.priceNote||(c.effectiveUnitPrice!=null?formatNum(floorN(c.effectiveUnitPrice,2),2):'—')}</td><td class="r">${retVal!=null?retVal:'—'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type||'')}</td><td class="r">${c.amount??''}</td><td class="r">${c.soldQty||0}</td><td class="r"><strong>${retQty}</strong></td><td class="r">${c.effectiveUnitWeightG!=null?Math.round(c.effectiveUnitWeightG)+' g':''}</td><td class="r">${fmtWeightKg(retWkg)}</td><td class="r">${p.priceNote||(c.effectiveUnitPrice!=null?formatNum(floorN(c.effectiveUnitPrice,2),2):'-')}</td><td class="r">${retVal!=null?retVal:'-'}</td><td class="r">${esc(p.tariffNo||'')}</td><td class="r">${p.tariffRate!=null?p.tariffRate+'%':''}</td><td class="r">${p.vatRate!=null?p.vatRate+'%':''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });
         const fl=format==='detailed'?' (Detailed)':' (Compressed)';
@@ -2337,7 +2337,7 @@ function printAllVersions(onlyDocNum = null) {
   </div>
   <div class="doc-top-right">
     <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">LRP: ${esc(lrp || '—')}</div>
+    <div class="lrp">LRP: ${esc(lrp || '-')}</div>
   </div>
 </div>${importerInfo}`;
   }
@@ -2416,7 +2416,7 @@ function printGoodsList(docNum, format = 'detailed') {
   </div>
   <div class="doc-top-right">
     <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">LRP: ${esc(lrp || '—')}</div>
+    <div class="lrp">LRP: ${esc(lrp || '-')}</div>
   </div>
 </div>
 <table class="info-table">
@@ -2465,7 +2465,7 @@ function printGoodsList(docNum, format = 'detailed') {
           <td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td>
           <td class="r">${g.amount}</td>
           <td class="r">${fmtWeightKg(g.wkg)}</td>
-          <td class="r">${g.hasVal ? g.val : '—'}</td></tr>`);
+          <td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
       });
       const rows = detailedRows.join('');
       tableHtml = `<div class="section-title">List of goods (By Type)</div>
@@ -2493,8 +2493,8 @@ function printGoodsList(docNum, format = 'detailed') {
             const varAmt = v.amount || 0;
             const varTotalWkg = Math.round(varAmt * (varWg || 0)) / 1000;
             const varTotalVal = varPrice != null ? Math.round(varPrice * varAmt) : null;
-            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '—');
-            const tv = varTotalVal != null ? varTotalVal : '—';
+            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
+            const tv = varTotalVal != null ? varTotalVal : '-';
             totAmt += varAmt; totWkg += varTotalWkg;
             if (varTotalVal != null) totVal += varTotalVal;
             detailedRows.push(`<tr><td class="c">${i+1}</td><td>${esc(v.sku||p.sku||'')}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td>
@@ -2509,8 +2509,8 @@ function printGoodsList(docNum, format = 'detailed') {
         } else {
           // Compressed or non-variant: one row per product
           const i = rowNum++;
-          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '—');
-          const tv = c.totalValue != null ? c.totalValue : '—';
+          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-');
+          const tv = c.totalValue != null ? c.totalValue : '-';
           totAmt += (c.amount || 0); totWkg += c.totalWeightKg;
           if (c.totalValue != null) totVal += c.totalValue;
           const titleDisplay = hasVariants(p) ? `${esc(p.title||'')} (${p.variants.filter(v=>!v.unlisted).length} variants)` : `${esc(p.title||'')}`;
@@ -2678,7 +2678,7 @@ function printGoodsList(docNum, format = 'detailed') {
           <td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td>
           <td class="r"><strong>${g.retQty}</strong></td>
           <td class="r">${fmtWeightKg(g.retWkg)}</td>
-          <td class="r">${g.hasVal ? g.retVal : '—'}</td></tr>`);
+          <td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
       });
       const rows = detailedRows.join('');
       const emptyRow = rows ? '' : `<tr><td colspan="8" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>`;
@@ -2712,8 +2712,8 @@ function printGoodsList(docNum, format = 'detailed') {
             const varRetVal = varPrice != null ? Math.round(varPrice * varRetQty) : null;
             totRetQty += varRetQty; totRetWkg += varRetWkg;
             if (varRetVal != null) totRetVal += varRetVal;
-            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '—');
-            const retValStr = varRetVal != null ? varRetVal : '—';
+            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
+            const retValStr = varRetVal != null ? varRetVal : '-';
             detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title||'')} - ${esc(v.name||'')}</td><td>${esc(p.type||'')}</td>
               <td class="r">${v.amount||0}</td><td class="r">${v.soldQty||0}</td>
               <td class="r"><strong>${varRetQty}</strong></td>
@@ -2734,8 +2734,8 @@ function printGoodsList(docNum, format = 'detailed') {
           const { retQty, retWkg, retVal } = rs;
           totRetQty += retQty; totRetWkg += retWkg;
           if (retVal != null) totRetVal += retVal;
-          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '—');
-          const retValStr = retVal != null ? retVal : '—';
+          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-');
+          const retValStr = retVal != null ? retVal : '-';
           const titleDisplay = hasVariants(p) ? `${esc(p.title||'')} (${p.variants.filter(v=>!v.unlisted).length} variants)` : esc(p.title||'');
           detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${titleDisplay}</td><td>${esc(p.type||'')}</td>
             <td class="r">${c.amount??''}</td><td class="r">${c.soldQty||0}</td>
@@ -2832,7 +2832,7 @@ function printProformaInvoice() {
   const rows = products.map((p, i) => {
     const c = calcProduct(p);
     const qty = c.amount || 0;
-    const unitPrice = c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : (p.priceNote || '—');
+    const unitPrice = c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : (p.priceNote || '-');
     const totalVal  = c.totalValue != null ? c.totalValue : 0;
     const originCc  = (p.originCountry && p.originCountry.trim()) ? p.originCountry.trim().toUpperCase() : (countryToCode(a.countryOfOrigin) || '');
     totQty += qty;
@@ -2841,12 +2841,12 @@ function printProformaInvoice() {
     return `<tr>
       <td class="r">${i + 1}</td>
       <td>${esc(p.title || '')}</td>
-      <td>${esc(p.tariffNo || '—')}</td>
+      <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
-      <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG) + ' g' : '—'}</td>
+      <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG) + ' g' : '-'}</td>
       <td class="r">${fmtWeightKg(c.totalWeightKg)}</td>
       <td class="r">${esc(String(unitPrice))}</td>
-      <td class="r">${c.totalValue != null ? c.totalValue : '—'}</td>
+      <td class="r">${c.totalValue != null ? c.totalValue : '-'}</td>
       <td class="r">${originCc}</td>
     </tr>`;
   }).join('');
@@ -2889,8 +2889,8 @@ function printProformaInvoice() {
 
 <div class="meta-row">
   <div class="meta-item"><div class="meta-label">Invoice Date</div><div class="meta-value">${today}</div></div>
-  <div class="meta-item"><div class="meta-label">Event</div><div class="meta-value">${esc(m.event || '—')}</div></div>
-  <div class="meta-item"><div class="meta-label">Event Dates</div><div class="meta-value">${esc([m.eventDateStart, m.eventDateEnd].filter(Boolean).join(' – ') || '—')}</div></div>
+  <div class="meta-item"><div class="meta-label">Event</div><div class="meta-value">${esc(m.event || '-')}</div></div>
+  <div class="meta-item"><div class="meta-label">Event Dates</div><div class="meta-value">${esc([m.eventDateStart, m.eventDateEnd].filter(Boolean).join(' - ') || '-')}</div></div>
   <div class="meta-item"><div class="meta-label">Currency</div><div class="meta-value">${esc(cur)}</div></div>
 </div>
 
@@ -2951,8 +2951,8 @@ function compute1174Groups() {
   if (asn.length > state.products.length) asn.length = state.products.length;
 
   function makeGroup(products) {
-    let tariffNo = '—', maxVal = -1;
-    const g = { tariffNo: '—', qty: 0, weightKg: 0, value: 0, retQty: 0, retWeightKg: 0, retValue: 0 };
+    let tariffNo = '-', maxVal = -1;
+    const g = { tariffNo: '-', qty: 0, weightKg: 0, value: 0, retQty: 0, retWeightKg: 0, retValue: 0 };
     products.forEach(p => {
       const c = calcProduct(p);
       g.qty      += (c.amount || 0);
@@ -2981,14 +2981,14 @@ function compute1174Groups() {
   // auto mode -group by tariff code, top value = g1, rest = g2
   const tariffValues = {};
   state.products.forEach(p => {
-    const key = (p.tariffNo || '').trim() || '—';
+    const key = (p.tariffNo || '').trim() || '-';
     const c = calcProduct(p);
     if (!tariffValues[key]) tariffValues[key] = 0;
     if (c.totalValue != null) tariffValues[key] += c.totalValue;
   });
   const topKey = Object.entries(tariffValues).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const g1prods = state.products.filter(p => ((p.tariffNo || '').trim() || '—') === topKey);
-  const g2prods = state.products.filter(p => ((p.tariffNo || '').trim() || '—') !== topKey);
+  const g1prods = state.products.filter(p => ((p.tariffNo || '').trim() || '-') === topKey);
+  const g2prods = state.products.filter(p => ((p.tariffNo || '').trim() || '-') !== topKey);
   const g1 = makeGroup(g1prods);
   const g2 = makeGroup(g2prods);
   return { g1, g2, hasG2: g2.qty > 0, g1prods, g2prods };
@@ -3041,7 +3041,7 @@ function updateRouteGuidance() {
         <li>Pay the e-dec import VAT - at the <strong>on-site customs office</strong> (e.g. Fantasy Basel has one at the venue), or at the border or airport</li>
         <li>Once the e-dec is paid, present <strong>Form 11.61</strong> at the border on departure - the <strong>full deposit is refunded</strong></li>
       </ol>
-      <div class="route-note" style="margin-bottom:8px"><strong>If Form 11.61 is not available</strong> - use Form 11.74 instead. Steps 1–4 are identical. On departure, replace step 6 with:</div>
+      <div class="route-note" style="margin-bottom:8px"><strong>If Form 11.61 is not available</strong> - use Form 11.74 instead. Steps 1-4 are identical. On departure, replace step 6 with:</div>
       <ol class="route-steps" start="6">
         <li>Go to the <strong>customs office at your point of departure</strong> and present your <strong>e-dec</strong> and <strong>Form 11.74</strong></li>
         <li>Fill in and submit <strong>Form 11.87</strong> (re-export / closure) at the customs counter</li>
@@ -3093,7 +3093,7 @@ function renderManual1174Cards() {
       card.dataset.idx = String(i);
       card.innerHTML = `<span class="g-card-handle">&#8942;&#8942;</span>
         <span class="g-card-title">${escHtml(p.title || '(untitled)')}</span>
-        <span class="g-card-hs">${escHtml(p.tariffNo || '—')}</span>
+        <span class="g-card-hs">${escHtml(p.tariffNo || '-')}</span>
         <span class="g-card-val">${getCurrency()} ${val}</span>`;
       zone.appendChild(card);
     });
@@ -3125,7 +3125,7 @@ function renderAuto1174Info() {
   // show which products land in each group
   const groups = {};
   state.products.forEach(p => {
-    const key = (p.tariffNo || '').trim() || '—';
+    const key = (p.tariffNo || '').trim() || '-';
     if (!groups[key]) groups[key] = { tariffNo: key, products: [], value: 0 };
     const c = calcProduct(p);
     groups[key].products.push(p);
@@ -3140,12 +3140,12 @@ function renderAuto1174Info() {
       const c = calcProduct(p);
       const val = c.totalValue != null ? Math.floor(c.totalValue) : 0;
       return `<div class="g-auto-item"><span class="g-card-title">${escHtml(p.title || '(untitled)')}</span>
-        <span class="g-card-hs">${escHtml(p.tariffNo || '—')}</span>
+        <span class="g-card-hs">${escHtml(p.tariffNo || '-')}</span>
         <span class="g-card-val">${getCurrency()} ${val}</span></div>`;
     }).join('');
     return `<div class="group-auto-col">
       <div class="group-col-header"><span class="group-col-title">${label}</span>
-        <span class="group-col-summary">HS: ${escHtml(group ? group.tariffNo : '—')}</span></div>
+        <span class="group-col-summary">HS: ${escHtml(group ? group.tariffNo : '-')}</span></div>
       <div class="g-auto-list">${items || '<div class="g-auto-empty">No products</div>'}</div>
     </div>`;
   }
@@ -3171,7 +3171,7 @@ function init1174GroupUI() {
 
       const groups = {};
       state.products.forEach((p, i) => {
-        const key = (p.tariffNo || '').trim() || '—';
+        const key = (p.tariffNo || '').trim() || '-';
         if (!groups[key]) groups[key] = { indices: [], value: 0 };
         const c = calcProduct(p);
         groups[key].indices.push(i);
@@ -3273,8 +3273,8 @@ function print1174() {
   // ── Helpers ──
   const fv  = (v, warn = false) => v
     ? `<span class="fv${warn ? ' warn' : ''}">${esc(v)}</span>`
-    : `<span class="ev">——</span>`;
-  const fvP = v => v ? `<span class="fv pre">${esc(v)}</span>` : `<span class="ev">——</span>`;
+    : `<span class="ev">--</span>`;
+  const fvP = v => v ? `<span class="fv pre">${esc(v)}</span>` : `<span class="ev">--</span>`;
 
   function cellHead(num, label) {
     return `<div class="ch"><span class="cn">${esc(num)}</span><span class="cl">${esc(label)}</span></div>`;
@@ -3413,7 +3413,7 @@ col.d-rn { width: 3%; }
 col.d-16 { width: 14%; }
 /* col.d-17 fills remaining */
 
-/* Numeric table (18–27) column widths -must total 100% */
+/* Numeric table (18-27) column widths -must total 100% */
 col.n-rn { width: 3%; }
 col.n-18 { width: 5%; }
 col.n-19 { width: 5%; }
@@ -3486,7 +3486,7 @@ col.n-27 { width: 7.5%; }
       </div>
     </div>
 
-    <!-- Fields 1–13 -->
+    <!-- Fields 1-13 -->
     <div class="top">
       <div class="lc">
         <div class="cell">
@@ -3510,7 +3510,7 @@ col.n-27 { width: 7.5%; }
           </div>
           <div class="cell">
             ${cellHead('7', 'Konto-Nr. / Compte No / Conto N.')}
-            <div class="cv"><span class="ev">——</span></div>
+            <div class="cv"><span class="ev">--</span></div>
           </div>
         </div>
         <div class="cell" style="min-height:7mm">
@@ -3523,7 +3523,7 @@ col.n-27 { width: 7.5%; }
         </div>
         <div class="cell" style="min-height:7mm">
           ${cellHead('9', 'Verfalldatum / Echéance / Scadenza')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell hfield" style="min-height:7mm">
           <div class="hfield-label">${cellHead('10', 'Ursprungsland / Pays d\'origine / Paese d\'origine')}</div>
@@ -3588,7 +3588,7 @@ col.n-27 { width: 7.5%; }
         </div>
         <div class="cell">
           ${cellHead('15', 'Abschlusszollstelle / Bureau de douane d\'apurement / Ufficio doganale della conclusione')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
       </div>
     </div>
@@ -3605,13 +3605,13 @@ col.n-27 { width: 7.5%; }
           <th>17 Genaue Warenbezeichnung (Material, Typ, Nummern, etc.), die eine Identifikation der Ware sicherstellt<br>Désignation exacte de la marchandise (matière, type, numéros, etc.) garantissant son identification<br>Designazione esatta della merce (materiale, tipo, numeri, ecc.), che garantisce l'identificazione della merce</th>
         </tr></thead>
         <tbody>
-          ${gtDescRow(1, 'see attached list', allTitles || '—')}
+          ${gtDescRow(1, 'see attached list', allTitles || '-')}
           ${hasG2 ? gtDescRow(2, '', '') : ''}
         </tbody>
       </table>
     </div>
 
-    <!-- Goods table: 18–27 (numeric columns) -->
+    <!-- Goods table: 18-27 (numeric columns) -->
     <div class="gt-wrap">
       <table class="gt">
         <colgroup>
@@ -3634,13 +3634,13 @@ col.n-27 { width: 7.5%; }
         </tr></thead>
         <tbody>
           ${gtNumRow(1,
-              g1.tariffNo !== '—' ? g1.tariffNo : '',
+              g1.tariffNo !== '-' ? g1.tariffNo : '',
               String(Math.round(g1.weightKg)),
               String(g1.qty),
               String(Math.round(g1.weightKg)),
               String(Math.floor(g1.value)))}
           ${hasG2 ? gtNumRow(2,
-              g2.tariffNo !== '—' ? g2.tariffNo : '',
+              g2.tariffNo !== '-' ? g2.tariffNo : '',
               String(Math.round(g2.weightKg)),
               String(g2.qty),
               String(Math.round(g2.weightKg)),
@@ -3649,20 +3649,20 @@ col.n-27 { width: 7.5%; }
       </table>
     </div>
 
-    <!-- Bottom: 28–31 + 32 -->
+    <!-- Bottom: 28-31 + 32 -->
     <div class="bot">
       <div class="bl">
         <div class="cell" style="min-height:8mm">
           ${cellHead('28', 'Verwender der Ware / Utilisateur de la marchandise / Utilizzatore della merce')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell" style="min-height:8mm">
           ${cellHead('29', 'MWST-Nr. / No TVA / N. IVA &nbsp;&nbsp; MWST-Code / Code-TVA / Codice-IVA')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell" style="min-height:8mm">
           ${cellHead('30', 'Bewilligung usw. / Permis, etc. / Permesso, ecc.')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell">
           ${cellHead('31', 'Ort/Datum · Lieu/date · Luogo/data &nbsp;&nbsp; Der Anmelder / Le déclarant / Il dichiarante &nbsp;&nbsp; Ref. / Réf. / Rif.')}
@@ -3673,7 +3673,7 @@ col.n-27 { width: 7.5%; }
             </div>
             <div style="flex:1">
               <div style="font-size:4.8pt;color:#555">Der Anmelder / Le déclarant / Il dichiarante</div>
-              <div class="fv" style="font-size:7pt">${esc(a.fullName || '—')}</div>
+              <div class="fv" style="font-size:7pt">${esc(a.fullName || '-')}</div>
               <div class="sig-note">→ Recommended: person paying the customs deposit</div>
             </div>
             <div style="flex:1">
@@ -3687,15 +3687,15 @@ col.n-27 { width: 7.5%; }
       <div class="br">
         <div class="cell" style="min-height:14mm">
           ${cellHead('32', 'Zollabgaben / Droits de douane / Tributi doganali')}
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
         <div class="cell">
           <div class="subtotal-label">Subtotal / Total int. / Subtotale</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
           <div class="subtotal-label">Einfuhrabgaben / Redevances d'entrée / Diritti d'entrata</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
           <div class="subtotal-label">Annahme / Acceptation / Accettazione</div>
-          <div class="cv"><span class="ev">——</span></div>
+          <div class="cv"><span class="ev">--</span></div>
         </div>
       </div>
     </div>
@@ -3746,8 +3746,8 @@ function print1187() {
 
   const X = v => String(v == null ? '' : v)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const fv  = v => v ? `<span class="fv">${X(v)}</span>` : `<span class="ev">——</span>`;
-  const fvP = v => v ? `<span class="fv pre">${X(v)}</span>` : `<span class="ev">——</span>`;
+  const fv  = v => v ? `<span class="fv">${X(v)}</span>` : `<span class="ev">--</span>`;
+  const fvP = v => v ? `<span class="fv pre">${X(v)}</span>` : `<span class="ev">--</span>`;
   function ch(num, label) {
     return `<div class="ch"><span class="cn">${num}</span><span class="cl">${label}</span></div>`;
   }
@@ -3919,7 +3919,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
         </div>
 
-        <!-- Right column: 5–12 -->
+        <!-- Right column: 5-12 -->
         <div class="rc">
           <div class="rc-row" style="min-height:14mm">
             <div class="cell" style="flex:1">
@@ -3938,7 +3938,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('7','Ursprungsland / Pays d\'origine / Paese d\'origine')}</div>
-            <div class="hfield-value">${fv(artistCC || '——')}</div>
+            <div class="hfield-value">${fv(artistCC || '--')}</div>
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('8','Land der vorübergehenden Bestimmung / Pays de destination temporaire / Paese di destinazione temporanea')}</div>
@@ -3946,7 +3946,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('9','Land der endgültigen Bestimmung / Pays de destination définitive / Paese di destinazione definitiva')}</div>
-            <div class="hfield-value">${fv(artistCC || '——')}</div>
+            <div class="hfield-value">${fv(artistCC || '--')}</div>
           </div>
           <div class="cell" style="min-height:8mm">
             ${ch('10','Zweck der vorübergehenden Verwendung / But de l\'admission temporaire / Scopo dell\'ammissione temporanea')}
@@ -3983,7 +3983,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
         </div>
       </div>
 
-      <!-- Goods table: fields 13–14 (description row) -->
+      <!-- Goods table: fields 13-14 (description row) -->
       <div class="gt-wrap" style="border-bottom:none">
         <table class="gt">
           <colgroup>
@@ -4000,7 +4000,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
             <tr class="data-row">
               <td class="rn">1</td>
               <td><span class="gfv">See attached list</span></td>
-              <td><span class="gfv">${X(allRetTitles || '—')}</span></td>
+              <td><span class="gfv">${X(allRetTitles || '-')}</span></td>
             </tr>
             <tr class="data-row">
               <td class="rn">2</td>
@@ -4010,7 +4010,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
         </table>
       </div>
 
-      <!-- Goods table: fields 15–23 (numeric row) -->
+      <!-- Goods table: fields 15-23 (numeric row) -->
       <div class="gt-wrap">
         <table class="gt">
           <colgroup>
@@ -4037,7 +4037,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
             <tr class="data-row">
               <td class="rn">1</td>
               <td></td><td></td>
-              ${gcell(g1.retQty > 0 && g1.tariffNo !== '—' ? g1.tariffNo : '')}
+              ${gcell(g1.retQty > 0 && g1.tariffNo !== '-' ? g1.tariffNo : '')}
               <td></td>
               ${gcell(g1.retQty > 0 ? Math.round(g1.retWeightKg) : '')}
               ${gcell(g1.retQty > 0 ? g1.retQty : '', 'center')}
@@ -4048,7 +4048,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
             ${hasG2 ? `<tr class="data-row">
               <td class="rn">2</td>
               <td></td><td></td>
-              ${gcell(g2.retQty > 0 && g2.tariffNo !== '—' ? g2.tariffNo : '')}
+              ${gcell(g2.retQty > 0 && g2.tariffNo !== '-' ? g2.tariffNo : '')}
               <td></td>
               ${gcell(g2.retQty > 0 ? Math.round(g2.retWeightKg) : '')}
               ${gcell(g2.retQty > 0 ? g2.retQty : '', 'center')}
@@ -4066,7 +4066,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           ${ch('24','Ort / Datum · Lieu / Date · Luogo / Data')}
           <div style="margin-top:1mm"><span class="fv">${X(eventCity ? eventCity + ', ' : '')}${X(today)}</span></div>
           <div style="margin-top:2mm; font-size:4.8pt; color:#444">Der Anmelder / Le déclarant / Il dichiarante</div>
-          <div style="margin-top:0.5mm"><span class="fv">${X(a.fullName || '——')}</span></div>
+          <div style="margin-top:0.5mm"><span class="fv">${X(a.fullName || '--')}</span></div>
           <div class="sig-note">→ Recommended: same person who signed the 11.74</div>
           <div class="sig-line">Unterschrift / Signature / Firma</div>
           <div style="margin-top:1mm; font-size:4.5pt; color:#444">Ref. / Réf. / Rif. &nbsp;<span style="border-bottom:0.5px solid #999;display:inline-block;min-width:30mm">&nbsp;</span></div>
@@ -4134,7 +4134,7 @@ function renderPermitOverrides() {
   if (hint) {
     hint.textContent = overrideCount > 0
       ? `${overrideCount} override${overrideCount !== 1 ? 's' : ''} from HS-code default`
-      : 'defaults from HS code — click a value to override';
+      : 'defaults from HS code - click a value to override';
   }
 
   list.innerHTML = soldProducts.map(p => {
@@ -4151,12 +4151,12 @@ function renderPermitOverrides() {
     return `<div class="permit-row">
       <div class="permit-row-info">
         <div class="permit-row-name">${escHtml(p.title || '(untitled)')}</div>
-        <div class="permit-row-meta">${listedSoldQty}× sold · HS ${escHtml(p.tariffNo || '—')} · default: ${defaultVal}</div>
+        <div class="permit-row-meta">${listedSoldQty}× sold · HS ${escHtml(p.tariffNo || '-')} · default: ${defaultVal}</div>
       </div>
       ${overrideBadge}
       <div class="permit-seg">
-        <button class="permit-seg-btn ${cls0}" onclick="setPermitOverride('${escHtml(p.id)}',0)" title="0 — bewilligungsfrei gemäss Deklarant (permit-free, as stated by declarant)">0</button>
-        <button class="permit-seg-btn ${cls2}" onclick="setPermitOverride('${escHtml(p.id)}',2)" title="2 — nicht bewilligungspflichtig (not subject to permit obligation)">2</button>
+        <button class="permit-seg-btn ${cls0}" onclick="setPermitOverride('${escHtml(p.id)}',0)" title="0 - bewilligungsfrei gemäss Deklarant (permit-free, as stated by declarant)">0</button>
+        <button class="permit-seg-btn ${cls2}" onclick="setPermitOverride('${escHtml(p.id)}',2)" title="2 - nicht bewilligungspflichtig (not subject to permit obligation)">2</button>
       </div>
     </div>`;
   }).join('');
@@ -4464,7 +4464,7 @@ function openEdecImportModal(xmlString, filename) {
   }
   // Check for parse error
   if (doc.querySelector('parsererror')) {
-    showToast('XML parse error — please check the file.', 'error');
+    showToast('XML parse error - please check the file.', 'error');
     return;
   }
 
@@ -4576,10 +4576,10 @@ function renderEdecImportModal(data) {
         <span>Artist / Declarant Info</span>
       </label>
       <div class="edec-import-details" id="edec-imp-artist-details">
-        <div class="edec-import-row"><span class="edec-import-key">Name</span><span class="edec-import-val">${escapeXml(a.fullName || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Street</span><span class="edec-import-val">${escapeXml(a.street || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Postcode &amp; City</span><span class="edec-import-val">${escapeXml(a.postCodeCity || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Country</span><span class="edec-import-val">${escapeXml(a.countryOfOrigin || '—')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Name</span><span class="edec-import-val">${escapeXml(a.fullName || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Street</span><span class="edec-import-val">${escapeXml(a.street || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Postcode &amp; City</span><span class="edec-import-val">${escapeXml(a.postCodeCity || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Country</span><span class="edec-import-val">${escapeXml(a.countryOfOrigin || '-')}</span></div>
       </div>
     </div>`;
   }
@@ -4595,11 +4595,11 @@ function renderEdecImportModal(data) {
       </label>
       <div class="edec-import-details" id="edec-imp-venue-details">
         ${v.eventName ? `<div class="edec-import-row"><span class="edec-import-key">Event Name</span><span class="edec-import-val">${escapeXml(v.eventName)}</span></div>` : ''}
-        <div class="edec-import-row"><span class="edec-import-key">Contact Name</span><span class="edec-import-val">${escapeXml(v.venueName || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Street</span><span class="edec-import-val">${escapeXml(v.venueStreet || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Postcode</span><span class="edec-import-val">${escapeXml(v.venuePostcode || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">City</span><span class="edec-import-val">${escapeXml(v.venueCity || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Country</span><span class="edec-import-val">${escapeXml(v.venueCountry || '—')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Contact Name</span><span class="edec-import-val">${escapeXml(v.venueName || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Street</span><span class="edec-import-val">${escapeXml(v.venueStreet || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Postcode</span><span class="edec-import-val">${escapeXml(v.venuePostcode || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">City</span><span class="edec-import-val">${escapeXml(v.venueCity || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Country</span><span class="edec-import-val">${escapeXml(v.venueCountry || '-')}</span></div>
         ${v.venueTIN ? `<div class="edec-import-row"><span class="edec-import-key">UID / TIN</span><span class="edec-import-val">${escapeXml(v.venueTIN)}</span></div>` : ''}
       </div>
     </div>`;
@@ -4617,8 +4617,8 @@ function renderEdecImportModal(data) {
       </label>
       <div class="edec-import-details" id="edec-imp-transport-details">
         <div class="edec-import-row"><span class="edec-import-key">Mode</span><span class="edec-import-val">${escapeXml(modeLabel)}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Vehicle Country</span><span class="edec-import-val">${escapeXml(t.transportationCountry || '—')}</span></div>
-        <div class="edec-import-row"><span class="edec-import-key">Plate / Number</span><span class="edec-import-val">${escapeXml(t.transportationNumber || '—')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Vehicle Country</span><span class="edec-import-val">${escapeXml(t.transportationCountry || '-')}</span></div>
+        <div class="edec-import-row"><span class="edec-import-key">Plate / Number</span><span class="edec-import-val">${escapeXml(t.transportationNumber || '-')}</span></div>
       </div>
     </div>`;
   }
@@ -4649,12 +4649,12 @@ function renderEdecImportModal(data) {
 
     data.products.forEach((p, i) => {
       const hsEntry = HS_CODES.find(h => h.code === p.tariffNo);
-      const hsDesc = hsEntry ? hsEntry.desc : (p.tariffNo || '—');
+      const hsDesc = hsEntry ? hsEntry.desc : (p.tariffNo || '-');
       html += `
           <div class="edec-import-product-row">
             <input type="checkbox" class="edec-imp-product-cb" data-idx="${i}" checked />
             <span class="edec-import-product-title" title="${escapeXml(hsDesc)}">${escapeXml(p.title)}</span>
-            <span class="edec-import-product-hs">${escapeXml(p.tariffNo || '—')}</span>
+            <span class="edec-import-product-hs">${escapeXml(p.tariffNo || '-')}</span>
             <span class="edec-import-product-qty">${p.amount}</span>
             <span class="edec-import-product-val">${p.soldValue.toLocaleString()}</span>
             <span class="edec-import-product-permit permit-chip-${p._permit}">${p._permit}</span>
@@ -4809,7 +4809,7 @@ function applyEdecImport() {
   if (changes > 0) {
     showToast(`Imported successfully (${changes} item${changes !== 1 ? 's' : ''} updated)`, 'success');
   } else {
-    showToast('Nothing was imported — no sections were selected.', 'info');
+    showToast('Nothing was imported - no sections were selected.', 'info');
   }
 }
 
@@ -4898,21 +4898,21 @@ function mergeProductsAsVariants(srcId, tgtId) {
   }
 
   if (tgtHas && !srcHas) {
-    // Drop plain onto variant product — add src as new variant
+    // Drop plain onto variant product - add src as new variant
     const prefix = commonWordPrefix(tgt.title, src.title);
     const varName = variantSuffix(src.title, prefix) || src.title;
     const newVar = makeVariantFrom(src, varName);
     tgt.variants.push(newVar);
     state.products.splice(srcIdx, 1);
   } else if (srcHas && !tgtHas) {
-    // Drop variant product onto plain — absorb tgt into src as a variant
+    // Drop variant product onto plain - absorb tgt into src as a variant
     const prefix = commonWordPrefix(src.title, tgt.title);
     const varName = variantSuffix(tgt.title, prefix) || tgt.title;
     const newVar = makeVariantFrom(tgt, varName);
     src.variants.push(newVar);
     state.products.splice(tgtIdx, 1);
   } else if (!srcHas && !tgtHas) {
-    // Both plain — create new merged product with two variants
+    // Both plain - create new merged product with two variants
     const prefix = commonWordPrefix(tgt.title, src.title);
     const parentTitle = prefix || tgt.title;
     const tgtName = variantSuffix(tgt.title, prefix) || tgt.title;
@@ -4957,7 +4957,7 @@ function mergeProductsAsVariants(srcId, tgtId) {
     state.products[tgtIdx] = merged;
     state.products.splice(srcIdx, 1);
   } else {
-    // Both have variants — merge src variants into tgt
+    // Both have variants - merge src variants into tgt
     for (const v of src.variants) {
       tgt.variants.push({ ...v, id: 'v' + Date.now() + Math.random().toString(36).slice(2, 6) });
     }
@@ -5200,7 +5200,7 @@ function init() {
 
   // Update origin cells live when artist country changes
   document.getElementById('artist-country').addEventListener('change', () => {
-    const defaultOrigin = countryToCode(state.artist.countryOfOrigin) || '—';
+    const defaultOrigin = countryToCode(state.artist.countryOfOrigin) || '-';
     document.querySelectorAll('#products-tbody tr[data-id]').forEach(tr => {
       const id = tr.dataset.id;
       const p = state.products.find(pr => pr.id === id);
@@ -5219,8 +5219,8 @@ function init() {
   document.getElementById('btn-export-import').addEventListener('click', () => showDocumentFormatDialog(1));
   document.getElementById('btn-export-sold').addEventListener('click',   () => showDocumentFormatDialog(2));
   document.getElementById('btn-export-return').addEventListener('click', () => showDocumentFormatDialog(3));
-  document.getElementById('btn-print-1174').addEventListener('click', () => showFormFormatDialog('Form 11.74 — Import (Temporary Admission)', print1174, 1));
-  document.getElementById('btn-print-1187').addEventListener('click', () => showFormFormatDialog('Form 11.87 — Re-export (Closure)', print1187, 3));
+  document.getElementById('btn-print-1174').addEventListener('click', () => showFormFormatDialog('Form 11.74 - Import (Temporary Admission)', print1174, 1));
+  document.getElementById('btn-print-1187').addEventListener('click', () => showFormFormatDialog('Form 11.87 - Re-export (Closure)', print1187, 3));
 
   // Add product button
   document.getElementById('btn-add-product').addEventListener('click', openAddModal);

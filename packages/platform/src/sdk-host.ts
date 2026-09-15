@@ -63,7 +63,7 @@ export interface HostServices {
 /**
  * A module's live handle on the platform, plus everything needed to take it
  * back. Every subscription a module makes is recorded here so unloading is
- * complete — an orphaned event handler in a "disabled" module is a bug that
+ * complete - an orphaned event handler in a "disabled" module is a bug that
  * would be almost impossible to find later.
  */
 export interface ModuleHost {

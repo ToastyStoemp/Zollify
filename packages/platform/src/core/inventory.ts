@@ -12,12 +12,12 @@ import { getSalesEvent } from './sales-events';
  * One inventory, with per-event claims on top.
  *
  * The booth owns a single pile of stock. An event may *claim* part of it, and
- * a claim is reserved — no other event can sell against it. An event with no
+ * a claim is reserved - no other event can sell against it. An event with no
  * claim sells from whatever is left unclaimed, which is the normal case for a
  * booth working one event at a time.
  *
  * Nothing here is a running balance. `onHand` is what was counted, and when;
- * what is still sellable is that count minus the sales made *since* it — a
+ * what is still sellable is that count minus the sales made *since* it - a
  * count already reflects everything sold before it. Deriving from recorded
  * sales every time means a reverted or late-arriving sale cannot drift the
  * figure the way a decremented counter would.
@@ -128,7 +128,7 @@ export async function setClaim(
  * Drops a claim so the event falls back to the shared pool.
  *
  * Distinct from claiming zero, which reserves nothing but still says "this
- * event takes none of these" — the difference matters when reading a packing
+ * event takes none of these" - the difference matters when reading a packing
  * list back.
  */
 export async function clearClaim(
@@ -190,7 +190,7 @@ export function soldAt(eventId: string, productId: string, variantId: string | n
 // screen asks for them once per row, and a row-by-row scan of every
 // transaction is what made pages crawl once the history grew.
 
-/** Like soldByEventAndKey, but only sales made after the item's last count — the ones the count does not already reflect. */
+/** Like soldByEventAndKey, but only sales made after the item's last count - the ones the count does not already reflect. */
 const soldSinceCountByEventAndKey = computed(() => {
   const byEvent = new Map<string, Map<string, number>>();
   for (const tx of recentTransactions.value) {
@@ -214,7 +214,7 @@ const soldTotalByKey = computed(() => {
   return out;
 });
 
-/** Every sale of this item ever, across every event — a lifetime counter, not what Free subtracts. */
+/** Every sale of this item ever, across every event - a lifetime counter, not what Free subtracts. */
 export function soldTotal(productId: string, variantId: string | null = ''): number {
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
@@ -222,7 +222,7 @@ export function soldTotal(productId: string, variantId: string | null = ''): num
 /**
  * A claim only reserves stock while its event is still to come or under way.
  * Once the event is over (closed, or its last day has passed) whatever it
- * took is either sold — and counted as such — or back in the pile.
+ * took is either sold - and counted as such - or back in the pile.
  */
 export function eventIsOver(event: SalesEvent | undefined, today = new Date().toISOString().slice(0, 10)): boolean {
   // No event (deleted, or never synced here): nothing to reserve for.
@@ -256,7 +256,7 @@ export function claimedTotal(productId: string, variantId: string | null = ''): 
  * Units drawn from the shared pool, per item.
  *
  * Sales by events with no claim all come out of the pool. Sales against a
- * claim come out of the claim — until the claim runs out, after which the
+ * claim come out of the claim - until the claim runs out, after which the
  * overage is drawn from the pool too. A print sold past a claim was still a
  * real print that left the pile, and pretending the pool is untouched would
  * let another event sell it a second time.
@@ -275,7 +275,7 @@ const poolSoldByKey = computed(() => {
 });
 
 /**
- * Stock nobody has claimed and nobody has sold — what an unclaimed event can
+ * Stock nobody has claimed and nobody has sold - what an unclaimed event can
  * draw on.
  *
  * Sales made within a claim are deliberately not subtracted here: they were
@@ -307,7 +307,7 @@ export interface Availability {
  * What one event can still sell of each item.
  *
  * With a claim: the claim minus what this event has already sold. The shared
- * pool is irrelevant — that is what reserving means.
+ * pool is irrelevant - that is what reserving means.
  *
  * Without a claim: everything not owned by someone else's claim, minus what
  * every unclaimed event has sold out of that same pool. Two events with no
@@ -365,7 +365,7 @@ export interface InventoryRow {
   claimed: number;
   /** Sold ever, across every event. */
   sold: number;
-  /** Unclaimed and unsold — what an event with no claim can draw on. */
+  /** Unclaimed and unsold - what an event with no claim can draw on. */
   free: number;
   /** More is promised or already gone than the booth owns. */
   overCommitted: boolean;

@@ -1,4 +1,4 @@
-/** e-dec import XML — exact port of legacy generateEdecXML() (golden-tested). */
+/** e-dec import XML - exact port of legacy generateEdecXML() (golden-tested). */
 import {
   countryToCode,
   escapeXml,

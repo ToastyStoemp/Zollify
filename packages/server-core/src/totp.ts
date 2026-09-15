@@ -1,5 +1,5 @@
 /**
- * RFC 6238 TOTP (authenticator 2FA) + recovery codes. SHA-1, 6 digits, 30s —
+ * RFC 6238 TOTP (authenticator 2FA) + recovery codes. SHA-1, 6 digits, 30s -
  * the universal authenticator-app default. Zero-dep (node:crypto).
  */
 import { createHmac, randomBytes, createHash, timingSafeEqual } from 'node:crypto';

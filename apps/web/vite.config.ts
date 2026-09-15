@@ -7,7 +7,7 @@ import vue from '@vitejs/plugin-vue';
 /**
  * Host entries published at stable, unhashed paths so `index.html` can carry a
  * static import map. They re-export the shell's own copies, so Rollup shares
- * one chunk between the shell and any runtime module — which is what keeps a
+ * one chunk between the shell and any runtime module - which is what keeps a
  * single Vue instance across the boundary.
  */
 const HOST_ENTRIES = ['vue', 'dexie', 'sdk', 'ui', 'shared'] as const;

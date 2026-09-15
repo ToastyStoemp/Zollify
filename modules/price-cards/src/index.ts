@@ -2,7 +2,7 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Price Cards — printable price tags for the table.
+ * Price Cards - printable price tags for the table.
  *
  * Reads the catalogue through the SDK and owns nothing of its own beyond
  * layout preferences, so prices on the table can never disagree with prices at

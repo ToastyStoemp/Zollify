@@ -7,7 +7,7 @@ import { emptyProfile, type ProfileUpdate, type TokenResponse } from '@zollify/s
  * Session and token handling.
  *
  * The access token is held in memory only and never written to localStorage.
- * The refresh token never reaches JavaScript at all — the server sets it as an
+ * The refresh token never reaches JavaScript at all - the server sets it as an
  * httpOnly, Secure, SameSite cookie. That combination means an XSS bug can at
  * worst borrow the current tab's short-lived access token; it cannot exfiltrate
  * a 90-day refresh token. With runtime-loaded modules executing in this origin,
@@ -15,8 +15,8 @@ import { emptyProfile, type ProfileUpdate, type TokenResponse } from '@zollify/s
  */
 
 /**
- * The server's auth response. The refresh token is absent on web — the gateway
- * strips it and sets an httpOnly cookie instead — so only `accessToken` and
+ * The server's auth response. The refresh token is absent on web - the gateway
+ * strips it and sets an httpOnly cookie instead - so only `accessToken` and
  * `user` are relied on here.
  */
 export type LoginResult = Omit<TokenResponse, 'refreshToken'> & { refreshToken?: string };
@@ -35,8 +35,8 @@ function toSnapshot(user: TokenResponse['user']): AccountSnapshot {
 }
 
 /**
- * Adopts a fresh user record from the server — after the profile is edited,
- * for instance — without touching the tokens.
+ * Adopts a fresh user record from the server - after the profile is edited,
+ * for instance - without touching the tokens.
  */
 export function applyUser(user: TokenResponse['user']): void {
   setAccount(toSnapshot(user));
@@ -47,7 +47,7 @@ export function applyUser(user: TokenResponse['user']): void {
  *
  * The server does not report a lifetime separately, and hard-coding one here
  * would silently drift the moment ACCESS_TTL changes. The `exp` claim is not
- * trusted for authorisation — only to decide when to refresh — so decoding
+ * trusted for authorisation - only to decide when to refresh - so decoding
  * without verifying is fine.
  */
 function expiryFromJwt(token: string): number {
@@ -116,7 +116,7 @@ export function clearSession(): void {
 /**
  * Ends the session on this device. The server revokes the refresh token and
  * clears its cookie; the local state is dropped regardless, so signing out
- * always works even with no connection — the token then dies of expiry.
+ * always works even with no connection - the token then dies of expiry.
  */
 export async function signOut(): Promise<void> {
   try {
@@ -162,7 +162,7 @@ let refreshInFlight: Promise<boolean> | null = null;
 
 /**
  * Exchanges the httpOnly refresh cookie for a new access token. Concurrent
- * callers share one request — otherwise a page that fires six requests on load
+ * callers share one request - otherwise a page that fires six requests on load
  * would rotate the refresh token six times and invalidate its own session.
  */
 export async function refreshAccessToken(): Promise<boolean> {
@@ -179,7 +179,7 @@ export async function refreshAccessToken(): Promise<boolean> {
       });
       if (!res.ok) {
         // Only a refusal ends the session. A 5xx is the gateway restarting or
-        // a proxy with nothing behind it — signing the booth out for that would
+        // a proxy with nothing behind it - signing the booth out for that would
         // drop the till mid-shift over a hiccup that fixes itself.
         if (res.status === 401 || res.status === 403 || res.status === 400) clearSession();
         return false;

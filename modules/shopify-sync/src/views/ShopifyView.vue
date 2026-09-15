@@ -42,7 +42,7 @@ onMounted(async () => {
 });
 
 /**
- * Matching is a read-only proposal. Nothing is written to the storefront here —
+ * Matching is a read-only proposal. Nothing is written to the storefront here -
  * a fuzzy match applied automatically would rewrite live prices on a guess.
  */
 async function run(): Promise<void> {
@@ -84,7 +84,7 @@ async function confirm(match: ProductMatch): Promise<void> {
 }
 
 function pct(score: number | undefined): string {
-  return score === undefined ? '—' : `${Math.round(score * 100)}%`;
+  return score === undefined ? '-' : `${Math.round(score * 100)}%`;
 }
 </script>
 

@@ -3,14 +3,14 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * SQLite via better-sqlite3 — synchronous, transactional, zero infra.
+ * SQLite via better-sqlite3 - synchronous, transactional, zero infra.
  * All data lives under DATA_DIR (a Docker volume in production):
  *   DATA_DIR/zollify.db       the database
  *   DATA_DIR/images/<acct>/   full-size product images
  */
 
 const MIGRATIONS: string[] = [
-  // v1 — initial schema
+  // v1 - initial schema
   `
   CREATE TABLE accounts (
     id        TEXT PRIMARY KEY,
@@ -79,7 +79,7 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (accountId, day)
   );
   `,
-  // v2 — client-uploaded diagnostic logs (see routes/logs.ts)
+  // v2 - client-uploaded diagnostic logs (see routes/logs.ts)
   `
   CREATE TABLE logs (
     id         TEXT PRIMARY KEY,
@@ -93,11 +93,11 @@ const MIGRATIONS: string[] = [
     createdAt  INTEGER NOT NULL
   );
   `,
-  // v3 — track each device's app flavor, so e.g. a register can list the
+  // v3 - track each device's app flavor, so e.g. a register can list the
   // account's Carbon terminals for the remote-payment-trigger picker.
   `ALTER TABLE devices ADD COLUMN flavor TEXT;`,
-  // v4 — scoped, revocable API tokens for machine access (e.g. the ZollTax
-  // accounting bridge) — read-only, so no account password lives in a config.
+  // v4 - scoped, revocable API tokens for machine access (e.g. the ZollTax
+  // accounting bridge) - read-only, so no account password lives in a config.
   `
   CREATE TABLE api_tokens (
     id         TEXT PRIMARY KEY,
@@ -112,7 +112,7 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_api_tokens_account ON api_tokens(accountId);
   `,
-  // v5 — 2FA (TOTP + recovery codes), richer session metadata on refresh tokens
+  // v5 - 2FA (TOTP + recovery codes), richer session metadata on refresh tokens
   // (a refresh token IS a login session → device/IP/geo for the admin overview),
   // and trusted devices so a 2FA'd device can skip the code on later logins.
   `
@@ -136,18 +136,18 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_trusted_user ON trusted_devices(userId, deviceId);
   `,
-  // v6 — per-user event restriction. A JSON array of event ids: when set, a member
+  // v6 - per-user event restriction. A JSON array of event ids: when set, a member
   // ("helper") only syncs and may only write data for those events, and the catalog
   // is read-only to them (except stock for their events). NULL = full access.
   `
   ALTER TABLE users ADD COLUMN allowedEventIds TEXT;
   ALTER TABLE invites ADD COLUMN allowedEventIds TEXT;
   `,
-  // v7 — account log epoch. Bumped by an in-place op-log rewrite (e.g. baking
+  // v7 - account log epoch. Bumped by an in-place op-log rewrite (e.g. baking
   // product merges into stored tx payloads); the pull API returns it so clients
   // detect the rewrite and re-pull from scratch. See scripts/rewrite-merges.mjs.
   `ALTER TABLE accounts ADD COLUMN syncEpoch INTEGER NOT NULL DEFAULT 0;`,
-  // v8 — account profile (JSON AccountProfile): artist details and whether
+  // v8 - account profile (JSON AccountProfile): artist details and whether
   // first-run setup has been completed. Server-side so every device agrees.
   `ALTER TABLE accounts ADD COLUMN profile TEXT;`,
 ];
@@ -183,7 +183,7 @@ export function bumpMetric(db: Database.Database, accountId: string, field: Metr
 }
 
 /**
- * Upsert device presence — called both from a sync push (routes/sync.ts) and
+ * Upsert device presence - called both from a sync push (routes/sync.ts) and
  * a fresh WS connection (ws.ts), since a device that mostly just listens
  * (e.g. a Carbon sitting in customer-display mode) may rarely push its own
  * ops otherwise, leaving its lastSeenAt stale for the device picker.

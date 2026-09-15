@@ -1,5 +1,5 @@
 /**
- * Goods-list documents (Import / Sold / Return) — exact ports of legacy
+ * Goods-list documents (Import / Sold / Return) - exact ports of legacy
  * printGoodsList() and printAllVersions() minus the window.open call.
  * The two legacy functions build the tables independently with small
  * differences; both are preserved verbatim (golden-tested).
@@ -70,7 +70,7 @@ function getCurrency(state: CustomsState): string {
   return state.meta && state.meta.currency ? state.meta.currency : 'CHF';
 }
 
-/** Full printable HTML document — port of printGoodsList(). */
+/** Full printable HTML document - port of printGoodsList(). */
 export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, format: GoodsFormat = 'detailed'): string {
   const m = state.meta;
   const a = state.artist;
@@ -111,7 +111,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
   </div>
   <div class="doc-top-right">
     <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">LRP: ${esc(lrp || '—')}</div>
+    <div class="lrp">LRP: ${esc(lrp || '-')}</div>
   </div>
 </div>
 <table class="info-table">
@@ -184,7 +184,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           <td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td>
           <td class="r">${g.amount}</td>
           <td class="r">${fmtWeightKg(g.wkg)}</td>
-          <td class="r">${g.hasVal ? g.val : '—'}</td></tr>`);
+          <td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
       });
       const rows = detailedRows.join('');
       tableHtml = `<div class="section-title">List of goods (By Type)</div>
@@ -215,8 +215,8 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             const varAmt = v.amount || 0;
             const varTotalWkg = Math.round(varAmt * ((varWg as number) || 0)) / 1000;
             const varTotalVal = varPrice != null ? Math.round((varPrice as number) * varAmt) : null;
-            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '—');
-            const tv = varTotalVal != null ? varTotalVal : '—';
+            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
+            const tv = varTotalVal != null ? varTotalVal : '-';
             totAmt += varAmt;
             totWkg += varTotalWkg;
             if (varTotalVal != null) totVal += varTotalVal;
@@ -232,8 +232,8 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
         } else {
           // Compressed or non-variant: one row per product
           const i = rowNum++;
-          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '—');
-          const tv = c.totalValue != null ? c.totalValue : '—';
+          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-');
+          const tv = c.totalValue != null ? c.totalValue : '-';
           totAmt += c.amount || 0;
           totWkg += c.totalWeightKg;
           if (c.totalValue != null) totVal += c.totalValue;
@@ -459,7 +459,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           <td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td>
           <td class="r"><strong>${g.retQty}</strong></td>
           <td class="r">${fmtWeightKg(g.retWkg)}</td>
-          <td class="r">${g.hasVal ? g.retVal : '—'}</td></tr>`);
+          <td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
       });
       const rows = detailedRows.join('');
       const emptyRow = rows
@@ -499,8 +499,8 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             totRetQty += varRetQty;
             totRetWkg += varRetWkg;
             if (varRetVal != null) totRetVal += varRetVal;
-            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '—');
-            const retValStr = varRetVal != null ? varRetVal : '—';
+            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
+            const retValStr = varRetVal != null ? varRetVal : '-';
             detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${soldReturnName(p, a.fullName)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>
               <td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td>
               <td class="r"><strong>${varRetQty}</strong></td>
@@ -522,8 +522,8 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           totRetQty += retQty;
           totRetWkg += retWkg;
           if (retVal != null) totRetVal += retVal;
-          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '—');
-          const retValStr = retVal != null ? retVal : '—';
+          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-');
+          const retValStr = retVal != null ? retVal : '-';
           const titleDisplay = hasVariants(p)
             ? `${soldReturnName(p, a.fullName)} (${p.variants!.filter((v) => !v.unlisted).length} variants)`
             : soldReturnName(p, a.fullName);

@@ -1,4 +1,4 @@
-/** ISO 4217 currencies (active) — code + English name, for the currency picker. */
+/** ISO 4217 currencies (active) - code + English name, for the currency picker. */
 export interface Currency {
   code: string;
   name: string;

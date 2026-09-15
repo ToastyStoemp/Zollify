@@ -229,7 +229,7 @@ describe('backup', () => {
 
     const file = await backup.createBackup();
 
-    // The deleted row must still be in the file — last-write-wins sync has no
+    // The deleted row must still be in the file - last-write-wins sync has no
     // other way to learn it is gone.
     expect(file.products).toHaveLength(1);
     expect(file.products[0]?.deletedAt).toBeGreaterThan(0);

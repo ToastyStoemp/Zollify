@@ -4,14 +4,14 @@ import { listenForRemotePayments } from './payments/satellite';
 import { onActiveProviderChanged } from './payments/registry';
 
 /**
- * POS — taking money at the booth.
+ * POS - taking money at the booth.
  *
  * Zollify never touches the sale itself: myPOS and SumUp terminals take the
  * card and settle to the vendor's bank. This module orchestrates the checkout,
  * records the result and prints the receipt, which is what keeps PCI scope out
  * of the platform entirely.
  *
- * Payment providers are a nested plugin layer inside this module — adding a new
+ * Payment providers are a nested plugin layer inside this module - adding a new
  * terminal means adding a provider here, and the platform never learns it
  * exists.
  */

@@ -2,7 +2,7 @@
   "name": "zollify",
   "version": "0.1.0",
   "private": true,
-  "description": "Zollify — a plugin platform for market and convention booths",
+  "description": "Zollify - a plugin platform for market and convention booths",
   "type": "module",
   "engines": {
     "node": ">=20"

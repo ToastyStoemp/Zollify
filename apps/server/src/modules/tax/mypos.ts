@@ -257,7 +257,7 @@ function hasNextPage(json: unknown, rowsThisPage: number): boolean {
 }
 
 /**
- * Only rows with a terminal id are card-terminal activity — that filter drops
+ * Only rows with a terminal id are card-terminal activity - that filter drops
  * bank transfers, payouts and the merchant's own card spending. A Credit is a
  * sale, a Debit its fee; transaction_amount is already signed.
  */

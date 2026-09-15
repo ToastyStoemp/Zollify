@@ -6,7 +6,7 @@ import { save, snap, supplierName } from '../api';
 import { sdk } from '../runtime';
 
 /**
- * Restock — what to order next. Two lenses: months of cover from the recent
+ * Restock - what to order next. Two lenses: months of cover from the recent
  * sales rate and what the booth has on hand, or the calendar: what the
  * previous edition of each upcoming event sold. Ticked rows become one
  * reorder per supplier, folded into that supplier's open one when there is.
@@ -91,7 +91,7 @@ async function order(): Promise<void> {
     <p v-if="lens === 'cover'" class="hint">Sold per month over the last 120 days of sales on this device, against what is on hand. Due when cover drops under the dossier's target (3 months by default); the suggestion tops it back up, rounded up to the MOQ.</p>
     <p v-else class="hint">For each upcoming event, the previous edition (same name, earlier year) and what it sold there. {{ plan.events.filter((e) => e.previous).length }} of {{ plan.events.length }} upcoming events have a previous edition.</p>
 
-    <p v-if="!rows.length" class="empty">{{ snap.dossiers.some((d) => d.pid) ? 'Nothing to show yet — sales will fill this in.' : 'Link the catalogue under Dossiers first.' }}</p>
+    <p v-if="!rows.length" class="empty">{{ snap.dossiers.some((d) => d.pid) ? 'Nothing to show yet - sales will fill this in.' : 'Link the catalogue under Dossiers first.' }}</p>
     <div v-else class="table-scroll">
       <table>
         <thead>
@@ -106,10 +106,10 @@ async function order(): Promise<void> {
           <tr v-for="r in rows" :key="r.dossierId" :class="{ due: r.due }">
             <td><input type="checkbox" :checked="picked.has(r.dossierId)" :aria-label="`Order ${r.title}`" @change="toggle(r.dossierId, r.suggestQty)" /></td>
             <td class="l">{{ r.title }}<small v-if="r.moq"> MOQ {{ r.moq }}</small></td>
-            <td class="l muted">{{ r.supplierId ? (supplierName.get(r.supplierId) ?? '?') : '—' }}</td>
-            <template v-if="lens === 'cover' && 'soldPerMonth' in r"><td>{{ r.soldPerMonth }}</td><td>{{ r.onHand }}</td><td :class="r.due ? 'bad' : ''">{{ r.monthsCover == null ? '—' : `${r.monthsCover} mo` }}</td></template>
+            <td class="l muted">{{ r.supplierId ? (supplierName.get(r.supplierId) ?? '?') : '-' }}</td>
+            <template v-if="lens === 'cover' && 'soldPerMonth' in r"><td>{{ r.soldPerMonth }}</td><td>{{ r.onHand }}</td><td :class="r.due ? 'bad' : ''">{{ r.monthsCover == null ? '-' : `${r.monthsCover} mo` }}</td></template>
             <template v-else-if="'soldPrev' in r"><td>{{ r.soldPrev }}</td><td>{{ r.onHand }}</td><td class="l muted small">{{ r.events.map((e) => `${e.name} (${e.soldPrev})`).join(', ') }}</td></template>
-            <td :class="r.due ? 'bad' : 'muted'"><strong>{{ r.suggestQty || '—' }}</strong></td>
+            <td :class="r.due ? 'bad' : 'muted'"><strong>{{ r.suggestQty || '-' }}</strong></td>
             <td><input v-if="picked.has(r.dossierId)" v-model.number="qty[r.dossierId]" type="number" min="0" inputmode="numeric" class="qty" aria-label="Quantity" /></td>
           </tr>
         </tbody>

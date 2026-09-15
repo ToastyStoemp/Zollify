@@ -1,4 +1,4 @@
-/** Sync op log — every local mutation becomes one op; the server just orders and fans them out. */
+/** Sync op log - every local mutation becomes one op; the server just orders and fans them out. */
 
 export type OpType =
   | 'tx.create'
@@ -15,7 +15,7 @@ export type OpType =
   | 'setting.upsert';
 
 export interface Op {
-  /** uuidv7, client-generated, globally unique — the idempotency key. */
+  /** uuidv7, client-generated, globally unique - the idempotency key. */
   opId: string;
   deviceId: string;
   /** Client wall clock (informational; LWW uses payload.updatedAt). */

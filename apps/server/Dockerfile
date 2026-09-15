@@ -2,8 +2,8 @@
 #   docker build -f apps/server/Dockerfile -t zollify .
 #
 # Unlike ZollTool, the web build happens here rather than being committed as a
-# zip. Zollify has to build the module bundles anyway — their hashes are what
-# the client verifies — so having the build in one reproducible place is worth
+# zip. Zollify has to build the module bundles anyway - their hashes are what
+# the client verifies - so having the build in one reproducible place is worth
 # more than shaving minutes off a deploy. On a small instance this is slow; see
 # deploy.sh for building elsewhere and shipping the image.
 
@@ -68,7 +68,7 @@ COPY packages/server-core packages/server-core
 COPY apps/server/src apps/server/src
 COPY apps/server/tsconfig.json apps/server/
 
-# Built artefacts from the build stage — sources for these are not shipped.
+# Built artefacts from the build stage - sources for these are not shipped.
 COPY --from=build /repo/apps/web/dist apps/web/dist
 COPY --from=build /repo/apps/server/modules-store apps/server/modules-store
 

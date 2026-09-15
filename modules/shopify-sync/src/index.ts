@@ -2,7 +2,7 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Shopify sync — the client face.
+ * Shopify sync - the client face.
  *
  * The Admin API token lives only on the server half; this module never sees it
  * and never talks to Shopify directly. It sends the local catalogue for

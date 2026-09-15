@@ -22,7 +22,7 @@ export interface ConfirmRequest {
 /** The shell renders whatever sits here; null means no dialog is open. */
 export const pendingConfirm = reactive<{ current: ConfirmRequest | null }>({ current: null });
 
-/** The shell's own confirm — the same dialog modules get, for core screens. */
+/** The shell's own confirm - the same dialog modules get, for core screens. */
 export const shellConfirm = (message: string, title?: string): Promise<boolean> =>
   createShellUi('core').confirm(message, title);
 
@@ -30,7 +30,7 @@ export const shellConfirm = (message: string, title?: string): Promise<boolean> 
  * Shell services handed to modules.
  *
  * Toasts carry the originating module id so a misbehaving module's noise can be
- * attributed rather than blamed on the app — and messages are treated as text
+ * attributed rather than blamed on the app - and messages are treated as text
  * by the renderer, never as markup.
  */
 export function createShellUi(moduleId: string): ShellUi {

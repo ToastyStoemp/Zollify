@@ -7,7 +7,7 @@ import { fileBytes, remove, save, snap, supplierName } from '../api';
 import { sdk } from '../runtime';
 
 /**
- * Reorders — one per supplier, moved along a status board from draft to
+ * Reorders - one per supplier, moved along a status board from draft to
  * received. Each yields a rep-ready spec message, a zip of the design files,
  * and once received, landed per-unit costs written onto the products.
  */
@@ -16,7 +16,7 @@ const currency = computed(() => sdk().account()?.profile.defaultCurrency ?? 'CHF
 const showDone = ref(false);
 const list = computed(() => [...snap.value.reorders].filter((r) => showDone.value || r.status !== 'received').sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt)));
 const rep = (supplierId: string) => snap.value.reps.find((r) => r.supplierId === supplierId);
-const money = (n: number | null | undefined, cur?: string) => (n == null ? '—' : fmtPrice(n, cur || currency.value));
+const money = (n: number | null | undefined, cur?: string) => (n == null ? '-' : fmtPrice(n, cur || currency.value));
 const lineTotal = (r: Reorder) => r.lines.reduce((s, l) => s + (Number(l.confirmedUnitPrice ?? l.quotedUnitPrice ?? snap.value.dossiers.find((d) => d.id === l.dossierId)?.lastUnitPrice ?? 0) || 0) * l.qty, 0);
 
 // ── Editor ──────────────────────────────────────────────────────────────────
@@ -63,9 +63,9 @@ const specFor = (r: Reorder) => buildSpec(r, snap.value);
 async function copySpec(r: Reorder): Promise<void> {
   try {
     await navigator.clipboard.writeText(specFor(r));
-    sdk().ui.toast('Spec copied — paste it into the chat.', { kind: 'success' });
+    sdk().ui.toast('Spec copied - paste it into the chat.', { kind: 'success' });
   } catch {
-    emit('error', 'Clipboard blocked — open the reorder and copy the spec from there.');
+    emit('error', 'Clipboard blocked - open the reorder and copy the spec from there.');
   }
 }
 function mailto(r: Reorder): string {
@@ -169,8 +169,8 @@ async function pushCosts(): Promise<void> {
             <div v-for="(l, i) in editing.lines" :key="l.dossierId" class="line">
               <span class="name">{{ l.title }}</span>
               <input v-model.number="l.qty" type="number" min="0" inputmode="numeric" aria-label="Quantity" />
-              <input v-model.number="l.quotedUnitPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="—" aria-label="Quoted unit price" />
-              <input v-model.number="l.confirmedUnitPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="—" aria-label="Confirmed unit price" />
+              <input v-model.number="l.quotedUnitPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="-" aria-label="Quoted unit price" />
+              <input v-model.number="l.confirmedUnitPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="-" aria-label="Confirmed unit price" />
               <button type="button" class="quiet" aria-label="Remove line" @click="editing.lines.splice(i, 1)"><Icon name="x" :size="14" /></button>
             </div>
           </div>

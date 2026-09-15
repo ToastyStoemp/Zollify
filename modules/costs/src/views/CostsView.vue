@@ -8,7 +8,7 @@ import { costsDb } from '../state';
 import { sdk } from '../runtime';
 
 /**
- * Cost batches — ZollTool's editor. Record a shipment: its total (production,
+ * Cost batches - ZollTool's editor. Record a shipment: its total (production,
  * import, shipping, often billed separately) and how many of each item
  * arrived. The total is spread across the units and written onto the products
  * as per-unit cost. A later batch simply updates it; editing an old one only
@@ -140,7 +140,7 @@ async function apply(): Promise<void> {
     await load();
     await applyCosts(batches.value);
     editing.value = false;
-    notice.value = editId.value ? 'Batch updated.' : `Costs updated — ${computation.value.lines.length} line${computation.value.lines.length === 1 ? '' : 's'}.`;
+    notice.value = editId.value ? 'Batch updated.' : `Costs updated - ${computation.value.lines.length} line${computation.value.lines.length === 1 ? '' : 's'}.`;
     setTimeout(() => (notice.value = null), 2500);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save the batch.';
@@ -179,7 +179,7 @@ const withCost = computed(() => marginRows.value.filter((r) => r.cost != null).l
 
     <article class="card">
       <h2>Batches</h2>
-      <p v-if="!batches.length" class="hint">No batches yet. Record the last order that arrived — production plus import plus shipping — and the per-unit costs follow.</p>
+      <p v-if="!batches.length" class="hint">No batches yet. Record the last order that arrived - production plus import plus shipping - and the per-unit costs follow.</p>
       <ul v-else class="batches">
         <li v-for="b in batches" :key="b.id">
           <button type="button" class="row" @click="open(b)">
@@ -202,8 +202,8 @@ const withCost = computed(() => marginRows.value.filter((r) => r.cost != null).l
             <tr v-for="r in marginRows" :key="r.key">
               <td class="name"><span class="dot" :style="{ background: typeColor(r.type) }"></span>{{ r.label }}</td>
               <td>{{ fmtPrice(r.price, currency) }}</td>
-              <td :class="{ muted: r.cost == null }">{{ r.cost != null ? fmtPrice(r.cost, currency) : '—' }}</td>
-              <td :class="r.margin == null ? 'muted' : r.margin < 30 ? 'bad' : r.margin < 50 ? 'warn' : 'good'">{{ r.margin == null ? '—' : `${r.margin}%` }}</td>
+              <td :class="{ muted: r.cost == null }">{{ r.cost != null ? fmtPrice(r.cost, currency) : '-' }}</td>
+              <td :class="r.margin == null ? 'muted' : r.margin < 30 ? 'bad' : r.margin < 50 ? 'warn' : 'good'">{{ r.margin == null ? '-' : `${r.margin}%` }}</td>
             </tr>
           </tbody>
         </table>
@@ -212,7 +212,7 @@ const withCost = computed(() => marginRows.value.filter((r) => r.cost != null).l
 
     <ModalShell v-if="editing" :title="editId ? 'Edit cost batch' : 'Cost batch'" wide @close="editing = false">
       <div class="form">
-        <p class="hint">Enter the shipment's costs and how many of each item arrived. The total is spread across the units. Enter a per-item cost on a row if you already know it — the rest is spread over the others.</p>
+        <p class="hint">Enter the shipment's costs and how many of each item arrived. The total is spread across the units. Enter a per-item cost on a row if you already know it - the rest is spread over the others.</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="three">
           <label><span>Date</span><input v-model="form.date" type="date" /></label>
@@ -240,7 +240,7 @@ const withCost = computed(() => marginRows.value.filter((r) => r.cost != null).l
               <span class="main"><span class="label">{{ r.label }}</span><small>sells {{ fmtPrice(r.price, currency) }}<template v-if="r.curCost != null"> · cost now {{ fmtPrice(r.curCost, currency) }}</template></small></span>
               <input v-model="r.qty" type="number" min="0" inputmode="numeric" placeholder="Qty" aria-label="Quantity" class="qty" />
               <input v-model="r.unitCost" type="number" min="0" step="0.01" inputmode="decimal" placeholder="each" aria-label="Known unit cost" class="unit" />
-              <strong :class="finalMap.has(r.pid + ':' + r.vid) ? 'good' : 'muted'">{{ finalMap.has(r.pid + ':' + r.vid) ? fmtPrice(finalMap.get(r.pid + ':' + r.vid) ?? 0, currency) : '—' }}</strong>
+              <strong :class="finalMap.has(r.pid + ':' + r.vid) ? 'good' : 'muted'">{{ finalMap.has(r.pid + ':' + r.vid) ? fmtPrice(finalMap.get(r.pid + ':' + r.vid) ?? 0, currency) : '-' }}</strong>
             </li>
           </ul>
         </section>

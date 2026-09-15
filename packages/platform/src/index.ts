@@ -1,5 +1,5 @@
 /**
- * @zollify/platform — the host.
+ * @zollify/platform - the host.
  *
  * Apps import this. Modules must not: their only permitted import from the
  * platform is @zollify/sdk.

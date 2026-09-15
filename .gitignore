@@ -3,7 +3,7 @@ dist/
 build/
 *.tsbuildinfo
 
-# Local env & secrets — never commit. See SECURITY.md.
+# Local env & secrets - never commit. See SECURITY.md.
 .env
 .env.*
 !.env.example
@@ -26,12 +26,12 @@ Thumbs.db
 # Test output
 coverage/
 
-# Built module bundles — regenerate with `npm run publish:modules`
+# Built module bundles - regenerate with `npm run publish:modules`
 modules/*/dist/
 
-# Built APKs — regenerate with `npm run android:apk && npm run android:pack`
+# Built APKs - regenerate with `npm run android:apk && npm run android:pack`
 apps/server/apk/
 apps/server/deploy/
 
-# Public CA roots the compat Android flavour trusts on Android 7 — not secrets
+# Public CA roots the compat Android flavour trusts on Android 7 - not secrets
 !android/app/src/compat/res/raw/*.pem

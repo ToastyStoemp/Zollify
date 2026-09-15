@@ -1,5 +1,5 @@
 /**
- * @zollify/sdk — the only surface a module may import from the platform.
+ * @zollify/sdk - the only surface a module may import from the platform.
  *
  * Keeping this the sole boundary is what allows the host to be rewritten, and a
  * public SDK to be published, without touching a single module. Nothing here
@@ -48,7 +48,7 @@ import type { ModuleDefinition } from './types';
 
 /**
  * Declares a Zollify module. The identity function exists for type inference
- * and to give the loader one recognisable shape to validate — a module's
+ * and to give the loader one recognisable shape to validate - a module's
  * default export must be the result of this call.
  */
 export function defineModule(def: ModuleDefinition): ModuleDefinition {

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { ModuleContext, ServerModule } from '@zollify/server-core';
 
 /**
- * Sourcing — the server half, ported from ZollSource.
+ * Sourcing - the server half, ported from ZollSource.
  *
  * Suppliers, reps, product dossiers, reorders, issues and materials are
  * small documents; they live server-side because supplier contacts must not
@@ -55,7 +55,7 @@ const FileBody = z.object({
 });
 const Approval = z.object({ approval: z.enum(['approved', 'rejected', 'pending']), note: z.string().max(500).optional() });
 
-/** 25 MB of base64 — a PSD or a print-ready PDF, not a video. */
+/** 25 MB of base64 - a PSD or a print-ready PDF, not a video. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const isColl = (s: string): s is Coll => (COLLECTIONS as readonly string[]).includes(s);
@@ -126,7 +126,7 @@ export const sourcingServerModule: ServerModule = {
       return reply.code(201).send({ file: meta });
     });
 
-    /** The bytes, base64 in JSON — the SDK's client speaks JSON, and a design file is a few MB at most. */
+    /** The bytes, base64 in JSON - the SDK's client speaks JSON, and a design file is a few MB at most. */
     app.get<{ Params: { id: string } }>('/files/:id', async (req, reply) => {
       const who = ctx.identity(req);
       const row = ctx.db.prepare('SELECT filename, mime, bytes FROM sourcing_files WHERE accountId = ? AND id = ?').get(who.accountId, req.params.id) as

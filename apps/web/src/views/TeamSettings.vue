@@ -5,8 +5,8 @@ import { authFetch, currentAccount, visibleEvents } from '@zollify/platform';
 /**
  * Team management.
  *
- * The auth layer has supported helpers since day one — a `member` scoped to
- * specific events — but nothing exposed it, so the capability existed with no
+ * The auth layer has supported helpers since day one - a `member` scoped to
+ * specific events - but nothing exposed it, so the capability existed with no
  * way to use it. This is that screen.
  */
 
@@ -170,7 +170,7 @@ function when(ts: number | null): string {
     </form>
 
     <p v-if="newCode" class="code" role="status">
-      Invite code: <strong>{{ newCode }}</strong> — valid for 14 days.
+      Invite code: <strong>{{ newCode }}</strong> - valid for 14 days.
     </p>
 
     <template v-if="invites.length">

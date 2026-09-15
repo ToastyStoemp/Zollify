@@ -1,7 +1,7 @@
 /**
  * The clustering domain. A `Txn` is one payment or fee row from any source; a
  * `Cluster` is a run of them on one device with no gap longer than a day and a
- * half — which, at a convention, is one event. Online orders skip clustering
+ * half - which, at a convention, is one event. Online orders skip clustering
  * and are grouped per calendar month instead.
  */
 

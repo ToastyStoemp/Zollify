@@ -1,4 +1,4 @@
-/** Formular 11.87 (temporary admission / conclusion) — exact port of legacy print1187() (golden-tested). */
+/** Formular 11.87 (temporary admission / conclusion) - exact port of legacy print1187() (golden-tested). */
 import { compute1174Groups, countryToCode } from './calc';
 import { COUNTRY_BY_CODE } from './data';
 import type { CustomsState } from './model';
@@ -32,8 +32,8 @@ export function build1187Html(state: CustomsState, now: Date = new Date()): stri
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
-  const fv = (v: string) => (v ? `<span class="fv">${X(v)}</span>` : `<span class="ev">——</span>`);
-  const fvP = (v: string) => (v ? `<span class="fv pre">${X(v)}</span>` : `<span class="ev">——</span>`);
+  const fv = (v: string) => (v ? `<span class="fv">${X(v)}</span>` : `<span class="ev">--</span>`);
+  const fvP = (v: string) => (v ? `<span class="fv pre">${X(v)}</span>` : `<span class="ev">--</span>`);
   function ch(num: string, label: string): string {
     return `<div class="ch"><span class="cn">${num}</span><span class="cl">${label}</span></div>`;
   }
@@ -187,7 +187,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
         </div>
 
-        <!-- Right column: 5–12 -->
+        <!-- Right column: 5-12 -->
         <div class="rc">
           <div class="rc-row" style="min-height:14mm">
             <div class="cell" style="flex:1">
@@ -206,7 +206,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('7', "Ursprungsland / Pays d'origine / Paese d'origine")}</div>
-            <div class="hfield-value">${fv(artistCC || '——')}</div>
+            <div class="hfield-value">${fv(artistCC || '--')}</div>
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('8', 'Land der vorübergehenden Bestimmung / Pays de destination temporaire / Paese di destinazione temporanea')}</div>
@@ -214,7 +214,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           </div>
           <div class="cell hfield" style="min-height:7mm">
             <div class="hfield-label">${ch('9', 'Land der endgültigen Bestimmung / Pays de destination définitive / Paese di destinazione definitiva')}</div>
-            <div class="hfield-value">${fv(artistCC || '——')}</div>
+            <div class="hfield-value">${fv(artistCC || '--')}</div>
           </div>
           <div class="cell" style="min-height:8mm">
             ${ch('10', "Zweck der vorübergehenden Verwendung / But de l'admission temporaire / Scopo dell'ammissione temporanea")}
@@ -251,7 +251,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
         </div>
       </div>
 
-      <!-- Goods table: fields 13–14 (description row) -->
+      <!-- Goods table: fields 13-14 (description row) -->
       <div class="gt-wrap" style="border-bottom:none">
         <table class="gt">
           <colgroup>
@@ -268,7 +268,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
             <tr class="data-row">
               <td class="rn">1</td>
               <td><span class="gfv">See attached list</span></td>
-              <td><span class="gfv">${X(allRetTitles || '—')}</span></td>
+              <td><span class="gfv">${X(allRetTitles || '-')}</span></td>
             </tr>
             <tr class="data-row">
               <td class="rn">2</td>
@@ -278,7 +278,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
         </table>
       </div>
 
-      <!-- Goods table: fields 15–23 (numeric row) -->
+      <!-- Goods table: fields 15-23 (numeric row) -->
       <div class="gt-wrap">
         <table class="gt">
           <colgroup>
@@ -305,7 +305,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
             <tr class="data-row">
               <td class="rn">1</td>
               <td></td><td></td>
-              ${gcell(g1.retQty > 0 && g1.tariffNo !== '—' ? g1.tariffNo : '')}
+              ${gcell(g1.retQty > 0 && g1.tariffNo !== '-' ? g1.tariffNo : '')}
               <td></td>
               ${gcell(g1.retQty > 0 ? Math.round(g1.retWeightKg) : '')}
               ${gcell(g1.retQty > 0 ? g1.retQty : '', 'center')}
@@ -318,7 +318,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
                 ? `<tr class="data-row">
               <td class="rn">2</td>
               <td></td><td></td>
-              ${gcell(g2.retQty > 0 && g2.tariffNo !== '—' ? g2.tariffNo : '')}
+              ${gcell(g2.retQty > 0 && g2.tariffNo !== '-' ? g2.tariffNo : '')}
               <td></td>
               ${gcell(g2.retQty > 0 ? Math.round(g2.retWeightKg) : '')}
               ${gcell(g2.retQty > 0 ? g2.retQty : '', 'center')}
@@ -338,7 +338,7 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
           ${ch('24', 'Ort / Datum · Lieu / Date · Luogo / Data')}
           <div style="margin-top:1mm"><span class="fv">${X(eventCity ? eventCity + ', ' : '')}${X(today)}</span></div>
           <div style="margin-top:2mm; font-size:4.8pt; color:#444">Der Anmelder / Le déclarant / Il dichiarante</div>
-          <div style="margin-top:0.5mm"><span class="fv">${X(a.fullName || '——')}</span></div>
+          <div style="margin-top:0.5mm"><span class="fv">${X(a.fullName || '--')}</span></div>
           <div class="sig-note">→ Recommended: same person who signed the 11.74</div>
           <div class="sig-line">Unterschrift / Signature / Firma</div>
           <div style="margin-top:1mm; font-size:4.5pt; color:#444">Ref. / Réf. / Rif. &nbsp;<span style="border-bottom:0.5px solid #999;display:inline-block;min-width:30mm">&nbsp;</span></div>

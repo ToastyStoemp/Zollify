@@ -1,5 +1,5 @@
 /*
- * Zollify design tokens — the single source of truth for colour, type and
+ * Zollify design tokens - the single source of truth for colour, type and
  * spacing. Every screen reads these as var(--zfy-*); none names a colour.
  *
  * Light is a cool grey ground with a deep teal accent and a warm terracotta
@@ -21,7 +21,7 @@
   /* ── Text ─────────────────────────────────────────────── */
   --zfy-ink: #141a22;           /* primary text                  */
   --zfy-muted: #5a6472;         /* secondary text   (7.0:1 on #fff) */
-  --zfy-faint: #8a94a2;         /* eyebrows, ids    (3.4:1 — large/upper only) */
+  --zfy-faint: #8a94a2;         /* eyebrows, ids    (3.4:1 - large/upper only) */
 
   /* ── Accent ───────────────────────────────────────────── */
   --zfy-accent: #0e7c66;        /* brand, primary buttons        */

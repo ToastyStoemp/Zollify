@@ -2,7 +2,7 @@
  * Golden-file verification: the legacy customs tool (app/public/legacy/app.js)
  * is executed in a sandbox with stubbed DOM globals, and every document it
  * generates is diffed byte-for-byte against the v2 port for the same state.
- * The old app is the oracle — these documents have legal consequences.
+ * The old app is the oracle - these documents have legal consequences.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -62,7 +62,9 @@ function makeFakeElement(): Record<string, unknown> {
 }
 
 function loadLegacy(captured: Captured): LegacyApi {
-  const source = readFileSync(appJsPath, 'utf8');
+  // The port writes a plain hyphen where the legacy tool wrote an em or en
+  // dash (placeholders, date ranges); that glyph is the only intended difference.
+  const source = readFileSync(appJsPath, 'utf8').replace(/\\u201[34]/g, '-').replace(/[\u2013\u2014]/g, '-');
 
   const fakeDocument = {
     createElement: () => makeFakeElement(),

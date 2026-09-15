@@ -109,7 +109,7 @@ async function run(): Promise<void> {
     <h1>Import from ZollTool</h1>
     <p class="lede">
       Reads one ZollTool backup (version 2) into this account. Use the <strong>.zip</strong> backup
-      to bring product photos across; the .json alone has no photo bytes. Business data only — users,
+      to bring product photos across; the .json alone has no photo bytes. Business data only - users,
       API keys and integration settings are re-entered by hand.
     </p>
 
@@ -157,7 +157,7 @@ async function run(): Promise<void> {
       Imported {{ done.products }} products, {{ done.events }} events, {{ done.stock }} event claims,
       {{ done.inventory }} opening stock counts, {{ done.transactions }} past sales, {{ done.discounts }} discount rules and {{ done.images }} photos.
       Photos sync to your other devices as thumbnails; the full-size copies stay on this one.
-      Switch this module off in Modules — it has done its job.
+      Switch this module off in Modules - it has done its job.
     </p>
   </section>
 </template>

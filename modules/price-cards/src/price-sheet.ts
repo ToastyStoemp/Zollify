@@ -7,7 +7,7 @@ import { fmtPrice } from '@zollify/shared';
  *
  * Merging mirrors how a stall actually quotes prices: a variant name shared by
  * two or more products (a *size* like "A4") collapses across every product into
- * one line ("A4 — 25"); design variants unique to a product (keychain designs)
+ * one line ("A4 - 25"); design variants unique to a product (keychain designs)
  * collapse into the product, and same-price products of one type then merge into
  * a single "any [type]" line. Discounts that touch a line (by type, product, or
  * variant) are attached as short deal tags. Callers pick which lines to include.
@@ -54,11 +54,11 @@ interface Entry {
 export function buildPriceGroups(products: Product[], discounts: DiscountRule[], currency: string): PriceGroup[] {
   const live = products.filter((p) => !p.deletedAt && p.forSale !== false);
 
-  // 1 — flatten catalog to sellable units (a product, or one row per variant).
+  // 1 - flatten catalog to sellable units (a product, or one row per variant).
   const units: Unit[] = [];
   for (const p of live) {
     const type = (p.type || '').trim() || 'Other';
-    const title = (p.title || '').replace(/\s*[-–—]\s*$/, '').trim() || '(untitled)';
+    const title = (p.title || '').replace(/\s*[---]\s*$/, '').trim() || '(untitled)';
     if (p.variants?.length) {
       for (const v of p.variants) {
         units.push({ pid: p.id, vid: v.id, type, title, vname: (v.name || '').trim(), price: round2(v.price ?? p.price ?? 0) });
@@ -68,7 +68,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
     }
   }
 
-  // 2 — which variant names are "sizes" (used by ≥2 products of that type).
+  // 2 - which variant names are "sizes" (used by ≥2 products of that type).
   const nameOwners = new Map<string, Set<string>>();
   for (const u of units) {
     if (!u.vname) continue;
@@ -79,7 +79,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
   }
   const isSize = (u: Unit): boolean => !!u.vname && (nameOwners.get(`${u.type}|${u.vname.toLowerCase()}`)?.size ?? 0) >= 2;
 
-  // 3 — group units into size-entries (by shared name) or product-entries.
+  // 3 - group units into size-entries (by shared name) or product-entries.
   const entryMap = new Map<string, Entry>();
   const add = (key: string, make: () => Entry, u: Unit): void => {
     let e = entryMap.get(key);
@@ -107,7 +107,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
     }
   }
 
-  // 4 — merge same-price product-entries of one type into a single "any" line.
+  // 4 - merge same-price product-entries of one type into a single "any" line.
   const finals: Entry[] = entries.filter((e) => e.kind === 'size');
   const byTypePrice = new Map<string, Entry[]>();
   for (const e of entries.filter((e) => e.kind === 'prod')) {
@@ -128,7 +128,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
     }
   }
 
-  // 5 — attach discounts.
+  // 5 - attach discounts.
   const dealsFor = (e: Entry): string[] => {
     const pids = new Set(e.units.map((u) => u.pid));
     const vkeys = new Set(e.units.map((u) => `${u.pid}:${u.vid}`));
@@ -144,7 +144,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
     return [...new Set(out.filter(Boolean))];
   };
 
-  // 6 — types with a single product collapse into a shared "Other" group.
+  // 6 - types with a single product collapse into a shared "Other" group.
   const OTHER = 'Other';
   const productsPerType = new Map<string, Set<string>>();
   for (const e of finals) {
@@ -156,7 +156,7 @@ export function buildPriceGroups(products: Product[], discounts: DiscountRule[],
     if (e.type !== OTHER && (productsPerType.get(e.type)?.size ?? 0) <= 1) e.type = OTHER;
   }
 
-  // 7 — group by type, ordered lines; "Other" sorts last.
+  // 7 - group by type, ordered lines; "Other" sorts last.
   const byType = new Map<string, PriceLine[]>();
   for (const e of finals) {
     const line: PriceLine = { id: e.key, label: e.label, qual: e.qual, price: e.price, deals: dealsFor(e), units: e.units.map((u) => ({ pid: u.pid, vid: u.vid })) };

@@ -41,7 +41,7 @@ interface SessionInfo {
 }
 
 // A valid argon2id hash of a throwaway value. Verified against on login when the
-// email is unknown, so a missing user costs the same time as a wrong password —
+// email is unknown, so a missing user costs the same time as a wrong password -
 // closing the timing side-channel that would otherwise reveal which emails exist.
 const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
 
@@ -86,7 +86,7 @@ export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
   };
 }
 
-/** A missing or unreadable profile is an empty one — never a crash on login. */
+/** A missing or unreadable profile is an empty one - never a crash on login. */
 export function parseProfile(raw: string | null | undefined): AccountProfile {
   if (!raw) return emptyProfile();
   try {
@@ -197,7 +197,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     config: { rateLimit: { max: Number(process.env.AUTH_RATE_LIMIT_MAX || 20), timeWindow: '1 minute' } },
   };
   // Refresh is a cheap indexed lookup of a 256-bit unguessable token, so the
-  // only risk is flooding (already covered globally) — a higher cap avoids
+  // only risk is flooding (already covered globally) - a higher cap avoids
   // throttling several devices on one IP that all refresh their 15-min access
   // token together.
   const REFRESH_RATE_LIMIT = {
@@ -249,7 +249,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
 
     // Hash before any DB write so invite consumption and user creation are one
     // synchronous, atomic step (no `await` in between). Combined with the
-    // conditional UPDATE below, an invite code can never be spent twice — not
+    // conditional UPDATE below, an invite code can never be spent twice - not
     // even by two registrations racing on the same code.
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
     const userId = randomUUID();
@@ -292,7 +292,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
         return reply.code(409).send({ error: 'This invite code has already been used' });
       }
       if (e instanceof Error && e.message === 'NOT_FIRST') {
-        return reply.code(403).send({ error: 'This server already has an owner — ask them for an invite code.' });
+        return reply.code(403).send({ error: 'This server already has an owner - ask them for an invite code.' });
       }
       throw e;
     }
@@ -315,7 +315,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const b = (req.body ?? {}) as { code?: string; flavor?: string; trustToken?: string; rememberDevice?: boolean };
 
     const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as UserRow | undefined;
-    // Always run a verify — against the real hash or a dummy — so an unknown
+    // Always run a verify - against the real hash or a dummy - so an unknown
     // email takes the same time as a wrong password (no user-enumeration oracle).
     const ok = await argon2.verify(user?.passwordHash ?? DUMMY_HASH, password).catch(() => false);
     if (!user || !ok) {
@@ -350,7 +350,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       device: parseDevice(req.headers['user-agent']),
       geo: await lookupGeo(req.ip),
     });
-    // "Remember this device" — issue a trust token so 2FA is skipped here next time.
+    // "Remember this device" - issue a trust token so 2FA is skipped here next time.
     const extra: Record<string, unknown> = {};
     if (has2fa(user) && b.rememberDevice && deviceId) extra.deviceTrustToken = issueDeviceTrust(db, user.id, deviceId);
     if (usedRecovery) extra.usedRecovery = true;
@@ -416,7 +416,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     if (!u?.totpSecret) return reply.code(400).send({ error: 'Start 2FA setup first.' });
     const code = String((req.body as { code?: string } | undefined)?.code ?? '').trim();
     if (!verifyToken(box.decrypt<string>(u.totpSecret), code)) {
-      return reply.code(400).send({ error: 'That code is not valid — check your device clock and try again.' });
+      return reply.code(400).send({ error: 'That code is not valid - check your device clock and try again.' });
     }
     const codes = generateRecoveryCodes(10);
     db.prepare('UPDATE users SET totpEnabled = 1, recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes.map(hashRecovery)), claims.sub);
@@ -463,7 +463,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     return { revoked: info.changes };
   });
 
-  // Current user (with up-to-date role + allowedEventIds) — the client polls this
+  // Current user (with up-to-date role + allowedEventIds) - the client polls this
   // each sync so an admin changing a helper's events takes effect without re-login.
   app.get('/api/auth/me', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
@@ -534,7 +534,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     return { deleted: info.changes };
   });
 
-  // Members of the caller's account (admins/owner) — for managing helpers.
+  // Members of the caller's account (admins/owner) - for managing helpers.
   app.get('/api/users', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     if (claims.role === 'member') return reply.code(403).send({ error: 'Admins only' });
@@ -568,7 +568,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     return { ok: true, allowedEventIds: events.length ? events : null };
   });
 
-  // Re-verify the caller's own password — a gate for irreversible actions.
+  // Re-verify the caller's own password - a gate for irreversible actions.
   async function passwordOk(userId: string, password: unknown): Promise<boolean> {
     const row = db.prepare('SELECT passwordHash FROM users WHERE id = ?').get(userId) as { passwordHash: string } | undefined;
     if (!row) return false;
@@ -580,7 +580,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   }
 
   // Delete the caller's own user, leaving the shared account/data intact. For
-  // members (helpers) leaving, and for admins when another admin remains — the
+  // members (helpers) leaving, and for admins when another admin remains - the
   // last admin must delete the whole account instead (below), never orphan it.
   app.post('/api/users/me/delete', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
@@ -624,7 +624,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
         delTrust.run(uid);
       }
       // Invites can reference this account's users via createdBy/usedBy even when
-      // the invite itself is for a new account (accountId NULL) — clear all of them.
+      // the invite itself is for a new account (accountId NULL) - clear all of them.
       db.prepare(
         'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
       ).run(accountId, accountId, accountId);
@@ -634,7 +634,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       db.prepare('DELETE FROM users WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
     })();
-    // Full-size images live on disk per account — remove that tree too.
+    // Full-size images live on disk per account - remove that tree too.
     try {
       rmSync(join(dataDir, 'images', accountId), { recursive: true, force: true });
     } catch {
@@ -655,7 +655,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     db.prepare(
       'INSERT INTO api_tokens (id, accountId, name, tokenHash, scopes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ).run(id, claims.accountId, body.name?.trim() || 'API token', sha256(token), scopes, claims.sub, Date.now());
-    // The plaintext token is shown exactly once — only its hash is stored.
+    // The plaintext token is shown exactly once - only its hash is stored.
     return { id, token, name: body.name?.trim() || 'API token', scopes };
   });
 
@@ -679,7 +679,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     return { revoked: true };
   });
 
-  // Permanently remove a token row. Only an already-revoked token can be purged —
+  // Permanently remove a token row. Only an already-revoked token can be purged -
   // an active token must be revoked first, so a live integration never vanishes
   // out from under itself by accident.
   app.delete('/api/tokens/:id/purge', { preHandler: app.authenticate }, async (req, reply) => {

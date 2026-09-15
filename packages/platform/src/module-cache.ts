@@ -5,13 +5,13 @@ import Dexie, { type EntityTable } from 'dexie';
  *
  * Entries are keyed by `<moduleId>@<version>` and are immutable: an update
  * writes a new row rather than overwriting the running one. That is what keeps
- * a half-finished download from bricking a register mid-convention — the old
+ * a half-finished download from bricking a register mid-convention - the old
  * version stays intact and bootable until the new one is fully written and
  * verified.
  */
 
 export interface CachedBundle {
-  /** `<moduleId>@<version>` — immutable per version. */
+  /** `<moduleId>@<version>` - immutable per version. */
   key: string;
   moduleId: string;
   version: string;
@@ -31,7 +31,7 @@ export function bundleKey(moduleId: string, version: string): string {
   return `${moduleId}@${version}`;
 }
 
-/** Lowercase hex SHA-256, via WebCrypto — available in every target browser and the Capacitor WebView. */
+/** Lowercase hex SHA-256, via WebCrypto - available in every target browser and the Capacitor WebView. */
 export async function sha256Hex(text: string): Promise<string> {
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -44,7 +44,7 @@ export async function getCached(moduleId: string, version: string): Promise<Cach
 
 /**
  * Verifies the published hash before storing. A bundle that doesn't match what
- * the registry claims is never written and never executed — this is the one
+ * the registry claims is never written and never executed - this is the one
  * integrity check standing between the registry and code running in the user's
  * session, so it fails loudly rather than falling back.
  */
@@ -70,7 +70,7 @@ export async function verifyCached(entry: CachedBundle): Promise<boolean> {
   return (await sha256Hex(entry.code)) === entry.integrity.toLowerCase();
 }
 
-/** Drops every cached version of a module — used on uninstall. */
+/** Drops every cached version of a module - used on uninstall. */
 export async function evictModule(moduleId: string): Promise<void> {
   await db.bundles.where('moduleId').equals(moduleId).delete();
 }

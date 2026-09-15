@@ -3,7 +3,7 @@
 One app for the booth, assembled from modules loaded at runtime.
 
 Zollify replaces ZollTool, ZollTax and ZollSource with a single multi-tenant
-platform. Selling, customs, tax and sourcing are **modules** — they register
+platform. Selling, customs, tax and sourcing are **modules** - they register
 themselves against a stable host API, can be switched on and off per account,
 and never import one another.
 
@@ -18,13 +18,13 @@ and never import one another.
   booth with no signal boots every module it already has, out of IndexedDB.
 - **Zollify never touches the sale.** myPOS and SumUp terminals take the card and
   settle to the vendor's own bank. That keeps PCI scope and money-transmission
-  licensing out of the platform — see [SECURITY.md](./SECURITY.md).
+  licensing out of the platform - see [SECURITY.md](./SECURITY.md).
 
 ## Layout
 
 ```
 packages/
-  sdk/            @zollify/sdk          THE boundary — all a module may import
+  sdk/            @zollify/sdk          THE boundary - all a module may import
   shared/         @zollify/shared       sync protocol, types, merge  (ported)
   platform/       @zollify/platform     shell, ModuleLoader, cache, session
   server-core/    @zollify/server-core  gateway, auth, entitlements  (ported)
@@ -95,7 +95,7 @@ npm run test --workspaces
 
 The customs suite includes **golden-file tests that diff the ported engine's
 output against the original legacy implementation** in
-`modules/customs/legacy/app.js`. If those fail, the port has drifted — that is
+`modules/customs/legacy/app.js`. If those fail, the port has drifted - that is
 the point of them, so fix the code rather than the fixture.
 
 ## The module contract
@@ -122,7 +122,7 @@ export default defineModule({
 ```
 
 **The one rule to hold:** a module imports `@zollify/sdk` and nothing else from
-the platform — no reaching into `@zollify/platform`, no importing another
+the platform - no reaching into `@zollify/platform`, no importing another
 module. Modules meet at the SDK's extension points instead. POS emits `sale`;
 Tax subscribes to it; neither package depends on the other, which is why either
 can be disabled, updated or removed on its own.
@@ -135,15 +135,15 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 **Built and passing (156 tests):**
 
 *Platform*
-- `@zollify/sdk` — the boundary, with a host-compatibility checker.
-- `@zollify/platform` — module loader (bundled + remote resolvers), hash-verified
+- `@zollify/sdk` - the boundary, with a host-compatibility checker.
+- `@zollify/platform` - module loader (bundled + remote resolvers), hash-verified
   immutable bundle cache, per-module storage, session handling.
-- **Core** — catalogue with variants and photos, sales events, one inventory
+- **Core** - catalogue with variants and photos, sales events, one inventory
   with per-event claims, recorded sales, discount rules, backup/restore, CSV
   export.
-- **Offline-first sync** — push-then-pull, last-write-wins, epoch recovery, and
+- **Offline-first sync** - push-then-pull, last-write-wins, epoch recovery, and
   per-op isolation so one bad payload cannot strand a device.
-- `@zollify/server-core` — gateway, multi-tenant auth, entitlements, module
+- `@zollify/server-core` - gateway, multi-tenant auth, entitlements, module
   registry, httpOnly refresh cookies.
 
 *Selling*
@@ -157,10 +157,10 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
   sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
-*Modules* — POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
+*Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
 events, Tax & books.
 
-*Tax & books* (the ZollTax port) — **Payments**: drop a myPOS export or
+*Tax & books* (the ZollTax port) - **Payments**: drop a myPOS export or
 statement, a Shopify orders CSV or a Wise history, or pull straight from
 myPOS / Shopify / SumUp; rows cluster per convention (a day-and-a-half gap on
 one terminal), online orders group per month; match clusters to events (or
@@ -179,15 +179,15 @@ from the account's op-log, so it updates whenever an event is edited. Public
 module halves mount under `/p/` with no session; the module resolves the account
 from the slug and refuses unless the module is enabled for it.
 
-*Deployment* — multi-stage Dockerfile, compose, `deploy.sh` that backs up before
+*Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway
 serving the built shell. See *Deploying on a VPS* below.
 
 **Not built:**
 
-- **Android shell** — built (`android/`, three flavours, self-update for
+- **Android shell** - built (`android/`, three flavours, self-update for
   compat/full via `/api/updates/*`; see `.github/workflows/android.yml`).
-- **Billing** — deferred. The per-account enabled-modules list is its seam.
+- **Billing** - deferred. The per-account enabled-modules list is its seam.
 - Smaller carry-overs from ZollTool: customer display mode, QR scanning, price
   comparison, PIN lock, cost tracking and PDF reports.
 
@@ -199,23 +199,23 @@ trimming structural rather than a per-route convention.
 
 ## Deploying on a VPS (EC2 + Caddy)
 
-The host needs Docker, git and Caddy — nothing else. Images are built by
+The host needs Docker, git and Caddy - nothing else. Images are built by
 GitHub Actions and pushed to GHCR on every push to `master`; the host only pulls.
 
 1. **Clone and configure.** `git clone` to `/home/ubuntu/zollify`, then
    `cp apps/server/.env.example apps/server/.env`. Nothing in it is required:
    the signing secret is minted into the data volume on first start, and the
-   first account created on the fresh server becomes its owner — open the
+   first account created on the fresh server becomes its owner - open the
    site once it is up and pick *Set up this server*. The repo and its
-   GHCR package are public, so pulling needs no token — make sure the package
+   GHCR package are public, so pulling needs no token - make sure the package
    `zollify` is set to public under the repo's Packages page once.
 2. **Caddy.** Add the block from `apps/server/Caddyfile.example` to your
    Caddyfile and reload. Caddy does TLS; the gateway listens on
    `127.0.0.1:8787` only and trusts `X-Forwarded-Proto`. If Caddy itself runs
    in Docker, set `CADDY_NETWORK=<its network>` in `.env` (see
-   `docker network ls`) and proxy to `zollify:8787` — the container joins
+   `docker network ls`) and proxy to `zollify:8787` - the container joins
    that network on deploy.
-3. **First start.** `./apps/server/deploy.sh --auto` — pulls the image, the
+3. **First start.** `./apps/server/deploy.sh --auto` - pulls the image, the
    Android APKs from the latest release, and starts the container. Check
    `https://<host>/health`.
 4. **Deploy on push.** Add repo secrets `DEPLOY_HOST`, `DEPLOY_USER`,
@@ -238,5 +238,5 @@ running.
 ## A note on verification
 
 `declare module '*.vue'` means a missing component still typechecks. The build
-is the gate for component wiring, not `tsc` — `npm run build -w @zollify/web`
+is the gate for component wiring, not `tsc` - `npm run build -w @zollify/web`
 is part of CI for that reason.

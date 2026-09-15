@@ -15,7 +15,7 @@ import {
 } from '@zollify/platform';
 
 /**
- * Discount rules — ZollTool's editor, screen for screen.
+ * Discount rules - ZollTool's editor, screen for screen.
  *
  * Rules live in core rather than POS because they reference products and must
  * survive POS being switched off. A rule targets whole product types, single
@@ -36,7 +36,7 @@ const form = reactive({
   name: '',
   type: 'bxgy' as DiscountRule['type'],
   productIds: [] as string[],
-  /** "pid:vid" keys — only relevant when the product itself isn't selected. */
+  /** "pid:vid" keys - only relevant when the product itself isn't selected. */
   variantIds: [] as string[],
   productTypes: [] as string[],
   buyQty: '2',
@@ -68,7 +68,7 @@ function covers(pid: string): boolean {
 }
 const productOf = (key: string): string => key.split(':')[0] ?? key;
 
-/** Other rules that already target something selected here — they stack. */
+/** Other rules that already target something selected here - they stack. */
 const overlapping = computed(() =>
   allDiscounts.value.filter(
     (d) =>
@@ -136,7 +136,7 @@ async function save(): Promise<void> {
     id: editId.value ?? crypto.randomUUID(),
     name: form.name.trim(),
     type: form.type,
-    // Targets a selected type already covers are redundant — drop them.
+    // Targets a selected type already covers are redundant - drop them.
     productIds: form.productIds.filter((id) => {
       const t = typeOf(id);
       return !t || !form.productTypes.includes(t);
@@ -248,7 +248,7 @@ function targets(d: DiscountRule): string {
           <label class="inline"><input v-model="form.hideQuickAdd" type="checkbox" /> <span>Hide the +N quick-add chips on the till</span></label>
         </div>
         <div v-else-if="form.type === 'combo'" class="tiers">
-          <p class="hint">Triggers once for every complete set of the members found in the cart — 2 purses + 3 wallets makes 2 bundles, one wallet left over. Pick at least two members below.</p>
+          <p class="hint">Triggers once for every complete set of the members found in the cart - 2 purses + 3 wallets makes 2 bundles, one wallet left over. Pick at least two members below.</p>
           <label><span>Bundle discount ({{ currency }}, off the total per bundle)</span><input v-model="form.comboDiscountAmount" type="number" min="0" step="0.05" inputmode="decimal" /></label>
         </div>
 
@@ -276,7 +276,7 @@ function targets(d: DiscountRule): string {
               </label>
             </template>
           </div>
-          <p v-if="overlapping.length" class="warn"><Icon name="alert-triangle" :size="14" /> Also targeted by {{ overlapping.map((d) => `"${d.name}"`).join(', ') }} — discounts on the same items stack.</p>
+          <p v-if="overlapping.length" class="warn"><Icon name="alert-triangle" :size="14" /> Also targeted by {{ overlapping.map((d) => `"${d.name}"`).join(', ') }} - discounts on the same items stack.</p>
         </fieldset>
       </div>
       <template #footer>

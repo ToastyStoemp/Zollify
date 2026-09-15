@@ -4,7 +4,7 @@ import vue from '@vitejs/plugin-vue';
 /**
  * Every host dependency a module may use. These are left external and resolved
  * at runtime through the shell's import map, so a bundle carries only its own
- * code — and, critically, never a second copy of Vue or Dexie.
+ * code - and, critically, never a second copy of Vue or Dexie.
  *
  * Adding an entry here also means adding it to the import map in
  * `apps/web/index.html`; a specifier left external with nothing to resolve it

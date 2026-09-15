@@ -6,7 +6,7 @@ import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth'
 /**
  * The account profile: who the booth is, and whether first-run setup has been
  * done. Held on the server rather than synced as ops because it is one record
- * per account with no offline write path worth building — the wizard runs on
+ * per account with no offline write path worth building - the wizard runs on
  * a signed-in device, and every other device reads it at its next login.
  */
 export function registerAccountRoutes(app: FastifyInstance, db: Database.Database): void {
@@ -14,7 +14,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
    * Starts the booth over: every synced op, image and metric row for the
    * account is dropped and the sync epoch is bumped, so devices that still
    * hold the old log throw it away on their next pull. Users, devices and the
-   * profile stay — it is the data that is reset, not the account.
+   * profile stay - it is the data that is reset, not the account.
    */
   app.post('/api/account/wipe', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;

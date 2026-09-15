@@ -20,12 +20,12 @@ import { loadAiConfig, matchEvent, parseInvoicePdf, pingAiKey } from './invoice-
 import { round2, type KvCache } from './types';
 
 /**
- * Tax — the server half (the ZollTax port).
+ * Tax - the server half (the ZollTax port).
  *
  * Holds each account's integration credentials encrypted at rest, talks to
  * myPOS / SumUp / Shopify / Lexware / Anthropic on the account's behalf, and
  * keeps the ledger of per-event expenses. Events and sales come from the
- * account's own op-log — the ZollTool read-token dance is gone.
+ * account's own op-log - the ZollTool read-token dance is gone.
  *
  * The clustering of payments into conventions stays in the browser, as it
  * was in ZollTax; this half only fetches rows, verifies, books and remembers
@@ -267,17 +267,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
             case 'lexware': {
               if (!c.lexware.apiKey) return { ok: false, detail: 'No API key set.' };
               const p = await new LexwareClient(c.lexware.apiKey, c.lexware.apiUrl).ping();
-              return { ok: true, detail: `Connected${p.companyName ? ` — ${p.companyName}` : ''}.` };
+              return { ok: true, detail: `Connected${p.companyName ? ` - ${p.companyName}` : ''}.` };
             }
             case 'mypos': {
               if (c.mypos.mode !== 'live') return { ok: false, detail: 'Missing myPOS credentials.' };
               const accounts = await c.mypos.listAccounts();
-              return { ok: true, detail: `Authenticated — ${accounts.length} account(s).` };
+              return { ok: true, detail: `Authenticated - ${accounts.length} account(s).` };
             }
             case 'shopify': {
               const st = await c.shopify.status(true);
               if (st.mode !== 'live') return { ok: false, detail: 'Missing Shopify credentials.' };
-              if (!st.ready) return { ok: false, detail: st.error ?? 'Token exchange failed — check the client ID/secret.' };
+              if (!st.ready) return { ok: false, detail: st.error ?? 'Token exchange failed - check the client ID/secret.' };
               return { ok: true, detail: `Connected to ${st.shop ?? 'Shopify'}.` };
             }
             case 'sumup': {
@@ -290,7 +290,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
             case 'ai': {
               if (!c.ai.apiKey) return { ok: false, detail: 'No API key set.' };
               const p = await pingAiKey(c.ai.apiKey);
-              return p.ok ? { ok: true, detail: `API key valid — using ${c.ai.model}.` } : { ok: false, detail: p.detail ?? 'Key check failed.' };
+              return p.ok ? { ok: true, detail: `API key valid - using ${c.ai.model}.` } : { ok: false, detail: p.detail ?? 'Key check failed.' };
             }
             default:
               return { ok: false, detail: 'Unknown integration.' };
@@ -569,7 +569,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       app.post('/ledger/parse', async (req, reply) => {
         const { accountId } = who(req);
         const ai = clientsFor(accountId).ai;
-        if (!ai.apiKey) return reply.code(503).send({ error: 'not_configured', message: 'Invoice scanning is off — add an Anthropic API key under Settings → Integrations.' });
+        if (!ai.apiKey) return reply.code(503).send({ error: 'not_configured', message: 'Invoice scanning is off - add an Anthropic API key under Settings → Integrations.' });
         const base64 = String((req.body as { base64?: string } | undefined)?.base64 ?? '');
         if (!base64) return reply.code(400).send({ error: 'invalid', message: 'No PDF provided.' });
         if (Math.floor((base64.length * 3) / 4) > ai.maxPdfBytes) {

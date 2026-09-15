@@ -23,7 +23,7 @@ import {
 import ProductThumb from '../components/ProductThumb.vue';
 
 /**
- * The catalogue — ZollTool's, grouped by type, edited in a sheet.
+ * The catalogue - ZollTool's, grouped by type, edited in a sheet.
  *
  * Stock here is what the booth owns; Inventory is where events claim a share
  * of it. Editing a product and counting it are one form because that is how
@@ -52,7 +52,7 @@ const hsHint = computed(() => HS_CODES.find((h) => h.code === form.tariffNo.trim
 
 // ── SKU generator ──────────────────────────────────────────────────────────
 // PN-2604-SB-PIC-02: booth initials, year+month introduced, type initials,
-// first three letters of the variant (or title), then the edition — one more
+// first three letters of the variant (or title), then the edition - one more
 // than any SKU already using that stem.
 const initials = (text: string, single = 2): string => {
   const words = text.trim().split(/[\s-]+/).filter(Boolean);
@@ -403,7 +403,7 @@ async function remove(product: Product): Promise<void> {
       <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
       <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
     </div>
-    <p v-if="!activeEventId" class="hint">No active event — open one under Events to see what is running low there.</p>
+    <p v-if="!activeEventId" class="hint">No active event - open one under Events to see what is running low there.</p>
     <p v-if="filter === 'customs'" class="hint">These would be left off or mis-weighed on customs documents. Set the tariff no., weight and origin under each product's Customs details.</p>
 
     <p v-if="!filtered.length" class="empty">{{ search || filter !== 'all' ? 'Nothing matches.' : 'No products yet.' }}</p>
@@ -429,7 +429,7 @@ async function remove(product: Product): Promise<void> {
 
     <ModalShell v-if="merging" title="Merge products" @close="merging = false">
       <div class="form">
-        <p class="hint">Combine plain products into one product with a variant each — keychain designs into "Keychain", say. Sales history re-attaches to the variants; nothing is lost.</p>
+        <p class="hint">Combine plain products into one product with a variant each - keychain designs into "Keychain", say. Sales history re-attaches to the variants; nothing is lost.</p>
         <fieldset class="variants">
           <legend>Products to fold together</legend>
           <div class="picks">
@@ -530,7 +530,7 @@ async function remove(product: Product): Promise<void> {
 
         <fieldset class="variants">
           <legend>Variants <button type="button" class="quiet add" @click="addVariant">+ Add variant</button></legend>
-          <p v-if="!form.variants.length" class="hint">No variants — the product sells as-is.</p>
+          <p v-if="!form.variants.length" class="hint">No variants - the product sells as-is.</p>
           <div v-for="(v, i) in form.variants" :key="v.id" class="variant">
             <label class="vphoto">
               <img v-if="v.previewUrl" :src="v.previewUrl" alt="" />

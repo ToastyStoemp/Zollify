@@ -23,7 +23,7 @@ import ProductThumb from '../components/ProductThumb.vue';
  *
  * Two views of the same stock: what the booth owns, and what a given event has
  * set aside. An event with no claim sells from whatever is unclaimed, which is
- * the normal case for a booth working one event at a time — so claiming is
+ * the normal case for a booth working one event at a time - so claiming is
  * opt-in rather than something to fill in for every event.
  */
 
@@ -117,7 +117,7 @@ async function updateClaim(productId: string, variantId: string, value: string):
   if (!eventId.value) return;
   error.value = null;
   try {
-    // Blank means "no claim" — the event falls back to the shared pool. Zero
+    // Blank means "no claim" - the event falls back to the shared pool. Zero
     // is different: it deliberately reserves nothing.
     if (value.trim() === '') await clearClaim(eventId.value, productId, variantId);
     else await setClaim(eventId.value, productId, variantId, Number(value));
@@ -177,12 +177,12 @@ async function unclaimAll(): Promise<void> {
 
       <p class="lede">
         On hand is what you counted; only sales made after that count reduce Free, so a fresh count resets it. Sold is the lifetime total.
-        <template v-if="totals.uncounted"> {{ totals.uncounted }} item{{ totals.uncounted === 1 ? '' : 's' }} never counted — Free shows once you count them.</template>
+        <template v-if="totals.uncounted"> {{ totals.uncounted }} item{{ totals.uncounted === 1 ? '' : 's' }} never counted - Free shows once you count them.</template>
       </p>
 
       <p v-if="overCommitMessage" class="warn" role="alert">{{ overCommitMessage }}</p>
 
-      <p v-if="!stock.length" class="empty">No products yet — add some in Catalog.</p>
+      <p v-if="!stock.length" class="empty">No products yet - add some in Catalog.</p>
 
       <div v-else class="table-scroll"><table>
         <thead>
@@ -216,7 +216,7 @@ async function unclaimAll(): Promise<void> {
             </td>
             <td class="num">{{ row.claimed }}</td>
             <td class="num">{{ row.sold }}</td>
-            <td class="num" :class="{ bad: row.counted && row.free < 0 }">{{ row.counted ? row.free : '—' }}</td>
+            <td class="num" :class="{ bad: row.counted && row.free < 0 }">{{ row.counted ? row.free : '-' }}</td>
           </tr>
           </template>
         </tbody>
@@ -246,13 +246,13 @@ async function unclaimAll(): Promise<void> {
       </label>
 
       <p class="lede">
-        Claiming reserves stock for this event — no other event can sell it. Leave a claim blank and
+        Claiming reserves stock for this event - no other event can sell it. Leave a claim blank and
         the event sells from whatever is unclaimed. Selling past a claim takes the extra from the
         unclaimed stock.
       </p>
 
       <p v-if="!eventId" class="empty">Pick an event to plan what it takes.</p>
-      <p v-else-if="!claims.length" class="empty">No products yet — add some in Catalog.</p>
+      <p v-else-if="!claims.length" class="empty">No products yet - add some in Catalog.</p>
 
       <div v-else class="table-scroll"><table>
         <thead>
@@ -278,12 +278,12 @@ async function unclaimAll(): Promise<void> {
                 v-if="canEdit"
                 type="number"
                 min="0"
-                placeholder="—"
+                placeholder="-"
                 :value="row.claimed ?? ''"
                 :aria-label="`Claim for ${row.label}`"
                 @change="updateClaim(row.productId, row.variantId, ($event.target as HTMLInputElement).value)"
               />
-              <span v-else>{{ row.claimed ?? '—' }}</span>
+              <span v-else>{{ row.claimed ?? '-' }}</span>
             </td>
             <td class="num">{{ row.soldHere }}</td>
             <!-- Negative means more was sold than the claim allowed: the claim

@@ -8,7 +8,7 @@ import { toPlain } from './plain';
 /**
  * The product catalogue.
  *
- * Modules never open this table themselves — they read it through
+ * Modules never open this table themselves - they read it through
  * `sdk.data.products`. Keeping the only writer here means the outbox stays
  * consistent: every mutation records an op for sync, and a module cannot write
  * a product without one.
@@ -38,7 +38,7 @@ export const catalogLoaded = computed(() => loaded.value);
 /** Everything sellable, title-sorted. Soft-deleted rows never appear. */
 export const allProducts = computed(() =>
   [...products.values()].sort(
-    // Manual order first — it is what a seller arranges on the tile grid so the
+    // Manual order first - it is what a seller arranges on the tile grid so the
     // things they sell most are where their hand already is. Title breaks ties.
     (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.title.localeCompare(b.title),
   ),
@@ -65,7 +65,7 @@ export function visibleProductsFor(role: string, isHelper: boolean): Product[] {
 
 export async function upsertProduct(product: Product): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  // Plain data before it reaches IndexedDB — a caller may hand us reactive
+  // Plain data before it reaches IndexedDB - a caller may hand us reactive
   // state, and the structured clone algorithm cannot clone a Proxy.
   const next: Product = toPlain({ ...product, updatedAt: Date.now() });
   await db.products.put(next);
@@ -87,7 +87,7 @@ export async function deleteProduct(id: string): Promise<void> {
   await queueOp({ type: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
 }
 
-/** Replaces the local catalogue wholesale — used by sync pulls and the importer. */
+/** Replaces the local catalogue wholesale - used by sync pulls and the importer. */
 export async function replaceCatalog(rows: Product[]): Promise<void> {
   const db = openCoreDb(requireAccountId());
   await db.products.bulkPut(rows.map(toPlain));

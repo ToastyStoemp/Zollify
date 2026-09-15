@@ -4,7 +4,7 @@
  *
  * Each domain passes its own salt, so the TOTP key and a module's credential
  * key are different keys even though they come from the same secret. The
- * default is the original TOTP salt — changing it would make existing TOTP
+ * default is the original TOTP salt - changing it would make existing TOTP
  * blobs undecryptable.
  */
 import { scryptSync, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';

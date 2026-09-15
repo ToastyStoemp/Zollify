@@ -9,7 +9,7 @@ import { toPlain } from './plain';
  * Discount rules.
  *
  * Stored by core rather than POS because they reference products and have to
- * survive POS being switched off — a rule is catalogue data that happens to be
+ * survive POS being switched off - a rule is catalogue data that happens to be
  * applied at checkout. POS owns the arithmetic; core owns the rows.
  */
 

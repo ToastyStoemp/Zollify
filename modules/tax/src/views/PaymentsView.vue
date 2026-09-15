@@ -124,7 +124,7 @@ async function pull(): Promise<void> {
     }
   }
   if (all.length) await saveWork(eng.mergeIn(clusters.value, all));
-  notice.value = (all.length ? `Imported ${all.length} row(s) — ${progress.value.join(', ')}.` : 'No transactions found.') + (errs.length ? ` Problems: ${errs.join('; ')}` : '');
+  notice.value = (all.length ? `Imported ${all.length} row(s) - ${progress.value.join(', ')}.` : 'No transactions found.') + (errs.length ? ` Problems: ${errs.join('; ')}` : '');
   busy.value = null;
 }
 
@@ -165,7 +165,7 @@ const fmt = (n: number): string => eng.fmtAmt(n);
 async function autoMatch(): Promise<void> {
   refreshEvents();
   if (!events.value.length) {
-    error.value = 'No dated events to match against — add dates to your events first.';
+    error.value = 'No dated events to match against - add dates to your events first.';
     return;
   }
   const r = eng.autoMergeAndMatch(clusters.value, events.value);
@@ -195,7 +195,7 @@ async function setAllCash(): Promise<void> {
   }
   await saveWork(next);
   busy.value = null;
-  notice.value = `Cash set on ${matched.length} cluster(s) — ${fmt(total)} added.`;
+  notice.value = `Cash set on ${matched.length} cluster(s) - ${fmt(total)} added.`;
 }
 
 async function book(uid: string): Promise<void> {
@@ -265,7 +265,7 @@ async function bookFees(key: string): Promise<void> {
     notice.value = `Fees booked. ${res.permalink ?? ''}`;
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    error.value = `Lexware fees: ${m}${/category/i.test(m) ? ' — set the fee category under Settings → Integrations.' : ''}`;
+    error.value = `Lexware fees: ${m}${/category/i.test(m) ? ' - set the fee category under Settings → Integrations.' : ''}`;
   } finally {
     busy.value = null;
   }

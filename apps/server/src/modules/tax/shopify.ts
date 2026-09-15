@@ -1,7 +1,7 @@
 import { dayEndISO, dayStartISO, num, resolveMode, round2, sleep, SourceError, type SourceRow } from './types';
 
 /**
- * Shopify Admin API orders client — pulls paid orders for a date range so
+ * Shopify Admin API orders client - pulls paid orders for a date range so
  * online and Shopify POS sales can be clustered and booked.
  *
  * Auth is a custom-app Admin API token, or a client id + secret exchanged for
@@ -199,7 +199,7 @@ function mockOrders(from: string, to: string): SourceRow[] {
     type: 'Payment',
     amount: 33.0,
     currency: 'EUR',
-    terminal: 'Shopify POS — Booth',
+    terminal: 'Shopify POS - Booth',
     card: 'Shopify POS',
     ref: '#3299',
     desc: 'Shopify order #3299',

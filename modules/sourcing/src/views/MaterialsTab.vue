@@ -7,7 +7,7 @@ import { remove, save, snap } from '../api';
 import { sdk } from '../runtime';
 
 /**
- * Materials — home-print consumables. Paper, ink, packaging: log what you
+ * Materials - home-print consumables. Paper, ink, packaging: log what you
  * buy, and each material's unit cost is the weighted average of everything
  * bought. A dossier's recipe turns those into a cost per print.
  */
@@ -65,7 +65,7 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
       </div>
       <ul v-if="m.purchases.length" class="purchases">
         <li v-for="p in sorted(m)" :key="p.id">
-          <span>{{ p.date || '—' }}</span><span>{{ plural(p.qty, m.unit) }}</span><span>{{ fmtPrice(p.cost, currency) }}</span><span class="muted">{{ p.note }}</span>
+          <span>{{ p.date || '-' }}</span><span>{{ plural(p.qty, m.unit) }}</span><span>{{ fmtPrice(p.cost, currency) }}</span><span class="muted">{{ p.note }}</span>
           <button type="button" class="quiet" aria-label="Remove purchase" @click="dropPurchase(m, p.id)"><Icon name="x" :size="12" /></button>
         </li>
       </ul>

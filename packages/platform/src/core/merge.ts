@@ -11,7 +11,7 @@ import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
 
 /**
- * Product merge — ported from ZollTool. Two or more plain products fold into
+ * Product merge - ported from ZollTool. Two or more plain products fold into
  * one product with a variant each, and their whole sales history re-attaches
  * to those variants through one append-only `product.merge` op. Nothing is
  * lost and nothing needs a resync: every device materialises the same op.
@@ -25,7 +25,7 @@ function requireAccountId(): string {
 
 /**
  * Rewrites the local tables for one merge: sale lines, claims, on-hand
- * counts, discount targets and local price overrides. Idempotent — once a
+ * counts, discount targets and local price overrides. Idempotent - once a
  * source key is remapped it no longer matches, so a second run is a no-op.
  */
 export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise<void> {

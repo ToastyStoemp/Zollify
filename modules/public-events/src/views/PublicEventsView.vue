@@ -101,7 +101,7 @@ async function copy(text: string, what: string): Promise<void> {
     copied.value = what;
     setTimeout(() => (copied.value = null), 1500);
   } catch {
-    error.value = 'Could not copy — select the text and copy it by hand.';
+    error.value = 'Could not copy - select the text and copy it by hand.';
   }
 }
 </script>
@@ -182,7 +182,7 @@ async function copy(text: string, what: string): Promise<void> {
 
             <h3>Widget for your shop</h3>
             <p class="hint">
-              Paste this where the events should appear — a Shopify page or section, or any site.
+              Paste this where the events should appear - a Shopify page or section, or any site.
               <code>data-limit</code> caps how many show; <code>data-heading</code> changes the title.
             </p>
             <pre class="snippet">{{ embedSnippet }}</pre>

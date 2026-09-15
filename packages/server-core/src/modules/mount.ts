@@ -13,7 +13,7 @@ export interface RequestIdentity {
 
 /**
  * What a server module half receives. It is handed the account context rather
- * than being trusted to derive it — a module never reads the raw token, and
+ * than being trusted to derive it - a module never reads the raw token, and
  * never chooses which account it is acting for.
  */
 export interface ModuleContext {
@@ -40,7 +40,7 @@ export interface ServerModule {
   routes: (ctx: ModuleContext) => FastifyPluginAsync;
   /**
    * Unauthenticated routes, mounted under `/p/<id>`. For the few modules that
-   * publish something to the open web — an events page, a calendar feed.
+   * publish something to the open web - an events page, a calendar feed.
    * Responses here may be embedded cross-origin, so the gateway relaxes the
    * resource-isolation headers for this prefix only.
    */
@@ -55,7 +55,7 @@ const RANK: Record<Role, number> = { member: 0, admin: 1, owner: 2 };
  * Enforcement lives here, once, rather than in each module: authentication,
  * the account's entitlement for this module, and the module's minimum role are
  * all checked before any module code runs. A module physically cannot forget
- * to check — which is the only way this stays true as modules are added.
+ * to check - which is the only way this stays true as modules are added.
  */
 export function mountServerModules(
   app: FastifyInstance,
@@ -78,8 +78,8 @@ export function mountServerModules(
 
           if (!isEnabled(db, who.accountId, mod.id)) {
             // 402 rather than 404: the module exists, this account has not
-            // switched it on. Distinguishing the two is safe — module ids are
-            // public — and gives the client something actionable to show.
+            // switched it on. Distinguishing the two is safe - module ids are
+            // public - and gives the client something actionable to show.
             return reply.code(402).send({
               error: 'module_not_enabled',
               moduleId: mod.id,

@@ -77,7 +77,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
             if (intent.action != BluetoothDevice.ACTION_ACL_DISCONNECTED) return
             termConnected = false
             termReady     = false
-            // A disconnect mid-payment must not leave the pending call latched —
+            // A disconnect mid-payment must not leave the pending call latched -
             // that would block every later startPayment with "already in progress".
             failPending("Terminal disconnected")
             notifyListeners("terminalStatus", JSObject().apply { put("connected", false) })
@@ -108,7 +108,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         pos.setPOSInfoListener(this)
         pos.setConnectionListener(this)
         pos.setPOSReadyListener(this)
-        // SDK safety-clearing (stuck transaction dropped) — release our latch too.
+        // SDK safety-clearing (stuck transaction dropped) - release our latch too.
         pos.setTransactionClearedListener { status -> failPending("Transaction cleared (status $status)") }
 
         // Register BLE pairing receiver with highest priority so we handle it before the system dialog.
@@ -237,7 +237,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
     /**
      * Cancel the in-flight payment (user aborted in the app) and clear the
      * pending latch so the plugin can never stay stuck in "already in progress".
-     * Safe to call with no payment running — it then just resets state.
+     * Safe to call with no payment running - it then just resets state.
      */
     @PluginMethod
     fun cancelPayment(call: PluginCall) {
@@ -250,7 +250,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
 
     override fun onConnected(device: BluetoothDevice?) {
         termConnected = true
-        // termReady is set by POSReadyListener — don't notify yet
+        // termReady is set by POSReadyListener - don't notify yet
     }
 
     // ── POSReadyListener ──────────────────────────────────────────────────────
@@ -274,7 +274,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         })
     }
 
-    // Progress notifications during a purchase — keep waiting, a final callback follows.
+    // Progress notifications during a purchase - keep waiting, a final callback follows.
     // Every other status while a purchase is pending is terminal: resolve as failure,
     // otherwise the pending latch sticks and every later payment is rejected with
     // "Payment already in progress". (All SDK POS_STATUS_* constants are >= 0, so the

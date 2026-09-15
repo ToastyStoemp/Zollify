@@ -15,7 +15,7 @@ export interface CartLine extends SaleLine {
   /** Variant key, or null for the product itself. */
   variantId: string | null;
   variantLabel: string | null;
-  /** Product.type — some discount rules target a whole type rather than ids. */
+  /** Product.type - some discount rules target a whole type rather than ids. */
   type?: string;
 }
 
@@ -58,7 +58,7 @@ export const isConverting = computed(
 /**
  * Converts a base amount into what the customer is actually charged.
  *
- * Rounding happens on the converted figure, not the base one — a booth in
+ * Rounding happens on the converted figure, not the base one - a booth in
  * Sweden charges round kronor, and rounding before conversion would produce
  * awkward numbers on the terminal.
  */
@@ -107,7 +107,7 @@ const discountLines = computed<DiscountCartLine[]>(() =>
  */
 const rate = computed(() => (isConverting.value && cart.exchangeRate ? cart.exchangeRate : 1));
 
-/** The manual discount in base currency — an amount was typed in the charge currency. */
+/** The manual discount in base currency - an amount was typed in the charge currency. */
 const baseCustom = computed<CustomDiscount | null>(() =>
   cart.custom && cart.custom.type === 'amount' ? { ...cart.custom, value: round2(cart.custom.value / rate.value) } : cart.custom,
 );
@@ -119,7 +119,7 @@ export const totals = computed(() =>
 /**
  * The charge layer, ported from ZollTool: discounts are computed directly
  * against the local (override-aware) line prices and local bundle totals,
- * not by scaling the base-currency figure — so a bundle price set under
+ * not by scaling the base-currency figure - so a bundle price set under
  * Prices lands exactly at checkout instead of drifting through rounding.
  */
 const chargeLines = computed<DiscountCartLine[]>(() =>
@@ -141,7 +141,7 @@ export const subtotal = computed(() => totals.value.subtotal);
 export const discountTotal = computed(
   () => round2(totals.value.ruleDiscountTotal + totals.value.customDiscountAmount),
 );
-/** Owed in the event's base currency — this is the figure the books use. */
+/** Owed in the event's base currency - this is the figure the books use. */
 export const baseTotal = computed(() => totals.value.grandTotal);
 
 /** Owed in the currency the customer pays in. */
@@ -249,12 +249,12 @@ export function addMisc(title: string, unitPrice: number, qty: number): void {
 /**
  * Records the sale and, on approval, announces it.
  *
- * Cash, split and custom methods are the seller's word — confirmed on screen,
+ * Cash, split and custom methods are the seller's word - confirmed on screen,
  * never through a device. Card goes to the terminal when one is configured;
  * with none, it is the seller's word too.
  *
  * The `sale` event is the entire contract between POS and anything that cares
- * about revenue — core records it, Tax books it, and neither imports this
+ * about revenue - core records it, Tax books it, and neither imports this
  * module. The cart is only cleared after the event is emitted, so a subscriber
  * that throws cannot leave a paid-for basket silently discarded.
  */
@@ -264,7 +264,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
 
   const charged = total.value;
   const base = baseTotal.value;
-  if (charged <= 0) return { approved: false, error: 'The total is zero — nothing to charge.' };
+  if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
 
   cart.busy = true;
   try {

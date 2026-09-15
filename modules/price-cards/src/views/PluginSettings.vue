@@ -4,7 +4,7 @@ import { Icon } from '@zollify/ui';
 import { sdk } from '../runtime';
 
 /**
- * The Photoshop plugin's access — ported from ZollPriceCards. The plugin
+ * The Photoshop plugin's access - ported from ZollPriceCards. The plugin
  * reads the catalogue as price rows and writes the current price onto the
  * text layers of the booth's PSD templates; the designs stay on the artist's
  * machine. The token is shown once, when minted.
@@ -56,7 +56,7 @@ async function copy(text: string): Promise<void> {
     copied.value = true;
     setTimeout(() => (copied.value = false), 1500);
   } catch {
-    /* clipboard blocked — the value is on screen */
+    /* clipboard blocked - the value is on screen */
   }
 }
 </script>
@@ -64,7 +64,7 @@ async function copy(text: string): Promise<void> {
 <template>
   <section class="plugin">
     <h2>Photoshop plugin</h2>
-    <p class="hint">Keep your price-card designs exactly as they are — the ZollPriceCards Photoshop plugin pulls current prices from here and writes them onto the text layers of your PSD templates. Paste the service URL and a plugin token into the plugin.</p>
+    <p class="hint">Keep your price-card designs exactly as they are - the ZollPriceCards Photoshop plugin pulls current prices from here and writes them onto the text layers of your PSD templates. Paste the service URL and a plugin token into the plugin.</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <label>
@@ -75,7 +75,7 @@ async function copy(text: string): Promise<void> {
     <label>
       <span>Plugin token</span>
       <div v-if="token" class="row"><code>{{ token }}</code><button type="button" class="quiet" @click="copy(token)"><Icon name="copy" :size="14" /> {{ copied ? 'Copied' : 'Copy' }}</button></div>
-      <small v-if="token" class="warn">Shown once — paste it into the plugin now. Minting again replaces it.</small>
+      <small v-if="token" class="warn">Shown once - paste it into the plugin now. Minting again replaces it.</small>
       <small v-else-if="createdAt">A token was minted on {{ new Date(createdAt).toLocaleDateString() }}. Mint a new one if it was lost; the old one stops working.</small>
       <small v-else>No token yet.</small>
     </label>

@@ -50,7 +50,7 @@ class SumUpPlugin : Plugin() {
 
     /**
      * SumUpAPI.isLoggedIn() throws an NPE (ReaderModuleCoreState null) on some
-     * devices/SDK builds when the reader module hasn't been initialized yet —
+     * devices/SDK builds when the reader module hasn't been initialized yet -
      * it initializes when the login activity first runs. An unchecked throw
      * from a plugin method crashes Capacitor's worker thread, so the Settings
      * status poll must never let it escape: treat "can't tell" as not logged in.

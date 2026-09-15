@@ -6,7 +6,7 @@ import { join } from 'node:path';
  * The catalogue of client module bundles this server can serve.
  *
  * Bundles are read from disk at boot and hashed once. The hash is published to
- * the client, which refuses to execute anything that doesn't match — so a
+ * the client, which refuses to execute anything that doesn't match - so a
  * corrupted or swapped file on the server is caught in the browser rather than
  * silently run.
  */
@@ -44,7 +44,7 @@ function sha256File(path: string): { hex: string; size: number } {
 
 /**
  * Scans `<storeDir>/<moduleId>/<version>/manifest.json`. A malformed entry is
- * skipped with a warning rather than aborting boot — one bad module directory
+ * skipped with a warning rather than aborting boot - one bad module directory
  * must not take the whole server down.
  */
 export function loadModuleStore(storeDir: string): Map<string, PublishedModule> {

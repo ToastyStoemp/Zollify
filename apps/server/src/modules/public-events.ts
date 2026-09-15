@@ -18,7 +18,7 @@ import {
 } from '@zollify/server-core';
 
 /**
- * Public events — the server half.
+ * Public events - the server half.
  *
  * Republishes the booth's events as a public page, a drop-in widget for a
  * shop, an iCal feed and an Instagram bio, at `/p/public-events/<slug>/…`.
@@ -27,7 +27,7 @@ import {
  *
  * Only sanitised display fields are exposed. The reducer returns whole event
  * records, and `splitPublicEvents` is the single place that picks the fields
- * that may leave — never a spread of the record.
+ * that may leave - never a spread of the record.
  */
 
 function migrate(db: Database.Database): void {
@@ -136,14 +136,14 @@ function range(start: string, end: string): string {
   if (Number.isNaN(s.getTime())) return '';
   const sd = s.getDate(), ed = e.getDate(), sm = MON[s.getMonth()], em = MON[e.getMonth()], sy = s.getFullYear(), ey = e.getFullYear();
   if (start === (end || start)) return `${sd} ${sm} ${sy}`;
-  if (sy === ey && sm === em) return `${sd}–${ed} ${sm} ${sy}`;
-  if (sy === ey) return `${sd} ${sm} – ${ed} ${em} ${sy}`;
-  return `${sd} ${sm} ${sy} – ${ed} ${em} ${ey}`;
+  if (sy === ey && sm === em) return `${sd}-${ed} ${sm} ${sy}`;
+  if (sy === ey) return `${sd} ${sm} - ${ed} ${em} ${sy}`;
+  return `${sd} ${sm} ${sy} - ${ed} ${em} ${ey}`;
 }
 
 function place(ev: PublicEvent): string {
   const loc = [ev.city, ev.country].filter(Boolean).map(h).join(', ');
-  // The flag is a pair of regional-indicator code points — safe unescaped.
+  // The flag is a pair of regional-indicator code points - safe unescaped.
   return ev.flag ? (loc ? `${ev.flag} ${loc}` : ev.flag) : loc;
 }
 
@@ -188,7 +188,7 @@ function renderPage(site: Site): string {
   const webcal = icsUrl.replace(/^https?:\/\//, 'webcal://');
   const upHtml = site.upcoming.length
     ? `<div class="grid">${site.upcoming.map(card).join('')}</div>`
-    : '<div class="empty">No upcoming events right now — check back soon.</div>';
+    : '<div class="empty">No upcoming events right now - check back soon.</div>';
   const pastHtml =
     site.config.showPast && site.past.length
       ? `<h2 class="sec">Past events</h2><ul class="past">${site.past
@@ -197,8 +197,8 @@ function renderPage(site: Site): string {
       : '';
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${h(site.org)} — Events</title>
-<meta name="description" content="${h(site.org)} — ${h(site.config.tagline)}. Upcoming conventions and events.">
+<title>${h(site.org)} - Events</title>
+<meta name="description" content="${h(site.org)} - ${h(site.config.tagline)}. Upcoming conventions and events.">
 <style>${PAGE_STYLE}</style></head><body><div class="wrap">
 <header class="hero">
   <div class="org">${h(site.org)}</div>
@@ -240,7 +240,7 @@ function widget(BASE) {
     var sPart = WD[s.getDay()] + ', ' + MON[s.getMonth()] + ' ' + s.getDate();
     if (!e || e.getTime() === s.getTime()) return sPart + ', ' + s.getFullYear();
     if (s.getFullYear() !== e.getFullYear()) sPart += ', ' + s.getFullYear();
-    return sPart + ' – ' + WD[e.getDay()] + ', ' + MON[e.getMonth()] + ' ' + e.getDate() + ', ' + e.getFullYear();
+    return sPart + ' - ' + WD[e.getDay()] + ', ' + MON[e.getMonth()] + ' ' + e.getDate() + ', ' + e.getFullYear();
   };
   var CAL = '<svg class="zev-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4.5" width="18" height="17" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6"/><line x1="16" y1="2.5" x2="16" y2="6"/></svg>';
   var PIN = '<svg class="zev-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-6.2 7-12a7 7 0 1 0-14 0c0 5.8 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg>';
@@ -303,7 +303,7 @@ function widget(BASE) {
           wasImminent = imminent;
         });
       } else {
-        body = '<div class="zev-empty">No upcoming events right now — check back soon.</div>';
+        body = '<div class="zev-empty">No upcoming events right now - check back soon.</div>';
       }
       el.innerHTML = '<div class="zev"><div class="zev-head">' + esc(heading) + '</div>' + body + '</div>';
       var mw = el.getAttribute('data-max-width');
@@ -341,7 +341,7 @@ export const publicEventsServerModule: ServerModule = {
       if (config.slug) {
         const owner = accountForSlug(ctx.db, config.slug);
         if (owner && owner !== who.accountId) {
-          return reply.code(409).send({ error: 'slug_taken', message: 'That address is already taken — try another.' });
+          return reply.code(409).send({ error: 'slug_taken', message: 'That address is already taken - try another.' });
         }
       }
       ctx.db

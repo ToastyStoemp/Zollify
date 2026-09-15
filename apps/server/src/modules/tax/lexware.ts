@@ -2,7 +2,7 @@ import { round2, sleep } from './types';
 
 /**
  * Lexware Office (lexoffice) public API: vouchers, files, contacts. Plus the
- * two voucher builders — a revenue "salesinvoice" for an event or a month of
+ * two voucher builders - a revenue "salesinvoice" for an event or a month of
  * online sales, and a "purchaseinvoice" for a month's payment fees.
  *
  * Ported from ZollTax. Booking categories are fixed lexoffice UUIDs; the
@@ -40,7 +40,7 @@ export class LexwareApiError extends Error {
   body: unknown;
   constructor(status: number, statusText: string, body: unknown, context: string) {
     const detail = body && typeof body === 'object' ? ((body as { message?: string }).message ?? JSON.stringify(body)) : String(body ?? '');
-    super(`Lexware API ${status} ${statusText} on ${context}${detail ? ` — ${detail}` : ''}`);
+    super(`Lexware API ${status} ${statusText} on ${context}${detail ? ` - ${detail}` : ''}`);
     this.name = 'LexwareApiError';
     this.status = status;
     this.body = body;
@@ -205,7 +205,7 @@ export interface FeeInput {
 export function buildFeeVoucher(input: FeeInput): Voucher {
   if (!input.voucherDate) throw new Error('voucherDate is required (YYYY-MM-DD).');
   if (input.totalGrossAmount == null) throw new Error('totalGrossAmount is required.');
-  if (!input.categoryId) throw new Error('A fee expense category is required — set it under Settings → Lexware Office.');
+  if (!input.categoryId) throw new Error('A fee expense category is required - set it under Settings → Lexware Office.');
   const taxType = input.taxType ?? 'gross';
   const it = item(input.totalGrossAmount, input.taxRatePercent ?? 0, taxType, input.categoryId);
   const voucher: Voucher = {

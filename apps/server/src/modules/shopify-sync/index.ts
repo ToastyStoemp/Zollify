@@ -6,7 +6,7 @@ import { matchCatalogs } from './match';
 import type { SavedMatches, ShopProduct, ZtProduct } from './types';
 
 /**
- * Shopify sync — the server half.
+ * Shopify sync - the server half.
  *
  * Ported from zolltool-shopify-sync: the catalogue matcher and Admin API client
  * come across unchanged, along with their tests. What is new is per-account
@@ -14,7 +14,7 @@ import type { SavedMatches, ShopProduct, ZtProduct } from './types';
  * where the original served one.
  *
  * The access token never leaves this process and is encrypted at rest
- * (SECURITY.md §5) — a Shopify admin token is exactly the kind of credential
+ * (SECURITY.md §5) - a Shopify admin token is exactly the kind of credential
  * that must not sit in a browser or in plain SQLite.
  */
 
@@ -26,7 +26,7 @@ const ConnectBody = z.object({
     .string()
     .min(3)
     .max(255)
-    // Shopify domains only — this string is interpolated into the API URL, so
+    // Shopify domains only - this string is interpolated into the API URL, so
     // anything looser would let a caller point the client at another host.
     .regex(/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i, 'Expected a *.myshopify.com domain.'),
   accessToken: z.string().min(10).max(500),

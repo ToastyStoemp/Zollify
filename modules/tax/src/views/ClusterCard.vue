@@ -21,7 +21,7 @@ const c = computed(() => props.cluster);
 const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString('nl-BE', { day: '2-digit', month: 'short', year: 'numeric' });
 const fmtDateTime = (ms: number): string => new Date(ms).toLocaleString('nl-BE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 const fmt = (n: number): string => eng.fmtAmt(n, c.value.txns[0]?.currency ?? 'EUR');
-const dateRange = computed(() => fmtDate(c.value.start) + (fmtDate(c.value.start) !== fmtDate(c.value.end) ? ' – ' + fmtDate(c.value.end) : ''));
+const dateRange = computed(() => fmtDate(c.value.start) + (fmtDate(c.value.start) !== fmtDate(c.value.end) ? ' - ' + fmtDate(c.value.end) : ''));
 const revenue = computed(() => round2(c.value.totalPay + (c.value.cashAmount || 0)));
 const net = computed(() => round2(revenue.value - c.value.totalFee));
 const feeRate = computed(() => (c.value.totalPay > 0 ? ((c.value.totalFee / c.value.totalPay) * 100).toFixed(2) : '0.00'));
@@ -82,7 +82,7 @@ async function applyCash(): Promise<void> {
 async function doSplitAtDate(): Promise<void> {
   if (!splitDate.value) return;
   const next = eng.splitAtDate(clusters.value, c.value.uid, splitDate.value);
-  if (!next) sdk().ui.toast('Every transaction falls on one side of that date — pick one inside the range.', { kind: 'error' });
+  if (!next) sdk().ui.toast('Every transaction falls on one side of that date - pick one inside the range.', { kind: 'error' });
   await apply(next);
 }
 async function doSplitSelected(): Promise<void> {
@@ -171,13 +171,13 @@ function pdf(mode: 'payments' | 'fees'): void {
     <div v-if="open" class="body">
       <div v-if="manual.length" class="banner warn">
         <span>
-          <strong>{{ manual.length }} manual payment order{{ manual.length !== 1 ? 's' : '' }}</strong> — {{ fmt(manual.reduce((s, t) => s + t.amount, 0)) }}. Likely paid on the card terminal and already in the card data.
+          <strong>{{ manual.length }} manual payment order{{ manual.length !== 1 ? 's' : '' }}</strong> - {{ fmt(manual.reduce((s, t) => s + t.amount, 0)) }}. Likely paid on the card terminal and already in the card data.
           <span class="sub">{{ manual.map((t) => `${t.orderNum} (${fmt(t.amount)})`).join(', ') }}</span>
         </span>
         <button type="button" class="danger" @click="removeManual">Remove from cluster</button>
       </div>
       <div v-for="ov in overlaps" :key="ov.uid" class="banner">
-        <span><strong>{{ ov.clusterID }}</strong> ({{ ov.device }}) overlaps these dates — same event?</span>
+        <span><strong>{{ ov.clusterID }}</strong> ({{ ov.device }}) overlaps these dates - same event?</span>
         <button type="button" @click="doMerge(ov.uid)">Merge clusters</button>
       </div>
 
@@ -227,7 +227,7 @@ function pdf(mode: 'payments' | 'fees'): void {
         <p class="eyebrow">Merge with another cluster</p>
         <div class="row">
           <select v-model="mergeWith">
-            <option value="">— select cluster —</option>
+            <option value="">- select cluster -</option>
             <option v-for="x in clusters.filter((y) => y.uid !== c.uid)" :key="x.uid" :value="x.uid">
               {{ x.clusterID }}{{ x.customName ? ' · ' + x.customName : '' }} ({{ x.device }})
             </option>
@@ -246,7 +246,7 @@ function pdf(mode: 'payments' | 'fees'): void {
         <div class="box">
           <h4>{{ c.isOnlineCluster ? 'Online orders' : 'Payments' }}</h4>
           <div class="big good">{{ fmt(c.totalPay) }}</div>
-          <small>{{ c.payments.length }} order{{ c.payments.length !== 1 ? 's' : '' }} · avg {{ c.payments.length ? fmt(c.totalPay / c.payments.length) : '–' }}</small>
+          <small>{{ c.payments.length }} order{{ c.payments.length !== 1 ? 's' : '' }} · avg {{ c.payments.length ? fmt(c.totalPay / c.payments.length) : '-' }}</small>
         </div>
         <div class="box">
           <h4>Fees</h4>
@@ -268,10 +268,10 @@ function pdf(mode: 'payments' | 'fees'): void {
 
       <div class="acct">
         <div class="row">
-          <template v-if="c.isOnlineCluster"><span class="hint">Online — books as monthly online sales.</span></template>
+          <template v-if="c.isOnlineCluster"><span class="hint">Online - books as monthly online sales.</span></template>
           <template v-else>
             <select :value="c.matchedEvent?.id ?? ''" aria-label="Match to an event" @change="match(($event.target as HTMLSelectElement).value)">
-              <option value="">— match an event —</option>
+              <option value="">- match an event -</option>
               <option v-for="e in events" :key="e.id" :value="e.id">{{ e.name }} ({{ e.dateStart }})</option>
             </select>
             <button v-if="suggestion" type="button" @click="match(suggestion.id)">Match “{{ suggestion.name }}”?</button>
@@ -285,7 +285,7 @@ function pdf(mode: 'payments' | 'fees'): void {
           <button v-if="c.matchedEvent" type="button" :disabled="busy === 'cash'" @click="loadCash"><Icon name="coins" :size="14" /> Cash from sales</button>
           <span v-if="c.cashLoaded" class="pill good"><Icon name="banknote" :size="12" /> {{ fmt(c.cashAmount) }}</span>
           <template v-if="canBook">
-            <a v-if="booked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${booked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Booked — view <Icon name="external-link" :size="12" /></a>
+            <a v-if="booked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${booked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Booked - view <Icon name="external-link" :size="12" /></a>
             <button v-else type="button" class="primary" @click="emit('book', c.uid)"><Icon name="send" :size="14" /> Book revenue to Lexware</button>
           </template>
         </div>
@@ -305,7 +305,7 @@ function pdf(mode: 'payments' | 'fees'): void {
                 <span v-if="t.isOnline" class="tag">online</span>
               </td>
               <td :class="['num', t.type === 'Payment' ? 'good' : 'bad']">{{ t.type === 'Payment' ? '+' : '−' }}{{ fmt(Math.abs(t.amount)) }}</td>
-              <td>{{ t.source === 'shopify' ? t.orderNum || t.ref : t.card || '–' }}</td>
+              <td>{{ t.source === 'shopify' ? t.orderNum || t.ref : t.card || '-' }}</td>
               <td><button type="button" class="quiet x" :aria-label="`Remove transaction ${t.ref}`" @click="removeTxn(t.id)"><Icon name="x" :size="14" /></button></td>
             </tr>
           </tbody>

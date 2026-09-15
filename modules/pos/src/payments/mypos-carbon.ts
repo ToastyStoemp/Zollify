@@ -17,7 +17,7 @@ export const myposCarbonProvider: PaymentProvider = {
       const { connected, detail } = await CarbonPayment.getStatus();
       let statusDetail = detail ?? (connected ? 'Terminal ready' : undefined);
       if (connected) {
-        // Best-effort — the terminal's settlement currency, shown up front so a
+        // Best-effort - the terminal's settlement currency, shown up front so a
         // mismatch (event in SEK, terminal set to EUR) is visible before the
         // seller ever taps Card, not after a confusing instant "declined".
         try {
@@ -35,7 +35,7 @@ export const myposCarbonProvider: PaymentProvider = {
 
   async startPayment(req: PaymentRequest): Promise<PaymentResult> {
     // MyPOSAPI.openPaymentActivity silently refuses a currency that doesn't
-    // match the terminal's own settlement currency — the activity finishes
+    // match the terminal's own settlement currency - the activity finishes
     // instantly with no card screen shown, which we'd otherwise only see as a
     // generic "Payment cancelled". Check first and say so plainly.
     try {
@@ -46,7 +46,7 @@ export const myposCarbonProvider: PaymentProvider = {
         return { approved: false, provider: 'mypos-carbon', error };
       }
     } catch {
-      // POS info unavailable — fall through and let the SDK's own validation handle it.
+      // POS info unavailable - fall through and let the SDK's own validation handle it.
     }
 
     logDiagnostic(`CarbonPayment.startPayment amount=${req.amount} currency=${req.currency}`);
@@ -66,6 +66,6 @@ export const myposCarbonProvider: PaymentProvider = {
   },
 
   async cancel(): Promise<void> {
-    // Intent-based flow — cancellation happens on the terminal UI itself.
+    // Intent-based flow - cancellation happens on the terminal UI itself.
   },
 };

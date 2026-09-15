@@ -54,9 +54,9 @@ export function resolveVatNumber(artist: ArtistInfo, country?: string): string {
 
 export const RECEIPT_KEYS = {
   artist: 'customs.artistDefaults',
-  /** Flattened onto white for thermal printing — see processLogoFile. */
+  /** Flattened onto white for thermal printing - see processLogoFile. */
   logoB64: 'receipt.logoB64',
-  /** Same source image, transparency preserved — for on-screen use (customer display). */
+  /** Same source image, transparency preserved - for on-screen use (customer display). */
   logoScreenB64: 'receipt.logoScreenB64',
   footerText: 'receipt.footerText',
   autoPrint: 'receipt.autoPrint',
@@ -174,7 +174,7 @@ export function buildReceiptLines(
         text: `  ${[leg.cardBrand, leg.authCode ? `auth ${leg.authCode}` : ''].filter(Boolean).join(' · ')}`,
       });
     }
-    // The card processor's transaction reference (e.g. myPOS transaction ID) —
+    // The card processor's transaction reference (e.g. myPOS transaction ID) -
     // handy for reconciliation and refunds.
     if (leg.txRef) lines.push({ kind: 'text', text: `  Txn ${leg.txRef}` });
   }
@@ -212,7 +212,7 @@ export async function processLogoFile(file: Blob): Promise<string> {
 
 /**
  * Prepare the same picked logo for on-screen use (customer display): scaled
- * down but with transparency preserved, unlike processLogoFile — a light or
+ * down but with transparency preserved, unlike processLogoFile - a light or
  * white-on-transparent logo would otherwise disappear once flattened onto
  * the white background thermal printing requires.
  */

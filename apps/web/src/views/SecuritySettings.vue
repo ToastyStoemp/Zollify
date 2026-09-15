@@ -5,7 +5,7 @@ import { loader } from '../boot';
 import { Icon } from '@zollify/ui';
 
 /**
- * Account & security — ported from ZollTool: two-factor authentication with
+ * Account & security - ported from ZollTool: two-factor authentication with
  * recovery codes, the login sessions on this account with remote sign-out,
  * and the danger zone (delete my login, or the whole account).
  */
@@ -167,7 +167,7 @@ onMounted(async () => {
       <h3>Two-factor authentication</h3>
       <p class="hint">Protect your login with an authenticator app (Google Authenticator, Authy, 1Password…).</p>
       <template v-if="recovery">
-        <p class="ok">2FA enabled. Save these recovery codes — each works once if you lose your device; they won't be shown again.</p>
+        <p class="ok">2FA enabled. Save these recovery codes - each works once if you lose your device; they won't be shown again.</p>
         <div class="codes"><code v-for="c in recovery" :key="c">{{ c }}</code></div>
         <button type="button" @click="recovery = null">Done</button>
       </template>
@@ -193,7 +193,7 @@ onMounted(async () => {
         <button type="button" class="quiet" @click="loadSessions">Refresh</button>
         <button v-if="sessions.length > 1" type="button" class="quiet danger" @click="revokeOthers">Log out all others</button>
       </div>
-      <p class="hint">Devices currently signed in as you.<template v-if="!geo"> Location is off — showing device and IP.</template></p>
+      <p class="hint">Devices currently signed in as you.<template v-if="!geo"> Location is off - showing device and IP.</template></p>
       <button type="button" class="signout" @click="leave">Sign out on this device</button>
       <p v-if="!sessions.length" class="hint">No active sessions.</p>
       <ul v-else class="sessions">
@@ -210,7 +210,7 @@ onMounted(async () => {
     <article class="card danger-zone">
       <h3>Danger zone</h3>
       <p class="hint">
-        <template v-if="isAdmin">Permanently delete this account and <strong>all</strong> of its data — events, products, sales, images and every user. This cannot be undone.</template>
+        <template v-if="isAdmin">Permanently delete this account and <strong>all</strong> of its data - events, products, sales, images and every user. This cannot be undone.</template>
         <template v-else>Permanently delete your own login. The account's shared data stays for the other members.</template>
       </p>
       <button v-if="!showDanger" type="button" class="danger" @click="showDanger = true">{{ isAdmin ? 'Delete account & all data…' : 'Delete my login…' }}</button>

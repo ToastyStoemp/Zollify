@@ -14,8 +14,8 @@ import type {
  *
  * Core is not a module, but it follows the same per-account rule so two logins
  * on one device never see each other's catalogue. Modules get their own
- * databases via `sdk.db()`; this one holds the shared domain — products,
- * events, stock, transactions — that modules read through the SDK rather than
+ * databases via `sdk.db()`; this one holds the shared domain - products,
+ * events, stock, transactions - that modules read through the SDK rather than
  * opening themselves.
  */
 
@@ -71,7 +71,7 @@ export function openCoreDb(accountId: string): CoreDb {
     products: 'id, title, sku, forSale, updatedAt',
     events: 'id, name, status, updatedAt',
     // Compound key so stock is unique per event/product/variant. variantId is
-    // '' rather than null for the product itself — IndexedDB compound keys
+    // '' rather than null for the product itself - IndexedDB compound keys
     // cannot hold null, which is why the shared type documents it that way.
     eventStock: '[eventId+productId+variantId], eventId, productId',
     transactions: 'id, eventId, timestamp',
@@ -88,7 +88,7 @@ export function openCoreDb(accountId: string): CoreDb {
    * Before this, stock existed only per event and there was no answer to "how
    * many do I own". Existing per-event rows become claims against the new
    * inventory, and the inventory is seeded from the largest claim any event
-   * held — the only figure in the old data that is evidence of what was owned.
+   * held - the only figure in the old data that is evidence of what was owned.
    * It is a starting point to correct, not a count, which is why the Inventory
    * screen leads with a recount prompt when it finds seeded rows.
    */

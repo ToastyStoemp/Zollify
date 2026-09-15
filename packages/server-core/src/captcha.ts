@@ -61,7 +61,7 @@ export function verifyChallenge(token: string, solution: string | number): { ok:
   } catch {
     return { ok: false, error: 'Malformed CAPTCHA.' };
   }
-  if (!data.exp || Date.now() > data.exp) return { ok: false, error: 'CAPTCHA expired — please retry.' };
+  if (!data.exp || Date.now() > data.exp) return { ok: false, error: 'CAPTCHA expired - please retry.' };
   if (usedNonces.has(data.nonce)) return { ok: false, error: 'CAPTCHA already used.' };
   const digest = createHash('sha256').update(`${data.nonce}:${solution}`).digest();
   if (leadingZeroBits(digest) < data.difficulty) return { ok: false, error: 'CAPTCHA not solved.' };

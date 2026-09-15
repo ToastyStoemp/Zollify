@@ -17,11 +17,11 @@ export const sumupProvider: PaymentProvider = {
     if (!hasNativePlugin('SumUp')) return { connected: false, detail: 'Android only' };
     try {
       const { loggedIn } = await SumUp.isLoggedIn();
-      if (loggedIn) return { connected: true, detail: 'Logged in — reader connects at checkout' };
+      if (loggedIn) return { connected: true, detail: 'Logged in - reader connects at checkout' };
       const hasKey = !!(await getSetting<string>(SUMUP_KEY_SETTING));
       return {
         connected: false,
-        detail: hasKey ? 'Not logged in — tap Connect' : 'Enter your affiliate key below, then Connect',
+        detail: hasKey ? 'Not logged in - tap Connect' : 'Enter your affiliate key below, then Connect',
       };
     } catch (err) {
       return { connected: false, detail: String(err) };
@@ -65,7 +65,7 @@ export const sumupProvider: PaymentProvider = {
     await SumUp.logout();
   },
 
-  /** True when SumUp isn't signed in yet — checkout should offer to log in. */
+  /** True when SumUp isn't signed in yet - checkout should offer to log in. */
   async needsLogin(): Promise<boolean> {
     if (!hasNativePlugin('SumUp')) return false;
     try {

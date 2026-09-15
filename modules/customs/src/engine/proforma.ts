@@ -1,4 +1,4 @@
-/** Proforma invoice — exact port of legacy printProformaInvoice() (golden-tested). */
+/** Proforma invoice - exact port of legacy printProformaInvoice() (golden-tested). */
 import { calcProduct, countryToCode, esc, floorN, fmtWeightKg, formatNum, hasCustomsInfo } from './calc';
 import type { CustomsState } from './model';
 
@@ -49,7 +49,7 @@ export function buildProformaHtml(state: CustomsState, now: Date = new Date()): 
     .map((p, i) => {
       const c = calcProduct(p);
       const qty = c.amount || 0;
-      const unitPrice = c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : p.priceNote || '—';
+      const unitPrice = c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : p.priceNote || '-';
       const totalVal = c.totalValue != null ? c.totalValue : 0;
       const originCc =
         p.originCountry && p.originCountry.trim()
@@ -61,12 +61,12 @@ export function buildProformaHtml(state: CustomsState, now: Date = new Date()): 
       return `<tr>
       <td class="r">${i + 1}</td>
       <td>${esc(p.title || '')}</td>
-      <td>${esc(p.tariffNo || '—')}</td>
+      <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
-      <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : '—'}</td>
+      <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : '-'}</td>
       <td class="r">${fmtWeightKg(c.totalWeightKg)}</td>
       <td class="r">${esc(String(unitPrice))}</td>
-      <td class="r">${c.totalValue != null ? c.totalValue : '—'}</td>
+      <td class="r">${c.totalValue != null ? c.totalValue : '-'}</td>
       <td class="r">${originCc}</td>
     </tr>`;
     })
@@ -108,8 +108,8 @@ export function buildProformaHtml(state: CustomsState, now: Date = new Date()): 
 
 <div class="meta-row">
   <div class="meta-item"><div class="meta-label">Invoice Date</div><div class="meta-value">${today}</div></div>
-  <div class="meta-item"><div class="meta-label">Event</div><div class="meta-value">${esc(m.event || '—')}</div></div>
-  <div class="meta-item"><div class="meta-label">Event Dates</div><div class="meta-value">${esc([m.eventDateStart, m.eventDateEnd].filter(Boolean).join(' – ') || '—')}</div></div>
+  <div class="meta-item"><div class="meta-label">Event</div><div class="meta-value">${esc(m.event || '-')}</div></div>
+  <div class="meta-item"><div class="meta-label">Event Dates</div><div class="meta-value">${esc([m.eventDateStart, m.eventDateEnd].filter(Boolean).join(' - ') || '-')}</div></div>
   <div class="meta-item"><div class="meta-label">Currency</div><div class="meta-value">${esc(cur)}</div></div>
 </div>
 

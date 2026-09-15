@@ -28,7 +28,7 @@ describe('tokenize', () => {
   });
 });
 
-describe('matchCatalogs — variant level', () => {
+describe('matchCatalogs - variant level', () => {
   it('matches a variant by exact SKU regardless of name', () => {
     const zts = [zt('a', { title: 'Nothing Alike', variants: [{ id: 'v1', name: 'X', sku: 'SKU-1' }] })];
     const shops = [shop('1', 'Completely Different', { variants: [{ sku: 'SKU-1' }] })];

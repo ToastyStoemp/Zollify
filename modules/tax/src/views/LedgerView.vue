@@ -6,8 +6,8 @@ import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
 
 /**
- * Ledger: per-event profit and loss. Revenue comes from the till; costs —
- * booth fee, travel, hotel — are entered here, with the invoice attached now
+ * Ledger: per-event profit and loss. Revenue comes from the till; costs -
+ * booth fee, travel, hotel - are entered here, with the invoice attached now
  * or later. An invoice PDF can be scanned to prefill the form and pick the
  * event.
  */
@@ -165,7 +165,7 @@ async function openInvoice(e: Expense): Promise<void> {
         <button v-if="current" type="button" class="quiet back" @click="back"><Icon name="arrow-left" :size="14" /> All events</button>
         <h1>{{ current ? current.name : 'Ledger' }}</h1>
         <p class="lede">
-          <template v-if="current">{{ current.country }}{{ current.start ? ` · ${current.start}` : '' }} — revenue from the till against the costs of doing the event.</template>
+          <template v-if="current">{{ current.country }}{{ current.start ? ` · ${current.start}` : '' }} - revenue from the till against the costs of doing the event.</template>
           <template v-else>Per-event profit and loss. Revenue is live from your sales; add booth, travel and hotel costs and attach the invoices.</template>
         </p>
       </div>
@@ -189,9 +189,9 @@ async function openInvoice(e: Expense): Promise<void> {
           <tbody>
             <tr v-for="r in rows" :key="r.eventId" class="row" @click="openEvent(r)">
               <td><strong>{{ r.name }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
-              <td class="mono">{{ r.start || '—' }}</td>
+              <td class="mono">{{ r.start || '-' }}</td>
               <td class="num good">{{ fmt(r.revenue, r.currency) }}</td>
-              <td class="num bad">{{ r.expenses ? '−' + fmt(r.expenses, r.currency) : '—' }}</td>
+              <td class="num bad">{{ r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
               <td :class="['num', r.margin >= 0 ? 'good' : 'bad']">{{ fmt(r.margin, r.currency) }}</td>
               <td class="sub">{{ r.expenseCount }} item{{ r.expenseCount === 1 ? '' : 's' }}{{ r.unbooked ? ` · ${r.unbooked} unbooked` : '' }}{{ r.currencies.length > 1 ? ' · mixed currencies' : '' }}</td>
             </tr>
@@ -244,8 +244,8 @@ async function openInvoice(e: Expense): Promise<void> {
           <thead><tr><th>Date</th><th>Vendor</th><th>Category</th><th class="num">Amount</th><th>Invoice</th><th></th></tr></thead>
           <tbody>
             <tr v-for="e in expenses" :key="e.id">
-              <td class="mono">{{ e.date || '—' }}</td>
-              <td>{{ e.vendor || '—' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span></td>
+              <td class="mono">{{ e.date || '-' }}</td>
+              <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span></td>
               <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}</td>
               <td class="num">{{ fmt(e.amount, e.currency) }}</td>
               <td>

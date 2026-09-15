@@ -28,7 +28,7 @@ export function registerModuleRoutes(
    * Re-scans the module store.
    *
    * The catalogue is read once at boot, so publishing a module used to require
-   * restarting the gateway — which in turn drops every open connection. The map
+   * restarting the gateway - which in turn drops every open connection. The map
    * is mutated in place rather than replaced, because the routes below close
    * over this exact reference.
    */
@@ -51,7 +51,7 @@ export function registerModuleRoutes(
   /**
    * The boot manifest: descriptors for every module this account has enabled
    * and this user's role may load. Filtering by role here means a helper's
-   * device is never even told a bundle exists — the client's role check is
+   * device is never even told a bundle exists - the client's role check is
    * then a second line, not the only one.
    */
   app.get('/modules/manifest', async (req) => {

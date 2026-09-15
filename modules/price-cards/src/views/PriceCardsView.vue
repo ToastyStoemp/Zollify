@@ -71,7 +71,7 @@ function print(): void {
     </header>
 
     <p v-if="!products.length" class="empty">
-      No products for sale yet — add some in Catalog and they'll appear here.
+      No products for sale yet - add some in Catalog and they'll appear here.
     </p>
 
     <div v-else class="picker">
@@ -104,7 +104,7 @@ function print(): void {
 .sku { margin: 0; font-size: .75rem; font-family: ui-monospace, monospace; color: #5a6472; }
 .price { margin: auto 0 0; font-size: 1.4rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-/* Only the cards should reach the paper — the controls and picker are workflow. */
+/* Only the cards should reach the paper - the controls and picker are workflow. */
 @media print {
   .controls, .picker, .empty { display: none; }
   .card { border-color: #999; }

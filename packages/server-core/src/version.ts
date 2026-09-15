@@ -15,7 +15,7 @@ export function resolveCommit(dataDir: string): string {
     const f = readFileSync(join(dataDir, 'commit'), 'utf8').trim();
     if (f) return f;
   } catch {
-    /* no commit file — fall through to git (dev) */
+    /* no commit file - fall through to git (dev) */
   }
   try {
     const sha = execSync('git rev-parse --short HEAD').toString().trim();

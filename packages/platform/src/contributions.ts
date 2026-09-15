@@ -23,7 +23,7 @@ export interface RouteSink {
 /**
  * Everything modules have contributed to the shell, tracked by owner so a
  * module can be unloaded cleanly. Reactive so the nav and settings index
- * re-render the moment a module is enabled or disabled — no reload.
+ * re-render the moment a module is enabled or disabled - no reload.
  */
 export class ContributionRegistry {
   readonly routes = reactive<OwnedRoute[]>([]);
@@ -88,7 +88,7 @@ export class ContributionRegistry {
 
   /**
    * Nav visible to a role, in order. Role filtering happens here as well as in
-   * the router guard — hiding a link is courtesy, refusing the route is the
+   * the router guard - hiding a link is courtesy, refusing the route is the
    * control, and the server refusing the data is the guarantee.
    */
   navFor(role: Role): OwnedNavItem[] {

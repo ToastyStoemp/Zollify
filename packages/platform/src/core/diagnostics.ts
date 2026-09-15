@@ -3,7 +3,7 @@ import { deviceFlavor, deviceId, deviceName } from './device';
 
 /**
  * In-memory ring buffer of console warnings/errors, uncaught exceptions and
- * explicit breadcrumbs — uploaded to the server on request (This device, or
+ * explicit breadcrumbs - uploaded to the server on request (This device, or
  * right from a failed-payment screen) so a register without a usable USB or
  * ADB connection can still get diagnostics to whoever is investigating.
  * Ported from ZollTool.
@@ -34,7 +34,7 @@ function push(level: LogEntry['level'], args: unknown[]): void {
 }
 
 let installed = false;
-/** Call once at startup — patches console.warn/error and catches uncaught errors. */
+/** Call once at startup - patches console.warn/error and catches uncaught errors. */
 export function installDiagnostics(): void {
   if (installed || typeof window === 'undefined') return;
   installed = true;

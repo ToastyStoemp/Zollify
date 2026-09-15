@@ -94,7 +94,7 @@ const inSection = (sec: Section): boolean =>
 const syncLabel = computed(() => {
   if (syncState.value === 'syncing') return 'Syncing…';
   if (syncState.value === 'offline') return pendingCount.value ? `Offline · ${pendingCount.value} waiting` : 'Offline';
-  if (syncState.value === 'error') return 'Sync failed — tap to retry';
+  if (syncState.value === 'error') return 'Sync failed - tap to retry';
   return pendingCount.value ? `${pendingCount.value} to sync` : 'Synced';
 });
 
@@ -102,7 +102,7 @@ const syncLabel = computed(() => {
 
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
-       column — otherwise the login card is squeezed into a 15rem track. -->
+       column - otherwise the login card is squeezed into a 15rem track. -->
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand">Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
     <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen }]">

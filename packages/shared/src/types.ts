@@ -1,4 +1,4 @@
-/** Data model v2 — shared between app and server. Grows in Phase 1/3. */
+/** Data model v2 - shared between app and server. Grows in Phase 1/3. */
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
@@ -28,7 +28,7 @@ export interface SalesEvent {
   /** Manual local-currency tiered-discount bundle-total overrides, keyed by "ruleId:tierIndex". */
   localTierOverrides?: Record<string, number>;
   status: EventStatus;
-  /** Per-event customs state (edec, form1174) — ported in Phase 6. */
+  /** Per-event customs state (edec, form1174) - ported in Phase 6. */
   customs?: Record<string, unknown>;
   updatedAt: number;
   deletedAt?: number;
@@ -82,7 +82,7 @@ export interface Product {
  * The one inventory: how many of a thing the booth owns, full stop.
  *
  * This is a counted figure, not a running balance. What is still available is
- * derived by subtracting recorded sales — a number decremented on every sale
+ * derived by subtracting recorded sales - a number decremented on every sale
  * drifts the moment one is reverted or arrives late from another register.
  */
 export interface InventoryItem {
@@ -95,7 +95,7 @@ export interface InventoryItem {
 }
 
 /**
- * An event's claim on the inventory — the stock set aside for it.
+ * An event's claim on the inventory - the stock set aside for it.
  *
  * A claim is reserved: no other event can sell against it. An event with no
  * claim sells from whatever is left unclaimed, which is the common case for a
@@ -129,14 +129,14 @@ export interface DiscountRule {
   productIds: string[];
   /** Specific variants, as "productId:variantId" keys. For type='combo', each entry is a required bundle member. */
   variantIds: string[];
-  /** Product types (Product.type) the rule applies to — matches every product of that type. For type='combo', each entry is a required bundle member. */
+  /** Product types (Product.type) the rule applies to - matches every product of that type. For type='combo', each entry is a required bundle member. */
   productTypes?: string[];
   buyQty?: number;
   freeQty?: number;
   nth?: number;
   percent?: number;
   tiers?: DiscountTier[];
-  /** For type='combo': flat amount off (base currency) per complete set — every productIds/variantIds/productTypes member needs qty >= 1. */
+  /** For type='combo': flat amount off (base currency) per complete set - every productIds/variantIds/productTypes member needs qty >= 1. */
   comboDiscountAmount?: number;
   tierContinue?: boolean;
   /** Don't show the derived "+N" quick-add chips on POS product cards. */
@@ -147,7 +147,7 @@ export interface DiscountRule {
 
 /**
  * One cost component of a batch. Import and production are often billed
- * separately, so a batch sums several of these — entered by hand, or linked to
+ * separately, so a batch sums several of these - entered by hand, or linked to
  * a purchase invoice recorded in ZollTax.
  */
 export interface CostSource {
@@ -172,7 +172,7 @@ export interface CostBatchLine {
 /**
  * A shipment/order whose one lump total (production + shipping + import + fees)
  * is auto-distributed across its units to set each product/variant's per-unit
- * cost. Recorded over time — a later batch (e.g. a bigger, cheaper order) simply
+ * cost. Recorded over time - a later batch (e.g. a bigger, cheaper order) simply
  * updates the cost going forward.
  */
 export interface CostBatch {
@@ -181,7 +181,7 @@ export interface CostBatch {
   date: string;
   note?: string;
   currency?: string;
-  /** Grand total for the whole shipment (base currency) — the sum of `sources`. */
+  /** Grand total for the whole shipment (base currency) - the sum of `sources`. */
   total: number;
   /** Itemized cost components (production, import, …); may link ZollTax invoices. */
   sources?: CostSource[];

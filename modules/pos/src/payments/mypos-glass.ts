@@ -37,6 +37,6 @@ export const myposGlassProvider: PaymentProvider = {
   },
 
   async cancel(): Promise<void> {
-    // Intent-based flow — cancellation happens in the Glass app's own UI.
+    // Intent-based flow - cancellation happens in the Glass app's own UI.
   },
 };

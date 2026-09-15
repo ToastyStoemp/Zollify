@@ -1,11 +1,11 @@
 /**
- * Product merge — fold two or more catalog products into one product with a
+ * Product merge - fold two or more catalog products into one product with a
  * variant per source, without rewriting the immutable transaction log.
  *
  * A merge is recorded as one append-only `product.merge` op. Every reader
  * resolves a sale's `(pid, vid)` through the merge map, so historical sales
  * re-attach to the merged product's variants. The map is keyed by the source's
- * *stockKey* (bare `pid`, or `pid:vid`), never the bare product id — that keeps
+ * *stockKey* (bare `pid`, or `pid:vid`), never the bare product id - that keeps
  * a merge safe when the merged product REUSES one source's id as its container:
  * old product-level sales (`pid`) remap to a variant, while brand-new sales of
  * that container's variants (`pid:vid`) do not match and pass through untouched.
@@ -24,9 +24,9 @@ export interface MergeSource {
   toPid: string;
   /** Variant id under `toPid` the source becomes (never empty in practice). */
   toVid: string;
-  /** Merged product title — rewrites the frozen `title` on historical sale lines. */
+  /** Merged product title - rewrites the frozen `title` on historical sale lines. */
   title: string;
-  /** Variant label — rewrites the frozen `variantLabel` on historical sale lines. */
+  /** Variant label - rewrites the frozen `variantLabel` on historical sale lines. */
   variantLabel: string;
 }
 

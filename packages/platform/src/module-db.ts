@@ -9,13 +9,13 @@ import type { StoreSchema } from '@zollify/sdk';
  * versions must increase monotonically, so a shared schema would need a
  * persisted global counter and an install/uninstall/reinstall cycle could never
  * reuse a version number. With one database per module the versioning is local,
- * an uninstall is a clean delete, and no module can read another's tables —
+ * an uninstall is a clean delete, and no module can read another's tables -
  * which is the isolation we want anyway.
  */
 
 const DB_PREFIX = 'zollify';
 
-/** `zollify_<accountId>_<moduleId>` — per account, so two logins on one device never mix. */
+/** `zollify_<accountId>_<moduleId>` - per account, so two logins on one device never mix. */
 export function moduleDbName(accountId: string, moduleId: string): string {
   return `${DB_PREFIX}_${sanitise(accountId)}_${sanitise(moduleId)}`;
 }
@@ -44,7 +44,7 @@ export function openModuleDb(
   return db;
 }
 
-/** Closes a module's database without deleting it — used when unloading a module. */
+/** Closes a module's database without deleting it - used when unloading a module. */
 export function closeModuleDb(accountId: string, moduleId: string): void {
   const name = moduleDbName(accountId, moduleId);
   const db = open.get(name);

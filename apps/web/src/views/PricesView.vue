@@ -6,7 +6,7 @@ import { Icon, typeColor } from '@zollify/ui';
 import { activeEvent, allDiscounts, allProducts, getSalesEvent, stockKey, upsertSalesEvent } from '@zollify/platform';
 
 /**
- * Local prices for an event abroad — ZollTool's Price compare. Every
+ * Local prices for an event abroad - ZollTool's Price compare. Every
  * catalogue price is shown converted, auto-rounded, and back-converted so
  * a price that rounded away too much value stands out; an override pins a
  * specific local price, and the till charges exactly that.
@@ -19,7 +19,7 @@ const error = ref<string | null>(null);
 
 interface Row {
   key: string;
-  /** Every stock key an override on this row applies to — more than one for a collapsed same-price group. */
+  /** Every stock key an override on this row applies to - more than one for a collapsed same-price group. */
   memberKeys: string[];
   pid: string;
   type: string;
@@ -190,14 +190,14 @@ const driftClass = (d: number): string => (Math.abs(d) < 0.005 ? 'faint' : Math.
       <span v-if="event" class="muted">{{ event.name }}</span>
     </header>
 
-    <p v-if="!event" class="empty">Event not found — open Prices from an event card under Events.</p>
-    <p v-else-if="!hasLocal" class="empty">This event has no local currency set — edit the event to set a currency and rate first.</p>
+    <p v-if="!event" class="empty">Event not found - open Prices from an event card under Events.</p>
+    <p v-else-if="!hasLocal" class="empty">This event has no local currency set - edit the event to set a currency and rate first.</p>
 
     <template v-else>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="tools">
         <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
-        <button type="button" @click="sortByDrift = !sortByDrift">Sort: {{ sortByDrift ? 'biggest rounding drift' : 'A–Z' }}</button>
+        <button type="button" @click="sortByDrift = !sortByDrift">Sort: {{ sortByDrift ? 'biggest rounding drift' : 'A-Z' }}</button>
       </div>
 
       <section v-for="g in groups" :key="g.type" class="group">
@@ -230,7 +230,7 @@ const driftClass = (d: number): string => (Math.abs(d) < 0.005 ? 'faint' : Math.
         </div>
       </section>
       <p v-if="!groups.length" class="empty">No products match.</p>
-      <p class="hint">"Converted" is the raw exchange-rate conversion before rounding. "Auto-rounded" is what the till charges by default. Set an override to charge a specific {{ event.localCurrency }} price instead — "Back to {{ event.currency }}" and "Drift" show what that is worth in your books, so a price that rounded away too much value stands out.</p>
+      <p class="hint">"Converted" is the raw exchange-rate conversion before rounding. "Auto-rounded" is what the till charges by default. Set an override to charge a specific {{ event.localCurrency }} price instead - "Back to {{ event.currency }}" and "Drift" show what that is worth in your books, so a price that rounded away too much value stands out.</p>
 
       <template v-if="ruleGroups.length">
         <h2 class="sub">Bundle prices</h2>

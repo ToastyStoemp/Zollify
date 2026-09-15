@@ -1,7 +1,7 @@
 import type { SalesEvent, Transaction } from '@zollify/shared';
 
 /**
- * Sourcing domain — ported from ZollSource. Records are plain documents kept
+ * Sourcing domain - ported from ZollSource. Records are plain documents kept
  * by the server half; everything derived (a rep-ready spec, landed costs,
  * material costing, restock and event planning) is computed here against
  * core data read through the SDK.
@@ -157,7 +157,7 @@ export const SHIP_MODES: { id: ShipMode; name: string }[] = [
 ];
 const shipModeName = (id: string): string => SHIP_MODES.find((m) => m.id === id)?.name ?? id;
 
-/** Carrier tracking pages — deep links only; unknown carriers go through 17TRACK's detector. */
+/** Carrier tracking pages - deep links only; unknown carriers go through 17TRACK's detector. */
 export const CARRIERS = [
   { id: 'dhl', name: 'DHL Express', url: 'https://www.dhl.com/en/express/tracking.html?AWB={t}' },
   { id: 'fedex', name: 'FedEx', url: 'https://www.fedex.com/fedextrack/?trknbr={t}' },
@@ -174,7 +174,7 @@ export function trackingUrl(carrierId: string, tracking: string): string {
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 const round4 = (n: number): number => Math.round((n + Number.EPSILON) * 10000) / 10000;
-const money = (n: number | null | undefined, cur: string): string => (n == null ? '—' : `${cur ? `${cur} ` : ''}${Number(n).toFixed(2)}`);
+const money = (n: number | null | undefined, cur: string): string => (n == null ? '-' : `${cur ? `${cur} ` : ''}${Number(n).toFixed(2)}`);
 
 /** The next "ZS-0007" reference, from what already exists. */
 export function nextRef(reorders: Reorder[]): string {
@@ -195,7 +195,7 @@ export function buildSpec(reorder: Reorder, snap: Snapshot): string {
   let fileCount = 0;
   for (const line of reorder.lines) {
     const d = snap.dossiers.find((x) => x.id === line.dossierId);
-    out.push(`• ${line.title || d?.title || '(item)'} — qty ${line.qty || 0}`);
+    out.push(`• ${line.title || d?.title || '(item)'} - qty ${line.qty || 0}`);
     const sp = d?.specs;
     if (sp) {
       const bits: string[] = [];
@@ -217,10 +217,10 @@ export function buildSpec(reorder: Reorder, snap: Snapshot): string {
   const lineDossiers = new Set(reorder.lines.map((l) => l.dossierId));
   const reminders = snap.issues.filter((i) => i.status !== 'resolved' && i.remindOnReorder && i.supplierId === reorder.supplierId && (!i.dossierId || lineDossiers.has(i.dossierId)));
   if (reminders.length) {
-    out.push('', 'Please note — issues from previous production to avoid this time:');
+    out.push('', 'Please note - issues from previous production to avoid this time:');
     for (const i of reminders) {
       const who = i.dossierId ? `${snap.dossiers.find((d) => d.id === i.dossierId)?.title ?? 'item'}: ` : '';
-      out.push(`  ⚠ ${who}${i.title}${i.detail ? ` — ${i.detail}` : ''}`);
+      out.push(`  ⚠ ${who}${i.title}${i.detail ? ` - ${i.detail}` : ''}`);
     }
   }
   const modes = (supplier?.shipModes ?? []).map(shipModeName);
@@ -245,7 +245,7 @@ export interface LandedLine {
 /**
  * Landed per-unit cost per line: the agreed unit price (confirmed → quoted →
  * dossier's last) plus a share of the reorder's landed extra, spread by line
- * value — the same split as the Costs module, so the two agree.
+ * value - the same split as the Costs module, so the two agree.
  */
 export function resolveReorderCosts(reorder: Reorder, dossiers: Dossier[]): { resolved: LandedLine[]; skipped: LandedLine[] } {
   const rows = reorder.lines
@@ -284,7 +284,7 @@ export function leadTimeDays(supplierId: string, reorders: Reorder[]): number | 
 }
 
 // ── Materials: home-print costing ───────────────────────────────────────────
-/** Weighted-average unit cost — total spent ÷ total units, so it self-adjusts with every purchase. */
+/** Weighted-average unit cost - total spent ÷ total units, so it self-adjusts with every purchase. */
 export function unitCost(m: Material): number {
   const qty = m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0);
   const cost = m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0);

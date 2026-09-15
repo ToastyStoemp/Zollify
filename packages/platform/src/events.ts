@@ -6,7 +6,7 @@ type Handler = (payload: unknown) => void;
  * The cross-module event bus.
  *
  * Handlers are isolated: one module throwing inside a `sale` handler must not
- * prevent the next module — or the emitter's own code after `emit` — from
+ * prevent the next module - or the emitter's own code after `emit` - from
  * running. A module that breaks should degrade itself, not the till.
  */
 export class PlatformEventBus implements EventBus {
@@ -68,7 +68,7 @@ export class PlatformEventBus implements EventBus {
     }
   }
 
-  /** Test/diagnostic helper — how many handlers are attached to a name. */
+  /** Test/diagnostic helper - how many handlers are attached to a name. */
   countFor(name: EventName): number {
     return this.handlers.get(String(name))?.size ?? 0;
   }

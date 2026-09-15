@@ -5,7 +5,7 @@
  * every call site, each plugin is exposed as a proxy that rejects with a clear
  * message, and `hasNativePlugin` is the single check providers use to decide
  * whether to offer themselves at all. On the web that means myPOS GO2, Carbon,
- * Glass and SumUp simply don't appear in the provider list — manual and the
+ * Glass and SumUp simply don't appear in the provider list - manual and the
  * bridge do, and the booth can still sell.
  */
 
@@ -43,7 +43,7 @@ export function hasNativePlugin(name: NativePluginName): boolean {
 
 function unavailable(name: NativePluginName): never {
   throw new Error(
-    `The ${name} terminal needs the Zollify Android app — it isn't available in a browser.`,
+    `The ${name} terminal needs the Zollify Android app - it isn't available in a browser.`,
   );
 }
 

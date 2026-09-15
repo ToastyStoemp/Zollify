@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
  *
  * In development Vite serves the app and proxies `/api` here, so this does
  * nothing. In a deployment the gateway is the only thing listening and has to
- * serve the shell as well as the API — otherwise there is no way to reach the
+ * serve the shell as well as the API - otherwise there is no way to reach the
  * app at all.
  */
 
@@ -68,7 +68,7 @@ export async function registerStatic(app: FastifyInstance, opts: StaticOptions):
 
   /**
    * SPA fallback. The app uses hash routing, so deep links rarely reach the
-   * server — but a stray path should still land on the app rather than a bare
+   * server - but a stray path should still land on the app rather than a bare
    * 404. API routes are excluded: a mistyped API path must fail as an API
    * error, not silently return HTML the caller then tries to parse as JSON.
    */

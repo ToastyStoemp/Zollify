@@ -5,7 +5,7 @@ import { sdk } from './runtime';
 /**
  * Typed wrapper over this module's own server half plus one in-memory copy
  * of everything. Requests reach `/api/m/sourcing/…` and cannot address
- * another module's routes — the host roots them at the module's namespace.
+ * another module's routes - the host roots them at the module's namespace.
  */
 
 type Coll = 'suppliers' | 'reps' | 'dossiers' | 'reorders' | 'issues' | 'materials';

@@ -5,7 +5,7 @@ import type { RequestIdentity } from './modules/mount';
 
 /**
  * Decorators the gateway installs. Declared in one place so the ported route
- * files keep compiling unchanged — they were written against these and the
+ * files keep compiling unchanged - they were written against these and the
  * augmentation, not the routes, is what had to come across.
  */
 declare module 'fastify' {

@@ -9,7 +9,7 @@ import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
 
 /**
- * Payments — ZollTool's settings: every terminal with its live status,
+ * Payments - ZollTool's settings: every terminal with its live status,
  * Connect / Pair reader / Log out where the provider supports it, the SumUp
  * affiliate key, the satellite Carbon to hand card payments to, and the
  * extra payment methods shown as buttons on the till.
@@ -115,7 +115,7 @@ async function removeMethod(name: string): Promise<void> {
 <template>
   <section class="payments">
     <h2>Payments</h2>
-    <p class="hint">Zollify never holds the money — the terminal settles straight to your bank.</p>
+    <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
 
     <h3>Card payment terminal</h3>
     <ul class="providers">
@@ -143,16 +143,16 @@ async function removeMethod(name: string): Promise<void> {
         <div class="row"><span class="label">Remote Carbon terminal</span><button type="button" class="quiet" @click="refreshCarbons">Refresh</button></div>
         <select v-if="carbons.length" v-model="remoteCarbonId" @change="saveRemoteCarbon">
           <option value="" disabled>Choose a Carbon…</option>
-          <option v-for="d in carbons" :key="d.id" :value="d.id">{{ d.name || d.id }} — seen {{ ago(d.lastSeenAt) }}</option>
+          <option v-for="d in carbons" :key="d.id" :value="d.id">{{ d.name || d.id }} - seen {{ ago(d.lastSeenAt) }}</option>
         </select>
         <p v-else-if="carbonsError" class="error">{{ carbonsError }}</p>
-        <p v-else class="hint">No Carbon seen on this account yet — open Zollify on it once, or paste its device id below.</p>
+        <p v-else class="hint">No Carbon seen on this account yet - open Zollify on it once, or paste its device id below.</p>
         <label class="field"><span>{{ carbons.length ? 'Or paste a device id' : 'Device id' }}</span><input v-model="remoteCarbonId" type="text" placeholder="Under This device on the Carbon" @change="saveRemoteCarbon" /></label>
       </div>
     </template>
 
     <h3>Extra payment methods</h3>
-    <p class="hint">Extra buttons on the till for payments taken outside the app — TWINT, a PayPal QR code. Sales made with them count as non-cash.</p>
+    <p class="hint">Extra buttons on the till for payments taken outside the app - TWINT, a PayPal QR code. Sales made with them count as non-cash.</p>
     <ul v-if="customMethods.length" class="methods">
       <li v-for="m in customMethods" :key="m"><span>{{ m }}</span><button type="button" class="quiet danger" @click="removeMethod(m)">Remove</button></li>
     </ul>

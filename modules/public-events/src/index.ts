@@ -2,11 +2,11 @@ import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 
 /**
- * Public events — the client half.
+ * Public events - the client half.
  *
  * One screen: where the booth's events are published (a page, a widget for
  * the shop, a calendar feed, an Instagram bio), plus the per-event extras
- * the event record itself does not carry — hall, booth number, a link.
+ * the event record itself does not carry - hall, booth number, a link.
  * Everything visitors see is rendered by the server half from the same
  * events the booth already keeps.
  */

@@ -8,7 +8,7 @@ import IssuesTab from './IssuesTab.vue';
 import MaterialsTab from './MaterialsTab.vue';
 
 /**
- * Sourcing — the reorder cockpit, ported from ZollSource. Dossiers hold what
+ * Sourcing - the reorder cockpit, ported from ZollSource. Dossiers hold what
  * a supplier needs to make each product; Restock says what to order;
  * Reorders carry an order from quote to received; Issues and Materials feed
  * the specs and the home-print costs.

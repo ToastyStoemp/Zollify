@@ -1,7 +1,7 @@
 import type { DiscountRule, Product } from './types';
 
 /**
- * Flat, card-ready price rows — ported from ZollPriceCards. One row per
+ * Flat, card-ready price rows - ported from ZollPriceCards. One row per
  * sellable item (per variant when a product has them), each with a `key`
  * (the SKU, or an id fallback) a Photoshop text layer is matched against,
  * and a `text` price in the requested currency. Prices are decimals of the
@@ -116,7 +116,7 @@ export function priceRows(products: Product[], opts: { currency?: string; exchan
           sku: v.sku || p.sku || '',
           title: p.title || '',
           variant: v.name || '',
-          label: v.name ? `${p.title} — ${v.name}` : p.title || '',
+          label: v.name ? `${p.title} - ${v.name}` : p.title || '',
           base,
           ...fmt(base),
           ...ladderFor(p, v, base),

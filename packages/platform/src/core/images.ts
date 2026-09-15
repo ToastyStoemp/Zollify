@@ -8,7 +8,7 @@ import { toPlain } from './plain';
  *
  * Blobs live only on the device: they are large, the sync protocol carries
  * metadata rather than binary, and a booth's photos are not worth the bandwidth
- * mid-convention. A backup keeps them out too — which is why the migration
+ * mid-convention. A backup keeps them out too - which is why the migration
  * importer says images are not carried across.
  */
 
@@ -30,7 +30,7 @@ function uuidv7(): string {
 /**
  * Image pipeline: any picked file is re-encoded to a bounded JPEG plus a small
  * WebP thumbnail. A plain <input type="file" accept="image/*"> covers both the
- * web file picker and the Android camera/gallery chooser — no extra plugin.
+ * web file picker and the Android camera/gallery chooser - no extra plugin.
  */
 
 const FULL_MAX_PX = 1280;
@@ -91,7 +91,7 @@ export async function saveProductImage(productId: string, file: Blob): Promise<s
 }
 
 /**
- * Stores an already-processed image under a given id — a backup restore, where
+ * Stores an already-processed image under a given id - a backup restore, where
  * products already point at that id. Same op as a fresh photo, so the other
  * devices receive the thumbnail the same way.
  */

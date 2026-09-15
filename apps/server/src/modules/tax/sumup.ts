@@ -1,7 +1,7 @@
 import { dayEndISO, dayStartISO, num, pick, round2, resolveMode, sleep, str, SourceError, type SourceRow } from './types';
 
 /**
- * SumUp API client — pulls merchant transaction history for a date range and
+ * SumUp API client - pulls merchant transaction history for a date range and
  * normalises it into Payment/Fee rows.
  *
  *   GET /v2.1/merchants/{merchant_code}/transactions/history

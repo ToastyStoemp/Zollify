@@ -3,7 +3,7 @@ import { defineComponent, h } from 'vue';
 /**
  * The icon set: a small, fixed selection of Lucide glyphs, inlined so a
  * runtime module can name an icon without shipping any SVG of its own. Every
- * icon is decorative — the text next to it carries the meaning — so it is
+ * icon is decorative - the text next to it carries the meaning - so it is
  * hidden from assistive technology.
  */
 export const ICON_PATHS: Record<string, string> = {

@@ -11,7 +11,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   const money = (n: number) => `${cur} ${n.toFixed(2)}`;
 
   // Everything in this report is shown in the base/tracking currency, even for
-  // sales charged in a converted local currency (SalesEvent.localCurrency) —
+  // sales charged in a converted local currency (SalesEvent.localCurrency) -
   // it's the accounting-oriented document, so figures without a precomputed
   // base value (payment legs, discounts) are converted back via the rate
   // snapshotted on the transaction at checkout time.
@@ -35,7 +35,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   doc.setFont('helvetica', 'bold').setFontSize(18);
   doc.text(event.name, margin, 20);
   doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(110);
-  const dates = [event.dateStart, event.dateEnd].filter(Boolean).join(' – ');
+  const dates = [event.dateStart, event.dateEnd].filter(Boolean).join(' - ');
   const place = [event.venue?.city, event.venue?.country].filter(Boolean).join(', ');
   doc.text(['Sales report', dates, place].filter(Boolean).join('  ·  '), margin, 26);
   doc.text(`Generated ${new Date().toLocaleString()}`, pageW - margin, 26, { align: 'right' });
@@ -164,7 +164,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
     doc.setFontSize(8).setTextColor(160);
-    doc.text(`${event.name} — page ${p}/${pages}`, pageW / 2, doc.internal.pageSize.getHeight() - 7, {
+    doc.text(`${event.name} - page ${p}/${pages}`, pageW / 2, doc.internal.pageSize.getHeight() - 7, {
       align: 'center',
     });
   }

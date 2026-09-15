@@ -45,7 +45,7 @@ class CarbonPaymentPlugin : Plugin() {
 
         // registerPOSInfo appears to be a persistent listener registration rather
         // than a one-shot request, so it's registered once (lazily) and the most
-        // recent value cached — repeat callers just read the cache.
+        // recent value cached - repeat callers just read the cache.
         private var posInfo: POSInfo? = null
         private var posInfoRegistered = false
 
@@ -86,7 +86,7 @@ class CarbonPaymentPlugin : Plugin() {
 
     /**
      * The terminal's own settlement currency (set on myPOS's side, not by this
-     * app) — MyPOSAPI.openPaymentActivity silently refuses a mismatched
+     * app) - MyPOSAPI.openPaymentActivity silently refuses a mismatched
      * currency (the activity finishes instantly with RESULT_CANCELED, no card
      * screen ever shown), which surfaced as a confusing generic "Payment
      * cancelled". Checking this first lets startPayment() give a real reason.

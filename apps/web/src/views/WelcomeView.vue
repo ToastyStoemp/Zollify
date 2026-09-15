@@ -9,7 +9,7 @@ import { loadEnabledModules, unloadModule } from '../boot';
 
 /**
  * First-run setup. Three short steps: who the booth is, which modules to
- * switch on, and where to go next. Every step can be skipped — skipping still
+ * switch on, and where to go next. Every step can be skipped - skipping still
  * marks setup as done so the wizard never nags, and it can be re-run from
  * Settings → Booth profile.
  */
@@ -30,12 +30,12 @@ interface AvailableModule {
 const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   pos: { forWhom: 'The till. You need this to sell anything at all.', recommended: true },
   customs: {
-    forWhom: 'For selling across a border — Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock.',
+    forWhom: 'For selling across a border - Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock.',
     recommended: true,
   },
   'price-cards': { forWhom: 'Printable price tags straight from the catalogue. Handy at any table.', recommended: true },
   'public-events': {
-    forWhom: 'A public "where to find us" page, a widget for your shop, a calendar feed and an Instagram bio — all from your events.',
+    forWhom: 'A public "where to find us" page, a widget for your shop, a calendar feed and an Instagram bio - all from your events.',
     recommended: true,
   },
   tax: {
@@ -150,7 +150,7 @@ function toggleWanted(id: string): void {
 
 /**
  * Applies only what changed. Server first, then the running shell, so a
- * refused toggle leaves the UI honest — the same order the Modules screen uses.
+ * refused toggle leaves the UI honest - the same order the Modules screen uses.
  */
 async function saveModules(): Promise<void> {
   busy.value = true;
@@ -207,7 +207,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <h1>Welcome to Zollify</h1>
       <p class="lede">
         One app for the booth: the till, stock, events and paperwork. First, who is behind the
-        table? These details go on receipts and customs documents, so they are worth getting right —
+        table? These details go on receipts and customs documents, so they are worth getting right -
         and you can change them any time under Settings.
       </p>
 
@@ -223,7 +223,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-else-if="step === 2" class="card" @submit.prevent="saveEvent">
       <h1>Your next event</h1>
       <p class="lede">Everything in Zollify happens inside an event: stock, sales and customs documents. Name your next convention to get started, or leave it empty to skip.</p>
-      <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} event{{ visibleEvents.length === 1 ? '' : 's' }} already synced in — you can skip this.</p>
+      <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} event{{ visibleEvents.length === 1 ? '' : 's' }} already synced in - you can skip this.</p>
       <div class="grid">
         <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
         <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
@@ -239,7 +239,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-else-if="step === 3" class="card" @submit.prevent="saveModules">
       <h1>Switch on what you need</h1>
       <p class="lede">
-        Zollify is built from modules. Turn on the ones that fit your booth — anything you leave off
+        Zollify is built from modules. Turn on the ones that fit your booth - anything you leave off
         stays out of the way and can be switched on later under Modules.
       </p>
 
@@ -281,7 +281,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <ol class="next">
         <li>
           <strong>Add your products</strong>
-          <span>Titles, prices, sizes — and a photo if you like. Everything else reads from this.</span>
+          <span>Titles, prices, sizes - and a photo if you like. Everything else reads from this.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'catalog' })">Open Catalog</button>
         </li>
         <li>

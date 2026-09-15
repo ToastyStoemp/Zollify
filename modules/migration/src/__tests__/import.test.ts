@@ -34,7 +34,7 @@ const event = (id: string, over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-describe('planImport — rejecting the wrong file', () => {
+describe('planImport - rejecting the wrong file', () => {
   it('refuses something that is not an object', () => {
     expect(() => planImport('nope')).toThrow(BackupParseError);
   });
@@ -45,7 +45,7 @@ describe('planImport — rejecting the wrong file', () => {
   });
 });
 
-describe('planImport — what comes across', () => {
+describe('planImport - what comes across', () => {
   it('carries products, events and stock', () => {
     const plan = planImport(
       backup({
@@ -92,7 +92,7 @@ describe('planImport — what comes across', () => {
   });
 
   it('seeds an opening inventory from the largest quantity ever taken', () => {
-    // ZollTool never recorded total stock owned — only what went to each event.
+    // ZollTool never recorded total stock owned - only what went to each event.
     // The biggest of those is the only evidence of how many existed.
     const plan = planImport(
       backup({
@@ -138,7 +138,7 @@ describe('planImport — what comes across', () => {
   });
 });
 
-describe('planImport — what is deliberately left behind', () => {
+describe('planImport - what is deliberately left behind', () => {
   it('imports well-formed transactions and drops malformed ones with a warning', () => {
     const good = { id: 't1', eventId: 'e1', timestamp: 1, items: [] };
     const plan = planImport(backup({ transactions: [good, { id: 't2' }] }));

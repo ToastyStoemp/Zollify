@@ -49,7 +49,7 @@ export function getTransaction(id: string): Transaction | undefined {
   return transactions.get(id);
 }
 
-/** Money handled in integer minor units, then converted once — see cart totals. */
+/** Money handled in integer minor units, then converted once - see cart totals. */
 function toMinor(value: number): number {
   return Math.round(value * 100);
 }
@@ -57,7 +57,7 @@ function toMinor(value: number): number {
 /**
  * Turns the SDK's cross-module `sale` announcement into a stored Transaction.
  *
- * The SDK event is deliberately a smaller shape than `Transaction` — it is the
+ * The SDK event is deliberately a smaller shape than `Transaction` - it is the
  * contract other modules consume, and widening it would make every subscriber
  * depend on storage details. The mapping lives here instead.
  */
@@ -166,7 +166,7 @@ export async function importTransactions(rows: Transaction[]): Promise<number> {
   return added;
 }
 
-/** Replaces rows wholesale — used by sync pulls and restore. */
+/** Replaces rows wholesale - used by sync pulls and restore. */
 export async function replaceTransactions(rows: Transaction[]): Promise<void> {
   const db = openCoreDb(requireAccountId());
   await db.transactions.bulkPut(rows.map(toPlain));
@@ -183,7 +183,7 @@ export interface SalesTotals {
 /**
  * Totals for an event, or for everything when no event is given.
  *
- * Reverted sales are counted separately rather than subtracted silently — at
+ * Reverted sales are counted separately rather than subtracted silently - at
  * cash-up you need to see both what was taken and what was handed back.
  */
 export function totalsFor(eventId?: string | null): SalesTotals[] {

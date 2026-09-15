@@ -19,7 +19,7 @@ const busy = ref<'export' | 'restore' | 'wipe' | null>(null);
 /** Owner only: server-side erase plus a local reset; the page reloads into an empty booth. */
 async function wipe(): Promise<void> {
   const ok = await shellConfirm(
-    'Erase every product, event, sale and photo in this booth, on the server and on this device? Export a backup first — this cannot be undone.',
+    'Erase every product, event, sale and photo in this booth, on the server and on this device? Export a backup first - this cannot be undone.',
     'Erase everything',
   );
   if (!ok) return;
@@ -39,7 +39,7 @@ const pending = ref<{ summary: BackupSummary; raw: unknown; name: string } | nul
 /**
  * Writes the backup out as a downloaded file.
  *
- * A file the user keeps is the point — the data lives in this browser's
+ * A file the user keeps is the point - the data lives in this browser's
  * storage, so anything that stays in the browser is lost with it.
  */
 async function exportBackup(): Promise<void> {
@@ -121,7 +121,7 @@ async function confirmRestore(): Promise<void> {
     <h2>Backup &amp; restore</h2>
     <p class="hint">
       Your booth's data lives on this device. Sync copies it to your other devices, but an exported
-      file is the only thing that survives losing them all — export before every convention.
+      file is the only thing that survives losing them all - export before every convention.
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -165,7 +165,7 @@ async function confirmRestore(): Promise<void> {
     <template v-if="currentAccount?.role === 'owner'">
       <h2 class="danger-h">Start from scratch</h2>
       <p class="hint">
-        Erases every product, event, sale and photo in this booth — on the server and on this device.
+        Erases every product, event, sale and photo in this booth - on the server and on this device.
         Other devices empty themselves at their next sync. Users, invites and the booth profile stay.
       </p>
       <div class="actions">

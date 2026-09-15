@@ -3,7 +3,7 @@ import { clearSdk, setSdk } from './runtime';
 import { resetState } from './state';
 
 /**
- * Tax — the books (the ZollTax port).
+ * Tax - the books (the ZollTax port).
  *
  * Two screens: Payments, where a month's card and online takings are
  * clustered per convention, matched to events, verified against myPOS and

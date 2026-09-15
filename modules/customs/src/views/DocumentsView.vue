@@ -23,7 +23,7 @@ import { DECLARANT_KEY } from './declarant';
 import { sdk } from '../runtime';
 
 /**
- * One event's customs paperwork — ZollTool's screen. Everything typed here is
+ * One event's customs paperwork - ZollTool's screen. Everything typed here is
  * saved into `event.customs` a moment later and syncs with the event, so the
  * declaration a booth prepares at home is the one it carries to the border.
  *
@@ -136,7 +136,7 @@ async function save(): Promise<void> {
 }
 watch([artist, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN], scheduleSave, { deep: true });
 
-/** Company code from the artist's initials — "Phuong Ninjin" → "PN". */
+/** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
 const autoCompanyCode = computed(() => {
   const name = (artist.value.companyName || artist.value.fullName || '').trim();
   if (!name) return '';
@@ -172,7 +172,7 @@ const state = computed(() => {
   return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent());
 });
 const lrp = computed(() => (state.value ? computeLRP(state.value, documentNumber.value) : ''));
-/** Claimed for this event but without a tariff no. or VAT rate — the goods lists leave these out. */
+/** Claimed for this event but without a tariff no. or VAT rate - the goods lists leave these out. */
 const missingInfo = computed(() =>
   (state.value?.products ?? [])
     .filter((p) => !hasCustomsInfo(p) && (p.amount ?? 0) + (p.variants ?? []).reduce((m, v) => m + (v.amount ?? 0), 0) > 0)
@@ -209,7 +209,7 @@ watch(hasVariantProducts, (has) => {
 
 const safeName = (suffix: string): string => `${(event.value?.name || 'event').replace(/[^\w-]+/g, '_')}_${suffix}`;
 
-/** Opens a generated document in its own tab — that is where it gets printed or saved as PDF. */
+/** Opens a generated document in its own tab - that is where it gets printed or saved as PDF. */
 /** "Save as PDF" is the browser's print dialog: the opened document asks for it as soon as it has rendered. */
 const saveAsPdf = ref(false);
 // Assembled so the SFC compiler does not read the tag as the end of this block.
@@ -276,12 +276,12 @@ const TRANSPORT_MODES = [
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="notice" role="status">{{ notice }}</p>
-    <p v-if="!event" class="empty">Event not found — open Customs from an event card under Events. Customs details are stored per event.</p>
+    <p v-if="!event" class="empty">Event not found - open Customs from an event card under Events. Customs details are stored per event.</p>
 
     <template v-else>
       <p v-if="claimedUnits === 0" class="warn" role="status">This event has no stock claimed, so the goods lists are empty. Claim what you're taking under Inventory → Claimed for an event.</p>
       <p v-if="missingInfo.length" class="warn" role="status">
-        Claimed but left off every document — no tariff no. (HS code) or VAT rate set under Products → Customs details:
+        Claimed but left off every document - no tariff no. (HS code) or VAT rate set under Products → Customs details:
         <strong>{{ missingInfo.join(', ') }}</strong>.
       </p>
 
@@ -300,7 +300,7 @@ const TRANSPORT_MODES = [
             <button type="button" :class="{ on: !saveAsPdf }" @click="saveAsPdf = false">View</button>
             <button type="button" :class="{ on: saveAsPdf }" @click="saveAsPdf = true">Save as PDF</button>
           </div>
-          <span v-if="saveAsPdf" class="hint">Opens the print dialog straight away — choose “Save as PDF” as the printer.</span>
+          <span v-if="saveAsPdf" class="hint">Opens the print dialog straight away - choose “Save as PDF” as the printer.</span>
         </div>
         <div class="docs">
           <button type="button" @click="openGoodsList(1)"><Icon name="download" :size="14" /> Import list</button>
@@ -332,7 +332,7 @@ const TRANSPORT_MODES = [
         <h2>Declaration details</h2>
         <div class="grid">
           <label>
-            <span>Company code (for LRP) <em v-if="!companyCode.trim() && autoCompanyCode">— auto: {{ autoCompanyCode }}</em></span>
+            <span>Company code (for LRP) <em v-if="!companyCode.trim() && autoCompanyCode">- auto: {{ autoCompanyCode }}</em></span>
             <input v-model="companyCode" type="text" :placeholder="autoCompanyCode || 'GUG'" />
           </label>
           <label><span>Document number</span><input v-model.number="documentNumber" type="number" min="1" inputmode="numeric" /></label>
@@ -340,7 +340,7 @@ const TRANSPORT_MODES = [
           <label><span>Venue TIN</span><input v-model="venueTIN" type="text" class="mono" /></label>
           <label class="wide"><span>Event location (shown on documents)</span><input v-model="eventLocation" type="text" /></label>
         </div>
-        <p class="hint">Venue address and event dates come from the event itself — edit them under Events.</p>
+        <p class="hint">Venue address and event dates come from the event itself - edit them under Events.</p>
       </article>
 
       <article class="card">
@@ -369,7 +369,7 @@ const TRANSPORT_MODES = [
         <ul v-if="form1174.groupMode === 'manual' && state" class="assign">
           <li v-for="(p, i) in state.products" :key="p.id ?? i">
             <span class="name">{{ p.title }}</span>
-            <span class="muted">{{ p.tariffNo || '—' }}</span>
+            <span class="muted">{{ p.tariffNo || '-' }}</span>
             <div class="seg">
               <button type="button" :class="{ on: form1174.assignments[i] === 1 }" @click="setAssignment(i, 1)">G1</button>
               <button type="button" :class="{ on: form1174.assignments[i] !== 1 }" @click="setAssignment(i, 2)">G2</button>

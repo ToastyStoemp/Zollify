@@ -54,7 +54,7 @@ export interface RouteDef {
 
 /**
  * Where a nav entry sits in the sidebar. Groups are named by the job someone is
- * doing, not by which package the screen came from — a seller looking for the
+ * doing, not by which package the screen came from - a seller looking for the
  * till should not need to know it is a module.
  */
 export type NavGroup = 'selling' | 'stock' | 'events' | 'books' | 'suppliers' | 'account';
@@ -67,7 +67,7 @@ export interface NavItem {
   group?: NavGroup;
   /** Lucide icon name, resolved by the shell so modules ship no icon payload. */
   icon?: string;
-  /** Lower sorts earlier. Core items occupy 0–99; modules should use 100+. */
+  /** Lower sorts earlier. Core items occupy 0-99; modules should use 100+. */
   order?: number;
   minRole?: Role;
 }
@@ -105,7 +105,7 @@ export interface SaleLine {
 
 /**
  * Emitted by POS after a completed checkout. This is the contract that lets Tax
- * book revenue without importing POS — the reason it lives in the SDK and not
+ * book revenue without importing POS - the reason it lives in the SDK and not
  * in either module.
  */
 export interface SaleEvent {
@@ -171,7 +171,7 @@ export interface HttpError extends Error {
 }
 
 /**
- * Calls are namespaced to the module's own server half — a request from module
+ * Calls are namespaced to the module's own server half - a request from module
  * `tax` reaches `/api/m/tax/…` and cannot address another module's routes.
  * Auth headers and tenant scoping are applied by the host.
  */
@@ -191,7 +191,7 @@ export type StoreSchema = Record<string, string | null>;
 
 /**
  * Read access to the shared catalogue. Modules never open core's database
- * themselves — going through here keeps core the only writer, so every change
+ * themselves - going through here keeps core the only writer, so every change
  * records a sync op and no module can quietly diverge from what syncs.
  */
 export interface CatalogApi {
@@ -211,7 +211,7 @@ export interface CatalogApi {
 
 export interface SalesEventApi {
   /**
-   * Events this user may see. For a helper that is only their allowed events —
+   * Events this user may see. For a helper that is only their allowed events -
    * the server applies the same filter on sync, so this is what they can act
    * on rather than the boundary itself.
    */
@@ -349,7 +349,7 @@ export interface ShellUi {
 
 /**
  * Everything a module is allowed to touch. A module imports `@zollify/sdk` and
- * nothing else from the platform — that boundary is what makes a published SDK
+ * nothing else from the platform - that boundary is what makes a published SDK
  * possible later without a rewrite, so it is enforced in review, not by
  * convention.
  */
@@ -374,7 +374,7 @@ export interface Sdk {
    */
   db(schema: StoreSchema, version?: number): Dexie;
 
-  /** Read access to core's shared domain — the catalogue and sales events. */
+  /** Read access to core's shared domain - the catalogue and sales events. */
   data: DataApi;
 
   /** Current account and user. Returns a snapshot; use `onAccountChange` to react. */
@@ -386,13 +386,13 @@ export interface Sdk {
 
   /**
    * Point-to-point messages between this account's devices over the live
-   * channel — a register asking a satellite terminal to take a card, and the
+   * channel - a register asking a satellite terminal to take a card, and the
    * terminal's answer. `connected` says whether the channel is up right now.
    */
   realtime: {
     connected(): boolean;
     deviceId(): Promise<string>;
-    /** Every device that has signed in to this account — the possible targets. */
+    /** Every device that has signed in to this account - the possible targets. */
     devices(): Promise<DeviceSummary[]>;
     sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage): boolean;
     onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;

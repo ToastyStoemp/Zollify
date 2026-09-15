@@ -5,7 +5,7 @@ import { isRef, toRaw, unref } from 'vue';
  *
  * The structured clone algorithm cannot clone a Proxy, so handing a reactive
  * object straight to Dexie fails with `DataCloneError: could not be cloned`.
- * A shallow `{ ...obj }` is not enough either — the spread copies the top level
+ * A shallow `{ ...obj }` is not enough either - the spread copies the top level
  * but leaves nested objects as proxies, which is exactly how this surfaces:
  * everything looks fine until a record happens to carry a nested field.
  *
@@ -13,7 +13,7 @@ import { isRef, toRaw, unref } from 'vue';
  * write through `sdk.data` too and would otherwise each have to remember.
  *
  * Types the clone algorithm handles natively (Blob, File, Date, ArrayBuffer,
- * Map, Set) are passed through untouched rather than rebuilt — product images
+ * Map, Set) are passed through untouched rather than rebuilt - product images
  * are Blobs, and JSON round-tripping would destroy them.
  */
 export function toPlain<T>(value: T): T {

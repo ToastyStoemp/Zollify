@@ -10,7 +10,7 @@ type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
 
 /**
  * WebSocket is a doorbell only: after a push, every *other* connected device
- * of the account gets a nudge and pulls over HTTP. Clients without WS poll —
+ * of the account gets a nudge and pulls over HTTP. Clients without WS poll -
  * same behavior, just slower.
  */
 export class Rooms {
@@ -37,7 +37,7 @@ export class Rooms {
 
   /**
    * Rebroadcast a register's cart snapshot to the account's other devices so
-   * they can act as customer displays. Ephemeral — nothing is stored.
+   * they can act as customer displays. Ephemeral - nothing is stored.
    */
   relayDisplayCart(accountId: string, fromDeviceId: string, cart: DisplayCartMessage['cart']): void {
     const room = this.byAccount.get(accountId);
@@ -51,9 +51,9 @@ export class Rooms {
   }
 
   /**
-   * Point-to-point relay for the remote payment trigger/result handshake —
+   * Point-to-point relay for the remote payment trigger/result handshake -
    * only the named target device gets the message, unlike the broadcast
-   * relayDisplayCart. Ephemeral — nothing is stored.
+   * relayDisplayCart. Ephemeral - nothing is stored.
    */
   relayToDevice(accountId: string, fromDeviceId: string, msg: PaymentMessage): void {
     const room = this.byAccount.get(accountId);
@@ -80,13 +80,13 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
     }
     rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
     if (deviceId) {
-      // Best-effort presence touch — a device that mostly just listens (e.g.
+      // Best-effort presence touch - a device that mostly just listens (e.g.
       // a Carbon in customer-display mode) may rarely push its own ops, so a
       // WS connection is often the only signal that it's still around.
       try {
         touchDevice(db, deviceId, claims.accountId, claims.sub, null, flavor || null, Date.now());
       } catch {
-        /* devices row requires an existing account/user FK — skip on any edge case */
+        /* devices row requires an existing account/user FK - skip on any edge case */
       }
     }
     socket.on('message', (raw) => {
@@ -105,7 +105,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
           rooms.relayToDevice(claims.accountId, deviceId ?? 'unknown', msg);
         }
       } catch {
-        /* not JSON — ignore */
+        /* not JSON - ignore */
       }
     });
   });

@@ -6,7 +6,7 @@ import { buildPriceGroups, buildPriceSheetHtml, type PriceGroup } from '../price
 import { sdk } from '../runtime';
 
 /**
- * The merged price sheet — ZollTool's. Sizes shared across prints collapse
+ * The merged price sheet - ZollTool's. Sizes shared across prints collapse
  * into one line, a design range at one price becomes "any design", and deals
  * hang off the lines they touch. Untick what is not on the table; the order
  * of the sections is remembered on this device.
@@ -84,7 +84,7 @@ function open(): void {
   const brand = (artist?.companyName || artist?.fullName || '').trim();
   const eventName = sdk().data.events.active()?.name;
   const html = buildPriceSheetHtml(included.value, {
-    title: brand || (eventName ? `Price List — ${eventName}` : 'Price List'),
+    title: brand || (eventName ? `Price List - ${eventName}` : 'Price List'),
     subtitle: brand ? ['Price list', eventName].filter(Boolean).join(' · ') + ` · prices in ${currency.value}` : `${shownLines.value} lines · prices in ${currency.value}`,
     currency: currency.value,
   });

@@ -228,7 +228,7 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 1;
     }
     default:
-      // Unknown to this build — skip rather than fail the whole batch.
+      // Unknown to this build - skip rather than fail the whole batch.
       return 0;
   }
 }
@@ -285,7 +285,7 @@ async function pull(): Promise<number> {
     const db = openCoreDb(requireAccountId());
     await db.transaction('rw', [db.products, db.events, db.eventStock, db.transactions], async () => {
       // Transactions are deliberately kept. They are financial records and are
-      // immutable once written, so there is nothing stale to discard — and a
+      // immutable once written, so there is nothing stale to discard - and a
       // sale made on this device but not yet pushed would be lost forever.
       await Promise.all([db.products.clear(), db.events.clear(), db.eventStock.clear()]);
     });
@@ -302,7 +302,7 @@ async function pull(): Promise<number> {
 }
 
 /**
- * Runs one sync cycle. Concurrent callers share the in-flight run — a screen
+ * Runs one sync cycle. Concurrent callers share the in-flight run - a screen
  * that syncs on mount plus a timer tick should not produce two pushes racing
  * over the same outbox rows.
  */
@@ -357,7 +357,7 @@ const PUSH_DEBOUNCE_MS = 1_500;
 
 /**
  * Starts periodic sync, plus an immediate attempt whenever the network
- * returns, plus a push shortly after anything is queued — a sale on one
+ * returns, plus a push shortly after anything is queued - a sale on one
  * register should be on the other within seconds, not at the next tick.
  */
 export function startAutoSync(intervalMs = 60_000): void {

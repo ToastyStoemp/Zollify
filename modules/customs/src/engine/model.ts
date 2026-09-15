@@ -1,5 +1,5 @@
 /**
- * Customs state model — mirrors the legacy v1 state shape exactly, because the
+ * Customs state model - mirrors the legacy v1 state shape exactly, because the
  * document generators are legal-consequence code verified byte-for-byte
  * against the old app. The adapter builds this from v2 data.
  */
@@ -78,9 +78,9 @@ export interface CustomsProduct {
   packagingType?: string;
   originCountry?: string;
   permitOverride?: number | null;
-  /** Year an art print was produced — shown as "Title (Year)" on customs docs. */
+  /** Year an art print was produced - shown as "Title (Year)" on customs docs. */
   year?: number;
-  /** Material of a purse — shown as "Title — Material" on customs docs. */
+  /** Material of a purse - shown as "Title - Material" on customs docs. */
   material?: string;
   amount?: number;
   soldQty?: number;

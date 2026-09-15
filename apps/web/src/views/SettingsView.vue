@@ -18,7 +18,7 @@ const account = currentAccount;
 /**
  * Core's own panels, listed before module contributions.
  *
- * Core is not a module, so it has nothing to register through the SDK — but its
+ * Core is not a module, so it has nothing to register through the SDK - but its
  * settings belong in the same index, not a separate screen.
  */
 const corePanels: Panel[] = [

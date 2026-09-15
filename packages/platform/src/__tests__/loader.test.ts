@@ -41,7 +41,7 @@ function makeLoader(defs: Record<string, ModuleDefinition | Error>) {
 
 const noopSetup = () => {};
 
-describe('ModuleLoader — validation', () => {
+describe('ModuleLoader - validation', () => {
   it('refuses a module built against an SDK the host cannot satisfy', async () => {
     const { loader } = makeLoader({
       old: defineModule({ id: 'old', version: '1.0.0', sdk: '^0.9.0', title: 'Old', setup: noopSetup }),
@@ -56,7 +56,7 @@ describe('ModuleLoader — validation', () => {
 
   it('refuses a bundle whose declared id differs from the one served', async () => {
     // Guards against a registry mix-up or a swapped bundle mounting under
-    // another module's namespace — and therefore its database and HTTP prefix.
+    // another module's namespace - and therefore its database and HTTP prefix.
     const { loader } = makeLoader({
       pos: defineModule({ id: 'tax', version: '1.0.0', sdk: '^1.0.0', title: 'Tax', setup: noopSetup }),
     });
@@ -82,7 +82,7 @@ describe('ModuleLoader — validation', () => {
   });
 });
 
-describe('ModuleLoader — isolation', () => {
+describe('ModuleLoader - isolation', () => {
   it('keeps loading other modules when one throws in setup', async () => {
     // The whole point: a broken Tax module must never stop the till opening.
     const { loader, contributions } = makeLoader({
@@ -166,7 +166,7 @@ describe('ModuleLoader — isolation', () => {
   });
 });
 
-describe('ModuleLoader — dependencies', () => {
+describe('ModuleLoader - dependencies', () => {
   it('skips a module whose requirement is unavailable', async () => {
     const { loader } = makeLoader({
       tax: defineModule({
@@ -183,7 +183,7 @@ describe('ModuleLoader — dependencies', () => {
 
   it('satisfies requirements the host provides itself', async () => {
     // Core is not a module, so `catalog` has no bundle to load. Without this,
-    // every module that depends on core data would be skipped at boot — which
+    // every module that depends on core data would be skipped at boot - which
     // is both first-party modules.
     const { loader } = makeLoader({
       pos: defineModule({

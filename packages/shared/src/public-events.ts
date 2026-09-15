@@ -5,7 +5,7 @@ import type { SalesEvent } from './types';
 /**
  * The public face of the events list: a "where to find us" page, a widget for
  * a shop, a calendar feed and an Instagram bio, all derived from the events
- * the booth already keeps. Only safe display fields ever leave — never sales.
+ * the booth already keeps. Only safe display fields ever leave - never sales.
  *
  * Ported from ZollEvents. Pure functions here so the server renders and the
  * app previews from the same code.
@@ -32,7 +32,7 @@ export const PublicEventsConfigSchema = z.object({
     .string()
     .trim()
     .toLowerCase()
-    .regex(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/, 'Use 3–40 letters, digits and dashes.')
+    .regex(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/, 'Use 3-40 letters, digits and dashes.')
     .nullable()
     .default(null),
   orgName: z.string().trim().max(80).default(''),

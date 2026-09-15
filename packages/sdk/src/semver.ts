@@ -43,7 +43,7 @@ export function compareVersions(a: SemVer, b: SemVer): number {
 function upperBoundFor(op: '^' | '~', v: SemVer): SemVer {
   if (op === '~') return { major: v.major, minor: v.minor + 1, patch: 0, prerelease: null };
   // Caret keeps the leftmost non-zero component stable, so 0.x releases are
-  // treated as breaking on every minor — matching npm, and mattering here
+  // treated as breaking on every minor - matching npm, and mattering here
   // because the SDK will sit on 0.x for a while.
   if (v.major > 0) return { major: v.major + 1, minor: 0, patch: 0, prerelease: null };
   if (v.minor > 0) return { major: 0, minor: v.minor + 1, patch: 0, prerelease: null };

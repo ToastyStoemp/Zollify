@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-/** Wire protocol between app and sync server — validated with zod on both sides. */
+/** Wire protocol between app and sync server - validated with zod on both sides. */
 
 export const OpTypeSchema = z.enum([
   'tx.create',
@@ -39,7 +39,7 @@ export type ServerOp = z.infer<typeof ServerOpSchema>;
 export const PushRequestSchema = z.object({
   deviceId: z.string().min(1),
   deviceName: z.string().optional(),
-  /** 'carbon' | 'compat' | 'full' | 'web' — lets other devices on the account
+  /** 'carbon' | 'compat' | 'full' | 'web' - lets other devices on the account
    *  find e.g. a Carbon terminal to target for a remote payment trigger. */
   flavor: z.string().optional(),
   ops: z.array(OpSchema).max(500),
@@ -67,7 +67,7 @@ export interface PullResponse {
    * Account-wide log epoch. Bumped when the server rewrites its op-log in place
    * (e.g. baking product merges into the stored payloads). A client that sees an
    * epoch different from the one it last stored must discard all local synced
-   * data and re-pull from seq 0 — the payloads it cached are no longer current.
+   * data and re-pull from seq 0 - the payloads it cached are no longer current.
    */
   epoch?: number;
 }
@@ -104,7 +104,7 @@ export const LogUploadSchema = z.object({
   deviceName: z.string().optional(),
   flavor: z.string().optional(),
   appVersion: z.string().optional(),
-  /** Why this was sent, e.g. "payment-failed" or "manual" — free text. */
+  /** Why this was sent, e.g. "payment-failed" or "manual" - free text. */
   reason: z.string().optional(),
   log: z.string().min(1).max(2_000_000),
 });
@@ -112,7 +112,7 @@ export type LogUpload = z.infer<typeof LogUploadSchema>;
 
 export type UserRole = 'owner' | 'admin' | 'member';
 
-/** Who is behind the booth — printed on customs paperwork and receipts. */
+/** Who is behind the booth - printed on customs paperwork and receipts. */
 export const ArtistDetailsSchema = z.object({
   companyName: z.string().max(120).default(''),
   fullName: z.string().max(120).default(''),
@@ -165,7 +165,7 @@ export interface TokenResponse {
   user: AuthUser;
 }
 
-/** WS doorbell message — tells clients to pull over HTTP; carries no data itself. */
+/** WS doorbell message - tells clients to pull over HTTP; carries no data itself. */
 export interface NudgeMessage {
   type: 'nudge';
   latestSeq: number;
@@ -181,7 +181,7 @@ export interface DisplayCart {
   lines: Array<{ title: string; variantLabel?: string; qty: number; lineTotal: number }>;
   discounts: Array<{ name: string; amount: number }>;
   total: number;
-  /** Set right after a completed sale — displays show a thank-you state. */
+  /** Set right after a completed sale - displays show a thank-you state. */
   paid?: { total: number };
   ts: number;
 }

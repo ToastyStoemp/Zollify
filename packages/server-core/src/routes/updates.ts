@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
  * Self-update for the Android app: a version manifest and one APK per
  * flavour, read from a directory the deploy fills (`apps/server/apk`,
  * written by `npm run android:pack` or `scripts/fetch-apks.mjs`). Nothing
- * here is committed to git — APKs are build output, not source.
+ * here is committed to git - APKs are build output, not source.
  *
  * Public on purpose, like /api/health: an APK carries no account data, and a
  * device that cannot sign in (an expired session on an old build, say) still

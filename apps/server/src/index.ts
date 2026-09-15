@@ -17,7 +17,7 @@ loadDotEnv();
  * Unlike client modules, these are not loaded at runtime: they run in a
  * privileged process holding the database and every tenant's integration keys,
  * and downloading code into that process would be an entirely different
- * security proposition. They are gated per account instead — see
+ * security proposition. They are gated per account instead - see
  * `mountServerModules`.
  */
 

@@ -53,7 +53,7 @@ export function parseSheet(raw: unknown[][], tidNames: TidNames): { format: Pars
       return t === 'type' || t === 'financial status' || t === 'direction' || t === 'status';
     }),
   );
-  if (hi < 0) throw new ParseError('Cannot recognise this file — none of the expected column headers are present.');
+  if (hi < 0) throw new ParseError('Cannot recognise this file - none of the expected column headers are present.');
   const headers = raw[hi]!.map((h) => String(h).trim().replace(/^"|"$/g, '').toLowerCase().replace(/\s+/g, '_'));
   const rows: Row[] = raw
     .slice(hi + 1)
@@ -183,7 +183,7 @@ export function parseWise(rows: Row[]): Txn[] {
         terminal: 'Wise',
         card: sender,
         ref: s(col(r, 'id')),
-        desc: note ? `Wise transfer — ${note}` : `Wise transfer from ${sender}`,
+        desc: note ? `Wise transfer - ${note}` : `Wise transfer from ${sender}`,
         source: 'wise',
       };
     })

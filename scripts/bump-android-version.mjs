@@ -1,6 +1,6 @@
 /**
  * Stamp a fresh versionCode/versionName into android/app/build.gradle before
- * building. Run this first, then build the APKs, then `npm run pack:apk` —
+ * building. Run this first, then build the APKs, then `npm run pack:apk` -
  * which reads the version back from build.gradle so server/apk/version.json
  * always matches exactly what's embedded in the APKs it's shipping (not a
  * separately-computed timestamp that can drift a few minutes apart).
@@ -26,7 +26,7 @@ function gitVersion() {
     const dirty = execSync('git status --porcelain', { cwd: root }).toString().trim() ? '-dirty' : '';
     return sha + dirty;
   } catch {
-    // No git (e.g. a source tarball) — fall back to a timestamp so it's never empty.
+    // No git (e.g. a source tarball) - fall back to a timestamp so it's never empty.
     return new Date().toISOString().slice(0, 16).replace('T', ' ');
   }
 }

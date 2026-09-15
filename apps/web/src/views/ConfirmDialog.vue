@@ -5,7 +5,7 @@ import { pendingConfirm } from '@zollify/platform';
 const confirmButton = ref<HTMLButtonElement | null>(null);
 
 // Focus lands on the confirming action so Enter completes the flow and Escape
-// backs out — the two keys anyone reaches for on a dialog.
+// backs out - the two keys anyone reaches for on a dialog.
 watch(
   () => pendingConfirm.current,
   async (req) => {

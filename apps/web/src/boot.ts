@@ -40,7 +40,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */
 export const booted = ref(false);
 let resolveBoot: () => void = () => {};
-/** Settles when boot is done — the router's first navigation waits on it. */
+/** Settles when boot is done - the router's first navigation waits on it. */
 export const whenBooted = new Promise<void>((resolve) => (resolveBoot = resolve));
 export function markBooted(): void {
   booted.value = true;
@@ -67,7 +67,7 @@ events.on('sale', (sale) => {
 
 /**
  * Routes reach the router the instant a module contributes them, rather than in
- * a pass afterwards — the nav is reactive and would otherwise render a link to
+ * a pass afterwards - the nav is reactive and would otherwise render a link to
  * a route the router does not yet know.
  */
 export function connectRouter(router: Router): void {
@@ -125,7 +125,7 @@ interface ManifestResponse {
  * stop the shell from starting. A booth with a broken Tax module still needs to
  * open the till.
  */
-/** Why each switched-on module is or is not running, from the last load — the Modules panel shows it. */
+/** Why each switched-on module is or is not running, from the last load - the Modules panel shows it. */
 export const loadOutcomes = ref<LoadOutcome[]>([]);
 
 export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]> {

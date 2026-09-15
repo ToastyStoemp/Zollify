@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
  * Which modules an account has switched on.
  *
  * Today this is a plain per-account list the owner edits. When billing arrives
- * it writes this same table and nothing else in the system changes — that is
+ * it writes this same table and nothing else in the system changes - that is
  * the seam the architecture was built around.
  */
 

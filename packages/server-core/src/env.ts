@@ -27,7 +27,7 @@ export function loadDotEnv(dir = process.cwd()): void {
       /* try the next candidate */
     }
   }
-  if (raw === undefined) return; // no .env — rely on process.env
+  if (raw === undefined) return; // no .env - rely on process.env
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;

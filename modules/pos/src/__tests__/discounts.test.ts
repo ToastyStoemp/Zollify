@@ -38,7 +38,7 @@ function rule(partial: Partial<DiscountRule>): DiscountRule {
 }
 
 describe('computeRuleDiscounts', () => {
-  it('bxgy: buy 2 get 1 — cheapest item of each full group goes free', () => {
+  it('bxgy: buy 2 get 1 - cheapest item of each full group goes free', () => {
     // 5 matching items priced [5,10,10,10,12] → group size 3, 1 full group → 1 free = cheapest (5)
     const lines = [line('a', null, 1, 5), line('a2', null, 3, 10), line('a3', null, 1, 12)];
     const r = rule({ type: 'bxgy', buyQty: 2, freeQty: 1, productIds: ['a', 'a2', 'a3'] });
@@ -148,7 +148,7 @@ describe('computeRuleDiscounts', () => {
   });
 
   it('tiered with tierContinue: no bundle pricing below the first tier', () => {
-    // 2 items never reach "3 for 25" — legacy wrongly priced them at 25/3 each
+    // 2 items never reach "3 for 25" - legacy wrongly priced them at 25/3 each
     const lines = [line('a', null, 2, 10)];
     const r = rule({ type: 'tiered', tiers: [{ qty: 3, total: 25 }], tierContinue: true, productIds: ['a'] });
     expect(computeRuleDiscounts(lines, [r])).toHaveLength(0);
@@ -156,7 +156,7 @@ describe('computeRuleDiscounts', () => {
 
   it('matches variant lines via productIds and specific variantIds without double counting', () => {
     const lines = [line('p', 'v1', 2, 10), line('p', 'v2', 1, 8)];
-    // Rule targets the whole product AND one variant explicitly — items must not be duplicated.
+    // Rule targets the whole product AND one variant explicitly - items must not be duplicated.
     const r = rule({ type: 'bxgy', buyQty: 2, freeQty: 1, productIds: ['p'], variantIds: ['p:v1'] });
     // 3 items [8,10,10] → 1 group → cheapest free = 8
     expect(computeRuleDiscounts(lines, [r])[0]!.amount).toBe(8);

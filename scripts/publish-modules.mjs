@@ -8,7 +8,7 @@
  *   <store>/<moduleId>/<version>/bundle.js
  *
  * Versions are written to their own directory and never overwritten, so a
- * published version's bytes are immutable — the client caches by
+ * published version's bytes are immutable - the client caches by
  * `<id>@<version>` and hash-verifies, and rollback is just pointing at the
  * older directory that is still there.
  */
@@ -67,7 +67,7 @@ for (const id of MODULES) {
   console.log(`building ${id}…`);
   // Run Vite through Node directly rather than via npm. Node 24 refuses to
   // spawn npm.cmd without a shell, and reaching for shell:true to work around
-  // that concatenates arguments unescaped — neither is worth it when the real
+  // that concatenates arguments unescaped - neither is worth it when the real
   // work is one binary we can call ourselves.
   execFileSync(process.execPath, [viteBin, 'build'], { cwd: moduleDir, stdio: 'inherit' });
 

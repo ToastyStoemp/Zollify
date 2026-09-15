@@ -43,7 +43,7 @@ export interface ImportPlan {
   /**
    * A starting inventory seeded from those claims.
    *
-   * ZollTool had no notion of total stock owned — only what was taken to each
+   * ZollTool had no notion of total stock owned - only what was taken to each
    * event. The largest quantity any event took is the only evidence in the old
    * data of how many existed, so it is used as an opening count to correct
    * rather than a figure to trust.
@@ -77,7 +77,7 @@ function asArray<T>(value: unknown, what: string, warnings: string[]): T[] {
 /**
  * Parses and validates a backup, returning what would be written.
  *
- * Nothing is imported here — the caller shows this plan first. Importing into
+ * Nothing is imported here - the caller shows this plan first. Importing into
  * a live catalogue without seeing the counts is how someone discovers they
  * picked the wrong file after it has already run.
  */
@@ -184,7 +184,7 @@ export function planImport(raw: unknown, imageBlobs: ImageBlobs = new Map()): Im
   if (seeded.size) {
     warnings.push(
       `Opening inventory seeded from the largest quantity each item was ever taken to an event ` +
-        `(${seeded.size} item(s)). Recount before trusting it — ZollTool never recorded total stock.`,
+        `(${seeded.size} item(s)). Recount before trusting it - ZollTool never recorded total stock.`,
     );
   }
 
@@ -217,7 +217,7 @@ const ZIP_IMAGE_RE = /^images\/(.+)\.(full|thumb)$/;
  */
 export function unpackZip(files: Record<string, Uint8Array>): { json: unknown; images: ImageBlobs } {
   const jsonBytes = files['backup.json'];
-  if (!jsonBytes) throw new BackupParseError('That zip has no backup.json inside — it is not a ZollTool backup.');
+  if (!jsonBytes) throw new BackupParseError('That zip has no backup.json inside - it is not a ZollTool backup.');
   const images: ImageBlobs = new Map();
   for (const [name, bytes] of Object.entries(files)) {
     const m = name.match(ZIP_IMAGE_RE);

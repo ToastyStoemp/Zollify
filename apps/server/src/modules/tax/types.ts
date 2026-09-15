@@ -1,5 +1,5 @@
 /**
- * One normalised payment-source row. Every importer — myPOS, SumUp, Shopify —
+ * One normalised payment-source row. Every importer - myPOS, SumUp, Shopify -
  * emits this shape, so the clustering engine in the client never knows which
  * provider a row came from beyond `source`.
  */
@@ -17,7 +17,7 @@ export interface SourceRow {
   isOnline: boolean;
   /** Shopify order number, when the row is an order. */
   orderNum?: string;
-  /** Paid by a manual / custom gateway — likely already in the card data. */
+  /** Paid by a manual / custom gateway - likely already in the card data. */
   isManual?: boolean;
   /** myPOS device serial, used to name the device once. */
   serial?: string;

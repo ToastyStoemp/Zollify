@@ -19,7 +19,7 @@ import {
 } from '@zollify/platform';
 
 /**
- * Events — ZollTool's card grid. Upcoming and active first, soonest at the
+ * Events - ZollTool's card grid. Upcoming and active first, soonest at the
  * top; finished ones below. Selling always goes through an event, so the
  * card is where you open it, sell for it, and close it again.
  */
@@ -84,7 +84,7 @@ const sell = (e: SalesEvent) =>
     if (hasRoute('pos:index')) await router.push({ name: 'pos:index' });
   });
 async function close(e: SalesEvent): Promise<void> {
-  const ok = await shellConfirm('Closing stops sales for this event. Nothing is deleted — history and exports stay, and you can reopen it any time.', 'Close event?');
+  const ok = await shellConfirm('Closing stops sales for this event. Nothing is deleted - history and exports stay, and you can reopen it any time.', 'Close event?');
   if (!ok) return;
   await guard(async () => {
     const end = e.dateEnd || e.dateStart;
@@ -183,7 +183,7 @@ async function fetchRate(): Promise<void> {
   const rate = await fetchExchangeRate(form.currency, form.localCurrency);
   fetchingRate.value = false;
   if (rate == null) {
-    rateError.value = 'Could not fetch a rate — enter it by hand.';
+    rateError.value = 'Could not fetch a rate - enter it by hand.';
     return;
   }
   form.exchangeRate = String(rate);
@@ -245,7 +245,7 @@ async function save(): Promise<void> {
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
-    <p v-if="!visibleEvents.length" class="empty">No events yet. Create one to start selling — every sale is recorded against the active event.</p>
+    <p v-if="!visibleEvents.length" class="empty">No events yet. Create one to start selling - every sale is recorded against the active event.</p>
 
     <template v-for="group in [{ label: '', list: upcoming }, { label: 'Finished', list: finished }]" :key="group.label">
       <h2 v-if="group.label && group.list.length" class="group">{{ group.label }}</h2>
@@ -291,7 +291,7 @@ async function save(): Promise<void> {
           <div class="two">
             <label><span>Base currency (your books)</span><CurrencyPicker v-model="form.currency" /></label>
           </div>
-          <p class="hint">Charging in another currency — for a convention abroad. Prices stay in {{ form.currency || 'base' }} for your books; the till charges the converted amount. Leave blank to sell in {{ form.currency || 'base' }} directly.</p>
+          <p class="hint">Charging in another currency - for a convention abroad. Prices stay in {{ form.currency || 'base' }} for your books; the till charges the converted amount. Leave blank to sell in {{ form.currency || 'base' }} directly.</p>
           <div class="three">
             <label><span>Local currency</span><CurrencyPicker v-model="form.localCurrency" placeholder="SEK" /></label>
             <label><span>Rate (1 {{ form.currency || 'base' }} =)</span><input v-model="form.exchangeRate" type="number" min="0" step="0.0001" inputmode="decimal" /></label>
@@ -312,7 +312,7 @@ async function save(): Promise<void> {
         <label v-if="!editId">
           <span>Copy stock claims from</span>
           <select v-model="form.copyStockFrom">
-            <option value="">— don't copy —</option>
+            <option value="">- don't copy -</option>
             <option v-for="e in visibleEvents" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>

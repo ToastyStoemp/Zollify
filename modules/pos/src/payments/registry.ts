@@ -35,7 +35,7 @@ export async function availableProviders(): Promise<PaymentProvider[]> {
  * Called on app start and whenever the provider selection changes. Connections
  * are only established for the provider that is actually in use:
  * - bridge: keep its websocket alive only while selected
- * - MyPOS GO2: enter Bluetooth-connectable state only while selected — the
+ * - MyPOS GO2: enter Bluetooth-connectable state only while selected - the
  *   native plugin deliberately never auto-connects on its own, so a paired
  *   terminal isn't grabbed when a different provider (or none) is configured.
  */

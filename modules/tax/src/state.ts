@@ -7,7 +7,7 @@ import type { TidNames } from './engine/parse';
 
 /**
  * The working set: clusters being reconciled, saved in this module's own
- * database so a reload — or a week between the pull and the booking — loses
+ * database so a reload - or a week between the pull and the booking - loses
  * nothing. ZollTax kept this in page memory; a closed tab meant starting
  * over, which at month-end was the most annoying thing about it.
  */

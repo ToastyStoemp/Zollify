@@ -33,7 +33,7 @@ export const router: Router = createRouter({
  * Authentication and role gates.
  *
  * Refusing the route is the control; hiding the nav link is only courtesy. The
- * server refusing the data is the actual guarantee — all three exist because
+ * server refusing the data is the actual guarantee - all three exist because
  * only the last one is load-bearing.
  */
 router.beforeEach(async (to) => {
@@ -53,7 +53,7 @@ router.beforeEach(async (to) => {
   }
 
   // A fresh account is walked through setup before anything else. Only an
-  // admin can complete it — a helper landing first just sees the app.
+  // admin can complete it - a helper landing first just sees the app.
   if (
     account &&
     account.profile.setupCompletedAt === null &&
@@ -67,7 +67,7 @@ router.beforeEach(async (to) => {
 });
 
 // Dev only: how long each page switch takes, from the click to the first
-// painted frame of the new route — the number a "this feels slow" report is about.
+// painted frame of the new route - the number a "this feels slow" report is about.
 if (import.meta.env.DEV) {
   let started = 0;
   router.beforeEach(() => {

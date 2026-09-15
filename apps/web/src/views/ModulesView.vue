@@ -37,7 +37,7 @@ onMounted(refresh);
 function problem(mod: AvailableModule): string | null {
   if (!mod.enabled || loader.isLoaded(mod.moduleId)) return null;
   const outcome = loadOutcomes.value.find((o) => o.moduleId === mod.moduleId);
-  return outcome?.reason ?? 'Not running on this device — reload the app.';
+  return outcome?.reason ?? 'Not running on this device - reload the app.';
 }
 
 /**

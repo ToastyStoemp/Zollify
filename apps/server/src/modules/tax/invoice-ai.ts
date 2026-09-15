@@ -32,7 +32,7 @@ export function loadAiConfig(env: Record<string, string>): AiConfig {
   };
 }
 
-/** Lists models — a validity check that spends no tokens. */
+/** Lists models - a validity check that spends no tokens. */
 export async function pingAiKey(apiKey: string, timeoutMs = 8000): Promise<{ ok: boolean; detail?: string }> {
   if (!apiKey) return { ok: false, detail: 'No API key set.' };
   const ctrl = new AbortController();
@@ -49,7 +49,7 @@ export async function pingAiKey(apiKey: string, timeoutMs = 8000): Promise<{ ok:
   }
 }
 
-const PROMPT = `You are extracting expense data from a single invoice or receipt PDF — a business cost for a market/convention vendor (hotel, travel, booth/stand fee, or other).
+const PROMPT = `You are extracting expense data from a single invoice or receipt PDF - a business cost for a market/convention vendor (hotel, travel, booth/stand fee, or other).
 Return ONLY a JSON object, no prose, with exactly these keys:
 {
   "vendor": string,            // business name on the invoice, e.g. "Hotel Ibis Koeln"

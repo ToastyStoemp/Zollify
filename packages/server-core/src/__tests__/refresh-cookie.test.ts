@@ -47,7 +47,7 @@ afterAll(async () => {
 
 /**
  * Closing Fastify does not close the SQLite handle, and Windows refuses to
- * delete a directory whose file is still open — so the database is closed
+ * delete a directory whose file is still open - so the database is closed
  * explicitly. Cleanup failure is never worth failing a test over: the directory
  * is in the OS temp folder either way.
  */
@@ -86,7 +86,7 @@ describe('refresh token transport', () => {
   });
 
   it('never puts the refresh token in the response body', async () => {
-    // The whole point: an XSS bug in this origin — where runtime modules run —
+    // The whole point: an XSS bug in this origin - where runtime modules run -
     // must not be able to read a long-lived refresh token.
     const res = await login();
     expect(res.json()).not.toHaveProperty('refreshToken');

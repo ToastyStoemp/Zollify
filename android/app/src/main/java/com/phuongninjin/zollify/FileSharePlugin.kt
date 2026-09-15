@@ -73,7 +73,7 @@ class FileSharePlugin : Plugin() {
                 activity.startActivity(view)
                 call.resolve(JSObject().apply { put("opened", true) })
             } catch (e: android.content.ActivityNotFoundException) {
-                // Nothing can view this type — fall back to the share sheet.
+                // Nothing can view this type - fall back to the share sheet.
                 val share = Intent(Intent.ACTION_SEND).apply {
                     type = mimeType
                     putExtra(Intent.EXTRA_STREAM, uri)

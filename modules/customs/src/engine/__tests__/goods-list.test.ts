@@ -23,8 +23,8 @@ function state(products: CustomsProduct[]): CustomsState {
 
 const artPrint = product({ id: 'a', title: 'Sunset', type: 'Art Print', year: 2024 });
 
-describe('goods list — art-print artist attribution', () => {
-  it('shows "Title (Year) — Artist" on the Import, Sold and Return lists', () => {
+describe('goods list - art-print artist attribution', () => {
+  it('shows "Title (Year) - Artist" on the Import, Sold and Return lists', () => {
     for (const doc of [1, 2, 3] as GoodsDocNum[]) {
       const html = buildGoodsListHtml(state([artPrint]), doc, 'detailed');
       expect(html, `doc ${doc}`).toContain('Sunset (2024) - Jane Doe');
@@ -38,7 +38,7 @@ describe('goods list — art-print artist attribution', () => {
   });
 });
 
-describe('import document — excludes zero-stock products', () => {
+describe('import document - excludes zero-stock products', () => {
   it('omits products with no brought stock, keeps stocked ones', () => {
     const html = buildGoodsListHtml(
       state([
@@ -75,7 +75,7 @@ describe('import document — excludes zero-stock products', () => {
   });
 });
 
-describe('goods list — by-type HS disambiguation', () => {
+describe('goods list - by-type HS disambiguation', () => {
   it('appends the HS code only when two groups share a type', () => {
     const html = buildGoodsListHtml(
       state([

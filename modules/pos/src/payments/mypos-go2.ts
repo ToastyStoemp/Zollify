@@ -41,7 +41,7 @@ export const myposGo2Provider: PaymentProvider = {
   async configure(): Promise<void> {
     const { granted } = await MyPos.connectTerminal();
     if (!granted) {
-      throw new Error('Bluetooth permission denied — allow Bluetooth (and Location) for ZollTool in Android settings');
+      throw new Error('Bluetooth permission denied - allow Bluetooth (and Location) for ZollTool in Android settings');
     }
   },
 };

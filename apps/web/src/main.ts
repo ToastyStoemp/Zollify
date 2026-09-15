@@ -91,7 +91,7 @@ async function autoUpdateCheck(): Promise<void> {
     const check = await checkForUpdate();
     if (!check?.available) return;
     await downloadUpdate(check);
-    if (updateDownload.ready) createShellUi('shell').toast(`Update ${check.versionName} is ready — install it under Settings → This device.`, { timeoutMs: 8000 });
+    if (updateDownload.ready) createShellUi('shell').toast(`Update ${check.versionName} is ready - install it under Settings → This device.`, { timeoutMs: 8000 });
   } catch {
     /* background convenience, never an error the user has to see */
   }

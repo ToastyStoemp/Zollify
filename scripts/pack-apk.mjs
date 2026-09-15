@@ -18,14 +18,14 @@ let packed = 0;
 for (const flavor of flavors) {
   const src = join(root, 'android', 'app', 'build', 'outputs', 'apk', flavor, buildType, `app-${flavor}-${buildType}.apk`);
   if (!existsSync(src)) {
-    console.warn(`Skipping ${flavor} — ${src} not found (build it first).`);
+    console.warn(`Skipping ${flavor} - ${src} not found (build it first).`);
     continue;
   }
   copyFileSync(src, join(outDir, `zollify-${flavor}.apk`));
   packed++;
 }
 if (!packed) {
-  console.error('No APKs found — run `npm run android:apk` first.');
+  console.error('No APKs found - run `npm run android:apk` first.');
   process.exit(1);
 }
 const gradle = readFileSync(join(root, 'android', 'app', 'build.gradle'), 'utf-8');

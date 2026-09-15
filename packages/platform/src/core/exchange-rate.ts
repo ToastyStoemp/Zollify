@@ -1,5 +1,5 @@
 /**
- * Free, keyless exchange-rate lookup — ported from ZollTool. Only ever
+ * Free, keyless exchange-rate lookup - ported from ZollTool. Only ever
  * prefills a convention's rate; nothing applies it without the seller
  * seeing the number first.
  */

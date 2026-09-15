@@ -32,7 +32,7 @@ import { sdk } from '../runtime';
 import ProductThumb from '../components/ProductThumb.vue';
 
 /**
- * The till — ZollTool's POS, screen for screen.
+ * The till - ZollTool's POS, screen for screen.
  *
  * Products are browsed by type (one card per type, tap to drill in) or as a
  * flat grid; a search box takes a scanner. Every payment is confirmed on
@@ -186,7 +186,7 @@ const typeProducts = computed(() => (openType.value === null ? [] : products.val
 function submitSearch(): void {
   const match = findSearchMatch(products.value, search.value);
   if (!match) return toast('No product found for that search.', 'bad');
-  if ('ambiguous' in match) return toast(`${match.count} matches — keep typing to narrow it down.`, 'bad');
+  if ('ambiguous' in match) return toast(`${match.count} matches - keep typing to narrow it down.`, 'bad');
   add(match.productId, match.variantId);
   toast(`Added ${match.label}`);
   search.value = '';
@@ -343,7 +343,7 @@ async function undoLast(): Promise<void> {
   if (!lastSale.value) return;
   await sdk().data.transactions.revert(lastSale.value.id);
   lastSale.value = null;
-  toast('Sale reverted — stock restored');
+  toast('Sale reverted - stock restored');
 }
 function receipt(): void {
   if (lastSale.value) void router.push({ name: 'pos:receipt', params: { saleId: lastSale.value.id } });
@@ -455,7 +455,7 @@ async function confirmPayment(): Promise<void> {
   });
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
-  finish(outcome.sale!, `Payment confirmed — ${count} item${count === 1 ? '' : 's'} sold`);
+  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`);
 }
 
 function finish(sale: SaleEvent, message: string): void {
@@ -504,10 +504,10 @@ async function cancelPayment(): Promise<void> {
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
           <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
-          <small v-else>Open one under Events — sales are filed against an event.</small>
+          <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
-        <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} — tap to re-check`" @click="tapTerminalState">
+        <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
         <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
@@ -528,7 +528,7 @@ async function cancelPayment(): Promise<void> {
         <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
       </div>
 
-      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet — add some under Products.' }}</p>
+      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
           <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0 }" @click="openType = e.group.type">
@@ -635,7 +635,7 @@ async function cancelPayment(): Promise<void> {
         <button v-for="v in (variantPicker.variants ?? []).filter((x: Variant) => !x.unlisted)" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
           <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
           <span class="head">
-            <!-- Only the variant's own photo — the product's would misrepresent the variant. -->
+            <!-- Only the variant's own photo - the product's would misrepresent the variant. -->
             <ProductThumb v-if="v.imageId" :image-id="v.imageId" :alt="v.name" :size="36" />
             <span class="title">{{ v.name || '(untitled)' }}</span>
           </span>
@@ -653,7 +653,7 @@ async function cancelPayment(): Promise<void> {
 
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
     <ModalShell v-if="showMisc" title="Misc item" @close="showMisc = false">
-      <p class="hint">Sell something that isn't in the catalogue — a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
+      <p class="hint">Sell something that isn't in the catalogue - a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
       <div class="form">
         <input v-model="miscForm.title" type="text" placeholder="Description (e.g. Commission)" />
         <div class="two">

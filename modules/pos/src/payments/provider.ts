@@ -13,7 +13,7 @@ export interface ProviderStatus {
 }
 
 export interface PaymentRequest {
-  /** Decimal major-unit amount (e.g. 12.50) — matches the native plugin contracts. */
+  /** Decimal major-unit amount (e.g. 12.50) - matches the native plugin contracts. */
   amount: number;
   currency: string;
   reference: string;
@@ -31,7 +31,7 @@ export interface PaymentResult {
 export interface PaymentProvider {
   readonly id: PaymentProviderId;
   readonly label: string;
-  /** Platform/plugin presence check — cheap, safe to call often. */
+  /** Platform/plugin presence check - cheap, safe to call often. */
   isAvailable(): Promise<boolean>;
   getStatus(): Promise<ProviderStatus>;
   startPayment(req: PaymentRequest): Promise<PaymentResult>;
@@ -45,7 +45,7 @@ export interface PaymentProvider {
   /**
    * Optional: true when the provider needs an interactive sign-in (e.g. SumUp
    * login) that hasn't happened yet, so checkout should prompt to connect or
-   * pick another method instead of attempting — and failing at — the terminal.
+   * pick another method instead of attempting - and failing at - the terminal.
    * Providers that connect on demand (myPOS Bluetooth) don't implement this.
    */
   needsLogin?(): Promise<boolean>;

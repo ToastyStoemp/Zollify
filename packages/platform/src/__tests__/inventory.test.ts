@@ -218,7 +218,7 @@ describe('the free pool', () => {
 
   it('loses the overage when a claim is oversold', async () => {
     // Three prints past the claim still physically left the pile. They came
-    // out of the unclaimed stock, so the pool — and every unclaimed event —
+    // out of the unclaimed stock, so the pool - and every unclaimed event -
     // must see them gone, or a second event could sell the same prints.
     await inv.setOnHand(PRINT, null, 100);
     await inv.setClaim('ev-a', PRINT, null, 5);
@@ -261,7 +261,7 @@ describe('reverted sales', () => {
 
     await tx.revertTransaction('sale-1');
 
-    // Derived, not decremented — which is exactly why a revert needs no
+    // Derived, not decremented - which is exactly why a revert needs no
     // compensating write anywhere.
     expect(availability('ev-a').available).toBe(30);
     expect(inventoryRow().sold).toBe(0);

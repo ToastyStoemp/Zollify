@@ -1,4 +1,4 @@
-/** Core's shared domain — the catalogue, sales events and the sync outbox. */
+/** Core's shared domain - the catalogue, sales events and the sync outbox. */
 export { openCoreDb, closeCoreDb, deleteCoreDb, coreDbName, type CoreDb, type OutboxOp, type SettingRow, type ImageRec } from './db';
 export {
   loadCatalog,

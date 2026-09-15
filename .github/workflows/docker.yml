@@ -1,7 +1,7 @@
 name: Docker image
 
 # Builds the server image on every push to main and pushes it to GHCR, so the
-# EC2 host only ever pulls — building there on a small instance is slow and
+# EC2 host only ever pulls - building there on a small instance is slow and
 # ties up the box that is serving the booth.
 on:
   push:

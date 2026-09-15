@@ -7,7 +7,7 @@ import { sdk } from '../runtime';
  * The Carbon side of a remote payment: a register asked THIS device to
  * charge a card. Runs the same on-device flow as a local sale and replies
  * over the live channel. Wired at module setup so it works whatever screen
- * the Carbon is showing — usually the customer display.
+ * the Carbon is showing - usually the customer display.
  */
 export function listenForRemotePayments(): () => void {
   let myId = '';

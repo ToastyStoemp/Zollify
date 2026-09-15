@@ -1,0 +1,14 @@
+# Caddy running in Docker too: put zollify on Caddy's network so the
+# Caddyfile can say `reverse_proxy zollify:8787`. deploy.sh adds this file
+# when CADDY_NETWORK is set in apps/server/.env (the network's name — see
+# `docker network ls`, usually <caddy compose project>_default).
+services:
+  zollify:
+    networks:
+      - default
+      - caddy
+
+networks:
+  caddy:
+    external: true
+    name: ${CADDY_NETWORK}

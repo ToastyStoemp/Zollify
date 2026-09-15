@@ -209,7 +209,10 @@ GitHub Actions and pushed to GHCR on every push to `master`; the host only pulls
    `zollify` is set to public under the repo's Packages page once.
 2. **Caddy.** Add the block from `apps/server/Caddyfile.example` to your
    Caddyfile and reload. Caddy does TLS; the gateway listens on
-   `127.0.0.1:8787` only and trusts `X-Forwarded-Proto`.
+   `127.0.0.1:8787` only and trusts `X-Forwarded-Proto`. If Caddy itself runs
+   in Docker, set `CADDY_NETWORK=<its network>` in `.env` (see
+   `docker network ls`) and proxy to `zollify:8787` — the container joins
+   that network on deploy.
 3. **First start.** `./apps/server/deploy.sh --auto` — pulls the image, the
    Android APKs from the latest release, and starts the container. Check
    `https://<host>/health`.

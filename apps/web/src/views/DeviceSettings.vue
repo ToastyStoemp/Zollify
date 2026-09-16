@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue';
 import type { DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
+  getApiBase,
+  isNative,
   checkForUpdate,
   downloadUpdate,
   installDownloadedUpdate,
@@ -186,6 +188,15 @@ function when(ts: number): string {
       </li>
     </ul>
 
+    <template v-if="!canSelfUpdate && !isNative()">
+      <h3>Android app</h3>
+      <p class="hint">Install once from here; the app then updates itself from this server. Carbon terminals get their build through myPOS instead.</p>
+      <div class="row">
+        <a class="btn" :href="`${getApiBase()}/updates/download/full`" download>Full (phones, tablets)</a>
+        <a class="btn" :href="`${getApiBase()}/updates/download/compat`" download>Compat (Android 7)</a>
+      </div>
+    </template>
+
     <template v-if="canSelfUpdate">
       <h3>App updates</h3>
       <p class="hint">
@@ -233,4 +244,6 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .themes .label { font-size: .875rem; font-weight: 600; }
 .themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; }
+.btn:hover { background: var(--zfy-surface-2, #e9edf1); }
 </style>

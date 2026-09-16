@@ -103,10 +103,10 @@ const syncLabel = computed(() => {
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column - otherwise the login card is squeezed into a 15rem track. -->
-  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand">Zollify<span>.</span></span><small>Opening the booth…</small></div>
+  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
     <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen }]">
-      <div class="brand">Zollify<span>.</span></div>
+      <div class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></div>
 
       <nav id="main-nav" aria-label="Main">
         <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
@@ -183,8 +183,10 @@ const syncLabel = computed(() => {
   background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
   position: sticky; top: 0; height: 100vh;
 }
-.brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; }
+.brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; display: inline-flex; align-items: center; gap: .45rem; }
 .brand span { color: var(--zfy-accent); }
+.brand .mark { width: 1.5rem; height: 1.5rem; border-radius: 6px; }
+.splash .brand .mark { width: 2.4rem; height: 2.4rem; border-radius: 9px; }
 nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; border-radius: 8px; text-decoration: none; color: inherit; font-size: .9rem; }
 .item:hover { background: var(--zfy-surface-2); }

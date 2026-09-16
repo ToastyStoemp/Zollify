@@ -185,7 +185,7 @@ async function register(): Promise<void> {
 <template>
   <div class="login">
     <form @submit.prevent="mode === 'login' ? login() : register()">
-      <h1>Zollify<span>.</span></h1>
+      <h1><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></h1>
       <p v-if="firstRun" class="hint setup">First run - the account you create now owns this server.</p>
       <div v-if="!firstRun" class="seg" role="tablist">
         <button type="button" role="tab" :aria-selected="mode === 'login'" :class="{ on: mode === 'login' }" @click="mode = 'login'; error = null">Sign in</button>
@@ -217,7 +217,8 @@ async function register(): Promise<void> {
 <style scoped>
 .login { display: grid; place-items: center; padding: 1rem; }
 form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
-h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; }
+h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; display: flex; align-items: center; gap: .5rem; }
+h1 .mark { width: 2rem; height: 2rem; border-radius: 8px; }
 h1 span { color: var(--zfy-accent, #0e7c66); }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }

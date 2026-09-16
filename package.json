@@ -27,9 +27,10 @@
     "android:pack": "node scripts/pack-apk.mjs"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.4",
+    "sharp": "^0.35.4",
     "typescript": "~5.9.0",
-    "vitest": "^5.0.1",
-    "@capacitor/cli": "^8.3.4"
+    "vitest": "^5.0.1"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.0",

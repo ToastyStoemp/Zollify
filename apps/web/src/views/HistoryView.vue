@@ -162,6 +162,41 @@ const daily = computed(() => {
   });
 });
 
+/**
+ * Across all events: what a Monday, a Saturday... is worth on average. Each
+ * calendar day with sales is one sample for its weekday; per weekday, days
+ * outside 1.5x the interquartile range are dropped as outliers (a one-off
+ * blowout or a half-day) before averaging, once there are enough samples for
+ * quartiles to mean anything.
+ */
+const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const weekday = computed(() => {
+  if (!allMode.value) return [];
+  const perDay = new Map<string, { dow: number; value: number }>();
+  for (const tx of live.value) {
+    const d = new Date(tx.timestamp);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const cur = perDay.get(key) ?? { dow: (d.getDay() + 6) % 7, value: 0 };
+    cur.value += amountOf(tx);
+    perDay.set(key, cur);
+  }
+  const samples: number[][] = WEEKDAYS.map(() => []);
+  for (const { dow, value } of perDay.values()) samples[dow]!.push(value);
+  const rows = samples.map((values, dow) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const q = (p: number): number => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))] ?? 0;
+    let kept = sorted;
+    if (sorted.length >= 4) {
+      const iqr = q(0.75) - q(0.25);
+      kept = sorted.filter((v) => v >= q(0.25) - 1.5 * iqr && v <= q(0.75) + 1.5 * iqr);
+    }
+    const avg = kept.length ? round2(kept.reduce((a, b) => a + b, 0) / kept.length) : 0;
+    return { label: WEEKDAYS[dow]!, avg, days: sorted.length, dropped: sorted.length - kept.length };
+  });
+  const max = Math.max(1, ...rows.map((r) => r.avg));
+  return rows.map((r) => ({ ...r, pct: (r.avg / max) * 100 }));
+});
+
 const compareHourly = ref(false);
 const hourly = computed(() => {
   const byDay = new Map<string, number[]>();
@@ -300,7 +335,23 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <button v-if="bestAll.length > 8" type="button" class="quiet more" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
       </article>
 
-      <article class="card">
+      <article v-if="allMode" class="card">
+        <div class="cardhead">
+          <h2>Average revenue per weekday</h2>
+        </div>
+        <p v-if="!daily.length" class="hint">No sales yet.</p>
+        <div v-else class="days">
+          <div v-for="w in weekday" :key="w.label" class="dayrow" :title="w.dropped ? `${w.days} days, ${w.dropped} outlier${w.dropped === 1 ? '' : 's'} left out` : `${w.days} day${w.days === 1 ? '' : 's'}`">
+            <span class="muted">{{ w.label }}</span>
+            <div class="bar"><div :style="{ width: w.pct + '%' }"></div></div>
+            <span class="muted small">{{ w.days }}d{{ w.dropped ? ` -${w.dropped}` : '' }}</span>
+            <strong>{{ w.days ? money(w.avg, baseCurrency) : '-' }}</strong>
+          </div>
+        </div>
+        <p class="hint">Each day with sales counts once for its weekday; days far outside that weekday's usual range are left out of the average.</p>
+      </article>
+
+      <article v-else class="card">
         <div class="cardhead">
           <h2>Revenue per day</h2>
           <button v-if="daily.length > 1" type="button" :class="['toggle', { on: compareDaily }]" @click="compareDaily = !compareDaily">vs. day before</button>
@@ -407,6 +458,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .best strong { min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
 .more { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .78rem; min-height: 1.6rem; padding: 0 .3rem; }
 .days { display: flex; flex-direction: column; gap: .35rem; font-size: .78rem; }
+.dayrow .small { font-size: .66rem; min-width: 3rem; text-align: right; }
 .dayrow { display: flex; align-items: center; gap: .5rem; }
 .dayrow > .muted { width: 3rem; flex-shrink: 0; }
 .bar { flex: 1; height: 1rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }

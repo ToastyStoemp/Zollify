@@ -183,19 +183,30 @@ const weekday = computed(() => {
   const samples: number[][] = WEEKDAYS.map(() => []);
   for (const { dow, value } of perDay.values()) samples[dow]!.push(value);
   const rows = samples.map((values, dow) => {
-    const sorted = [...values].sort((a, b) => a - b);
-    const q = (p: number): number => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))] ?? 0;
-    let kept = sorted;
-    if (sorted.length >= 4) {
-      const iqr = q(0.75) - q(0.25);
-      kept = sorted.filter((v) => v >= q(0.25) - 1.5 * iqr && v <= q(0.75) + 1.5 * iqr);
-    }
-    const avg = kept.length ? round2(kept.reduce((a, b) => a + b, 0) / kept.length) : 0;
-    return { label: WEEKDAYS[dow]!, avg, days: sorted.length, dropped: sorted.length - kept.length };
+    const { avg, dropped } = trimmed(values);
+    return { label: WEEKDAYS[dow]!, avg, days: values.length, dropped };
   });
-  const max = Math.max(1, ...rows.map((r) => r.avg));
-  return rows.map((r) => ({ ...r, pct: (r.avg / max) * 100 }));
+  const seen = rows.filter((r) => r.days > 0);
+  const max = Math.max(1, ...seen.map((r) => r.avg));
+  return seen.map((r) => ({ ...r, pct: (r.avg / max) * 100 }));
 });
+
+/**
+ * Mean with outliers trimmed: once there are enough samples for quartiles to
+ * mean anything, values outside 1.5x the interquartile range (a one-off
+ * blowout, a half-day) are left out. Shared by the weekday and hourly averages.
+ */
+function trimmed(values: number[]): { avg: number; dropped: number } {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (!sorted.length) return { avg: 0, dropped: 0 };
+  const q = (p: number): number => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))] ?? 0;
+  let kept = sorted;
+  if (sorted.length >= 4) {
+    const iqr = q(0.75) - q(0.25);
+    kept = sorted.filter((v) => v >= q(0.25) - 1.5 * iqr && v <= q(0.75) + 1.5 * iqr);
+  }
+  return { avg: round2(kept.reduce((a, b) => a + b, 0) / kept.length), dropped: sorted.length - kept.length };
+}
 
 const compareHourly = ref(false);
 const hourly = computed(() => {
@@ -211,9 +222,15 @@ const hourly = computed(() => {
   if (!days.length) return [];
   let buckets: number[];
   let prev: number[] | null = null;
-  if (compareHourly.value) {
+  if (compareHourly.value && !allMode.value) {
     buckets = byDay.get(days[days.length - 1]!)!;
     prev = days.length > 1 ? byDay.get(days[days.length - 2]!)! : null;
+  } else if (allMode.value) {
+    // Across events: what an hour is worth on an average selling day, with
+    // each day's figure for that hour as one sample and outliers trimmed.
+    buckets = new Array<number>(24).fill(0);
+    const perDay = [...byDay.values()];
+    for (let h = 0; h < 24; h++) buckets[h] = trimmed(perDay.map((b) => b[h] ?? 0)).avg;
   } else {
     buckets = new Array<number>(24).fill(0);
     for (const b of byDay.values()) for (let h = 0; h < 24; h++) buckets[h] = (buckets[h] ?? 0) + (b[h] ?? 0);
@@ -370,8 +387,9 @@ const money = (n: number, c: string) => fmtPrice(n, c);
 
     <article class="card">
       <div class="cardhead">
-        <h2>Revenue per hour</h2>
-        <button v-if="daily.length > 1" type="button" :class="['toggle', { on: compareHourly }]" @click="compareHourly = !compareHourly">vs. day before</button>
+        <h2>{{ allMode ? 'Average revenue per hour' : 'Revenue per hour' }}</h2>
+        <span v-if="allMode" class="hint">over {{ daily.length }} selling day{{ daily.length === 1 ? '' : 's' }}</span>
+        <button v-else-if="daily.length > 1" type="button" :class="['toggle', { on: compareHourly }]" @click="compareHourly = !compareHourly">vs. day before</button>
       </div>
       <p v-if="!hourly.length" class="hint">No sales yet.</p>
       <div v-else class="hours">

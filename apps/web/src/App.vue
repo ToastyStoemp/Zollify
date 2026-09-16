@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
@@ -80,6 +80,21 @@ const sections = computed<Section[]>(() => {
 const accountNav = computed(() => allNav.value.filter((e) => e.group === 'account'));
 
 const openSection = computed(() => sections.value.find((sec) => inSection(sec)) ?? null);
+
+/**
+ * The tab bar's height, published as --zfy-bottom-nav so a page can keep its
+ * own sticky controls (the till's cart button) clear of it. Zero on desktop.
+ */
+const bottomNav = ref<HTMLElement | null>(null);
+onMounted(() => {
+  const publish = (): void => {
+    const h = bottomNav.value?.offsetHeight ?? 0;
+    document.documentElement.style.setProperty('--zfy-bottom-nav', `${h}px`);
+  };
+  new ResizeObserver(publish).observe(document.documentElement);
+  watch(bottomNav, publish, { flush: 'post' });
+  publish();
+});
 
 /** Phone: the nav folds behind a burger and closes itself once a page is picked. */
 const menuOpen = ref(false);
@@ -165,7 +180,7 @@ const syncLabel = computed(() => {
     <!-- Phone: the bottom tab bar from ZollTool - thumbs reach it, and the
          open section's pages sit in a row above it. The burger still opens
          the full list for what does not fit here. -->
-    <nav v-if="account && !settingUp" class="bottom" aria-label="Main">
+    <nav v-if="account && !settingUp" ref="bottomNav" class="bottom" aria-label="Main">
       <div v-if="openSection?.children.length" class="subrow">
         <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
       </div>

@@ -339,6 +339,7 @@ const today = computed(() => {
 
 // ── Last sale: undo or reprint without leaving the counter ─────────────────
 const lastSale = ref<{ id: string; total: number; currency: string; units: number } | null>(null);
+let lastSaleTimer: ReturnType<typeof setTimeout> | undefined;
 async function undoLast(): Promise<void> {
   if (!lastSale.value) return;
   await sdk().data.transactions.revert(lastSale.value.id);
@@ -463,6 +464,10 @@ function finish(sale: SaleEvent, message: string): void {
   showCartSheet.value = false;
   // The transaction row lands a tick later; the sale itself has all the bar needs.
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
+  // The bar answers "did that go through?"; after that it is in the way of
+  // the next customer. Undo and the receipt stay reachable from History.
+  clearTimeout(lastSaleTimer);
+  lastSaleTimer = setTimeout(() => { lastSale.value = null; }, 8000);
   toast(message);
   clearTimeout(publishTimer);
   thankYouUntil = Date.now() + 6000;
@@ -847,7 +852,12 @@ async function cancelPayment(): Promise<void> {
   .cart { display: none; }
   .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
   .cart.sheet .close { display: inline-flex; }
-  .cartbar { display: flex; justify-content: space-between; margin: .5rem 1rem 1rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: .5rem; }
+  /* The floor fills the viewport so the cart button sits at the bottom even
+     with a short list, and stays there while a long one scrolls. */
+  .floor { display: flex; flex-direction: column; min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
+  .grid { flex: 1; }
+  /* Sticks just above the shell's tab bar, whose height the shell publishes. */
+  .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
   .search { margin-left: 0; width: 100%; order: 3; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }

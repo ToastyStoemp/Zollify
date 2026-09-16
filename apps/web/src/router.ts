@@ -39,7 +39,12 @@ export const router: Router = createRouter({
 router.beforeEach(async (to) => {
   // The shell mounts before the session is restored; no guard may judge a
   // navigation until it is, or a reload would bounce a signed-in user to login.
-  if (!booted.value) await whenBooted;
+  if (!booted.value) {
+    await whenBooted;
+    // A reload on a module page matched the catch-all before the module's
+    // routes existed; now that they do, resolve the same address again.
+    if (to.name === 'not-found' && router.resolve(to.fullPath).name !== 'not-found') return to.fullPath;
+  }
   if (to.meta.public === true) return true;
 
   if (!isAuthenticated.value) {

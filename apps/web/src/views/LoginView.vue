@@ -216,7 +216,13 @@ async function register(): Promise<void> {
 </template>
 
 <style scoped>
-.login { display: grid; place-items: center; padding: 1rem; }
+.login {
+  display: grid; place-items: center; padding: 1rem;
+  /* Centred in the viewport, clear of the status and gesture bars in the app. */
+  min-height: 100dvh;
+  padding-top: calc(1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
+  padding-bottom: calc(1rem + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+}
 form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
 h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; display: flex; align-items: center; gap: .5rem; }
 h1 .mark { width: 2rem; height: 2rem; border-radius: 8px; }

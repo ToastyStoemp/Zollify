@@ -8,8 +8,8 @@ android {
         applicationId "com.phuongninjin.zollify"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 29825329
-        versionName "e936bd3-dirty"
+        versionCode 29825343
+        versionName "8be6ea7-dirty"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

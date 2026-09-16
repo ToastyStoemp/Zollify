@@ -42,8 +42,23 @@ configureApiBase(isNative() && getServerUrl() ? `${getServerUrl()}/api` : (impor
  * The shell mounts straight away and shows a splash; the first navigation
  * waits on this so a module route typed into the address bar still resolves.
  */
+/**
+ * Android back gesture / button. The WebView's own history is not enough
+ * once the router has replaced entries, so it is driven explicitly: step back
+ * while there is somewhere to go, otherwise let Android close the app.
+ */
+async function wireBackButton(): Promise<void> {
+  if (!isNative()) return;
+  const { App: CapApp } = await import('@capacitor/app');
+  await CapApp.addListener('backButton', ({ canGoBack }) => {
+    if (canGoBack && window.history.length > 1) router.back();
+    else void CapApp.exitApp();
+  });
+}
+
 async function start(): Promise<void> {
   connectRouter(router);
+  void wireBackButton();
   const ready = boot();
   createApp(App).use(router).mount('#app');
   await ready;

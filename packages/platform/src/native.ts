@@ -113,10 +113,13 @@ export async function saveFile(filename: string, content: string | Blob, mimeTyp
 export async function openDocument(filename: string, content: string, mimeType = 'text/html;charset=utf-8'): Promise<boolean> {
   const share = nativePlugin('FileShare');
   if (share?.openFile) {
+    // Android picks a viewer by the bare type; a charset parameter matches
+    // nothing but a plain-text editor, which shows the markup as text.
+    const type = mimeType.split(';')[0]!.trim();
     try {
-      await share.openFile({ filename, content, mimeType });
+      await share.openFile({ filename, content, mimeType: type });
     } catch {
-      await share.shareFile?.({ filename, content, mimeType });
+      await share.shareFile?.({ filename, content, mimeType: type });
     }
     return true;
   }

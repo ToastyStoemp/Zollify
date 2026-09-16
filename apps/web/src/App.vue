@@ -79,6 +79,8 @@ const sections = computed<Section[]>(() => {
 /** Account-level module pages (the ZollTool importer, …) sit with Modules and Settings, under the rule. */
 const accountNav = computed(() => allNav.value.filter((e) => e.group === 'account'));
 
+const openSection = computed(() => sections.value.find((sec) => inSection(sec)) ?? null);
+
 /** Phone: the nav folds behind a burger and closes itself once a page is picked. */
 const menuOpen = ref(false);
 watch(() => route.fullPath, () => { menuOpen.value = false; });
@@ -160,6 +162,20 @@ const syncLabel = computed(() => {
     <!-- Phone: tapping outside the open drawer closes it. -->
     <div v-if="menuOpen" class="scrim" @click="menuOpen = false"></div>
 
+    <!-- Phone: the bottom tab bar from ZollTool - thumbs reach it, and the
+         open section's pages sit in a row above it. The burger still opens
+         the full list for what does not fit here. -->
+    <nav v-if="account && !settingUp" class="bottom" aria-label="Main">
+      <div v-if="openSection?.children.length" class="subrow">
+        <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
+      </div>
+      <div class="tabs">
+        <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
+        <router-link v-for="sec in sections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
+        <router-link :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
+      </div>
+    </nav>
+
     <!-- Toast text is bound, never injected as markup: a module controls this string. -->
     <div class="toasts" aria-live="polite">
       <p v-for="toast in toasts" :key="toast.id" :class="['toast', toast.kind]">
@@ -194,7 +210,7 @@ nav { display: flex; flex-direction: column; gap: .1rem; overflow-y: auto; }
 .item.router-link-active .zfy-icon { color: var(--zfy-accent); }
 .item.top .zfy-icon { color: var(--zfy-muted); }
 .rule { border: 0; border-top: 1px solid var(--zfy-line); margin: .6rem .3rem; }
-.burger, .scrim { display: none; }
+.burger, .scrim, .bottom { display: none; }
 .burger .dot { top: .2rem; right: .2rem; }
 .section { display: flex; flex-direction: column; gap: .1rem; }
 /* The open section's own row stays quiet when a child is the page: one accent at a time. */
@@ -228,21 +244,41 @@ nav { flex: 1; }
 
 /* Phone and narrow tablets: a slim top bar (brand, sync, burger); the nav
    becomes a drawer under it, opened by the burger. */
+/* Phone and narrow tablets. The Android shell runs edge-to-edge, so the top
+   bar and the tab bar pad themselves past the status and gesture bars
+   (Capacitor injects --safe-area-inset-*; env() covers iOS and the web). */
 @media (max-width: 900px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr auto; }
   .sidebar {
     display: flex; flex-direction: row; align-items: center; gap: .5rem; padding: .5rem .75rem;
+    padding-top: calc(.5rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
     border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 7;
+    position: sticky; top: 0;
   }
   .brand { font-size: 1.1rem; }
   .burger { display: inline-flex; margin-left: auto; min-height: 2rem; padding: .25rem .5rem; }
   .sidebar nav {
-    display: none; position: fixed; top: 3.1rem; left: 0; bottom: 0; width: min(18rem, 85vw);
-    padding: .75rem; background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
-    box-shadow: 0 12px 32px -12px var(--zfy-shadow); z-index: 7;
+    display: none; position: fixed; top: calc(3.1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); left: 0; bottom: 0; width: min(18rem, 85vw);
+    padding: .75rem; padding-bottom: calc(.75rem + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+    background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
+    box-shadow: 0 12px 32px -12px var(--zfy-shadow); z-index: 9;
   }
   .sidebar.menu-open nav { display: flex; }
-  .scrim { display: block; position: fixed; inset: 3.1rem 0 0 0; background: var(--zfy-shadow); opacity: .35; z-index: 6; }
+  .scrim { display: block; position: fixed; inset: 0; background: var(--zfy-shadow); opacity: .35; z-index: 8; }
   .content { padding: 1rem; padding-bottom: 1.5rem; }
+  .bottom {
+    display: flex; flex-direction: column; position: sticky; bottom: 0; z-index: 6;
+    background: var(--zfy-surface); border-top: 1px solid var(--zfy-line);
+    padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  }
+  .subrow { display: flex; gap: .3rem; padding: .4rem .6rem 0; overflow-x: auto; scrollbar-width: none; }
+  .subrow::-webkit-scrollbar { display: none; }
+  .chip { white-space: nowrap; font-size: .78rem; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--zfy-line); color: var(--zfy-muted); text-decoration: none; }
+  .chip.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); border-color: var(--zfy-accent-soft); font-weight: 600; }
+  .tabs { display: flex; }
+  .tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: .15rem; padding: .45rem 0 .4rem; font-size: .66rem; color: var(--zfy-muted); text-decoration: none; }
+  .tab.router-link-active { color: var(--zfy-accent-ink); }
+  .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
+  .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }
 }
 </style>

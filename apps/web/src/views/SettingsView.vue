@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch, type Component } from 'vue';
+import { computed, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { currentAccount } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
+import { Icon } from '@zollify/ui';
 
 interface Panel {
   id: string;
@@ -70,6 +71,10 @@ const corePanels: Panel[] = [
   },
 ];
 
+/** Phone: the list and a panel are two screens, not two columns. */
+const phone = ref(typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches);
+if (typeof matchMedia === 'function') matchMedia('(max-width: 720px)').addEventListener('change', (e) => { phone.value = e.matches; });
+
 const panels = computed<Panel[]>(() => {
   const role = account.value?.role;
   if (!role) return [];
@@ -96,7 +101,7 @@ const router = useRouter();
 const selected = computed<string | null>(() => {
   const wanted = typeof route.query.panel === 'string' ? route.query.panel : null;
   if (wanted && panels.value.some((p) => p.id === wanted)) return wanted;
-  return panels.value[0]?.id ?? null;
+  return phone.value ? null : (panels.value[0]?.id ?? null);
 });
 
 function select(id: string): void {
@@ -126,11 +131,12 @@ const groups = computed(() => [
 </script>
 
 <template>
-  <section class="settings">
-    <h1>Settings</h1>
+  <section class="settings" :class="{ phone }">
+    <h1 v-if="!phone || !activePanel">Settings</h1>
+    <router-link v-else :to="{ name: 'settings' }" class="back"><Icon name="arrow-left" :size="14" /> Settings</router-link>
 
     <div class="layout">
-      <nav aria-label="Settings sections">
+      <nav v-if="!phone || !activePanel" aria-label="Settings sections">
         <template v-for="group in groups" :key="group.name">
           <p v-if="group.items.length" class="group">{{ group.name }}</p>
           <button
@@ -146,7 +152,7 @@ const groups = computed(() => [
         </template>
       </nav>
 
-      <div class="panel">
+      <div v-if="!phone || activePanel" class="panel">
         <component :is="activeComponent" v-if="activeComponent" />
       </div>
     </div>
@@ -164,7 +170,10 @@ nav button { text-align: left; border-color: transparent; background: transparen
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 @media (max-width: 720px) {
   .layout { grid-template-columns: 1fr; }
-  nav { flex-direction: row; flex-wrap: wrap; gap: .3rem; }
-  .group { width: 100%; margin: .4rem 0 0; }
+  nav { gap: .35rem; }
+  nav button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 2.8rem; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); }
+  nav button::after { content: '\203A'; color: var(--zfy-muted, #5a6472); font-size: 1.1rem; }
+  .group { margin: .6rem 0 .1rem; }
+  .back { display: inline-flex; align-items: center; gap: .35rem; color: var(--zfy-muted, #5a6472); text-decoration: none; font-size: .9rem; }
 }
 </style>

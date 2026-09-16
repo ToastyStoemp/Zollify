@@ -7,6 +7,7 @@ import {
   deviceFlavor,
   getServerUrl,
   isNative,
+  nativeHeaders,
   setServerUrl,
   deviceId,
   deviceName,
@@ -114,7 +115,7 @@ async function login(): Promise<void> {
     const res = await fetch(`${getApiBase()}/auth/login`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
       body: JSON.stringify({
         email: email.value,
         password: password.value,
@@ -157,7 +158,7 @@ async function register(): Promise<void> {
     const res = await fetch(`${getApiBase()}/auth/register`, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
       body: JSON.stringify({
         email: email.value,
         password: password.value,

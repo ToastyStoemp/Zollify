@@ -163,6 +163,25 @@ describe('sync', () => {
     expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe('/sync/pull?since=42');
   });
 
+  it('keeps pulling pages until the server tail, and the cursor follows the last op applied', async () => {
+    // The server pages at 500; a client that jumped its cursor to latestSeq
+    // after one page would silently skip everything in between.
+    const op = (seq: number, id: string) => ({ opId: id.repeat(16), deviceId: 'other', ts: 1, serverSeq: seq, type: 'product.upsert', payload: product(id, `P${seq}`, 1000 + seq) });
+    pullResponses = [
+      { ops: [op(1, 'e'), op(2, 'f')], latestSeq: 4 },
+      { ops: [op(3, 'g'), op(4, 'h')], latestSeq: 4 },
+    ];
+
+    await sync.syncNow();
+
+    const pulls = calls.filter((c) => c.path.startsWith('/sync/pull')).map((c) => c.path);
+    expect(pulls).toEqual(['/sync/pull?since=0', '/sync/pull?since=2']);
+    expect(catalog.getProduct('h')?.title).toBe('P4');
+    calls.length = 0;
+    await sync.syncNow();
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe('/sync/pull?since=4');
+  });
+
   it('discards local data and re-pulls when the server epoch changes', async () => {
     pullResponses = [{ ops: [], latestSeq: 5, epoch: 1 }];
     await sync.syncNow();

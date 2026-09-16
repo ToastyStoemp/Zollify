@@ -273,6 +273,32 @@ async function push(): Promise<number> {
   return accepted;
 }
 
+/**
+ * Applies pages of ops until the server's tail is reached. The server pages
+ * at 500, so the cursor moves to the last op actually applied - never to the
+ * server's latestSeq, which would silently skip everything between the end
+ * of one page and the tail of the log.
+ */
+async function drain(first: PullResponse, since: number): Promise<{ applied: number; cursor: number }> {
+  let page = first;
+  let cursor = since;
+  let applied = 0;
+  for (;;) {
+    if (!page.ops.length) {
+      // Caught up, or a restricted user whose page was filtered empty: the
+      // tail is where we stand either way.
+      cursor = Math.max(cursor, page.latestSeq);
+      break;
+    }
+    applied += await applyOps(page.ops);
+    cursor = page.ops[page.ops.length - 1]!.serverSeq;
+    if (cursor >= page.latestSeq) break;
+    await writeCursor(cursor, page.epoch ?? 0);
+    page = (await authFetch(`/sync/pull?since=${cursor}`)) as PullResponse;
+  }
+  return { applied, cursor };
+}
+
 async function pull(): Promise<number> {
   const { since, epoch } = await readCursor();
   const res = (await authFetch(`/sync/pull?since=${since}`)) as PullResponse;
@@ -291,14 +317,14 @@ async function pull(): Promise<number> {
     });
     await writeCursor(0, serverEpoch);
     const fresh = (await authFetch('/sync/pull?since=0')) as PullResponse;
-    const applied = await applyOps(fresh.ops);
-    await writeCursor(fresh.latestSeq, fresh.epoch ?? serverEpoch);
-    return applied;
+    const result = await drain(fresh, 0);
+    await writeCursor(result.cursor, fresh.epoch ?? serverEpoch);
+    return result.applied;
   }
 
-  const applied = await applyOps(res.ops);
-  await writeCursor(res.latestSeq, serverEpoch);
-  return applied;
+  const result = await drain(res, since);
+  await writeCursor(result.cursor, serverEpoch);
+  return result.applied;
 }
 
 /**

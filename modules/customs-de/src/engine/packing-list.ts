@@ -62,6 +62,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
       return `<tr>
       <td class="r">${i + 1}</td>
       <td>${esc(p.title || '')}</td>
+      <td>${esc(p.sku || '-')}</td>
       <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
       <td class="r">${fmtWeightKg(weightKg)}</td>
@@ -101,15 +102,16 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   <thead><tr>
     <th class="r">#</th>
     <th>Description</th>
+    <th>SKU</th>
     <th>HS / tariff code</th>
     <th class="r">Qty</th>
     <th class="r">Weight</th>
     <th class="r">Value (${esc(cur)})</th>
     <th class="r">Origin</th>
   </tr></thead>
-  <tbody>${rows || '<tr><td colspan="7" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>'}</tbody>
+  <tbody>${rows || '<tr><td colspan="8" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>'}</tbody>
   <tfoot><tr>
-    <td></td><td style="text-align:right">TOTALS</td><td></td>
+    <td></td><td style="text-align:right">TOTALS</td><td></td><td></td>
     <td class="r">${totQty}</td>
     <td class="r">${fmtWeightKg(totWkg)}</td>
     <td class="r">${Math.floor(totVal)}</td>

@@ -7,9 +7,13 @@
  *   - https://github.com/mkuhlmann/pyphomemo (GATT service/characteristics)
  *   - https://github.com/vivier/phomemo-tools (M110/M120/M220-specific command
  *     bytes and raster width, as distinct from the older M02)
- * NOT verified against a real M110 by this codebase - the printer manual
- * documents none of this. If a command below turns out wrong, trust a fresh
- * packet capture over this file.
+ * Mostly not verified against a real M110 by this codebase - the printer
+ * manual documents none of this. If a command below turns out wrong, trust a
+ * fresh packet capture over this file. One thing IS confirmed live: the
+ * device does not advertise a "Phomemo"/"M110" name over BLE - it showed up
+ * in the picker as something like "Q199…" (a generic module name, not the
+ * marketed model). Device discovery below deliberately doesn't filter by
+ * name for that reason - see connect().
  *
  * Confirmed fixed:
  *   - Service 0xff00, write characteristic 0xff02, notify 0xff03.
@@ -74,8 +78,24 @@ export class PhomemoPrinter {
   /** Must be called from a user gesture (a click handler) - Web Bluetooth requirement. */
   async connect(): Promise<void> {
     if (!navigator.bluetooth) throw new Error('This browser has no Web Bluetooth support (Chrome/Edge on desktop or Android only - not Safari or iOS).');
+    // Not filtered by service UUID: `filters: [{ services: [...] }]` only
+    // matches a device that advertises that UUID in its raw BLE advertisement
+    // packet, before any connection - these printers only expose 0xff00 in
+    // their GATT table once connected, so a services filter hides them from
+    // the picker entirely (confirmed against pyphomemo, which discovers the
+    // M110 by device name, not by an advertised service). `acceptAllDevices`
+    // shows every nearby BLE device instead and lets the user pick the
+    // printer by name; `optionalServices` is still required for the 0xff00
+    // lookup below to be allowed once connected.
     this.device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [SERVICE_UUID] }],
+      acceptAllDevices: true,
+      // Web Bluetooth only allows GATT access to services listed here (or in
+      // `filters`) at request time - an unlisted service is invisible even
+      // to `getPrimaryServices()` after connecting. The standard ones below
+      // cost nothing to declare and let `listServices()` show real
+      // manufacturer/device info if the printer happens to expose it, which
+      // is useful for confirming it's actually the right device.
+      optionalServices: [SERVICE_UUID, 'generic_access', 'device_information', 'battery_service'],
     });
     const server = await this.device.gatt?.connect();
     if (!server) throw new Error('Could not open a GATT connection to the printer.');
@@ -86,6 +106,33 @@ export class PhomemoPrinter {
   disconnect(): void {
     this.device?.gatt?.disconnect();
     this.characteristic = null;
+  }
+
+  /**
+   * Debug aid for "the printer connected but nothing prints": lists every
+   * GATT service and characteristic actually on the connected device. Only
+   * shows services declared in `optionalServices` above - if 0xff00 doesn't
+   * show up here even though the device is connected, this printer's
+   * firmware uses a different service UUID than the one this driver assumes,
+   * and that's the real thing to chase next (not the write logic).
+   */
+  async listServices(): Promise<string> {
+    const server = this.device?.gatt;
+    if (!server?.connected) throw new Error('Not connected to a printer.');
+    const services = await server.getPrimaryServices();
+    const lines: string[] = [`Device: ${this.device?.name ?? '(unnamed)'}`];
+    for (const service of services) {
+      lines.push(`Service ${service.uuid}`);
+      const chars = await service.getCharacteristics();
+      for (const c of chars) {
+        const props = Object.entries(c.properties)
+          .filter(([, v]) => v)
+          .map(([k]) => k)
+          .join(', ');
+        lines.push(`  Characteristic ${c.uuid} (${props})`);
+      }
+    }
+    return lines.join('\n');
   }
 
   private async write(bytes: number[]): Promise<void> {

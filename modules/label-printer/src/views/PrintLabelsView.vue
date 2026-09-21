@@ -191,9 +191,11 @@ const bluetoothSupported = typeof navigator !== 'undefined' && 'bluetooth' in na
 const busy = ref(false);
 const progress = ref<{ done: number; total: number } | null>(null);
 const error = ref<string | null>(null);
+const deviceInfo = ref<string | null>(null);
 
 async function connect(): Promise<void> {
   error.value = null;
+  deviceInfo.value = null;
   try {
     await printer.connect();
     printerName.value = printer.name ?? 'Printer';
@@ -204,8 +206,25 @@ async function connect(): Promise<void> {
 function disconnect(): void {
   printer.disconnect();
   printerName.value = null;
+  deviceInfo.value = null;
 }
 onUnmounted(() => printer.disconnect());
+
+/**
+ * Web Bluetooth has no "list nearby devices" API - only the native picker
+ * `connect()` opens can show that, for privacy reasons every browser
+ * enforces. This is the next best thing once connected: what GATT services
+ * and characteristics this specific device actually has, so a "nothing
+ * prints" failure can be told apart from "wrong service UUID entirely".
+ */
+async function showDeviceInfo(): Promise<void> {
+  error.value = null;
+  try {
+    deviceInfo.value = await printer.listServices();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not read the device info.';
+  }
+}
 
 const workCanvas = document.createElement('canvas');
 
@@ -332,6 +351,12 @@ async function printAll(): Promise<void> {
         <button type="button" class="primary" :disabled="!printerName || !chosen.length || busy" @click="printAll">
           {{ busy ? `Printing ${progress?.done ?? 0} / ${progress?.total ?? 0}…` : `Print ${totalLabels} label${totalLabels === 1 ? '' : 's'}` }}
         </button>
+
+        <template v-if="printerName">
+          <button type="button" class="quiet" @click="showDeviceInfo">Show device info</button>
+          <p class="hint">Nothing prints? This lists what GATT services this exact device has - if 0xff00 isn't in there, this driver's assumptions don't match your unit's firmware.</p>
+          <pre v-if="deviceInfo" class="device-info">{{ deviceInfo }}</pre>
+        </template>
       </article>
     </div>
   </section>
@@ -380,4 +405,5 @@ h2 { margin: 0; font-size: .95rem; }
 .preview canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid var(--zfy-line, #d6dde4); }
 .printer-row { display: flex; align-items: center; gap: .6rem; }
 .printer-row .full { flex: 1; width: 100%; }
+.device-info { margin: 0; padding: .6rem .7rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; font-size: .78rem; white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }
 </style>

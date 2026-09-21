@@ -177,9 +177,15 @@ export class PhomemoPrinter {
     const bytesPerLine = rows[0]?.length ?? PRINTER_BYTES_WIDE;
 
     await this.write([0x1b, 0x4e, 0x0d, speed]);
+    await sleep(30);
     await this.write([0x1b, 0x4e, 0x04, density]);
     await sleep(30);
     await this.write([0x1f, 0x11, 0x0a]);
+    // Gap-sensing feed is a physical motor move, not instant - starting raster
+    // data before it completes chops the top rows off the label (confirmed
+    // live: this produced a print missing its first title line, with the
+    // same amount of blank stock left over at the bottom).
+    await sleep(30);
 
     for (let start = 0; start < rows.length; start += MAX_LINES_PER_BLOCK) {
       const block = rows.slice(start, start + MAX_LINES_PER_BLOCK);

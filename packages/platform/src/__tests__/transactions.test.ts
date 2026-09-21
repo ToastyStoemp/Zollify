@@ -24,6 +24,7 @@ const backup = await import('../core/backup');
 const catalog = await import('../core/catalog');
 const events = await import('../core/sales-events');
 const device = await import('../core/device');
+const images = await import('../core/images');
 
 function sale(over: Partial<SaleEvent> = {}): SaleEvent {
   return {
@@ -200,15 +201,23 @@ describe('totals', () => {
 });
 
 describe('backup', () => {
-  it('round-trips everything core owns', async () => {
+  it('round-trips everything core owns, including photos', async () => {
     await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false } as never);
     await events.upsertSalesEvent({ id: 'ev-1', name: 'Fair', venue: {}, currency: 'CHF', status: 'planned' } as never);
     await tx.recordSale(sale({ saleId: 's1' }));
+    await images.importProductImage({
+      id: 'img-1',
+      productId: 'p1',
+      updatedAt: 1,
+      full: new Blob(['full'], { type: 'image/jpeg' }),
+      thumb: new Blob(['thumb'], { type: 'image/webp' }),
+    });
 
     const file = await backup.createBackup();
     expect(file.products).toHaveLength(1);
     expect(file.events).toHaveLength(1);
     expect(file.transactions).toHaveLength(1);
+    expect(file.images).toHaveLength(1);
 
     await deleteCoreDb(account.accountId);
     catalog.resetCatalogCache();
@@ -218,9 +227,15 @@ describe('backup', () => {
     const result = await backup.restoreBackup(JSON.parse(JSON.stringify(file)));
 
     expect(result.products).toBe(1);
+    expect(result.images).toBe(1);
     expect(catalog.allProducts.value).toHaveLength(1);
     expect(events.visibleEvents.value).toHaveLength(1);
     expect(tx.recentTransactions.value).toHaveLength(1);
+
+    const restoredImage = await openCoreDb(account.accountId).images.get('img-1');
+    expect(await restoredImage?.full.text()).toBe('full');
+    expect(restoredImage?.full.type).toBe('image/jpeg');
+    expect(await restoredImage?.thumb.text()).toBe('thumb');
   });
 
   it('keeps tombstones so a restore does not resurrect deleted rows', async () => {

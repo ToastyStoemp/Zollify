@@ -51,7 +51,7 @@ async function exportBackup(): Promise<void> {
     await saveFile(backupFilename(backup), JSON.stringify(backup, null, 2), 'application/json');
 
     status.value =
-      `Exported ${backup.products.length} products, ${backup.events.length} events and ` +
+      `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events and ` +
       `${backup.transactions.length} sales.`;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create a backup.';
@@ -105,7 +105,7 @@ async function confirmRestore(): Promise<void> {
     const result = await restoreBackup(raw);
     pending.value = null;
     status.value =
-      `Restored ${result.products} products, ${result.events} events and ` +
+      `Restored ${result.products} products (${result.images} photos), ${result.events} events and ` +
       `${result.transactions} sales. Syncing to your other devices…`;
     void syncNow();
   } catch (err) {
@@ -153,6 +153,7 @@ async function confirmRestore(): Promise<void> {
         <li><strong>{{ pending.summary.inventory }}</strong> stock counts</li>
         <li><strong>{{ pending.summary.eventStock }}</strong> event claims</li>
         <li><strong>{{ pending.summary.transactions }}</strong> sales</li>
+        <li><strong>{{ pending.summary.images }}</strong> photos</li>
       </ul>
       <div class="row">
         <button type="button" @click="pending = null">Cancel</button>

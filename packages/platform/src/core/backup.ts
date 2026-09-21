@@ -10,6 +10,7 @@ import { loadSalesEvents, resetSalesEventCache } from './sales-events';
 import { loadTransactions, resetTransactionCache } from './transactions';
 import { loadInventory, resetInventoryCache } from './inventory';
 import { queueOp } from './outbox';
+import { base64ToBlob, blobToBase64, importProductImage } from './images';
 
 /**
  * Local backup and restore.
@@ -22,6 +23,17 @@ import { queueOp } from './outbox';
  */
 
 export const BACKUP_VERSION = 1;
+
+/** An image, blobs base64-encoded so the whole backup is one JSON file. */
+export interface BackupImage {
+  id: string;
+  productId: string;
+  updatedAt: number;
+  fullB64: string;
+  fullType: string;
+  thumbB64: string;
+  thumbType: string;
+}
 
 export interface ZollifyBackup {
   format: 'zollify-backup';
@@ -37,6 +49,8 @@ export interface ZollifyBackup {
   /** Per-event claims against it. */
   eventStock: EventStock[];
   transactions: Transaction[];
+  /** Product photos - optional so a version-1 backup from before they were added still restores. */
+  images?: BackupImage[];
 }
 
 export class RestoreError extends Error {}
@@ -58,13 +72,26 @@ export async function createBackup(): Promise<ZollifyBackup> {
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
-  const [products, events, inventory, eventStock, transactions] = await Promise.all([
+  const [products, events, inventory, eventStock, transactions, imageRecs] = await Promise.all([
     db.products.toArray(),
     db.events.toArray(),
     db.inventory.toArray(),
     db.eventStock.toArray(),
     db.transactions.toArray(),
+    db.images.toArray(),
   ]);
+
+  const images: BackupImage[] = await Promise.all(
+    imageRecs.map(async (rec) => ({
+      id: rec.id,
+      productId: rec.productId,
+      updatedAt: rec.updatedAt,
+      fullB64: await blobToBase64(rec.full),
+      fullType: rec.full.type,
+      thumbB64: await blobToBase64(rec.thumb),
+      thumbType: rec.thumb.type,
+    })),
+  );
 
   return {
     format: 'zollify-backup',
@@ -77,6 +104,7 @@ export async function createBackup(): Promise<ZollifyBackup> {
     inventory,
     eventStock,
     transactions,
+    images,
   };
 }
 
@@ -89,6 +117,7 @@ export interface BackupSummary {
   inventory: number;
   eventStock: number;
   transactions: number;
+  images: number;
 }
 
 /**
@@ -123,6 +152,7 @@ export function inspectBackup(raw: unknown): BackupSummary {
     inventory: file.inventory?.length ?? 0,
     eventStock: file.eventStock?.length ?? 0,
     transactions: file.transactions?.length ?? 0,
+    images: file.images?.length ?? 0,
   };
 }
 
@@ -132,6 +162,7 @@ export interface RestoreResult {
   inventory: number;
   eventStock: number;
   transactions: number;
+  images: number;
 }
 
 /**
@@ -172,6 +203,19 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   for (const entry of stock) await queueOp({ type: 'stock.set', payload: entry });
   for (const tx of transactions) await queueOp({ type: 'tx.create', payload: tx });
 
+  // Images go through the same path a fresh photo does, one at a time - each
+  // one queues its own thumbnail op, and there is no bulk equivalent worth
+  // building for something that runs once per restore.
+  for (const image of file.images ?? []) {
+    await importProductImage({
+      id: image.id,
+      productId: image.productId,
+      updatedAt: image.updatedAt,
+      full: base64ToBlob(image.fullB64, image.fullType),
+      thumb: base64ToBlob(image.thumbB64, image.thumbType),
+    });
+  }
+
   // Rebuilt rather than patched - a restore touches everything, and reloading
   // from the database is both simpler and impossible to get subtly wrong.
   resetCatalogCache();
@@ -186,6 +230,7 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
     inventory: summary.inventory,
     eventStock: summary.eventStock,
     transactions: summary.transactions,
+    images: summary.images,
   };
 }
 

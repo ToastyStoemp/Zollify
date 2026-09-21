@@ -8,8 +8,10 @@ import { toPlain } from './plain';
  *
  * Blobs live only on the device: they are large, the sync protocol carries
  * metadata rather than binary, and a booth's photos are not worth the bandwidth
- * mid-convention. A backup keeps them out too - which is why the migration
- * importer says images are not carried across.
+ * mid-convention - other devices only ever get the thumbnail. A backup file
+ * does carry the full images (base64, see backup.ts), since that is the only
+ * copy that survives losing every device. The ZollTool migration importer is
+ * separate and still does not bring images across.
  */
 
 function requireAccountId(): string {

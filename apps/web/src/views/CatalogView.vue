@@ -213,6 +213,8 @@ const editId = ref<string | null>(null);
 const imageFile = ref<File | null>(null);
 const imagePreview = ref<string | null>(null);
 const removeImage = ref(false);
+/** Set while duplicating: the source product, so its photo carries over without a real `existing` row. */
+const duplicateFrom = ref<Product | null>(null);
 const form = reactive({
   title: '',
   sku: '',
@@ -230,13 +232,14 @@ const form = reactive({
   variants: [] as VariantForm[],
 });
 const existing = computed(() => (editId.value ? allProducts.value.find((p) => p.id === editId.value) : undefined));
-const hasPhoto = computed(() => Boolean(imagePreview.value || (existing.value?.imageId && !removeImage.value)));
+const hasPhoto = computed(() => Boolean(imagePreview.value || ((existing.value?.imageId || duplicateFrom.value?.imageId) && !removeImage.value)));
 
 function resetForm(p?: Product): void {
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
   imageFile.value = null;
   imagePreview.value = null;
   removeImage.value = false;
+  duplicateFrom.value = null;
   Object.assign(form, {
     title: p?.title ?? '',
     sku: p?.sku ?? '',
@@ -263,6 +266,18 @@ function openNew(): void {
 function openEdit(p: Product): void {
   editId.value = p.id;
   resetForm(p);
+  error.value = null;
+  editing.value = true;
+}
+/** Prefills a new product from an existing one - own id, own (zero) stock, own SKU to fill in. */
+function duplicate(p: Product): void {
+  editId.value = null;
+  resetForm(p);
+  duplicateFrom.value = p;
+  form.title = `${p.title} (copy)`;
+  form.sku = '';
+  form.onHand = 0;
+  form.variants = form.variants.map((v) => ({ ...v, id: crypto.randomUUID(), sku: '', onHand: 0 }));
   error.value = null;
   editing.value = true;
 }
@@ -318,7 +333,7 @@ async function save(): Promise<void> {
   const prior = existing.value;
   const productId = editId.value ?? crypto.randomUUID();
   try {
-    let imageId = removeImage.value ? undefined : prior?.imageId;
+    let imageId = removeImage.value ? undefined : (prior?.imageId ?? duplicateFrom.value?.imageId);
     if (imageFile.value) imageId = await saveProductImage(productId, imageFile.value);
 
     const variants: Variant[] = [];
@@ -477,7 +492,7 @@ async function remove(product: Product): Promise<void> {
         <div class="photo">
           <div class="frame">
             <img v-if="imagePreview" :src="imagePreview" alt="" />
-            <ProductThumb v-else-if="hasPhoto" :image-id="existing?.imageId" :alt="form.title || 'Product'" :size="80" />
+            <ProductThumb v-else-if="hasPhoto" :image-id="existing?.imageId || duplicateFrom?.imageId" :alt="form.title || 'Product'" :size="80" />
             <Icon v-else name="package" :size="28" />
           </div>
           <div class="photo-actions">
@@ -551,6 +566,7 @@ async function remove(product: Product): Promise<void> {
       <template #footer>
         <div class="actions">
           <button v-if="existing" type="button" class="danger" @click="remove(existing)">Remove</button>
+          <button v-if="existing" type="button" class="quiet" @click="duplicate(existing)"><Icon name="copy" :size="14" /> Duplicate</button>
           <span class="spacer"></span>
           <button type="button" @click="editing = false">Cancel</button>
           <button type="button" class="primary" @click="save">Save</button>

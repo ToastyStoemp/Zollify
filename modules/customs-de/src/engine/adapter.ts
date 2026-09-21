@@ -92,6 +92,8 @@ export function buildCustomsDeState(
         forSale: p.forSale,
         unlisted: p.unlisted,
         price: p.price,
+        year: p.year,
+        material: p.material,
         weightG: p.weightG,
         tariffNo: p.tariffNo,
         originCountry: p.originCountry,

@@ -83,4 +83,18 @@ describe('buildPackingListHtml', () => {
     const html = buildPackingListHtml(state(), 'export', 'compressed');
     expect(html).toContain('Not for sale');
   });
+
+  it('identifies art prints by year and the declarant name, and purses by material - same rule as customs-ch', () => {
+    const artState: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Zurich Pop Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), fullName: 'Phuong Ninjin' },
+      products: [
+        { id: 'p1', title: 'Sunset', type: 'Art Print', year: 2024, originCountry: 'Germany', price: 25, amount: 3, soldQty: 0, soldValue: 0 },
+        { id: 'p2', title: 'Tote', type: 'Purse', material: 'Genuine leather', originCountry: 'Germany', price: 40, amount: 2, soldQty: 0, soldValue: 0 },
+      ],
+    };
+    const html = buildPackingListHtml(artState, 'export', 'compressed');
+    expect(html).toContain('Sunset (2024) - Phuong Ninjin');
+    expect(html).toContain('Tote - Genuine leather');
+  });
 });

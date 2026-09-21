@@ -20,7 +20,8 @@
  *     precheck office) instead of customs-ch's LRP/artist fields.
  */
 import { calcDeProduct, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
-import type { CustomsDeState } from './model';
+import type { CustomsDeProduct, CustomsDeState } from './model';
+import { isArtwork, isPurse } from '../lib/artwork';
 
 export type PackingListKind = 'export' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
@@ -29,6 +30,23 @@ export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
 function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: string }): string {
   const shared = all.filter((x) => x.type === g.type).length > 1;
   return shared ? `${esc(g.type)} (${esc(g.tariffNo || 'no HS code')})` : esc(g.type);
+}
+
+/**
+ * Customs line name - an item is only as identifiable as its title, and two
+ * booths' "Sunset" print aren't the same thing. Art prints read as
+ * "Title (Year) - Artist"; purses add their material. Mirrors
+ * customs-ch/engine/goods-list.ts's titleForCustoms().
+ */
+function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
+  const t = esc(p.title || '');
+  if (isArtwork(p.type)) {
+    const base = p.year ? `${t} (${p.year})` : t;
+    const artist = (artistName ?? '').trim();
+    return artist ? `${base} - ${esc(artist)}` : base;
+  }
+  if (isPurse(p.type) && p.material) return `${t} - ${esc(p.material)}`;
+  return t;
 }
 
 type Align = 'l' | 'r' | 'c';
@@ -155,7 +173,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
             row([
               { text: rowNum, align: 'c' },
               { text: esc(v.sku || p.sku || '-') },
-              { text: `${esc(p.title || '')} - ${esc(v.name || '')}` },
+              { text: `${titleForCustoms(p, d.fullName)} - ${esc(v.name || '')}` },
               { text: forSaleLabel },
               { text: esc(p.type || '') },
               { text: qty, align: 'r' },
@@ -182,7 +200,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         }
         rowNum++;
         const listedVariants = hasVariants(p) ? p.variants!.filter((v) => !v.unlisted).length : 0;
-        const titleDisplay = listedVariants ? `${esc(p.title || '')} (${listedVariants} variant${listedVariants === 1 ? '' : 's'})` : esc(p.title || '');
+        const titleDisplay = listedVariants ? `${titleForCustoms(p, d.fullName)} (${listedVariants} variant${listedVariants === 1 ? '' : 's'})` : titleForCustoms(p, d.fullName);
         rowsArr.push(
           row([
             { text: rowNum, align: 'c' },

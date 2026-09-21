@@ -100,6 +100,10 @@ export interface CustomsDeProduct {
   /** Free text - this module does not look up or verify tariff rates. */
   tariffNo?: string;
   originCountry?: string;
+  /** Year an art print was produced - shown as "Title (Year)" on the packing list. */
+  year?: number;
+  /** Material composition of a purse - shown as "Title - Material" on the packing list. */
+  material?: string;
   /** Brought to the event (what was declared for export). */
   amount: number;
   /** Sold at the event, so not coming back to Germany. */

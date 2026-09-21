@@ -28,14 +28,20 @@
  *   - Writes are chunked to 128 bytes - BLE GATT payload size the vendor app
  *     itself stays under.
  *
- * Genuinely uncertain (exposed as adjustable settings rather than baked in):
- *   - Speed/density: documented as "0x1b 0x4e 0x0d" / "0x1b 0x4e 0x04" with a
- *     noted value range (1-5, 1-15) but the capture that revealed this didn't
- *     show whether that's a fixed 3rd byte or a 4th parameter byte. Modelled
- *     here as opcode + one parameter byte (the common ESC/POS shape); if
- *     printing failed outright this would be the first thing to try dropping.
- *   - Footer order (two 0x1f 0xf0 commands) - sent in the order the source
- *     listed them; unconfirmed against real hardware.
+ * Confirmed against a live device (Q199G2CK0820239) plus a second, known-
+ * working browser implementation of this same protocol
+ * (https://github.com/ToastyStoemp/pippo-label-studio):
+ *   - Speed/density byte shape, raster header/footer bytes and ordering all
+ *     match pippo-label-studio's `m110.js` exactly.
+ *   - This unit's ff02 characteristic reports writeWithoutResponse=false -
+ *     writes must use writeValueWithResponse (see connect()/write() below).
+ *     Calling writeValueWithoutResponse on it throws NotSupportedError,
+ *     which without this fix reads as "connects but nothing prints".
+ *   - Timing matters: pippo-label-studio inserts 30ms after speed/density
+ *     (before the raster header), 300ms after the last raster chunk, and
+ *     500ms after the footer, on top of the 20ms inter-chunk delay already
+ *     used here - added below to match, since skipping them is a plausible
+ *     second reason for a connected-but-silent printer.
  */
 
 const SERVICE_UUID = 0xff00;
@@ -66,6 +72,15 @@ function sleep(ms: number): Promise<void> {
 export class PhomemoPrinter {
   private device: BluetoothDevice | null = null;
   private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+  /**
+   * Confirmed live: this device's ff02 characteristic reports
+   * writeWithoutResponse=false (Windows WebBluetooth), unlike most
+   * printers this protocol was reverse-engineered from. Writing with
+   * the wrong method throws NotSupportedError - silently, if the call
+   * site doesn't surface it - which reads as "connects but prints
+   * nothing". Picked once at connect() time from the real properties.
+   */
+  private useWriteWithResponse = false;
 
   get connected(): boolean {
     return this.device?.gatt?.connected ?? false;
@@ -101,6 +116,7 @@ export class PhomemoPrinter {
     if (!server) throw new Error('Could not open a GATT connection to the printer.');
     const service = await server.getPrimaryService(SERVICE_UUID);
     this.characteristic = await service.getCharacteristic(WRITE_CHARACTERISTIC_UUID);
+    this.useWriteWithResponse = !this.characteristic.properties.writeWithoutResponse;
   }
 
   disconnect(): void {
@@ -139,7 +155,9 @@ export class PhomemoPrinter {
     if (!this.characteristic) throw new Error('Not connected to a printer.');
     const data = new Uint8Array(bytes);
     for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-      await this.characteristic.writeValueWithoutResponse(data.slice(i, i + CHUNK_SIZE));
+      const chunk = data.slice(i, i + CHUNK_SIZE);
+      if (this.useWriteWithResponse) await this.characteristic.writeValueWithResponse(chunk);
+      else await this.characteristic.writeValueWithoutResponse(chunk);
       await sleep(WRITE_DELAY_MS);
     }
   }
@@ -155,6 +173,7 @@ export class PhomemoPrinter {
 
     await this.write([0x1b, 0x4e, 0x0d, speed]);
     await this.write([0x1b, 0x4e, 0x04, density]);
+    await sleep(30);
     await this.write([0x1f, 0x11, 0x0a]);
 
     for (let start = 0; start < rows.length; start += MAX_LINES_PER_BLOCK) {
@@ -170,7 +189,8 @@ export class PhomemoPrinter {
       await this.write([...header, ...body]);
     }
 
-    await this.write([0x1f, 0xf0, 0x05, 0x00]);
-    await this.write([0x1f, 0xf0, 0x03, 0x00]);
+    await sleep(300);
+    await this.write([0x1f, 0xf0, 0x05, 0x00, 0x1f, 0xf0, 0x03, 0x00]);
+    await sleep(500);
   }
 }

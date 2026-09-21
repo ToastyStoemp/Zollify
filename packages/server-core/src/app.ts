@@ -117,10 +117,12 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       directives: {
         defaultSrc: ["'self'"],
         // blob: is required: runtime modules are executed as ES modules from a
-        // blob URL. It is deliberately the only addition - no CDNs, no inline
-        // script - so the only code that can run is code this server published
-        // and the client hash-verified.
-        scriptSrc: ["'self'", 'blob:'],
+        // blob URL. The sha256 hash below allow-lists exactly one inline
+        // script: index.html's `<script type="importmap">` (static, checked
+        // into the repo, never user-influenced). No CDNs, no other inline
+        // script - only code this server published and the client
+        // hash-verified. Update this hash if that importmap's content changes.
+        scriptSrc: ["'self'", 'blob:', "'sha256-p+LKqyd2jOipf8Tv+O1oSGQDPZXNY2HB85qyMMtjsjE='"],
         workerSrc: ["'self'", 'blob:'],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:', 'blob:'],

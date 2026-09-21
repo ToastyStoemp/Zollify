@@ -31,6 +31,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'customs-de': () => import('@zollify/customs-de'),
   'price-cards': () => import('@zollify/price-cards'),
   'label-printer': () => import('@zollify/label-printer'),
+  'convention-checklist': () => import('@zollify/convention-checklist'),
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),
   'shopify-sync': () => import('@zollify/shopify-sync'),

@@ -120,3 +120,4 @@ export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
 export { startRealtime, stopRealtime, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
+export { getSyncedSetting, setSyncedSetting } from './synced-settings';

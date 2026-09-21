@@ -17,6 +17,7 @@
     "@zollify/platform": "*",
     "@zollify/pos": "*",
     "@zollify/price-cards": "*",
+    "@zollify/convention-checklist": "*",
     "@zollify/label-printer": "*",
     "@zollify/costs": "*",
     "@zollify/sdk": "*",

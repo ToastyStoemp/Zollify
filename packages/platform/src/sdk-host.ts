@@ -53,6 +53,7 @@ import {
   upsertSalesEvent,
   visibleEvents,
 } from './core/sales-events';
+import { getSyncedSetting, setSyncedSetting } from './core/synced-settings';
 
 export interface HostServices {
   contributions: ContributionRegistry;
@@ -166,6 +167,10 @@ const coreData: import('@zollify/sdk').DataApi = {
     get: (id) => getDiscount(id),
     upsert: (rule) => upsertDiscount(rule),
     remove: (id) => deleteDiscount(id),
+  },
+  settings: {
+    get: (key) => getSyncedSetting(key),
+    set: (key, value) => setSyncedSetting(key, value),
   },
 };
 

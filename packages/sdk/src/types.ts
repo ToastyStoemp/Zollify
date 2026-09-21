@@ -315,6 +315,20 @@ export interface ImageApi {
   put(image: { id: string; productId: string; full: Blob; thumb: Blob; updatedAt: number }): Promise<void>;
 }
 
+/**
+ * Small key/value settings, synced account-wide (same 'setting.upsert'
+ * mechanism core uses for the default active event) - last-write-wins on a
+ * server timestamp. Shared across modules like the rest of DataApi, so pick
+ * a key namespaced to your module (e.g. 'my-module.template') to avoid
+ * colliding with another one. Not for anything large or high-frequency;
+ * this is for the odd shared list or flag a module wants every device to
+ * agree on.
+ */
+export interface SyncedSettingsApi {
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  set(key: string, value: unknown): Promise<void>;
+}
+
 export interface DataApi {
   products: CatalogApi;
   inventory: InventoryApi;
@@ -322,6 +336,7 @@ export interface DataApi {
   events: SalesEventApi;
   discounts: DiscountApi;
   transactions: TransactionApi;
+  settings: SyncedSettingsApi;
 }
 
 export interface Logger {

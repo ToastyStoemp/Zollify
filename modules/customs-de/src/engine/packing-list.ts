@@ -7,15 +7,19 @@
  * generating anything submitted directly to German customs; the actual
  * ATLAS filing still needs to be made by hand or through certified software.
  *
- * Column set and the three format options (Detailed / Compressed / By type)
- * match customs-ch's import goods list (engine/goods-list.ts, docNum 1) -
- * same idea, same level of detail, checked against it directly. Two columns
- * from that document are deliberately left out: Tariff Rate and VAT Rate are
- * Swiss import-duty figures, assessed when the goods enter Switzerland; they
- * don't exist yet at the point this document is prepared (Germany, before
- * export) and aren't this module's to calculate.
+ * Built 1:1 against customs-ch's import goods list (engine/goods-list.ts,
+ * docNum 1) - same header layout (doc-top + info-table), same goods-table
+ * styling, same three format options (Detailed / Compressed / By type), same
+ * type-grouped product order (see adapter.ts). Two differences, both
+ * deliberate:
+ *   - Tariff Rate and VAT Rate columns are left out - those are Swiss
+ *     import-duty figures, assessed when the goods enter Switzerland; they
+ *     don't exist yet at the point this document is prepared (Germany,
+ *     before export) and aren't this module's to calculate.
+ *   - The info-table's declarant fields are this module's own (EORI,
+ *     precheck office) instead of customs-ch's LRP/artist fields.
  */
-import { calcDeProduct, esc, fmtWeightKg, hasVariants } from './calc';
+import { calcDeProduct, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
 import type { CustomsDeState } from './model';
 
 export type PackingListKind = 'export' | 'reimport';
@@ -27,45 +31,43 @@ function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: s
   return shared ? `${esc(g.type)} (${esc(g.tariffNo || 'no HS code')})` : esc(g.type);
 }
 
-/** `r` cells are right-aligned via the same `td.r` rule the CSS block declares. */
-function row(cells: { text: string | number; r?: boolean }[]): string {
-  return `<tr>${cells.map((c) => `<td${c.r ? ' class="r"' : ''}>${c.text}</td>`).join('')}</tr>`;
+type Align = 'l' | 'r' | 'c';
+function row(cells: { text: string | number; align?: Align }[]): string {
+  return `<tr>${cells.map((c) => `<td${c.align && c.align !== 'l' ? ` class="${c.align}"` : ''}>${c.text}</td>`).join('')}</tr>`;
 }
 
 export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKind, format: PackingListFormat = 'detailed', now: Date = new Date()): string {
   const m = state.meta;
   const d = state.declarant;
   const cur = m.currency || 'EUR';
-  const today = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
   const products = state.products.filter((p) => !p.unlisted);
   const title = kind === 'export' ? 'Export packing list' : 'Re-import packing list (unsold goods)';
 
   const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #000; padding: 15mm; }
-  .doc-title { font-size: 16pt; font-weight: bold; text-transform: uppercase; margin-bottom: 6mm; }
-  .parties { display: flex; gap: 10mm; margin-bottom: 6mm; }
-  .party { flex: 1; border: 1px solid #ccc; padding: 4mm; }
-  .party-label { font-size: 7pt; font-weight: bold; text-transform: uppercase; color: #666; margin-bottom: 2mm; border-bottom: 1px solid #ddd; padding-bottom: 1mm; }
-  .party-name { font-size: 10pt; font-weight: bold; margin-bottom: 1mm; }
-  .party-detail { font-size: 8pt; line-height: 1.5; color: #222; }
-  .meta-row { display: flex; gap: 8mm; margin-bottom: 6mm; font-size: 8pt; flex-wrap: wrap; }
-  .meta-item .meta-label { font-weight: bold; font-size: 7pt; text-transform: uppercase; color: #666; }
-  .meta-item .meta-value { font-size: 9pt; margin-top: 1px; }
-  .section-title { font-weight: bold; font-size: 9pt; margin: 0 0 2mm 0; }
-  table.goods { width: 100%; border-collapse: collapse; font-size: 7pt; margin-bottom: 6mm; }
-  table.goods th { background: #222; color: #fff; padding: 3px 5px; text-align: left; font-size: 6.5pt; white-space: nowrap; }
-  table.goods th.r { text-align: right; }
-  table.goods td { border-bottom: 1px solid #ddd; padding: 3px 5px; vertical-align: middle; }
-  table.goods td.r { text-align: right; }
-  table.goods tr:nth-child(even) td { background: #f8f8f8; }
-  table.goods tfoot td { background: #eee; font-weight: bold; border-top: 2px solid #555; padding: 4px 5px; }
-  .r { text-align: right; }
-  .total-box { border: 2px solid #000; display: inline-block; padding: 4mm 8mm; margin-bottom: 6mm; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; color: #000; padding: 12mm; }
+  .doc-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm; }
+  .doc-top-left .doc-title { font-size: 10pt; font-weight: bold; text-transform: uppercase; }
+  .doc-top-left .doc-subtitle { font-size: 8pt; color: #444; margin-top: 2px; }
+  .doc-top-right { text-align: right; }
+  .doc-top-right .event-name { font-size: 11pt; font-weight: bold; }
+  .doc-top-right .lrp { font-size: 8pt; margin-top: 3px; }
+  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
+  .info-table td { padding: 2px 6px; font-size: 8pt; border: 1px solid #ccc; }
+  .info-table td.lbl { font-weight: bold; background: #f4f4f4; width: 130px; font-size: 7.5pt; }
+  .section-title { font-weight: bold; font-size: 9pt; margin: 4mm 0 2mm 0; border-bottom: 1.5px solid #000; padding-bottom: 1mm; }
+  table.goods { width: 100%; border-collapse: collapse; font-size: 7pt; }
+  table.goods th { background: #e8e8e8; border: 1px solid #aaa; padding: 3px 4px; text-align: left; font-size: 6.5pt; font-weight: bold; white-space: nowrap; }
+  table.goods td { border: 1px solid #ccc; padding: 2px 4px; vertical-align: middle; }
+  table.goods tr:nth-child(even) td { background: #fafafa; }
+  table.goods tfoot td { background: #e8e8e8; font-weight: bold; border: 1px solid #aaa; padding: 3px 4px; }
+  .r { text-align: right; } .c { text-align: center; }
+  .total-box { border: 2px solid #000; display: inline-block; padding: 4mm 8mm; margin: 4mm 0; }
   .total-box .total-label { font-size: 8pt; text-transform: uppercase; color: #555; }
   .total-box .total-value { font-size: 14pt; font-weight: bold; }
-  .notice { font-size: 7.5pt; color: #333; border-top: 1px solid #ccc; padding-top: 4mm; margin-bottom: 6mm; line-height: 1.6; }
-  .sig-line { border-top: 1px solid #000; padding-top: 2mm; font-size: 7.5pt; color: #777; margin-top: 10mm; width: 100mm; }
+  .notice { font-size: 7.5pt; color: #333; border-top: 1px solid #ccc; padding-top: 4mm; margin-top: 4mm; line-height: 1.6; }
+  .signature-section { margin-top: 8mm; }
+  .signature-box { border: 1px solid #000; width: 80mm; height: 22mm; margin-top: 2mm; }
   @media print { body { padding: 0; } @page { size: A4 landscape; margin: 12mm; } }`;
 
   let totQty = 0,
@@ -102,22 +104,22 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const rows = groupList
       .map((g, i) =>
         row([
-          { text: i + 1, r: true },
+          { text: i + 1, align: 'c' },
           { text: `<strong>${byTypeGroupName(groupList, g)}</strong>` },
-          { text: esc(g.tariffNo || '-'), r: true },
-          { text: g.qty, r: true },
-          { text: fmtWeightKg(g.wkg), r: true },
-          { text: g.hasVal ? g.val : '-', r: true },
+          { text: esc(g.tariffNo || '-'), align: 'r' },
+          { text: g.qty, align: 'r' },
+          { text: fmtWeightKg(g.wkg), align: 'r' },
+          { text: g.hasVal ? g.val : '-', align: 'r' },
         ]),
       )
       .join('');
     tableHtml = `<div class="section-title">List of goods (By type)</div>
 <table class="goods"><thead><tr>
-  <th class="r">#</th><th>Type</th><th class="r">HS / tariff code</th>
+  <th>#</th><th>Type</th><th class="r">HS / tariff code</th>
   <th class="r">Qty</th><th class="r">Weight</th><th class="r">Value (${esc(cur)})</th>
 </tr></thead><tbody>${rows || `<tr><td colspan="6" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
 <tfoot><tr>
-  <td colspan="3" style="text-align:right">TOTALS</td>
+  <td colspan="2" style="text-align:right">TOTALS</td><td></td>
   <td class="r">${totQty}</td>
   <td class="r">${fmtWeightKg(totWkg)}</td>
   <td class="r">${hasVal ? Math.floor(totVal) : '-'}</td>
@@ -151,18 +153,18 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
           rowNum++;
           rowsArr.push(
             row([
-              { text: rowNum, r: true },
+              { text: rowNum, align: 'c' },
               { text: esc(v.sku || p.sku || '-') },
               { text: `${esc(p.title || '')} - ${esc(v.name || '')}` },
               { text: forSaleLabel },
               { text: esc(p.type || '') },
-              { text: qty, r: true },
-              { text: wg ? Math.round(wg) + ' g' : '-', r: true },
-              { text: fmtWeightKg(weightKg), r: true },
-              { text: price != null ? price : '-', r: true },
-              { text: value != null ? value : '-', r: true },
-              { text: esc(p.tariffNo || '-'), r: true },
-              { text: origin, r: true },
+              { text: qty, align: 'r' },
+              { text: wg ? Math.round(wg) + ' g' : '-', align: 'r' },
+              { text: fmtWeightKg(weightKg), align: 'r' },
+              { text: price != null ? price : '-', align: 'r' },
+              { text: value != null ? value : '-', align: 'r' },
+              { text: esc(p.tariffNo || '-'), align: 'r' },
+              { text: origin, align: 'c' },
             ]),
           );
         }
@@ -183,18 +185,18 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const titleDisplay = listedVariants ? `${esc(p.title || '')} (${listedVariants} variant${listedVariants === 1 ? '' : 's'})` : esc(p.title || '');
         rowsArr.push(
           row([
-            { text: rowNum, r: true },
+            { text: rowNum, align: 'c' },
             { text: esc(p.sku || '-') },
             { text: titleDisplay },
             { text: forSaleLabel },
             { text: esc(p.type || '') },
-            { text: qty, r: true },
-            { text: c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-', r: true },
-            { text: fmtWeightKg(weightKg), r: true },
-            { text: c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-', r: true },
-            { text: value != null ? value : '-', r: true },
-            { text: esc(p.tariffNo || '-'), r: true },
-            { text: origin, r: true },
+            { text: qty, align: 'r' },
+            { text: c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-', align: 'r' },
+            { text: fmtWeightKg(weightKg), align: 'r' },
+            { text: c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-', align: 'r' },
+            { text: value != null ? value : '-', align: 'r' },
+            { text: esc(p.tariffNo || '-'), align: 'r' },
+            { text: origin, align: 'c' },
           ]),
         );
       }
@@ -203,10 +205,10 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const formatLabel = format === 'detailed' ? 'Detailed' : 'Compressed';
     tableHtml = `<div class="section-title">List of goods (${formatLabel})</div>
 <table class="goods"><thead><tr>
-  <th class="r">#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th>
+  <th>#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th>
   <th class="r">Qty</th><th class="r">Unit weight</th><th class="r">Total weight</th>
   <th class="r">Unit value (${esc(cur)})</th><th class="r">Total value (${esc(cur)})</th>
-  <th class="r">HS / tariff code</th><th class="r">Origin</th>
+  <th class="r">HS / tariff code</th><th class="c">Origin</th>
 </tr></thead><tbody>${rowsArr.join('') || `<tr><td colspan="12" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
 <tfoot><tr>
   <td colspan="5" style="text-align:right">TOTALS</td>
@@ -217,32 +219,33 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
 </tr></tfoot></table>`;
   }
 
-  const declarantLines = [d.companyName || '', d.fullName || '', d.street || '', d.postCodeCity || '', d.countryOfOrigin || ''].filter(Boolean).join('<br>');
+  const header = `<div class="doc-top">
+  <div class="doc-top-left">
+    <div class="doc-title">${esc(title)}</div>
+    <div class="doc-subtitle">${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}</div>
+  </div>
+  <div class="doc-top-right">
+    <div class="event-name">${esc(m.event || '')}</div>
+    <div class="lrp">EORI: ${esc(m.eori || '-')}</div>
+    ${m.lrn ? `<div class="lrp">LRN: ${esc(m.lrn)}</div>` : ''}
+    ${m.exportMrn ? `<div class="lrp">MRN: ${esc(m.exportMrn)}</div>` : ''}
+  </div>
+</div>
+<table class="info-table">
+  <tr><td class="lbl">Company Name</td><td>${esc(d.companyName || '')}</td>
+      <td class="lbl">Name &amp; Surname</td><td>${esc(d.fullName || '')}</td></tr>
+  <tr><td class="lbl">Street &amp; House Number</td><td>${esc(d.street || '')}</td>
+      <td class="lbl">Postcode &amp; City</td><td>${esc(d.postCodeCity || '')}</td></tr>
+  <tr><td class="lbl">Country of Origin</td><td>${esc(d.countryOfOrigin || '')}</td>
+      <td class="lbl">Phone / Mobile</td><td>${esc(d.phone || '')}</td></tr>
+  <tr><td class="lbl">Email</td><td>${esc(d.email || '')}</td>
+      <td class="lbl">Precheck Office</td><td>${esc(m.precheckOffice || '-')}</td></tr>
+</table>`;
 
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>${esc(title)} - ${esc(m.event || '')}</title>
 <style>${CSS}</style></head><body>
-<div class="doc-title">${esc(title)}</div>
-
-<div class="parties">
-  <div class="party">
-    <div class="party-label">Exporter / declarant</div>
-    <div class="party-name">${esc(d.companyName || d.fullName || '')}</div>
-    <div class="party-detail">${declarantLines}</div>
-  </div>
-  <div class="party">
-    <div class="party-label">Precheck office</div>
-    <div class="party-detail">${esc(m.precheckOffice || '-')}<br>EORI: ${esc(m.eori || '-')}${m.exportMrn ? `<br>Export MRN: ${esc(m.exportMrn)}` : ''}</div>
-  </div>
-</div>
-
-<div class="meta-row">
-  <div class="meta-item"><div class="meta-label">Date</div><div class="meta-value">${today}</div></div>
-  <div class="meta-item"><div class="meta-label">Event</div><div class="meta-value">${esc(m.event || '-')}</div></div>
-  <div class="meta-item"><div class="meta-label">Event dates</div><div class="meta-value">${esc([m.eventDateStart, m.eventDateEnd].filter(Boolean).join(' - ') || '-')}</div></div>
-  <div class="meta-item"><div class="meta-label">Currency</div><div class="meta-value">${esc(cur)}</div></div>
-</div>
-
+${header}
 ${tableHtml}
 
 <div class="total-box">
@@ -260,7 +263,7 @@ ${tableHtml}
   }
 </div>
 
-<div class="sig-line">${esc(d.fullName || d.companyName || '')} &nbsp;&nbsp;·&nbsp;&nbsp; Date: _______________</div>
+<div class="signature-section"><strong>Date and Signature</strong><div class="signature-box"></div></div>
 </body></html>`;
 
   return html;

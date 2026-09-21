@@ -47,6 +47,19 @@ export function fmtWeightKg(kg: number): string {
   return (Math.round(kg * 100) / 100).toFixed(2).replace('.', ',') + ' kg';
 }
 
+/** "2026-05-14", "2026-05-16" -> "14. - 16.05.2026" (mirrors customs-ch/engine/calc.ts). */
+export function fmtEventDates(start: string, end: string): string {
+  if (!start) return '';
+  const s = new Date(start + 'T00:00:00');
+  const d1 = s.getDate();
+  const mm = String(s.getMonth() + 1).padStart(2, '0');
+  const yyyy = s.getFullYear();
+  if (!end) return `${d1}.${mm}.${yyyy}`;
+  const e = new Date(end + 'T00:00:00');
+  const d2 = e.getDate();
+  return `${d1}. - ${d2}.${mm}.${yyyy}`;
+}
+
 // ── Variant helpers (mirrors customs-ch/engine/calc.ts) ─────────────────────
 
 export function hasVariants(p: CustomsDeProduct): boolean {

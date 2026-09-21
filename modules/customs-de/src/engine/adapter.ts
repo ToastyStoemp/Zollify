@@ -43,8 +43,19 @@ export function buildCustomsDeState(
     }
   }
 
+  // Documents read best with items of one type together: group by type
+  // (catalogue order within), same as customs-ch's adapter - a customs
+  // officer sees all prints, then all pins, rather than the booth's own
+  // display order.
+  const typeRank = new Map<string, number>();
+  for (const p of products) {
+    const t = p.type?.trim() || '￿';
+    if (!typeRank.has(t)) typeRank.set(t, typeRank.size);
+  }
+
   const customsProducts: CustomsDeProduct[] = [...products]
     .filter((p) => !p.deletedAt)
+    .sort((a, b) => (typeRank.get(a.type?.trim() || '￿') ?? 0) - (typeRank.get(b.type?.trim() || '￿') ?? 0))
     .map((p) => {
       // The parent line always carries the rolled-up total - that's what the
       // ATLAS/DEXPDF side reads, which has no verified per-variant layout to

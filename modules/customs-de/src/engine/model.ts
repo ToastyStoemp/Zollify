@@ -77,11 +77,23 @@ export interface CustomsDeDeclarant {
   vatId: string;
 }
 
+export interface CustomsDeVariant {
+  name?: string;
+  sku?: string;
+  price?: number | string | null;
+  weightG?: number | string | null;
+  unlisted?: boolean;
+  amount?: number;
+  soldQty?: number;
+  soldValue?: number;
+}
+
 export interface CustomsDeProduct {
   id?: string;
   title?: string;
   sku?: string;
   type?: string;
+  forSale?: boolean;
   unlisted?: boolean;
   price?: number | string | null;
   weightG?: number | string | null;
@@ -93,6 +105,7 @@ export interface CustomsDeProduct {
   /** Sold at the event, so not coming back to Germany. */
   soldQty: number;
   soldValue: number;
+  variants?: CustomsDeVariant[];
 }
 
 export interface CustomsDeState {

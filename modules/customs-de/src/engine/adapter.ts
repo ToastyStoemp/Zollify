@@ -5,7 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
-import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState } from './model';
+import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
 export interface CustomsDeBlob {
@@ -46,21 +46,39 @@ export function buildCustomsDeState(
   const customsProducts: CustomsDeProduct[] = [...products]
     .filter((p) => !p.deletedAt)
     .map((p) => {
-      // Variant amounts/sales are rolled into the parent line: this module
-      // doesn't have a verified per-variant ATLAS layout to justify the
-      // extra detail the Swiss engine carries.
+      // The parent line always carries the rolled-up total - that's what the
+      // ATLAS/DEXPDF side reads, which has no verified per-variant layout to
+      // justify the extra detail. The packing list wants that detail though
+      // (same level as the Swiss import list), so variants are carried too.
       let amount = broughtByKey.get(`${p.id}:`) ?? 0;
       let sold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
-      for (const v of p.variants) {
-        amount += broughtByKey.get(`${p.id}:${v.id}`) ?? 0;
-        const vSold = soldByKey.get(`${p.id}:${v.id}`);
-        if (vSold) sold = { qty: sold.qty + vSold.qty, value: sold.value + vSold.value };
-      }
+      const variants: CustomsDeVariant[] = p.variants.map((v) => {
+        const vAmount = broughtByKey.get(`${p.id}:${v.id}`) ?? 0;
+        const vSold = soldByKey.get(`${p.id}:${v.id}`) ?? { qty: 0, value: 0 };
+        // Unlisted variants never count toward the rolled-up total - same rule
+        // as an unlisted product, otherwise this total and calcDeProduct's own
+        // variant-aware total (which does skip them) disagree.
+        if (!v.unlisted) {
+          amount += vAmount;
+          sold = { qty: sold.qty + vSold.qty, value: sold.value + vSold.value };
+        }
+        return {
+          name: v.name,
+          sku: v.sku,
+          price: v.price ?? null,
+          weightG: v.weightG ?? null,
+          unlisted: v.unlisted,
+          amount: vAmount,
+          soldQty: vSold.qty,
+          soldValue: vSold.value,
+        };
+      });
       return {
         id: p.id,
         title: p.title,
         sku: p.sku,
         type: p.type,
+        forSale: p.forSale,
         unlisted: p.unlisted,
         price: p.price,
         weightG: p.weightG,
@@ -69,6 +87,7 @@ export function buildCustomsDeState(
         amount,
         soldQty: sold.qty,
         soldValue: sold.value,
+        variants,
       };
     });
 

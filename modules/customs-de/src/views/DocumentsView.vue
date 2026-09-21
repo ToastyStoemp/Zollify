@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router';
 import type { EventStock, SalesEvent } from '@zollify/shared';
 import { buildCustomsDeState, readCustomsDeBlob } from '../engine/adapter';
 import { calcDeProduct, fmtWeightKg } from '../engine/calc';
-import { buildPackingListHtml } from '../engine/packing-list';
+import { buildPackingListHtml, type PackingListFormat } from '../engine/packing-list';
 import { buildProformaHtml } from '../engine/proforma';
 import { buildIaaPlusSheetData, buildIaaPlusSheetHtml } from '../engine/iaa-plus-sheet';
 import { buildDexpdfXml } from '../engine/dexpdf-xml';
@@ -181,8 +181,26 @@ async function openXml(source: string, name: string): Promise<void> {
   const opened = await sdk().ui.openDocument(`${name}.xml`, source, 'application/xml');
   if (!opened) await sdk().ui.saveFile(`${name}.xml`, source, 'application/xml');
 }
-const openExportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'export'), safeName('de_export'));
-const openReimportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'reimport'), safeName('de_reimport'));
+const packingFormat = ref<PackingListFormat>('detailed');
+const hasVariantProducts = computed(() => state.value?.products.some((p) => !p.unlisted && (p.variants?.length ?? 0) > 0) ?? false);
+const packingFormatOptions = computed<{ value: PackingListFormat; label: string }[]>(() =>
+  hasVariantProducts.value
+    ? [
+        { value: 'detailed', label: 'Detailed' },
+        { value: 'compressed', label: 'Compressed' },
+        { value: 'bytype', label: 'By type' },
+      ]
+    : [
+        { value: 'detailed', label: 'Per product' },
+        { value: 'bytype', label: 'By type' },
+      ],
+);
+watch(hasVariantProducts, (has) => {
+  if (!has && packingFormat.value === 'compressed') packingFormat.value = 'detailed';
+});
+
+const openExportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'export', packingFormat.value), safeName('de_export'));
+const openReimportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'reimport', packingFormat.value), safeName('de_reimport'));
 const openProforma = () => state.value && openHtml(buildProformaHtml(state.value), safeName('de_proforma'));
 const printIaaPlusSheet = () => state.value && openHtml(buildIaaPlusSheetHtml(state.value), safeName('iaa_plus'));
 
@@ -364,6 +382,12 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
 
       <article class="card">
         <h2>Documents</h2>
+        <div class="fmt">
+          <span class="hint">Packing list format</span>
+          <div class="seg">
+            <button v-for="o in packingFormatOptions" :key="o.value" type="button" :class="{ on: packingFormat === o.value }" @click="packingFormat = o.value">{{ o.label }}</button>
+          </div>
+        </div>
         <div class="docs">
           <button type="button" @click="openExportList">Export packing list</button>
           <button type="button" @click="openReimportList">Re-import packing list</button>
@@ -399,6 +423,7 @@ h3 { margin: .2rem 0 0; font-size: .85rem; }
 .card.notice { background: var(--zfy-warning-soft, #fdf3e3); border-color: var(--zfy-warning, #e0a83a); font-size: .85rem; }
 .card.notice p { margin: 0; color: var(--zfy-warning-ink, #8a5a1e); }
 .docs { display: flex; gap: .5rem; flex-wrap: wrap; }
+.fmt { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }

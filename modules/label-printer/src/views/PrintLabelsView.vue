@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch, type Directive } from 'vue';
 import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label';
 import { rasterizeCanvas } from '../engine/raster';
-import { PhomemoPrinter } from '../engine/phomemo';
+import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
 import { sdk } from '../runtime';
 
 /**
@@ -156,16 +156,20 @@ const totalLabels = computed(() => chosen.value.reduce((n, l) => n + (qty[l.key]
 const labelSize = ref<LabelSize>({ ...DEFAULT_LABEL_SIZE });
 const speed = ref(4);
 const density = ref(8);
+/** See PrintMode in phomemo.ts - 'safe' paces off the printer's ff03 notifications when available. */
+const printMode = ref<PrintMode>('continuous');
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
   if (stored) labelSize.value = stored;
   speed.value = (await sdk().config.get<number>('speed')) ?? 4;
   density.value = (await sdk().config.get<number>('density')) ?? 8;
+  printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
 watch(density, (v) => void sdk().config.set('density', v));
+watch(printMode, (v) => void sdk().config.set('printMode', v));
 
 // ── Preview: redraws whenever the first chosen leaf or the label size changes ──
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
@@ -192,6 +196,7 @@ const busy = ref(false);
 const progress = ref<{ done: number; total: number } | null>(null);
 const error = ref<string | null>(null);
 const deviceInfo = ref<string | null>(null);
+const cancelRequested = ref(false);
 
 async function connect(): Promise<void> {
   error.value = null;
@@ -235,23 +240,34 @@ async function printAll(): Promise<void> {
   }
   error.value = null;
   busy.value = true;
+  cancelRequested.value = false;
   progress.value = { done: 0, total: totalLabels.value };
   try {
-    for (const l of chosen.value) {
+    outer: for (const l of chosen.value) {
       const copies = Math.max(1, qty[l.key] ?? 1);
       renderLabel(workCanvas, labelSize.value, l.sku, l.title);
       const rows = rasterizeCanvas(workCanvas);
       for (let i = 0; i < copies; i++) {
-        await printer.printRaster(rows, { speed: speed.value, density: density.value });
+        // Only checked between whole labels, never mid-transmission - stopping
+        // partway through one would leave the printer's buffer holding a
+        // half-sent job that corrupts whatever prints next.
+        if (cancelRequested.value) break outer;
+        await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value });
         progress.value = { done: progress.value!.done + 1, total: progress.value!.total };
       }
     }
+    if (cancelRequested.value) error.value = `Stopped after ${progress.value!.done} of ${progress.value!.total} labels.`;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Printing failed partway through.';
   } finally {
     busy.value = false;
+    cancelRequested.value = false;
     progress.value = null;
   }
+}
+
+function cancelPrint(): void {
+  cancelRequested.value = true;
 }
 </script>
 
@@ -331,6 +347,14 @@ async function printAll(): Promise<void> {
           <label class="field"><span>Speed (1-5)</span><input v-model.number="speed" type="number" min="1" max="5" inputmode="numeric" /></label>
           <label class="field"><span>Density (1-15)</span><input v-model.number="density" type="number" min="1" max="15" inputmode="numeric" /></label>
         </div>
+        <label class="field">
+          <span>Batch pacing</span>
+          <select v-model="printMode">
+            <option value="continuous">Continuous - fixed delay, fastest</option>
+            <option value="safe">Safe - waits on printer feedback when available</option>
+          </select>
+        </label>
+        <p class="hint">Safe paces off the printer's own notifications between labels instead of a fixed guess - try it if batches come out ghosted or misaligned.</p>
         <p class="hint">Not verified against real hardware - adjust if prints come out too light, dark, or fast to feed cleanly.</p>
 
         <h2>Preview</h2>
@@ -348,9 +372,14 @@ async function printAll(): Promise<void> {
             <button type="button" class="quiet" @click="disconnect">Disconnect</button>
           </template>
         </div>
-        <button type="button" class="primary" :disabled="!printerName || !chosen.length || busy" @click="printAll">
-          {{ busy ? `Printing ${progress?.done ?? 0} / ${progress?.total ?? 0}…` : `Print ${totalLabels} label${totalLabels === 1 ? '' : 's'}` }}
-        </button>
+        <div class="row printer-row">
+          <button type="button" class="primary" :disabled="!printerName || !chosen.length || busy" @click="printAll">
+            {{ busy ? `Printing ${progress?.done ?? 0} / ${progress?.total ?? 0}…` : `Print ${totalLabels} label${totalLabels === 1 ? '' : 's'}` }}
+          </button>
+          <button type="button" class="quiet" v-if="busy" :disabled="cancelRequested" @click="cancelPrint">
+            {{ cancelRequested ? 'Stopping…' : 'Cancel' }}
+          </button>
+        </div>
 
         <template v-if="printerName">
           <button type="button" class="quiet" @click="showDeviceInfo">Show device info</button>

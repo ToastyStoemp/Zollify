@@ -17,6 +17,15 @@ import { toPlain } from './plain';
 const events = reactive(new Map<string, SalesEvent>());
 const activeId = ref<string | null>(null);
 const ACTIVE_KEY = 'core.activeEventId';
+/**
+ * Account-wide, synced via 'setting.upsert' - written whenever any device
+ * calls setActiveEvent(), so a fresh device inherits it instead of asking
+ * again. It is only ever a fallback: an explicit local choice (ACTIVE_KEY)
+ * always wins, and loadSalesEvents() re-checks visibleEvents before ever
+ * applying it, so a helper without access to that event never gets it
+ * silently activated just because another device set it.
+ */
+const DEFAULT_ACTIVE_KEY = 'core.defaultActiveEventId';
 
 function requireAccountId(): string {
   const account = getAccount();
@@ -31,11 +40,21 @@ export async function loadSalesEvents(): Promise<void> {
   for (const row of rows) {
     if (!row.deletedAt) events.set(row.id, row);
   }
-  const stored = await db.settings.get(ACTIVE_KEY);
+  const [stored, defaultStored] = await Promise.all([
+    db.settings.get(ACTIVE_KEY),
+    db.settings.get(DEFAULT_ACTIVE_KEY),
+  ]);
   const candidate = stored?.value as string | undefined;
   // Only restore an active event that still exists and is still visible -
   // otherwise a deleted event leaves the till pointed at nothing.
-  activeId.value = candidate && events.has(candidate) ? candidate : null;
+  if (candidate && events.has(candidate)) {
+    activeId.value = candidate;
+    return;
+  }
+  // No explicit choice on this device yet - fall back to the account's
+  // synced default, but only if this account can actually see that event.
+  const fallback = defaultStored?.value as string | null | undefined;
+  activeId.value = fallback && visibleEvents.value.some((e) => e.id === fallback) ? fallback : null;
 }
 
 /**
@@ -74,6 +93,15 @@ export async function setActiveEvent(id: string | null): Promise<void> {
   // Device-local, not synced: two registers at the same booth may legitimately
   // be working different events.
   await db.settings.put({ key: ACTIVE_KEY, value: id });
+  // Also published as the account-wide default (see DEFAULT_ACTIVE_KEY) so a
+  // fresh device inherits it instead of asking again. A helper account can't
+  // write this op at all (server rejects setting.upsert from restricted
+  // users - see opWritable in routes/sync.ts); queue it regardless and let
+  // the push silently drop for them rather than special-casing it here.
+  await queueOp({
+    type: 'setting.upsert',
+    payload: { key: DEFAULT_ACTIVE_KEY, value: id, updatedAt: Date.now() },
+  });
 }
 
 export async function upsertSalesEvent(event: SalesEvent): Promise<void> {

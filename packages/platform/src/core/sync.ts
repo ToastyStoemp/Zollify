@@ -89,7 +89,7 @@ async function applyOps(ops: ServerOp[]): Promise<number> {
 
   await db.transaction(
     'rw',
-    [db.products, db.events, db.eventStock, db.transactions, db.discounts, db.inventory, db.images],
+    [db.products, db.events, db.eventStock, db.transactions, db.discounts, db.inventory, db.images, db.settings],
     async () => {
     for (const op of ops) {
       try {
@@ -226,6 +226,20 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       const thumb = base64ToBlob(incoming.thumbB64, 'image/webp');
       await db.images.put({ id: incoming.imageId, productId: incoming.productId, updatedAt: incoming.updatedAt, thumb, full: existing?.full ?? thumb });
       return 1;
+    }
+    case 'setting.upsert': {
+      // Generic account-wide key/value, LWW on updatedAt - currently used
+      // for the synced default active event (see DEFAULT_ACTIVE_KEY in
+      // sales-events.ts). Applying it here only ever writes the row; a
+      // helper without access to the event it names is protected at
+      // read time, in loadSalesEvents()'s visibleEvents check, not here.
+      const incoming = op.payload as { key: string; value: unknown; updatedAt?: number };
+      const existing = await db.settings.get(incoming.key);
+      if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
+        await db.settings.put(incoming);
+        return 1;
+      }
+      return 0;
     }
     default:
       // Unknown to this build - skip rather than fail the whole batch.

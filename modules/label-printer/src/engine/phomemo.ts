@@ -46,6 +46,7 @@
 
 const SERVICE_UUID = 0xff00;
 const WRITE_CHARACTERISTIC_UUID = 0xff02;
+const NOTIFY_CHARACTERISTIC_UUID = 0xff03;
 
 /** Print head width - fixed by the hardware, not a label setting. */
 export const PRINTER_DOTS_WIDE = 344;
@@ -58,11 +59,25 @@ const MAX_LINES_PER_BLOCK = 240;
 const WRITE_DELAY_MS = 20;
 const CHUNK_SIZE = 128;
 
+/**
+ * 'continuous' (default): paces jobs with the fixed, height-scaled delay
+ * only - fast, but that delay is a guess (see printRaster).
+ * 'safe': after each label, also arms a race between any notification on
+ * ff03 and that same delay as a timeout ceiling, proceeding on whichever
+ * comes first. Whether this printer's ff03 notifications actually mean
+ * "done printing" is unconfirmed - nothing here decodes their content, it
+ * only treats arrival as a hint - so 'safe' is a best-effort adaptive
+ * pacing, not a verified handshake. If ff03 never notifies (unsupported
+ * firmware), it behaves identically to 'continuous'.
+ */
+export type PrintMode = 'continuous' | 'safe';
+
 export interface PhomemoOptions {
   /** 1-5. Default is 4 - not verified against real hardware, adjust if labels feed unevenly. */
   speed?: number;
   /** 1-15. Default is a middle value - not verified against real hardware. */
   density?: number;
+  mode?: PrintMode;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -81,6 +96,7 @@ export class PhomemoPrinter {
    * nothing". Picked once at connect() time from the real properties.
    */
   private useWriteWithResponse = false;
+  private notifyCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
 
   get connected(): boolean {
     return this.device?.gatt?.connected ?? false;
@@ -117,11 +133,22 @@ export class PhomemoPrinter {
     const service = await server.getPrimaryService(SERVICE_UUID);
     this.characteristic = await service.getCharacteristic(WRITE_CHARACTERISTIC_UUID);
     this.useWriteWithResponse = !this.characteristic.properties.writeWithoutResponse;
+
+    // Best-effort: 'safe' mode uses this if it shows up, but nothing here
+    // depends on it existing or on decoding what it sends.
+    try {
+      const notify = await service.getCharacteristic(NOTIFY_CHARACTERISTIC_UUID);
+      await notify.startNotifications();
+      this.notifyCharacteristic = notify;
+    } catch {
+      this.notifyCharacteristic = null;
+    }
   }
 
   disconnect(): void {
     this.device?.gatt?.disconnect();
     this.characteristic = null;
+    this.notifyCharacteristic = null;
   }
 
   /**
@@ -149,6 +176,24 @@ export class PhomemoPrinter {
       }
     }
     return lines.join('\n');
+  }
+
+  /** Resolves on the first ff03 notification, or after `timeoutMs` - whichever is first. */
+  private waitForNotifyOrTimeout(timeoutMs: number): Promise<void> {
+    const notify = this.notifyCharacteristic;
+    if (!notify) return sleep(timeoutMs);
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        notify.removeEventListener('characteristicvaluechanged', onNotify);
+        resolve();
+      };
+      const onNotify = () => finish();
+      notify.addEventListener('characteristicvaluechanged', onNotify);
+      setTimeout(finish, timeoutMs);
+    });
   }
 
   private async write(bytes: number[]): Promise<void> {
@@ -202,6 +247,19 @@ export class PhomemoPrinter {
 
     await sleep(300);
     await this.write([0x1f, 0xf0, 0x05, 0x00, 0x1f, 0xf0, 0x03, 0x00]);
-    await sleep(500);
+    // Fixed 500ms here (matching the one reference source found) was only
+    // ever validated at one label height (30mm / 240 lines). The footer
+    // triggers a real mechanical feed-and-cut - the BLE write ack (even
+    // write-with-response) confirms the bytes reached the printer's radio,
+    // not that the motor finished moving - and that takes longer for a
+    // taller label. Sending the next job's setup commands before it
+    // finishes overlaps the next print onto the tail of this one, which is
+    // the doubled/ghosted text and stray blank labels seen printing a mixed
+    // batch. Scaled from that one known-good data point (240 lines -> 500ms
+    // was enough) with headroom; not verified against real hardware at
+    // other heights - tighten only with a batch print that stays clean.
+    const settleMs = Math.max(500, Math.round(rows.length * 3));
+    if ((options.mode ?? 'continuous') === 'safe') await this.waitForNotifyOrTimeout(settleMs);
+    else await sleep(settleMs);
   }
 }

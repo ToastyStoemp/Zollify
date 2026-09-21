@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import type { ArtistDetails, SalesEvent } from '@zollify/shared';
+import { emptyProfile, type ArtistDetails, type SalesEvent } from '@zollify/shared';
 import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -57,12 +57,8 @@ const error = ref<string | null>(null);
 
 // ── Step 1: who ──────────────────────────────────────────────────────────────
 const name = ref(account.value?.accountName ?? '');
-const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? blankArtist()) });
+const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
-
-function blankArtist(): ArtistDetails {
-  return { companyName: '', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '' };
-}
 
 async function saveWho(): Promise<void> {
   busy.value = true;

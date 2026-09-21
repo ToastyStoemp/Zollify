@@ -51,6 +51,15 @@ const currency = defineModel<string>('currency', { default: 'CHF' });
         <input v-model="model.email" type="email" autocomplete="email" />
       </label>
       <label>
+        <span>VAT / tax ID</span>
+        <input v-model="model.vatId" type="text" class="mono" placeholder="DE123456789" />
+      </label>
+      <label>
+        <span>EORI number</span>
+        <input v-model="model.eori" type="text" class="mono" />
+        <small>Required on EU export declarations - Germany, not Switzerland.</small>
+      </label>
+      <label>
         <span>Currency</span>
         <CurrencyPicker v-model="currency" />
         <small>Your books are kept in this. New events start with it.</small>
@@ -64,4 +73,5 @@ const currency = defineModel<string>('currency', { default: 'CHF' });
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 small { color: var(--zfy-muted); font-size: .78rem; }
+.mono { font-family: ui-monospace, monospace; font-size: .85rem; }
 </style>

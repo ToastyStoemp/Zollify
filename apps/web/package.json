@@ -11,7 +11,8 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@zollify/customs": "*",
+    "@zollify/customs-ch": "*",
+    "@zollify/customs-de": "*",
     "@zollify/migration": "*",
     "@zollify/platform": "*",
     "@zollify/pos": "*",

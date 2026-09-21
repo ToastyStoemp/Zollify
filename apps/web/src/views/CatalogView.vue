@@ -96,7 +96,7 @@ function customsIssues(p: Product): string[] {
 }
 
 /** Issues are only worth flagging on every row when the booth actually does customs paperwork. */
-const customsOn = loader.isLoaded('customs');
+const customsOn = loader.isLoaded('customs-ch') || loader.isLoaded('customs-de');
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();

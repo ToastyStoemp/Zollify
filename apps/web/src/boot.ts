@@ -27,7 +27,8 @@ import {
  */
 const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   pos: () => import('@zollify/pos'),
-  customs: () => import('@zollify/customs'),
+  'customs-ch': () => import('@zollify/customs-ch'),
+  'customs-de': () => import('@zollify/customs-de'),
   'price-cards': () => import('@zollify/price-cards'),
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),

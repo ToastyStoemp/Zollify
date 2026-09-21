@@ -1,0 +1,361 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+	<!-- Framework -->
+
+	<xs:element name="Codelist">
+		<xs:complexType>
+			<xs:sequence>
+				<xs:element name="Entry" maxOccurs="unbounded">
+					<xs:complexType>
+						<xs:sequence>
+							<xs:element name="StartDate" type="DateTimeType" minOccurs="0"/>
+							<xs:element name="EndDate" type="DateTimeType" minOccurs="0"/>
+							<xs:choice>
+								<xs:annotation>
+									<xs:documentation xml:lang="en">All &lt;Entry&gt; data sets of each single &lt;Codelist&gt; file use the same choice here.</xs:documentation>
+								</xs:annotation>
+								<xs:sequence>
+									<xs:annotation>
+										<xs:documentation>generic</xs:documentation>
+									</xs:annotation>
+									<xs:element name="Code" type="CodeType"/>
+									<xs:element name="Qualifier" type="QualifierType" minOccurs="0"/>
+									<xs:choice minOccurs="0">
+										<xs:sequence>
+											<xs:annotation>
+												<xs:documentation>I09[1234][123456]</xs:documentation>
+											</xs:annotation>
+											<xs:element name="Reference" type="StatusType"/>
+											<xs:element name="ItemNumber" type="StatusType"/>
+											<xs:element name="Complement" type="StatusType"/>
+											<xs:element name="Detail" type="StatusType"/>
+											<xs:element name="Authority" type="StatusType"/>
+											<xs:element name="IssuingDate" type="StatusType"/>
+											<xs:element name="ValidityDate" type="StatusType"/>
+											<xs:element name="MeasurementUnit" type="StatusType"/>
+											<xs:element name="ComplementaryUnit" type="StatusType"/>
+											<xs:element name="Value" type="StatusType"/>
+											<xs:element name="Copy" type="BooleanType" minOccurs="0">
+												<xs:annotation>
+													<xs:documentation xml:lang="en">not used for I091[123456]</xs:documentation>
+												</xs:annotation>
+											</xs:element>
+										</xs:sequence>
+										<xs:sequence>
+											<xs:annotation>
+												<xs:documentation>I0255</xs:documentation>
+											</xs:annotation>
+											<xs:element name="Obligation" type="ObligationType"/>
+										</xs:sequence>
+									</xs:choice>
+								</xs:sequence>
+								<xs:sequence>
+									<xs:annotation>
+										<xs:documentation>I0100</xs:documentation>
+									</xs:annotation>
+									<xs:element name="RequestedProcedure" type="StandardProcedureType"/>
+									<xs:element name="PreviousProcedure" type="StandardProcedureType"/>
+									<xs:element name="AdditionalProcedure" type="AdditionalProcedureType" minOccurs="0" maxOccurs="99">
+										<xs:annotation>
+											<xs:documentation xml:lang="de">EINFUHR: Wiederholbarkeit für Kombinationen</xs:documentation>
+										</xs:annotation>
+									</xs:element>
+									<xs:sequence minOccurs="0">
+										<xs:annotation>
+											<xs:documentation xml:lang="de">EINFUHR</xs:documentation>
+										</xs:annotation>
+										<xs:element name="TaxFlag" type="TaxType" minOccurs="0"/>
+										<xs:element name="DeclarationKind" type="DeclarationKindType"/>
+									</xs:sequence>
+								</xs:sequence>
+								<xs:sequence>
+									<xs:annotation>
+										<xs:documentation>I0200</xs:documentation>
+									</xs:annotation>
+									<xs:element name="DocumentCode" type="DocumentType"/>
+									<xs:element name="Division" type="DivisionType"/>
+								</xs:sequence>
+								<xs:sequence>
+									<xs:annotation>
+										<xs:documentation>I0500</xs:documentation>
+									</xs:annotation>
+									<xs:element name="CustomsOffice" type="OfficeType"/>
+									<xs:element name="Location" type="LocationType"/>
+								</xs:sequence>
+								<xs:sequence>
+									<xs:annotation>
+										<xs:documentation>I0600</xs:documentation>
+									</xs:annotation>
+									<xs:element name="Airport" type="AirportCodeType"/>
+									<xs:element name="Percentage" type="PercentageType"/>
+									<xs:element name="Zone" type="ZoneType"/>
+								</xs:sequence>
+							</xs:choice>
+							<xs:element name="Note" type="TextType" minOccurs="0"/>
+							<xs:element name="Description" type="TextType"/>
+						</xs:sequence>
+					</xs:complexType>
+				</xs:element>
+			</xs:sequence>
+			<xs:attribute name="Id" type="IdType" use="required"/>
+			<xs:attribute name="Name" type="TextType" use="required"/>
+			<xs:attribute name="Release" type="TextType" use="required"/>
+			<xs:attribute name="System" type="SystemType" use="required"/>
+			<xs:attribute name="PublicationDate" type="DateTimeType" use="required"/>
+		</xs:complexType>
+	</xs:element>
+
+
+	<!-- Generic types -->
+
+	<xs:simpleType name="IdType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-Z][0-9]{4}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="SystemType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="EAS">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Eingangs-/Ausgangs-SumA</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="EINFUHR">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Freier Verkehr, Aktive Veredelung / Umwandlungsverfahren, Nacherhebung / Erstattung / Erlass, Summarische Anmeldung, Zolllager</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="EMCS">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">EMCS</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="EX">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Ausfuhr</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="VER">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Versand</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="CodeType">
+		<xs:restriction base="xs:token"/>
+	</xs:simpleType>
+
+	<xs:simpleType name="QualifierType">
+		<xs:restriction base="xs:token"/>
+	</xs:simpleType>
+
+	<xs:simpleType name="TextType">
+		<xs:restriction base="xs:token"/>
+	</xs:simpleType>
+
+	<xs:simpleType name="BooleanType">
+		<xs:restriction base="xs:boolean">
+			<xs:pattern value="[01]"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="DateTimeType">
+		<xs:restriction base="xs:dateTime">
+			<xs:annotation>
+				<xs:documentation>%Y-%m-%dT%H:%M:%S</xs:documentation>
+			</xs:annotation>
+			<xs:pattern value="[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I0100 types -->
+
+	<xs:simpleType name="StandardProcedureType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[0-9]{2}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="AdditionalProcedureType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-Z][0-9]{2}"/>
+			<xs:pattern value="[0-9][A-Z][A-Z0-9]"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="TaxType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="01">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">ohne EUSt-Befreiung, mit VSt-Befreiung</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="02">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">mit EUSt-Befreiung, ohne VSt-Befreiung</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="03">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">ohne EUSt-Befreiung, ohne VSt-Befreiung</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="DeclarationKindType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-ZÄÖÜ]{2,5}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I091[123456], I092[123456], I093[123456], I094[1345] types -->
+
+	<xs:simpleType name="StatusType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="R">
+				<xs:annotation>
+					<xs:documentation xml:lang="en">required</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="O">
+				<xs:annotation>
+					<xs:documentation xml:lang="en">optional</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="D">
+				<xs:annotation>
+					<xs:documentation xml:lang="en">dependent</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="N">
+				<xs:annotation>
+					<xs:documentation xml:lang="en">not used</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I0200 types -->
+
+	<xs:simpleType name="DocumentType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-Z][0-9]{3}"/>
+			<xs:pattern value="[A-Z]{4}"/>
+			<xs:pattern value="[0-9][A-Z]{3}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="DivisionType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="1">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Zeugnisse/Bescheinigungen</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="2">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Einfuhrrechtliche Papiere/Befreiungen</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="3">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Präferenznachweis</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="4">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Sonstige Unterlage</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="5">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Befreiungstatbestände/Erklärungen</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="6">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Nachweis des Gemeinschaftscharakters bzw. der Freiverkehrseigenschaft</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I0255 types -->
+
+	<xs:simpleType name="ObligationType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="O">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Original</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="K">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Kopie</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I0500 types -->
+
+	<xs:simpleType name="OfficeType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[0-9]{4}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="LocationType">
+		<xs:restriction base="xs:token">
+			<xs:enumeration value="2">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">An Drittlandsgrenze</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="3">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">An See- oder Freihafengrenze</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+			<xs:enumeration value="5">
+				<xs:annotation>
+					<xs:documentation xml:lang="de">Am Flughafen</xs:documentation>
+				</xs:annotation>
+			</xs:enumeration>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+	<!-- I0600 types -->
+
+	<xs:simpleType name="AirportCodeType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-Z]{3}"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="PercentageType">
+		<xs:restriction base="xs:integer">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="100"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+	<xs:simpleType name="ZoneType">
+		<xs:restriction base="xs:token">
+			<xs:pattern value="[A-Z]"/>
+		</xs:restriction>
+	</xs:simpleType>
+
+
+</xs:schema>

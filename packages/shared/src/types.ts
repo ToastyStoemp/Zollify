@@ -28,8 +28,10 @@ export interface SalesEvent {
   /** Manual local-currency tiered-discount bundle-total overrides, keyed by "ruleId:tierIndex". */
   localTierOverrides?: Record<string, number>;
   status: EventStatus;
-  /** Per-event customs state (edec, form1174) - ported in Phase 6. */
+  /** Per-event Swiss customs state (edec, form1174) - ported in Phase 6. */
   customs?: Record<string, unknown>;
+  /** Per-event German customs (ATLAS) state - separate from `customs` so the two modules never collide. */
+  customsDe?: Record<string, unknown>;
   updatedAt: number;
   deletedAt?: number;
 }

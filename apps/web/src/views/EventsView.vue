@@ -263,7 +263,8 @@ async function save(): Promise<void> {
             <button v-else type="button" @click="activate(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" class="btn"><Icon name="coins" :size="14" /> Prices</router-link>
-            <router-link v-if="hasRoute('customs:documents')" :to="{ name: 'customs:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
+            <router-link v-if="hasRoute('customs-ch:documents')" :to="{ name: 'customs-ch:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (CH)</router-link>
+            <router-link v-if="hasRoute('customs-de:documents')" :to="{ name: 'customs-de:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (DE)</router-link>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
             <button v-if="canEdit && e.status !== 'closed'" type="button" class="quiet" @click="close(e)">Close</button>
             <!-- Deleting is two steps on purpose: close first, then delete. -->

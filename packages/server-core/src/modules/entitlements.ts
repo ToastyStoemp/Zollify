@@ -25,6 +25,19 @@ export function migrateEntitlements(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_account_modules_account ON account_modules(accountId);
   `);
+
+  // The customs module split into customs-ch/customs-de; accounts that
+  // switched on the old "customs" id need it renamed so it keeps running.
+  // Safe to run every boot: a no-op once no "customs" rows are left.
+  db.exec(`
+    UPDATE account_modules SET moduleId = 'customs-ch'
+    WHERE moduleId = 'customs'
+      AND NOT EXISTS (
+        SELECT 1 FROM account_modules a2
+        WHERE a2.accountId = account_modules.accountId AND a2.moduleId = 'customs-ch'
+      );
+    DELETE FROM account_modules WHERE moduleId = 'customs';
+  `);
 }
 
 export function listForAccount(db: Database.Database, accountId: string): AccountModule[] {

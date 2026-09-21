@@ -9,10 +9,10 @@ import { clearSdk, setSdk } from './runtime';
  * Nothing in this file should reimplement any of it; this is registration only.
  */
 export default defineModule({
-  id: 'customs',
+  id: 'customs-ch',
   version: '0.1.0',
   sdk: '^0.1.0',
-  title: 'Customs',
+  title: 'Customs (Switzerland)',
   description: 'EDEC XML, Forms 1174 and 1187, proforma invoices and goods lists.',
   requires: ['catalog'],
   // Helpers work an event; customs paperwork is the account holder's business.

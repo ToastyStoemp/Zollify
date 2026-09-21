@@ -19,6 +19,8 @@ export interface CustomsMeta {
   venueCountry: string;
   venueTIN: string;
   currency: string;
+  /** Delivery term shown on the EU-compliant proforma, e.g. "EXW Berlin" (Incoterms 2020) - self-transported, self-consigned goods have no real buyer/seller split, so EXW at the exporter's own address is the defensible default. Required on the invoice by German export brokers. */
+  incoterms: string;
 }
 
 export interface CustomsArtist {
@@ -29,6 +31,8 @@ export interface CustomsArtist {
   countryOfOrigin: string;
   phone: string;
   email: string;
+  /** Seller VAT/tax identifier - EN 16931 seller identifier field, expected on an EU-compliant invoice. */
+  vatId: string;
 }
 
 export interface CustomsEdec {
@@ -112,6 +116,7 @@ export function defaultCustomsMeta(): CustomsMeta {
     venueCountry: 'Switzerland',
     venueTIN: 'CHE222251936',
     currency: 'CHF',
+    incoterms: '',
   };
 }
 
@@ -124,6 +129,7 @@ export function defaultCustomsArtist(): CustomsArtist {
     countryOfOrigin: '',
     phone: '',
     email: '',
+    vatId: '',
   };
 }
 

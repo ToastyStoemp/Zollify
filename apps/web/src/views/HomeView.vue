@@ -178,7 +178,8 @@ const syncLine = computed(() => {
         </ul>
         <footer class="cfoot">
           <router-link :to="{ name: 'events' }">All events <Icon name="chevron-right" :size="14" /></router-link>
-          <router-link v-if="hasRoute('customs:index')" :to="{ name: 'customs:index' }">Customs papers <Icon name="chevron-right" :size="14" /></router-link>
+          <router-link v-if="hasRoute('customs-ch:index')" :to="{ name: 'customs-ch:index' }">Customs papers (CH) <Icon name="chevron-right" :size="14" /></router-link>
+          <router-link v-if="hasRoute('customs-de:index')" :to="{ name: 'customs-de:index' }">Customs papers (DE) <Icon name="chevron-right" :size="14" /></router-link>
         </footer>
       </article>
 

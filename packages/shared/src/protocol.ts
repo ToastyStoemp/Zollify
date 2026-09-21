@@ -121,6 +121,10 @@ export const ArtistDetailsSchema = z.object({
   countryOfOrigin: z.string().max(80).default(''),
   phone: z.string().max(40).default(''),
   email: z.string().max(160).default(''),
+  /** VAT/tax identifier, shown on customs invoices. */
+  vatId: z.string().max(40).default(''),
+  /** EORI number, required on EU export declarations. */
+  eori: z.string().max(40).default(''),
 });
 export type ArtistDetails = z.infer<typeof ArtistDetailsSchema>;
 

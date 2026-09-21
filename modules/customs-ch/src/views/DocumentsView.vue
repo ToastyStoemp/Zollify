@@ -11,6 +11,7 @@ import { build1174Html } from '../engine/form1174';
 import { build1187Html } from '../engine/form1187';
 import { buildGoodsListHtml, type GoodsDocNum, type GoodsFormat } from '../engine/goods-list';
 import { buildProformaHtml } from '../engine/proforma';
+import { buildProformaEuHtml } from '../engine/proforma-eu';
 import {
   defaultCustomsArtist,
   defaultCustomsEdec,
@@ -52,6 +53,7 @@ const documentNumber = ref(1);
 const venueName = ref('');
 const eventLocation = ref('');
 const venueTIN = ref('');
+const incoterms = ref('');
 const stock = ref<EventStock[]>([]);
 let loadedEventId: string | null = null;
 let loading = false;
@@ -79,6 +81,7 @@ async function load(ev: SalesEvent): Promise<void> {
   venueName.value = blob.meta?.venueName ?? '';
   eventLocation.value = blob.meta?.eventLocation ?? '';
   venueTIN.value = blob.meta?.venueTIN ?? ev.venue?.tin ?? '';
+  incoterms.value = blob.meta?.incoterms ?? '';
   stock.value = await sdk().data.events.stock(ev.id);
   setTimeout(() => (loading = false));
 }
@@ -126,6 +129,7 @@ async function save(): Promise<void> {
           venueName: venueName.value,
           eventLocation: eventLocation.value,
           venueTIN: venueTIN.value,
+          incoterms: incoterms.value,
         },
       },
       updatedAt: Date.now(),
@@ -134,7 +138,7 @@ async function save(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Could not save the customs details.';
   }
 }
-watch([artist, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN], scheduleSave, { deep: true });
+watch([artist, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN, incoterms], scheduleSave, { deep: true });
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
 const autoCompanyCode = computed(() => {
@@ -165,6 +169,7 @@ const state = computed(() => {
         venueName: venueName.value,
         eventLocation: eventLocation.value,
         venueTIN: venueTIN.value,
+        incoterms: incoterms.value,
       },
     },
   };
@@ -225,6 +230,7 @@ function download(filename: string, text: string, type: string): void {
 const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value));
 const openAll = () => state.value && openHtml(buildAllVersionsHtml(state.value));
 const openProforma = () => state.value && openHtml(buildProformaHtml(state.value));
+const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value));
 const open1174 = () => state.value && openHtml(build1174Html(state.value));
 const open1187 = () => state.value && openHtml(build1187Html(state.value));
 function exportEdec(): void {
@@ -236,7 +242,7 @@ function exportEdec(): void {
 
 /** Inline preview, for when a pop-up is blocked or to check before printing. */
 const preview = ref('');
-const previewChoice = ref<'all' | '1' | '2' | '3' | 'proforma' | '1174' | '1187'>('all');
+const previewChoice = ref<'all' | '1' | '2' | '3' | 'proforma' | 'proforma-eu' | '1174' | '1187'>('all');
 watch(
   [state, previewChoice, goodsFormat],
   () => {
@@ -244,7 +250,7 @@ watch(
     try {
       const c = previewChoice.value;
       preview.value =
-        c === 'all' ? buildAllVersionsHtml(state.value) : c === 'proforma' ? buildProformaHtml(state.value) : c === '1174' ? build1174Html(state.value) : c === '1187' ? build1187Html(state.value) : buildGoodsListHtml(state.value, Number(c) as GoodsDocNum, goodsFormat.value);
+        c === 'all' ? buildAllVersionsHtml(state.value) : c === 'proforma' ? buildProformaHtml(state.value) : c === 'proforma-eu' ? buildProformaEuHtml(state.value) : c === '1174' ? build1174Html(state.value) : c === '1187' ? build1187Html(state.value) : buildGoodsListHtml(state.value, Number(c) as GoodsDocNum, goodsFormat.value);
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err);
       preview.value = '';
@@ -269,7 +275,7 @@ const TRANSPORT_MODES = [
 <template>
   <section class="customs">
     <header class="bar">
-      <router-link :to="{ name: 'customs:index' }" class="back"><Icon name="arrow-left" :size="14" /> Customs</router-link>
+      <router-link :to="{ name: 'customs-ch:index' }" class="back"><Icon name="arrow-left" :size="14" /> Customs</router-link>
       <h1>{{ event?.name ?? 'Customs documents' }}</h1>
       <span v-if="event?.dateStart" class="muted">{{ event.dateStart }}<template v-if="event.dateEnd"> → {{ event.dateEnd }}</template></span>
     </header>
@@ -308,6 +314,7 @@ const TRANSPORT_MODES = [
           <button type="button" @click="openGoodsList(3)"><Icon name="upload" :size="14" /> Return goods list</button>
           <button type="button" @click="openAll"><Icon name="layers" :size="14" /> All formats bundle</button>
           <button type="button" @click="openProforma"><Icon name="file-text" :size="14" /> Proforma invoice</button>
+          <button type="button" @click="openProformaEu"><Icon name="file-text" :size="14" /> Proforma invoice (EU)</button>
           <button type="button" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
           <button type="button" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
           <button type="button" class="primary" @click="exportEdec"><Icon name="download" :size="14" /> e-dec XML</button>
@@ -323,9 +330,11 @@ const TRANSPORT_MODES = [
           <label><span>Postcode &amp; city</span><input v-model="artist.postCodeCity" type="text" placeholder="9000 Gent" /></label>
           <label><span>Country of origin</span><CountryPicker v-model="artist.countryOfOrigin" store="name" placeholder="Belgium" /></label>
           <label><span>Phone</span><input v-model="artist.phone" type="tel" /></label>
-          <label class="wide"><span>Email</span><input v-model="artist.email" type="email" /></label>
+          <label><span>Email</span><input v-model="artist.email" type="email" /></label>
+          <label><span>VAT / tax ID</span><input v-model="artist.vatId" type="text" class="mono" placeholder="DE123456789" /></label>
         </div>
         <p class="hint">Prefilled from the booth profile and the declarant under Settings; what you change here applies to this event only.</p>
+        <p class="hint">VAT/tax ID is only shown on the EU proforma invoice - required by German export brokers as a seller identifier.</p>
       </article>
 
       <article class="card">
@@ -338,9 +347,11 @@ const TRANSPORT_MODES = [
           <label><span>Document number</span><input v-model.number="documentNumber" type="number" min="1" inputmode="numeric" /></label>
           <label><span>Venue / organiser name</span><input v-model="venueName" type="text" placeholder="Messe Basel" /></label>
           <label><span>Venue TIN</span><input v-model="venueTIN" type="text" class="mono" /></label>
+          <label><span>Delivery term (Incoterms)</span><input v-model="incoterms" type="text" placeholder="EXW Berlin" /></label>
           <label class="wide"><span>Event location (shown on documents)</span><input v-model="eventLocation" type="text" /></label>
         </div>
         <p class="hint">Venue address and event dates come from the event itself - edit them under Events.</p>
+        <p class="hint">Delivery term is only shown on the EU proforma invoice - your broker's mail asks for it stated on the invoice.</p>
       </article>
 
       <article class="card">
@@ -388,6 +399,7 @@ const TRANSPORT_MODES = [
             <option value="2">Sold goods list</option>
             <option value="3">Return goods list</option>
             <option value="proforma">Proforma invoice</option>
+            <option value="proforma-eu">Proforma invoice (EU)</option>
             <option value="1174">Form 11.74</option>
             <option value="1187">Form 11.87</option>
           </select>

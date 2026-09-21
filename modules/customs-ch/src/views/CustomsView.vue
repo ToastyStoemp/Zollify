@@ -41,7 +41,7 @@ function when(event: { dateStart?: string; dateEnd?: string }): string {
           <h2>{{ group.label }}</h2>
           <ul class="events">
             <li v-for="event in group.list" :key="event.id">
-              <router-link :to="{ name: 'customs:documents', params: { eventId: event.id } }">
+              <router-link :to="{ name: 'customs-ch:documents', params: { eventId: event.id } }">
                 <span class="name">
                   {{ event.name }}
                   <span v-if="event.id === activeId" class="badge">Active</span>

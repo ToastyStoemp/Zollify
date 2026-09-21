@@ -24,6 +24,7 @@ COPY modules/customs-de/package.json modules/customs-de/
 COPY modules/sourcing/package.json modules/sourcing/
 COPY modules/shopify-sync/package.json modules/shopify-sync/
 COPY modules/price-cards/package.json modules/price-cards/
+COPY modules/label-printer/package.json modules/label-printer/
 COPY modules/migration/package.json modules/migration/
 COPY apps/web/package.json apps/web/
 COPY apps/server/package.json apps/server/

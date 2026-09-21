@@ -1,0 +1,383 @@
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted, reactive, ref, watch, type Directive } from 'vue';
+import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label';
+import { rasterizeCanvas } from '../engine/raster';
+import { PhomemoPrinter } from '../engine/phomemo';
+import { sdk } from '../runtime';
+
+/**
+ * Prints SKU-barcode + product-name labels to a Phomemo M110 over Web
+ * Bluetooth. Chrome/Edge only (desktop or Android) - Web Bluetooth doesn't
+ * exist in Safari/iOS. See engine/phomemo.ts for what in this protocol is
+ * confirmed vs. reverse-engineered-but-unverified.
+ *
+ * Selection is a type > product > variant tree - a label is printed per
+ * variant SKU (or per plain product when it has none), which is what a
+ * barcode actually has to identify. "Select claimed" is the fast path: the
+ * active event's claimed stock, one click, then deselect what you don't want.
+ */
+
+// ── Leaf model: one printable label per row ─────────────────────────────────
+interface Leaf {
+  key: string; // `${productId}:${variantId}`
+  productId: string;
+  variantId: string; // '' for a plain product
+  sku: string;
+  title: string;
+  /** Just the variant's own name, for the indented row - `title` carries the full "Product - Variant" for the printed label and the preview. */
+  variantName?: string;
+}
+interface ProductGroup {
+  productId: string;
+  title: string;
+  leaves: Leaf[]; // length 1 for a plain product, one per listed variant otherwise
+}
+interface TypeGroup {
+  type: string;
+  products: ProductGroup[];
+}
+
+const typeGroups = computed<TypeGroup[]>(() => {
+  const byType = new Map<string, ProductGroup[]>();
+  for (const p of sdk().data.products.list()) {
+    const type = p.type?.trim() || 'Other';
+    const leaves: Leaf[] =
+      p.variants.length > 0
+        ? p.variants
+            .filter((v) => !v.unlisted)
+            .map((v) => {
+              const variantName = v.name?.trim() || '(unnamed)';
+              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName };
+            })
+            .filter((l) => l.sku)
+        : (p.sku?.trim() ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku.trim(), title: p.title || '(untitled)' }] : []);
+    if (!leaves.length) continue;
+    const group: ProductGroup = { productId: p.id, title: p.title || '(untitled)', leaves };
+    (byType.get(type) ?? byType.set(type, []).get(type)!).push(group);
+  }
+  return [...byType.entries()].map(([type, products]) => ({ type, products }));
+});
+const allLeaves = computed(() => typeGroups.value.flatMap((g) => g.products.flatMap((p) => p.leaves)));
+const skippedCount = computed(() => sdk().data.products.list().length - typeGroups.value.reduce((n, g) => n + g.products.length, 0));
+
+// ── Search ───────────────────────────────────────────────────────────────────
+const search = ref('');
+const visibleGroups = computed<TypeGroup[]>(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return typeGroups.value;
+  return typeGroups.value
+    .map((g) => ({ type: g.type, products: g.products.filter((p) => p.title.toLowerCase().includes(q) || p.leaves.some((l) => l.title.toLowerCase().includes(q) || l.sku.toLowerCase().includes(q))) }))
+    .filter((g) => g.products.length);
+});
+
+// ── Selection (tri-state at type and product level) ─────────────────────────
+const selected = ref<Set<string>>(new Set());
+const qty = reactive<Record<string, number>>({});
+const expanded = ref<Set<string>>(new Set());
+
+function leafState(keys: string[]): 'all' | 'none' | 'some' {
+  const n = keys.filter((k) => selected.value.has(k)).length;
+  return n === 0 ? 'none' : n === keys.length ? 'all' : 'some';
+}
+const typeKeys = (g: TypeGroup) => g.products.flatMap((p) => p.leaves.map((l) => l.key));
+const productKeys = (p: ProductGroup) => p.leaves.map((l) => l.key);
+
+function setKeys(keys: string[], on: boolean): void {
+  const next = new Set(selected.value);
+  for (const k of keys) {
+    if (on) {
+      next.add(k);
+      if (!qty[k]) qty[k] = 1;
+    } else next.delete(k);
+  }
+  selected.value = next;
+}
+function toggleType(g: TypeGroup): void {
+  setKeys(typeKeys(g), leafState(typeKeys(g)) !== 'all');
+}
+function toggleProduct(p: ProductGroup): void {
+  setKeys(productKeys(p), leafState(productKeys(p)) !== 'all');
+}
+function toggleLeaf(l: Leaf): void {
+  setKeys([l.key], !selected.value.has(l.key));
+}
+function toggleExpanded(productId: string): void {
+  const next = new Set(expanded.value);
+  if (next.has(productId)) next.delete(productId);
+  else next.add(productId);
+  expanded.value = next;
+}
+
+function selectAll(): void {
+  setKeys(allLeaves.value.map((l) => l.key), true);
+}
+function selectNone(): void {
+  selected.value = new Set();
+}
+/**
+ * The fast path: whatever the active event has claimed - one label per unit
+ * claimed, not per SKU, since the point is a label for every physical item
+ * going out. Falls back to on-hand stock if no event is active.
+ */
+async function selectClaimed(): Promise<void> {
+  const event = sdk().data.events.active();
+  const counts = new Map<string, number>();
+  if (event) {
+    const availability = sdk().data.inventory.availability(event.id);
+    const claimed = new Map(availability.map((a) => [`${a.productId}:${a.variantId}`, a.claimed]));
+    for (const l of allLeaves.value) {
+      const n = claimed.get(l.key) ?? 0;
+      if (n > 0) counts.set(l.key, n);
+    }
+  } else {
+    for (const l of allLeaves.value) {
+      const n = sdk().data.inventory.onHand(l.productId, l.variantId || null);
+      if (n > 0) counts.set(l.key, n);
+    }
+  }
+  selectNone();
+  setKeys([...counts.keys()], true);
+  for (const [key, n] of counts) qty[key] = n;
+  // A product with only some variants claimed reads clearer expanded.
+  expanded.value = new Set(typeGroups.value.flatMap((g) => g.products).filter((p) => leafState(productKeys(p)) === 'some').map((p) => p.productId));
+}
+const activeEventName = computed(() => sdk().data.events.active()?.name ?? null);
+
+/** Native checkboxes have no tri-state attribute - this keeps `.indeterminate` in sync with the "some selected" state. */
+const vIndeterminate: Directive<HTMLInputElement, boolean> = {
+  mounted(el, binding) { el.indeterminate = binding.value; },
+  updated(el, binding) { el.indeterminate = binding.value; },
+};
+
+const chosen = computed(() => allLeaves.value.filter((l) => selected.value.has(l.key)));
+const totalLabels = computed(() => chosen.value.reduce((n, l) => n + (qty[l.key] ?? 1), 0));
+
+// ── Label size / print settings, persisted ───────────────────────────────────
+const labelSize = ref<LabelSize>({ ...DEFAULT_LABEL_SIZE });
+const speed = ref(4);
+const density = ref(8);
+
+onMounted(async () => {
+  const stored = await sdk().config.get<LabelSize>('labelSize');
+  if (stored) labelSize.value = stored;
+  speed.value = (await sdk().config.get<number>('speed')) ?? 4;
+  density.value = (await sdk().config.get<number>('density')) ?? 8;
+});
+watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
+watch(speed, (v) => void sdk().config.set('speed', v));
+watch(density, (v) => void sdk().config.set('density', v));
+
+// ── Preview: redraws whenever the first chosen leaf or the label size changes ──
+const previewCanvas = ref<HTMLCanvasElement | null>(null);
+const previewLeaf = computed(() => chosen.value[0] ?? null);
+function redrawPreview(): void {
+  const canvas = previewCanvas.value;
+  const l = previewLeaf.value;
+  if (!canvas) return;
+  if (!l) {
+    canvas.width = 0;
+    canvas.height = 0;
+    return;
+  }
+  renderLabel(canvas, labelSize.value, l.sku, l.title);
+}
+watch([previewLeaf, labelSize], redrawPreview, { flush: 'post' });
+onMounted(redrawPreview);
+
+// ── Printer connection ───────────────────────────────────────────────────────
+const printer = new PhomemoPrinter();
+const printerName = ref<string | null>(null);
+const bluetoothSupported = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+const busy = ref(false);
+const progress = ref<{ done: number; total: number } | null>(null);
+const error = ref<string | null>(null);
+
+async function connect(): Promise<void> {
+  error.value = null;
+  try {
+    await printer.connect();
+    printerName.value = printer.name ?? 'Printer';
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not connect to the printer.';
+  }
+}
+function disconnect(): void {
+  printer.disconnect();
+  printerName.value = null;
+}
+onUnmounted(() => printer.disconnect());
+
+const workCanvas = document.createElement('canvas');
+
+async function printAll(): Promise<void> {
+  if (!printer.connected) {
+    error.value = 'Connect the printer first.';
+    return;
+  }
+  error.value = null;
+  busy.value = true;
+  progress.value = { done: 0, total: totalLabels.value };
+  try {
+    for (const l of chosen.value) {
+      const copies = Math.max(1, qty[l.key] ?? 1);
+      renderLabel(workCanvas, labelSize.value, l.sku, l.title);
+      const rows = rasterizeCanvas(workCanvas);
+      for (let i = 0; i < copies; i++) {
+        await printer.printRaster(rows, { speed: speed.value, density: density.value });
+        progress.value = { done: progress.value!.done + 1, total: progress.value!.total };
+      }
+    }
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Printing failed partway through.';
+  } finally {
+    busy.value = false;
+    progress.value = null;
+  }
+}
+</script>
+
+<template>
+  <section class="page labels">
+    <header>
+      <h1>Print labels</h1>
+      <div class="tools">
+        <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
+      </div>
+    </header>
+
+    <p v-if="!bluetoothSupported" class="warn">
+      This browser has no Web Bluetooth support. Use Chrome or Edge on desktop, or Chrome on Android - not Safari or iOS.
+    </p>
+
+    <div class="grid">
+      <article class="card products">
+        <div class="quick">
+          <button type="button" class="primary" @click="selectClaimed">
+            Select claimed{{ activeEventName ? ` · ${activeEventName}` : '' }}
+          </button>
+          <button type="button" class="quiet" @click="selectAll">All</button>
+          <button type="button" class="quiet" @click="selectNone">None</button>
+          <span class="count">{{ selected.size }} selected</span>
+        </div>
+        <p v-if="!activeEventName" class="hint">No active event - "Select claimed" falls back to everything with on-hand stock.</p>
+        <p v-if="skippedCount" class="hint">{{ skippedCount }} product{{ skippedCount === 1 ? '' : 's' }} without a SKU can't be listed - a barcode needs one.</p>
+
+        <p v-if="!typeGroups.length" class="empty">No products with a SKU yet. Set one under Products.</p>
+        <ul v-else class="tree">
+          <li v-for="g in visibleGroups" :key="g.type" class="type-row">
+            <label class="row group">
+              <input type="checkbox" :checked="leafState(typeKeys(g)) === 'all'" v-indeterminate="leafState(typeKeys(g)) === 'some'" @change="toggleType(g)" />
+              <span class="label">{{ g.type }}</span>
+              <span class="sub">{{ typeKeys(g).length }}</span>
+            </label>
+            <ul class="products-in-type">
+              <li v-for="p in g.products" :key="p.productId">
+                <div class="row product">
+                  <button v-if="p.leaves.length > 1" type="button" class="chevron" :class="{ open: expanded.has(p.productId) }" @click="toggleExpanded(p.productId)" aria-label="Toggle variants"><span>▸</span></button>
+                  <span v-else class="chevron-spacer"></span>
+                  <label class="pick">
+                    <input type="checkbox" :checked="leafState(productKeys(p)) === 'all'" v-indeterminate="leafState(productKeys(p)) === 'some'" @change="toggleProduct(p)" />
+                    <span class="label">{{ p.title }}</span>
+                    <span v-if="p.leaves.length === 1" class="sku">{{ p.leaves[0]!.sku }}</span>
+                    <span v-else class="sub">{{ p.leaves.length }} variants</span>
+                  </label>
+                  <input v-if="p.leaves.length === 1 && selected.has(p.leaves[0]!.key)" v-model.number="qty[p.leaves[0]!.key]" type="number" min="1" inputmode="numeric" class="qty" aria-label="Copies" />
+                </div>
+                <ul v-if="p.leaves.length > 1 && expanded.has(p.productId)" class="variants">
+                  <li v-for="l in p.leaves" :key="l.key" class="row variant">
+                    <label class="pick">
+                      <input type="checkbox" :checked="selected.has(l.key)" @change="toggleLeaf(l)" />
+                      <span class="label">{{ l.variantName }}</span>
+                      <span class="sku">{{ l.sku }}</span>
+                    </label>
+                    <input v-if="selected.has(l.key)" v-model.number="qty[l.key]" type="number" min="1" inputmode="numeric" class="qty" aria-label="Copies" />
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h2>Label size</h2>
+        <div class="two">
+          <label class="field"><span>Width (mm)</span><input v-model.number="labelSize.widthMm" type="number" min="10" max="43" inputmode="numeric" /></label>
+          <label class="field"><span>Height (mm)</span><input v-model.number="labelSize.heightMm" type="number" min="10" max="200" inputmode="numeric" /></label>
+        </div>
+        <p class="hint">Print head is fixed at 43mm wide - width above that is clamped. Match this to the label roll actually loaded.</p>
+
+        <h2>Print settings</h2>
+        <div class="two">
+          <label class="field"><span>Speed (1-5)</span><input v-model.number="speed" type="number" min="1" max="5" inputmode="numeric" /></label>
+          <label class="field"><span>Density (1-15)</span><input v-model.number="density" type="number" min="1" max="15" inputmode="numeric" /></label>
+        </div>
+        <p class="hint">Not verified against real hardware - adjust if prints come out too light, dark, or fast to feed cleanly.</p>
+
+        <h2>Preview</h2>
+        <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
+        <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
+
+        <h2>Printer</h2>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <div class="row printer-row">
+          <template v-if="!printerName">
+            <button type="button" class="primary full" :disabled="!bluetoothSupported" @click="connect">Connect Phomemo M110</button>
+          </template>
+          <template v-else>
+            <span class="ok">Connected: {{ printerName }}</span>
+            <button type="button" class="quiet" @click="disconnect">Disconnect</button>
+          </template>
+        </div>
+        <button type="button" class="primary" :disabled="!printerName || !chosen.length || busy" @click="printAll">
+          {{ busy ? `Printing ${progress?.done ?? 0} / ${progress?.total ?? 0}…` : `Print ${totalLabels} label${totalLabels === 1 ? '' : 's'}` }}
+        </button>
+      </article>
+    </div>
+  </section>
+</template>
+
+<style scoped>
+.labels { display: flex; flex-direction: column; gap: 1rem; max-width: 64rem; }
+h1 { margin: 0; font-size: 1.35rem; }
+h2 { margin: 0; font-size: .95rem; }
+.warn { color: var(--zfy-warning-ink, #8a5a1e); margin: 0; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.ok { color: var(--zfy-accent-ink, #0a5a4a); font-size: .9rem; }
+.empty { color: var(--zfy-muted, #5a6472); margin: 0; }
+.hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; }
+.grid { display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(16rem, 1fr); gap: 1rem; align-items: start; }
+.card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
+.products { max-height: 40rem; }
+
+.quick { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.quick .count { margin-left: auto; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+
+.tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; overflow: auto; }
+.type-row { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .3rem; }
+.type-row:first-child { border-top: none; padding-top: 0; }
+.row { display: flex; flex-direction: row; align-items: center; gap: .5rem; min-height: 2.3rem; }
+.row.group { font-weight: 600; font-size: .9rem; cursor: pointer; }
+.row.product { padding-left: .1rem; }
+.products-in-type { list-style: none; margin: 0; padding: 0 0 0 .2rem; }
+.variants { list-style: none; margin: 0; padding: 0 0 .3rem 1.9rem; display: flex; flex-direction: column; }
+/* `.pick`/`.row.group` are <label> elements - flex-direction is set explicitly
+   here so the generic `.field` (column) layout below can never leak into them. */
+.pick { display: flex; flex-direction: row; align-items: baseline; gap: .6rem; flex: 1; min-width: 0; font-size: .9rem; cursor: pointer; }
+.pick .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pick .sku { color: var(--zfy-ink, #1a2230); font-family: ui-monospace, monospace; font-size: .9rem; font-weight: 600; white-space: nowrap; }
+.pick .sub { color: var(--zfy-muted, #5a6472); font-size: .8rem; white-space: nowrap; }
+.qty { width: 3.5rem; flex: none; }
+.chevron { background: transparent; border: 1px solid var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); line-height: 1; padding: .15rem .35rem; border-radius: 6px; flex: none; }
+.chevron > * { display: inline-block; transition: transform .15s ease; }
+.chevron.open > * { transform: rotate(90deg); }
+.chevron-spacer { width: 1.6rem; display: inline-block; flex: none; }
+
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.field > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }
+.preview { display: flex; justify-content: center; padding: .5rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; }
+.preview canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid var(--zfy-line, #d6dde4); }
+.printer-row { display: flex; align-items: center; gap: .6rem; }
+.printer-row .full { flex: 1; width: 100%; }
+</style>

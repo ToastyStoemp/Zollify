@@ -164,12 +164,17 @@ export class PhomemoPrinter {
 
   /**
    * Prints one label from pre-rasterized rows (see raster.ts): one
-   * `Uint8Array` per print line, each `PRINTER_BYTES_WIDE` bytes, MSB-first,
-   * 1 = ink. Split into blocks of `MAX_LINES_PER_BLOCK` automatically.
+   * `Uint8Array` per print line, MSB-first, 1 = ink. Row width can be
+   * narrower than the head (labelDots() shrinks it for labels under
+   * PRINTER_DOTS_WIDE) - the header must declare the row's real byte
+   * width, not the head's, or every line reads shifted by the
+   * difference (confirmed live: this is what produced a diagonally
+   * garbled print). Split into blocks of `MAX_LINES_PER_BLOCK` automatically.
    */
   async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}): Promise<void> {
     const speed = Math.min(5, Math.max(1, options.speed ?? 4));
     const density = Math.min(15, Math.max(1, options.density ?? 8));
+    const bytesPerLine = rows[0]?.length ?? PRINTER_BYTES_WIDE;
 
     await this.write([0x1b, 0x4e, 0x0d, speed]);
     await this.write([0x1b, 0x4e, 0x04, density]);
@@ -181,7 +186,7 @@ export class PhomemoPrinter {
       const lineCount = block.length;
       const header = [
         0x1d, 0x76, 0x30, 0x00,
-        PRINTER_BYTES_WIDE & 0xff, (PRINTER_BYTES_WIDE >> 8) & 0xff,
+        bytesPerLine & 0xff, (bytesPerLine >> 8) & 0xff,
         lineCount & 0xff, (lineCount >> 8) & 0xff,
       ];
       const body: number[] = [];

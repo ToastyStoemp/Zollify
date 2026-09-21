@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import {
   activeEvent,
@@ -95,6 +95,53 @@ function range(e: { dateStart?: string; dateEnd?: string }): string {
   return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} - ${f(e.dateEnd)}` : f(e.dateStart);
 }
 
+// ── Calendar ─────────────────────────────────────────────────────────────────
+const calMonth = ref(new Date(startOfDay.getFullYear(), startOfDay.getMonth(), 1));
+function shiftMonth(delta: number): void {
+  calMonth.value = new Date(calMonth.value.getFullYear(), calMonth.value.getMonth() + delta, 1);
+}
+const calMonthLabel = computed(() => calMonth.value.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }));
+const weekdayLabels = computed(() => {
+  const fmt = new Intl.DateTimeFormat(undefined, { weekday: 'short' });
+  const monday = new Date(2024, 0, 1); // a known Monday
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    return fmt.format(d);
+  });
+});
+
+interface CalDay {
+  iso: string;
+  day: number;
+  inMonth: boolean;
+  isToday: boolean;
+  events: (typeof visibleEvents.value)[number][];
+}
+const calendarWeeks = computed<CalDay[][]>(() => {
+  const first = calMonth.value;
+  const gridStart = new Date(first);
+  gridStart.setDate(1 - ((first.getDay() + 6) % 7)); // back up to the Monday on/before the 1st
+  const weeks: CalDay[][] = [];
+  const cursor = new Date(gridStart);
+  for (let w = 0; w < 6; w++) {
+    const days: CalDay[] = [];
+    for (let d = 0; d < 7; d++) {
+      const iso = cursor.toISOString().slice(0, 10);
+      days.push({
+        iso,
+        day: cursor.getDate(),
+        inMonth: cursor.getMonth() === first.getMonth(),
+        isToday: iso === today,
+        events: visibleEvents.value.filter((e) => e.dateStart && iso >= e.dateStart && iso <= (e.dateEnd ?? e.dateStart)!),
+      });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(days);
+  }
+  return weeks;
+});
+
 // ── Stock ───────────────────────────────────────────────────────────────────
 const LOW = 3;
 /**
@@ -161,6 +208,35 @@ const syncLine = computed(() => {
           <router-link :to="{ name: 'history' }">History <Icon name="chevron-right" :size="14" /></router-link>
           <router-link v-if="isAdmin && event" :to="{ name: 'cashup' }">Cash up <Icon name="chevron-right" :size="14" /></router-link>
         </footer>
+      </article>
+
+      <!-- ── Calendar ────────────────────────────────────────────────────── -->
+      <article class="card wide">
+        <header class="chead cal-head">
+          <h2>{{ calMonthLabel }}</h2>
+          <div class="cal-nav">
+            <button type="button" class="icon-btn" @click="shiftMonth(-1)" aria-label="Previous month"><Icon name="chevron-left" :size="16" /></button>
+            <button type="button" class="icon-btn" @click="calMonth = new Date(startOfDay.getFullYear(), startOfDay.getMonth(), 1)" aria-label="This month">Today</button>
+            <button type="button" class="icon-btn" @click="shiftMonth(1)" aria-label="Next month"><Icon name="chevron-right" :size="16" /></button>
+          </div>
+        </header>
+        <div class="calendar">
+          <div class="cal-weekday" v-for="w in weekdayLabels" :key="w">{{ w }}</div>
+          <template v-for="week in calendarWeeks" :key="week[0]!.iso">
+            <router-link
+              v-for="d in week"
+              :key="d.iso"
+              :to="{ name: 'events' }"
+              class="cal-day"
+              :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length }"
+            >
+              <span class="cal-date">{{ d.day }}</span>
+              <span v-if="d.events.length" class="cal-dots">
+                <span v-for="e in d.events.slice(0, 3)" :key="e.id" class="cal-dot" :class="e.status" :title="e.name"></span>
+              </span>
+            </router-link>
+          </template>
+        </div>
       </article>
 
       <!-- ── Coming up ───────────────────────────────────────────────────── -->
@@ -240,6 +316,23 @@ h2 { margin: 0; font-size: 1rem; }
 .when { font-size: .78rem; color: var(--zfy-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .list li.active .when { color: var(--zfy-accent-ink); font-weight: 600; }
 .bad { color: var(--zfy-danger); }
+.cal-head { justify-content: space-between; }
+.cal-nav { display: flex; align-items: center; gap: .3rem; }
+.icon-btn { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid var(--zfy-line); background: var(--zfy-bg); color: inherit; border-radius: 8px; padding: .3rem .55rem; font-size: .78rem; cursor: pointer; }
+.icon-btn:hover { background: var(--zfy-surface-2); }
+.calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }
+.cal-weekday { text-align: center; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--zfy-muted); padding-bottom: .25rem; }
+.cal-day { display: flex; flex-direction: column; align-items: center; gap: .25rem; min-height: 3.2rem; padding: .35rem 0; border-radius: 8px; text-decoration: none; color: inherit; }
+.cal-day.out-month { color: var(--zfy-muted); opacity: .5; }
+.cal-day.has-events { background: var(--zfy-bg); }
+.cal-day.has-events:hover { background: var(--zfy-surface-2); }
+.cal-day.today .cal-date { background: var(--zfy-accent); color: var(--zfy-on-accent); border-radius: 999px; padding: 0 .4rem; }
+.cal-date { font-size: .85rem; font-variant-numeric: tabular-nums; }
+.cal-dots { display: flex; gap: .2rem; }
+.cal-dot { width: .4rem; height: .4rem; border-radius: 999px; background: var(--zfy-muted); }
+.cal-dot.active { background: var(--zfy-accent); }
+.cal-dot.planned { background: var(--zfy-warning-ink, #8a5a1e); }
+.cal-dot.closed { background: var(--zfy-line); }
 .cfoot { margin-top: auto; padding-top: .5rem; border-top: 1px solid var(--zfy-line); display: flex; gap: 1rem; flex-wrap: wrap; }
 .cfoot a { display: inline-flex; align-items: center; gap: .15rem; font-size: .85rem; color: var(--zfy-accent-ink); text-decoration: none; }
 .cfoot a:hover { text-decoration: underline; }

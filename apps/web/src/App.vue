@@ -251,7 +251,18 @@ nav { flex: 1; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
-.content { padding: 1.5rem; min-width: 0; }
+/* Capped and centered so a page with no width opinion of its own doesn't
+   stretch full-bleed on an ultrawide monitor - most pages set no max-width,
+   relying on this. A page that needs more room (a wide table, say) can still
+   override max-width itself; this only sets the default.
+   96% rather than a flat cap: it grows with the window up to 120rem, so
+   moderately wide screens still use nearly all the space, and only clamps
+   once there is more room than that to spare - never a full edge-to-edge fill.
+   No explicit `width` here - a grid item's default justify-self:stretch only
+   fills the track (and lets these auto margins split the leftover space) when
+   its own width is 'auto'; setting width:100% here disables that and the
+   margins compute to 0, leaving the content flush against the sidebar. */
+.content { padding: 1.5rem; min-width: 0; max-width: min(96%, 120rem); margin: 0 auto; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
 .toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }
 .toast.error { border-color: var(--zfy-danger); }

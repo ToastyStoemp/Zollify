@@ -171,8 +171,8 @@ toggle route.
 - Vue escapes interpolated text; there is no `v-html` anywhere in the repository.
 - Toast messages come from modules and are bound as text, never markup.
 - Generated customs documents are rendered in a **sandboxed iframe** via `srcdoc`
-  (`modules/customs/src/views/DocumentsView.vue`) rather than injected into the
-  shell's DOM - so even self-generated HTML cannot reach the session.
+  (`modules/customs-ch/src/views/DocumentsView.vue`, `modules/customs-de/src/views/DocumentsView.vue`)
+  rather than injected into the shell's DOM - so even self-generated HTML cannot reach the session.
 
 ## 16. Restrict file uploads - Done
 

@@ -95,7 +95,7 @@ npm run test --workspaces
 
 The customs suite includes **golden-file tests that diff the ported engine's
 output against the original legacy implementation** in
-`modules/customs/legacy/app.js`. If those fail, the port has drifted - that is
+`modules/customs-ch/legacy/app.js`. If those fail, the port has drifted - that is
 the point of them, so fix the code rather than the fixture.
 
 ## The module contract

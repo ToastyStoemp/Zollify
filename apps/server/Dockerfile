@@ -19,7 +19,8 @@ COPY packages/platform/package.json packages/platform/
 COPY packages/server-core/package.json packages/server-core/
 COPY packages/ui/package.json packages/ui/
 COPY modules/pos/package.json modules/pos/
-COPY modules/customs/package.json modules/customs/
+COPY modules/customs-ch/package.json modules/customs-ch/
+COPY modules/customs-de/package.json modules/customs-de/
 COPY modules/sourcing/package.json modules/sourcing/
 COPY modules/shopify-sync/package.json modules/shopify-sync/
 COPY modules/price-cards/package.json modules/price-cards/

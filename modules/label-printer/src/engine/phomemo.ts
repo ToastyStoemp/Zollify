@@ -92,25 +92,6 @@ export interface PhomemoOptions {
   mode?: PrintMode;
 }
 
-/**
- * Prints the barcode via the printer's own ESC/POS-style native barcode
- * command (`GS k`) instead of a rasterized bitmap - `gapTopRow`/`gapHeightRows`
- * mark the blank rows renderLabel() left for it (see label.ts's
- * `nativeBarcode` option).
- *
- * Entirely unverified against a real M110: no source consulted for this
- * driver (pyphomemo, vivier/phomemo-tools, pippo-label-studio) uses or
- * documents this command for this printer family - all three only ever use
- * raster mode. If the firmware doesn't implement `GS k`, or expects
- * different type/prefix bytes than guessed here, this will print garbage or
- * nothing rather than falling back - that is the whole reason it is opt-in.
- */
-export interface NativeBarcode {
-  sku: string;
-  gapTopRow: number;
-  gapHeightRows: number;
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -130,6 +111,8 @@ export class PhomemoPrinter {
   private useWriteWithResponse = false;
   private hasNotify = false;
   private lastNotifyAt = 0;
+  /** Reset on every connect() - see printRaster's own use of this. */
+  private printedSinceConnect = false;
 
   get connected(): boolean {
     return this.isConnected;
@@ -163,6 +146,7 @@ export class PhomemoPrinter {
       this.isConnected = false;
     });
     this.isConnected = true;
+    this.printedSinceConnect = false;
 
     const services = await BleClient.getServices(this.device.deviceId);
     const service = services.find((s) => s.uuid.toLowerCase() === SERVICE_UUID.toLowerCase());
@@ -261,24 +245,6 @@ export class PhomemoPrinter {
   }
 
   /**
-   * Experimental (see NativeBarcode's own doc comment). Guessed shape:
-   * `GS w n` sets module width, `GS h n` sets bar height, `GS H 0` turns off
-   * the printer's own human-readable text under the bars (this driver
-   * already draws the SKU itself, in its own font), and `GS k m n d1..dn`
-   * with m=73 requests CODE128 - prefixed with `{B` per the ESC/POS spec's
-   * code-set selector, the common convention for an alphanumeric payload.
-   */
-  private async writeNativeBarcode(sku: string, heightDots: number): Promise<void> {
-    const moduleWidth = 2;
-    const height = Math.min(255, Math.max(1, Math.round(heightDots)));
-    await this.write([0x1d, 0x77, moduleWidth]);
-    await this.write([0x1d, 0x68, height]);
-    await this.write([0x1d, 0x48, 0x00]);
-    const payload = [0x7b, 0x42, ...[...sku].map((c) => c.charCodeAt(0) & 0xff)]; // '{B' + data
-    await this.write([0x1d, 0x6b, 73, payload.length, ...payload]);
-  }
-
-  /**
    * Prints one label from pre-rasterized rows (see raster.ts): one
    * `Uint8Array` per print line, MSB-first, 1 = ink. Row width can be
    * narrower than the head (labelDots() shrinks it for labels under
@@ -287,7 +253,7 @@ export class PhomemoPrinter {
    * difference (confirmed live: this is what produced a diagonally
    * garbled print). Split into blocks of `MAX_LINES_PER_BLOCK` automatically.
    */
-  async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}, nativeBarcode?: NativeBarcode): Promise<void> {
+  async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}): Promise<void> {
     const speed = Math.min(5, Math.max(1, options.speed ?? 4));
     const density = Math.min(15, Math.max(1, options.density ?? 8));
     const bytesPerLine = rows[0]?.length ?? PRINTER_BYTES_WIDE;
@@ -301,15 +267,21 @@ export class PhomemoPrinter {
     // data before it completes chops the top rows off the label (confirmed
     // live: this produced a print missing its first title line, with the
     // same amount of blank stock left over at the bottom).
-    await sleep(30);
+    //
+    // 30ms was only ever enough for a label printed after the mechanism was
+    // already warmed up by a prior job - confirmed live, the very FIRST
+    // label after connecting still glitched at 30ms (and even at a flat
+    // 120ms bump) while every later label in the same session printed
+    // clean. So this waits properly only on that first print: race a
+    // notification against a generous timeout, the same infra 'safe' mode
+    // uses, regardless of which pacing mode is selected - a slow first label
+    // is a fair trade for it not being garbled. Every later print in the
+    // session uses the fast fixed delay unconditionally.
+    if (!this.printedSinceConnect) await this.waitForNotifyOrTimeout(400);
+    else await sleep(120);
 
-    if (nativeBarcode) {
-      await this.writeRasterRows(rows.slice(0, nativeBarcode.gapTopRow), bytesPerLine);
-      await this.writeNativeBarcode(nativeBarcode.sku, nativeBarcode.gapHeightRows);
-      await this.writeRasterRows(rows.slice(nativeBarcode.gapTopRow + nativeBarcode.gapHeightRows), bytesPerLine);
-    } else {
-      await this.writeRasterRows(rows, bytesPerLine);
-    }
+    await this.writeRasterRows(rows, bytesPerLine);
+    this.printedSinceConnect = true;
 
     await sleep(300);
     await this.write([0x1f, 0xf0, 0x05, 0x00, 0x1f, 0xf0, 0x03, 0x00]);

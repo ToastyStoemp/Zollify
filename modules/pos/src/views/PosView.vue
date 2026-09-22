@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product, Variant } from '@zollify/shared';
 import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
@@ -191,6 +191,69 @@ function submitSearch(): void {
   toast(`Added ${match.label}`);
   search.value = '';
 }
+
+// ── Barcode scanner (camera) ─────────────────────────────────────────────────
+// Native BarcodeDetector rather than a bundled decoder library: our own
+// labels are Code128 (see @zollify/label-printer), which it covers, and it
+// needs no dependency - Chrome/Edge desktop and Android support it, same
+// browsers this app already requires elsewhere (Web Bluetooth). Not in the
+// standard DOM types yet, hence the local shape below instead of `any`.
+interface DetectedBarcode {
+  rawValue: string;
+}
+interface BarcodeDetectorLike {
+  detect(source: CanvasImageSource): Promise<DetectedBarcode[]>;
+}
+interface BarcodeDetectorCtor {
+  new (options?: { formats?: string[] }): BarcodeDetectorLike;
+}
+const scannerSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window;
+const scannerOpen = ref(false);
+const scannerError = ref<string | null>(null);
+const scannerVideo = ref<HTMLVideoElement | null>(null);
+let scannerStream: MediaStream | null = null;
+let scannerTimer: ReturnType<typeof setInterval> | undefined;
+
+async function openScanner(): Promise<void> {
+  if (!scannerSupported) return toast('Barcode scanning needs a newer Chrome or Edge - not available on this device.', 'bad');
+  scannerError.value = null;
+  scannerOpen.value = true;
+  await nextTick();
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video = scannerVideo.value;
+    if (!video) throw new Error('Could not open the camera view.');
+    video.srcObject = scannerStream;
+    await video.play();
+
+    const Detector = (window as unknown as { BarcodeDetector: BarcodeDetectorCtor }).BarcodeDetector;
+    const detector = new Detector({ formats: ['code_128'] });
+    scannerTimer = setInterval(() => {
+      if (!scannerVideo.value || scannerVideo.value.readyState < 2) return;
+      detector
+        .detect(scannerVideo.value)
+        .then((codes) => {
+          const value = codes[0]?.rawValue;
+          if (!value) return;
+          closeScanner();
+          search.value = value;
+          submitSearch();
+        })
+        .catch(() => undefined); // one bad frame - try the next tick
+    }, 300);
+  } catch (err) {
+    scannerError.value = err instanceof Error ? err.message : 'Could not access the camera.';
+  }
+}
+
+function closeScanner(): void {
+  scannerOpen.value = false;
+  clearInterval(scannerTimer);
+  scannerTimer = undefined;
+  scannerStream?.getTracks().forEach((t) => t.stop());
+  scannerStream = null;
+}
+onUnmounted(closeScanner);
 
 // ── Adding ──────────────────────────────────────────────────────────────────
 const variantPicker = ref<Product | null>(null);
@@ -515,7 +578,10 @@ async function cancelPayment(): Promise<void> {
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
-        <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
+        <div class="search-group">
+          <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
+          <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
+        </div>
         <div class="modes">
           <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
           <button type="button" :class="['pill', { active: viewMode === 'grouped' }]" @click="setViewMode('grouped')">Types</button>
@@ -656,6 +722,13 @@ async function cancelPayment(): Promise<void> {
       </div>
     </ModalShell>
 
+    <!-- ── Barcode scanner ───────────────────────────────────────────────── -->
+    <ModalShell v-if="scannerOpen" title="Scan barcode" @close="closeScanner">
+      <p v-if="scannerError" class="warn">{{ scannerError }}</p>
+      <video ref="scannerVideo" class="scanner-video" autoplay playsinline muted></video>
+      <p class="hint">Point the camera at a barcode.</p>
+    </ModalShell>
+
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
     <ModalShell v-if="showMisc" title="Misc item" @close="showMisc = false">
       <p class="hint">Sell something that isn't in the catalogue - a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
@@ -767,7 +840,9 @@ async function cancelPayment(): Promise<void> {
 .event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
-.search { margin-left: auto; width: 14rem; max-width: 100%; }
+.search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
+.search { width: 14rem; max-width: 100%; }
+.scanner-video { width: 100%; max-height: 60vh; border-radius: 10px; background: #000; object-fit: cover; }
 .modes { display: flex; gap: .3rem; }
 .pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
@@ -859,7 +934,8 @@ async function cancelPayment(): Promise<void> {
   /* Sticks just above the shell's tab bar, whose height the shell publishes. */
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
-  .search { margin-left: 0; width: 100%; order: 3; }
+  .search-group { margin-left: 0; width: 100%; order: 3; }
+  .search { flex: 1; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }
   .tile { min-height: 5.5rem; padding: .55rem .6rem; }
   .grid.inmodal { grid-template-columns: repeat(2, minmax(0, 1fr)); }

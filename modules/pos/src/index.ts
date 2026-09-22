@@ -17,7 +17,7 @@ import { onActiveProviderChanged } from './payments/registry';
  */
 export default defineModule({
   id: 'pos',
-  version: '0.1.0',
+  version: '0.1.1',
   sdk: '^0.1.0',
   title: 'POS',
   description: 'Cart, checkout and receipts, with pluggable payment terminals.',

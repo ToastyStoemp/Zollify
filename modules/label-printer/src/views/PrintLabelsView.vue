@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch, type Directive 
 import { Capacitor } from '@capacitor/core';
 import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label';
 import { rasterizeCanvas } from '../engine/raster';
-import { PhomemoPrinter, type NativeBarcode, type PrintMode } from '../engine/phomemo';
+import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
 import { sdk } from '../runtime';
 
 /**
@@ -163,8 +163,6 @@ const density = ref(8);
 const printMode = ref<PrintMode>('continuous');
 /** 50-150%, multiplies the title's auto-fit starting size - see RenderLabelOptions in label.ts. */
 const titleScale = ref(1);
-/** Experimental - see NativeBarcode in phomemo.ts. Off by default; unverified against real hardware. */
-const nativeBarcode = ref(false);
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
@@ -173,14 +171,12 @@ onMounted(async () => {
   density.value = (await sdk().config.get<number>('density')) ?? 8;
   printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
   titleScale.value = (await sdk().config.get<number>('titleScale')) ?? 1;
-  nativeBarcode.value = (await sdk().config.get<boolean>('nativeBarcode')) ?? false;
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
 watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
 watch(titleScale, (v) => void sdk().config.set('titleScale', v));
-watch(nativeBarcode, (v) => void sdk().config.set('nativeBarcode', v));
 
 // ── Preview: redraws whenever the first chosen leaf or the label size changes ──
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
@@ -194,9 +190,9 @@ function redrawPreview(): void {
     canvas.height = 0;
     return;
   }
-  renderLabel(canvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value, nativeBarcode: nativeBarcode.value });
+  renderLabel(canvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value });
 }
-watch([previewLeaf, labelSize, titleScale, nativeBarcode], redrawPreview, { flush: 'post' });
+watch([previewLeaf, labelSize, titleScale], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
 
 // ── Printer connection ───────────────────────────────────────────────────────
@@ -258,20 +254,14 @@ async function printAll(): Promise<void> {
   try {
     outer: for (const l of chosen.value) {
       const copies = Math.max(1, qty[l.key] ?? 1);
-      const { barcodeGap } = renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
-        titleScale: titleScale.value,
-        nativeBarcode: nativeBarcode.value,
-      });
+      renderLabel(workCanvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value });
       const rows = rasterizeCanvas(workCanvas);
-      const barcode: NativeBarcode | undefined = barcodeGap
-        ? { sku: l.sku, gapTopRow: barcodeGap.top, gapHeightRows: barcodeGap.height }
-        : undefined;
       for (let i = 0; i < copies; i++) {
         // Only checked between whole labels, never mid-transmission - stopping
         // partway through one would leave the printer's buffer holding a
         // half-sent job that corrupts whatever prints next.
         if (cancelRequested.value) break outer;
-        await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value }, barcode);
+        await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value });
         progress.value = { done: progress.value!.done + 1, total: progress.value!.total };
       }
     }
@@ -381,20 +371,9 @@ function cancelPrint(): void {
           <input v-model.number="titleScale" type="range" min="0.5" max="1.5" step="0.05" />
         </label>
 
-        <label class="field inline">
-          <input v-model="nativeBarcode" type="checkbox" />
-          <span>Experimental: print barcode natively (printer-drawn, not a bitmap)</span>
-        </label>
-        <p v-if="nativeBarcode" class="hint">
-          Unverified against real hardware - the bars are sent as raw data for the printer's own firmware to draw, which should be sharper than any bitmap, but could just as easily print garbled or blank if this printer doesn't support it the way this assumes. Test one label before a batch.
-        </p>
-
         <h2>Preview</h2>
         <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
-        <template v-else>
-          <div class="preview"><canvas ref="previewCanvas"></canvas></div>
-          <p v-if="nativeBarcode" class="hint">Bars print blank here - the printer draws them itself, so this preview can't show what they'll look like.</p>
-        </template>
+        <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
 
         <h2>Printer</h2>
         <p v-if="error" class="error" role="alert">{{ error }}</p>

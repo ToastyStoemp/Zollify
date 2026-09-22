@@ -73,21 +73,35 @@ const TITLE_FONT_FRACTION = 0.3;
 export interface RenderLabelOptions {
   /** 0.5-1.5 - multiplies the title's auto-fit starting size; a knob for tuning by eye, not a guarantee (the fit loop can still shrink further). */
   titleScale?: number;
-  /**
-   * Experimental, unverified against real hardware: when true, the barcode
-   * bars are left blank in the returned canvas - the caller is expected to
-   * print them via the printer's own native barcode command instead of this
-   * bitmap. See PhomemoPrinter.printRaster's `nativeBarcode` option.
-   */
-  nativeBarcode?: boolean;
 }
 
-export interface RenderLabelResult {
-  /** Present only when `nativeBarcode` was requested: the dot-row range left blank for the printer's native barcode command. */
-  barcodeGap?: { top: number; height: number };
+/**
+ * Renders the barcode at the largest integer module width (in dots) that
+ * fits `maxWidth` outright - jsbarcode always renders bars at whole-pixel
+ * widths, but the previous approach rendered once at a fixed width then
+ * scaled the whole image down by whatever fractional ratio was needed to
+ * fit. That scaling rounds each bar's edges independently, so bars meant to
+ * be identical widths land at slightly different pixel counts after
+ * scaling - inconsistent module widths are a classic cause of a Code128
+ * decoder failing intermittently on a barcode that looks fine to the eye.
+ * Trying integer widths first means the common case never scales at all:
+ * every bar is an exact whole number of print dots, matching the printer's
+ * fixed resolution 1:1. Only when even the narrowest module (1 dot) still
+ * doesn't fit - a long SKU on a small label - does this fall back to
+ * scaling, which is unavoidable at that point.
+ */
+function fitBarcodeCanvas(sku: string, maxWidth: number, height: number): { canvas: HTMLCanvasElement; scaled: boolean } {
+  let last: HTMLCanvasElement | null = null;
+  for (let width = 3; width >= 1; width--) {
+    const canvas = document.createElement('canvas');
+    JsBarcode(canvas, sku, { format: 'CODE128', displayValue: false, margin: 8, width, height });
+    if (canvas.width <= maxWidth) return { canvas, scaled: false };
+    last = canvas;
+  }
+  return { canvas: last!, scaled: true };
 }
 
-export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: string, title: string, options: RenderLabelOptions = {}): RenderLabelResult {
+export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: string, title: string, options: RenderLabelOptions = {}): void {
   const { widthDots, heightDots } = labelDots(size);
   canvas.width = widthDots;
   canvas.height = heightDots;
@@ -133,52 +147,24 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   ctx.lineTo(widthDots - margin, titleAreaHeight);
   ctx.stroke();
 
-  // Barcode bars, rendered by jsbarcode onto their own canvas at the exact
-  // pixel budget we have, then copied in. A real quiet zone (margin) either
-  // side is not cosmetic - a scanner needs clear space around the bars to
-  // lock onto them reliably.
-  //
-  // The human-readable SKU is drawn separately below, in our own font size -
-  // NOT via jsbarcode's `displayValue`, which would get shrunk along with
-  // the bars by the width-fit scale a few lines down and end up illegibly
-  // small whenever the barcode itself is wider than the label.
   const skuFontSize = Math.max(14, Math.round(barcodeAreaHeight * 0.18));
   const skuLineHeight = skuFontSize * 1.2;
   const barsHeight = Math.max(8, barcodeAreaHeight - skuLineHeight - 6);
   const barcodeTop = titleAreaHeight + 4;
 
-  if (options.nativeBarcode) {
-    // Bars are left blank - the printer draws them itself from raw SKU data.
-    ctx.font = `700 ${skuFontSize}px ui-monospace, "Courier New", monospace`;
-    ctx.textAlign = 'center';
-    ctx.fillText(sku, widthDots / 2, barcodeTop + barsHeight + 4, widthDots - margin * 2);
-    return { barcodeGap: { top: barcodeTop, height: barsHeight } };
-  }
-
-  // Barcode bars, rendered by jsbarcode onto their own canvas at the exact
-  // pixel budget we have, then copied in. A real quiet zone (margin) either
-  // side is not cosmetic - a scanner needs clear space around the bars to
-  // lock onto them reliably.
-  //
   // The human-readable SKU is drawn separately below, in our own font size -
   // NOT via jsbarcode's `displayValue`, which would get shrunk along with
   // the bars by the width-fit scale a few lines down and end up illegibly
   // small whenever the barcode itself is wider than the label.
-  const barcodeCanvas = document.createElement('canvas');
-  JsBarcode(barcodeCanvas, sku, {
-    format: 'CODE128',
-    displayValue: false,
-    margin: 8,
-    width: 2,
-    height: barsHeight,
-  });
+  const { canvas: barcodeCanvas, scaled } = fitBarcodeCanvas(sku, widthDots - margin * 2, barsHeight);
 
-  // Scale to fit the available width without distortion, then centre it.
-  // Smoothing off: the default bilinear resample turns crisp bar edges into
-  // a grey fringe, which rasterizeCanvas's threshold then has to guess about
-  // - nearest-neighbour keeps every edge a clean black/white step.
+  // Smoothing off in the (now rare) scaled case: the default bilinear
+  // resample turns crisp bar edges into a grey fringe, which
+  // rasterizeCanvas's threshold then has to guess about - nearest-neighbour
+  // at least keeps every edge a clean black/white step, even if module
+  // widths still land unevenly.
   ctx.imageSmoothingEnabled = false;
-  const scale = Math.min(1, (widthDots - margin * 2) / barcodeCanvas.width);
+  const scale = scaled ? Math.min(1, (widthDots - margin * 2) / barcodeCanvas.width) : 1;
   const drawWidth = barcodeCanvas.width * scale;
   const drawHeight = barcodeCanvas.height * scale;
   ctx.drawImage(barcodeCanvas, (widthDots - drawWidth) / 2, barcodeTop, drawWidth, drawHeight);
@@ -186,5 +172,4 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   ctx.font = `700 ${skuFontSize}px ui-monospace, "Courier New", monospace`;
   ctx.textAlign = 'center';
   ctx.fillText(sku, widthDots / 2, barcodeTop + drawHeight + 4, widthDots - margin * 2);
-  return {};
 }

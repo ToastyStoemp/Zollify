@@ -226,7 +226,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </div>
       <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later under Events.</p>
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="step = 2">Back</button>
+        <button type="button" class="quiet" :disabled="busy" @click="step = 1">Back</button>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : eventForm.name.trim() ? 'Create & continue' : 'Skip' }}</button>
       </footer>
     </form>
@@ -261,7 +261,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <p v-if="!modules.length" class="empty">No modules are published on this server yet.</p>
 
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="step = 1">Back</button>
+        <button type="button" class="quiet" :disabled="busy" @click="step = 2">Back</button>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Applying…' : 'Continue' }}</button>
       </footer>
     </form>

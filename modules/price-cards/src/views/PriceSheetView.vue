@@ -74,7 +74,7 @@ function move(type: string, dir: -1 | 1): void {
   }
 }
 
-function open(): void {
+async function open(): Promise<void> {
   if (!included.value.length) {
     notice.value = 'Pick at least one line.';
     return;
@@ -88,7 +88,11 @@ function open(): void {
     subtitle: brand ? ['Price list', eventName].filter(Boolean).join(' · ') + ` · prices in ${currency.value}` : `${shownLines.value} lines · prices in ${currency.value}`,
     currency: currency.value,
   });
-  void sdk().ui.openDocument('price-sheet.html', html);
+  try {
+    await sdk().ui.openDocument('price-sheet.html', html);
+  } catch (err) {
+    notice.value = err instanceof Error ? err.message : 'Could not open the price sheet.';
+  }
 }
 </script>
 
@@ -135,7 +139,7 @@ function open(): void {
 .head h2 { margin: 0; font-size: .95rem; }
 .head small { color: var(--zfy-muted, #5a6472); }
 .spacer { flex: 1; }
-.head .quiet { min-height: 1.8rem; padding: .1rem .5rem; font-size: .78rem; }
+.head .quiet { min-height: 2.2rem; padding: .1rem .5rem; font-size: .78rem; }
 .swatch { width: .35rem; height: 1rem; border-radius: 999px; }
 ul { list-style: none; margin: 0; padding: 0; }
 li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }

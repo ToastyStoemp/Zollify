@@ -179,17 +179,17 @@ const summary = computed(() => {
 .clear:hover { color: var(--zfy-ink, #1a2230); }
 .panel { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: .75rem; background: var(--zfy-surface, #fff); box-shadow: 0 12px 28px -16px var(--zfy-shadow, rgba(20,26,34,.35)); }
 .head { display: flex; align-items: center; justify-content: space-between; font-size: .75rem; color: var(--zfy-muted, #5a6472); margin-bottom: .5rem; }
-.nav { min-height: 1.8rem; padding: .1rem .3rem; }
+.nav { min-height: 2.2rem; min-width: 2.2rem; padding: .1rem .3rem; }
 .months { display: flex; gap: 1rem; flex-wrap: wrap; }
-.month { flex: 1 1 14rem; min-width: 0; }
+.month { flex: 1 1 15.5rem; min-width: 0; }
 .month p { margin: 0 0 .3rem; text-align: center; font-size: .85rem; font-weight: 600; }
 .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .wd { text-align: center; font-size: .62rem; font-weight: 600; color: var(--zfy-muted, #5a6472); padding: .2rem 0; }
-.day { min-height: 2rem; padding: 0; font-size: .78rem; font-weight: 400; border: 0; border-radius: 8px; background: none; color: var(--zfy-ink, #1a2230); }
+.day { min-height: 2.3rem; padding: 0; font-size: .78rem; font-weight: 400; border: 0; border-radius: 8px; background: none; color: var(--zfy-ink, #1a2230); }
 .day:hover { background: var(--zfy-bg, #f1f4f6); }
 .day.edge { background: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); font-weight: 700; }
 .day.mid { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-radius: 0; }
 .day.today { box-shadow: inset 0 0 0 1px var(--zfy-line, #d6dde4); }
 .foot { display: flex; justify-content: space-between; margin-top: .6rem; padding-top: .5rem; border-top: 1px solid var(--zfy-line, #d6dde4); }
-.foot button { min-height: 1.9rem; font-size: .8rem; }
+.foot button { min-height: 2.2rem; font-size: .8rem; }
 </style>

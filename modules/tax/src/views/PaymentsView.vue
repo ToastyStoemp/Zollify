@@ -168,9 +168,14 @@ async function autoMatch(): Promise<void> {
     error.value = 'No dated events to match against - add dates to your events first.';
     return;
   }
-  const r = eng.autoMergeAndMatch(clusters.value, events.value);
-  await saveWork(r.clusters);
-  notice.value = `Auto merge & match: ${r.matched} matched, ${r.merged} merged across terminals, ${r.ambiguous} left for review (overlapping events).`;
+  busy.value = 'match';
+  try {
+    const r = eng.autoMergeAndMatch(clusters.value, events.value);
+    await saveWork(r.clusters);
+    notice.value = `Auto merge & match: ${r.matched} matched, ${r.merged} merged across terminals, ${r.ambiguous} left for review (overlapping events).`;
+  } finally {
+    busy.value = null;
+  }
 }
 
 async function setAllCash(): Promise<void> {
@@ -285,10 +290,10 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
         <p class="lede">Card and online takings, clustered per convention, matched to your events and booked into Lexware.</p>
       </div>
       <div v-if="status" class="conn" aria-label="Connections">
-        <span :class="{ on: status.mypos.mode === 'live' }">myPOS</span>
-        <span :class="{ on: status.shopify.mode === 'live' && status.shopify.ready }">Shopify</span>
-        <span :class="{ on: status.sumup.mode === 'live' }">SumUp</span>
-        <span :class="{ on: status.lexware.configured }">Lexware</span>
+        <span :class="{ on: status.mypos.mode === 'live' }" :aria-label="`myPOS: ${status.mypos.mode === 'live' ? 'connected' : 'not connected'}`" :title="status.mypos.mode === 'live' ? 'Connected' : 'Not connected'">myPOS</span>
+        <span :class="{ on: status.shopify.mode === 'live' && status.shopify.ready }" :aria-label="`Shopify: ${status.shopify.mode === 'live' && status.shopify.ready ? 'connected' : 'not connected'}`" :title="status.shopify.mode === 'live' && status.shopify.ready ? 'Connected' : 'Not connected'">Shopify</span>
+        <span :class="{ on: status.sumup.mode === 'live' }" :aria-label="`SumUp: ${status.sumup.mode === 'live' ? 'connected' : 'not connected'}`" :title="status.sumup.mode === 'live' ? 'Connected' : 'Not connected'">SumUp</span>
+        <span :class="{ on: status.lexware.configured }" :aria-label="`Lexware: ${status.lexware.configured ? 'connected' : 'not connected'}`" :title="status.lexware.configured ? 'Connected' : 'Not connected'">Lexware</span>
       </div>
     </header>
 
@@ -342,7 +347,7 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
           <button v-for="d in devices" :key="d" type="button" :class="['pill', { active: filter === d }]" @click="filter = d">{{ d }}</button>
         </div>
         <div class="bulk">
-          <button type="button" :disabled="!events.length" @click="autoMatch"><Icon name="sparkles" :size="14" /> Auto merge &amp; match</button>
+          <button type="button" :disabled="!events.length || busy === 'match'" @click="autoMatch"><Icon name="sparkles" :size="14" /> {{ busy === 'match' ? 'Matching…' : 'Auto merge & match' }}</button>
           <button type="button" :disabled="!matchedCount || busy === 'cash'" @click="setAllCash"><Icon name="coins" :size="14" /> Cash from sales ({{ matchedCount }})</button>
           <button v-if="canBook" type="button" class="primary" :disabled="!readyCount || busy === 'book'" @click="bookAllReady"><Icon name="send" :size="14" /> Book all ready{{ readyCount ? ` (${readyCount})` : '' }}</button>
           <button type="button" class="danger" @click="reset">Start fresh</button>
@@ -362,10 +367,10 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
             <button type="button" class="quiet" @click="monthReport(m.key, 'payments')">PN_{{ m.key }}_P.pdf</button>
             <button type="button" class="quiet" @click="monthReport(m.key, 'fees')">PN_{{ m.key }}_F.pdf</button>
             <a v-if="m.feesBooked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${m.feesBooked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Fees booked</a>
-            <button v-else-if="canBook && m.fee > 0" type="button" @click="bookFees(m.key)"><Icon name="send" :size="14" /> Book fees</button>
+            <button v-else-if="canBook && m.fee > 0" type="button" :disabled="busy === 'book'" @click="bookFees(m.key)"><Icon name="send" :size="14" /> {{ busy === 'book' ? 'Booking…' : 'Book fees' }}</button>
           </div>
         </header>
-        <ClusterCard v-for="c in m.list" :key="c.uid" :cluster="c" @book="book" />
+        <ClusterCard v-for="c in m.list" :key="c.uid" :cluster="c" :booking="busy === 'book'" @book="book" />
       </section>
     </template>
     <p v-else-if="loaded" class="empty">Nothing imported yet. Drop a payment export above, or pull from a connected provider.</p>
@@ -401,7 +406,7 @@ h1 { margin: 0; font-size: 1.35rem; }
 .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .pills, .bulk { display: flex; gap: .4rem; flex-wrap: wrap; }
 .bulk button, .mactions button { display: inline-flex; align-items: center; gap: .35rem; }
-.pill { min-height: 2rem; padding: .25rem .8rem; border-radius: 999px; font-size: .8rem; }
+.pill { min-height: 2.2rem; padding: .25rem .8rem; border-radius: 999px; font-size: .8rem; }
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .pill.good { display: inline-flex; align-items: center; gap: .3rem; text-decoration: none; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border: 1px solid transparent; }
 .month { display: flex; flex-direction: column; gap: .5rem; }

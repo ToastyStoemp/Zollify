@@ -349,7 +349,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <strong>{{ money(b.value, baseCurrency) }}</strong>
           </li>
         </ol>
-        <button v-if="bestAll.length > 8" type="button" class="quiet more" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
+        <button v-if="bestAll.length > 8" type="button" class="quiet more" :aria-expanded="bestExpanded" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
       </article>
 
       <article v-if="allMode" class="card">
@@ -455,7 +455,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .good { color: var(--zfy-accent-ink, #0a5a4a); }
 .bad { color: var(--zfy-danger, #c6512f); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .6rem; }
-.tile { display: flex; flex-direction: column; gap: .15rem; padding: .7rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
+.tile { display: flex; flex-direction: column; gap: .15rem; padding: .7rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); max-width: 16rem; }
 .tile span { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .tile strong { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
@@ -463,7 +463,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .cardhead h2 { margin: 0; font-size: .95rem; flex: 1; }
 .cardhead select { max-width: 14rem; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .75rem; }
-.toggle { min-height: 1.7rem; padding: .1rem .6rem; font-size: .74rem; }
+.toggle { min-height: 2.2rem; padding: .1rem .6rem; font-size: .74rem; }
 .toggle.on { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .compare { width: 100%; border-collapse: collapse; font-size: .875rem; font-variant-numeric: tabular-nums; }
 .compare th { text-align: right; font-weight: 400; font-size: .72rem; color: var(--zfy-muted, #5a6472); padding: .2rem .4rem; white-space: nowrap; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
@@ -474,7 +474,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .rank { width: 1.4rem; text-align: right; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .best strong { min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
-.more { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .78rem; min-height: 1.6rem; padding: 0 .3rem; }
+.more { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .78rem; min-height: 2.2rem; padding: 0 .3rem; }
 .days { display: flex; flex-direction: column; gap: .35rem; font-size: .78rem; }
 .dayrow .small { font-size: .66rem; min-width: 3rem; text-align: right; }
 .dayrow { display: flex; align-items: center; gap: .5rem; }
@@ -502,7 +502,7 @@ label.inline { display: flex; align-items: center; gap: .4rem; font-size: .8rem;
 .chip { font-size: .66rem; padding: .1rem .4rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); font-weight: 600; }
 .time { font-size: .75rem; }
-.txhead .quiet { min-height: 1.8rem; padding: .1rem .5rem; font-size: .78rem; }
+.txhead .quiet { min-height: 2.2rem; padding: .1rem .5rem; font-size: .78rem; }
 .icon { display: inline-flex; align-items: center; color: var(--zfy-muted, #5a6472); }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; font-size: .78rem; color: var(--zfy-muted, #5a6472); }
 .lines li { display: flex; justify-content: space-between; gap: .5rem; }

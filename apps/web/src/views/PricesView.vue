@@ -210,7 +210,7 @@ const driftClass = (d: number): string => (Math.abs(d) < 0.005 ? 'faint' : Math.
             <tbody>
               <tr v-for="r in g.rows" :key="r.key" :class="{ set: drafts[r.key] }">
                 <td class="name">
-                  <button v-if="r.showToggle" type="button" class="quiet toggle" @click="toggle(r.pid)">
+                  <button v-if="r.showToggle" type="button" class="quiet toggle" :aria-expanded="r.expanded" @click="toggle(r.pid)">
                     <Icon :name="r.expanded ? 'chevron-down' : 'chevron-right'" :size="14" /> {{ r.title }} <small>{{ r.expanded ? 'collapse' : `(${r.variantCount} variants)` }}</small>
                   </button>
                   <span v-else>{{ r.title }}</span>
@@ -290,9 +290,9 @@ td { text-align: right; padding: .4rem .7rem; border-bottom: 1px solid var(--zfy
 tr:last-child td { border-bottom: 0; }
 th:first-child, td.name { text-align: left; }
 tr.set td { background: var(--zfy-accent-soft, #deeee9); }
-.toggle { display: inline-flex; align-items: center; gap: .3rem; min-height: 1.6rem; padding: 0 .2rem; font-weight: 400; }
+.toggle { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: 0 .2rem; font-weight: 400; }
 .toggle small { color: var(--zfy-muted, #5a6472); }
 .ovr { white-space: nowrap; }
-.ovr input { width: 6rem; min-height: 1.9rem; padding: .1rem .4rem; text-align: right; }
-.ovr .quiet { min-height: 1.6rem; padding: 0 .3rem; }
+.ovr input { width: 6rem; min-height: 2.2rem; padding: .1rem .4rem; text-align: right; }
+.ovr .quiet { min-height: 2.2rem; padding: 0 .3rem; }
 </style>

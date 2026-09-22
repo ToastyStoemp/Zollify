@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch, type Component } from 'vue';
+import { computed, onUnmounted, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { currentAccount } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
@@ -72,8 +72,13 @@ const corePanels: Panel[] = [
 ];
 
 /** Phone: the list and a panel are two screens, not two columns. */
-const phone = ref(typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches);
-if (typeof matchMedia === 'function') matchMedia('(max-width: 720px)').addEventListener('change', (e) => { phone.value = e.matches; });
+const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null;
+const phone = ref(phoneQuery?.matches ?? false);
+const onPhoneChange = (e: MediaQueryListEvent): void => {
+  phone.value = e.matches;
+};
+phoneQuery?.addEventListener('change', onPhoneChange);
+onUnmounted(() => phoneQuery?.removeEventListener('change', onPhoneChange));
 
 const panels = computed<Panel[]>(() => {
   const role = account.value?.role;

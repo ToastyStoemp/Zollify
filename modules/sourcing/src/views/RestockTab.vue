@@ -136,5 +136,5 @@ td small { color: var(--zfy-muted, #5a6472); margin-left: .3rem; }
 .muted { color: var(--zfy-muted, #5a6472); }
 .small { font-size: .74rem; }
 .bad { color: var(--zfy-danger, #c6512f); }
-.qty { width: 4.5rem; min-height: 1.8rem; padding: .1rem .4rem; text-align: right; }
+.qty { width: 4.5rem; min-height: 2.2rem; padding: .1rem .4rem; text-align: right; }
 </style>

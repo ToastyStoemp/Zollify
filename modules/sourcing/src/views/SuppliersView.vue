@@ -57,8 +57,13 @@ function newRep(supplierId: string): void {
 }
 async function saveRep(): Promise<void> {
   if (!editingRep.value?.name.trim()) return;
-  await save('reps', { ...editingRep.value, name: editingRep.value.name.trim() });
-  editingRep.value = null;
+  error.value = null;
+  try {
+    await save('reps', { ...editingRep.value, name: editingRep.value.name.trim() });
+    editingRep.value = null;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save the rep.';
+  }
 }
 </script>
 
@@ -144,7 +149,7 @@ header .primary { display: inline-flex; align-items: center; gap: .4rem; }
 .notes { margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); white-space: pre-wrap; }
 .reps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; }
 .reps li { display: flex; align-items: center; gap: .3rem; padding: .3rem .5rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .85rem; }
-.quiet, .link { min-height: 1.8rem; padding: .1rem .5rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .25rem; text-decoration: none; color: var(--zfy-ink, #1a2230); border-radius: 6px; }
+.quiet, .link { min-height: 2.2rem; padding: .1rem .5rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .25rem; text-decoration: none; color: var(--zfy-ink, #1a2230); border-radius: 6px; }
 .link:hover { background: var(--zfy-surface, #fff); }
 .add { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); }
 .form { display: flex; flex-direction: column; gap: .6rem; }

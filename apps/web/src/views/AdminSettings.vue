@@ -152,10 +152,18 @@ async function viewLog(entry: AdminLogEntry): Promise<void> {
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────────
+const revokingId = ref<string | null>(null);
 async function revoke(s: AdminSession): Promise<void> {
   if (!(await shellConfirm(`${s.email} on ${s.deviceName || s.device || 'that device'} must sign in again.`, 'Log out this session?'))) return;
-  await authFetch(`/admin/sessions/${s.id}`, { method: 'DELETE' });
-  sessions.value = sessions.value.filter((x) => x.id !== s.id);
+  revokingId.value = s.id;
+  try {
+    await authFetch(`/admin/sessions/${s.id}`, { method: 'DELETE' });
+    sessions.value = sessions.value.filter((x) => x.id !== s.id);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not log out that session.';
+  } finally {
+    revokingId.value = null;
+  }
 }
 
 const when = (ts: number | null): string => (ts ? new Date(ts).toLocaleString() : 'never');
@@ -211,7 +219,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
         <h3>Accounts</h3>
         <ul class="list">
           <li v-for="a in accounts" :key="a.id">
-            <button type="button" class="row-btn" @click="toggleAccount(a.id)">
+            <button type="button" class="row-btn" :aria-expanded="openAccount === a.id" @click="toggleAccount(a.id)">
               <span class="main"><span>{{ a.name }}</span><small>{{ a.userCount }} users · {{ a.deviceCount }} devices · {{ a.opCount.toLocaleString() }} ops · {{ a.txTotal.toLocaleString() }} sales · active {{ when(a.lastActivityAt) }}</small></span>
               <Icon :name="openAccount === a.id ? 'chevron-down' : 'chevron-right'" :size="14" />
             </button>
@@ -233,7 +241,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
         <p v-if="!logs.length" class="hint">Nothing uploaded yet. A device sends its log from This device, or from a failed card payment.</p>
         <ul v-else class="list">
           <li v-for="l in logs" :key="l.id">
-            <button type="button" class="row-btn" @click="viewLog(l)">
+            <button type="button" class="row-btn" :aria-expanded="openLog === l.id" @click="viewLog(l)">
               <span class="main"><span>{{ l.accountName }} · {{ l.deviceName || l.deviceId.slice(0, 8) }}<em v-if="l.reason">{{ l.reason }}</em></span><small>{{ when(l.createdAt) }} · {{ l.flavor || 'web' }}<template v-if="l.appVersion"> {{ l.appVersion }}</template> · {{ kb(l.size) }}</small></span>
               <Icon :name="openLog === l.id ? 'chevron-down' : 'chevron-right'" :size="14" />
             </button>
@@ -248,7 +256,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
         <ul class="list">
           <li v-for="s in sessions" :key="s.id" class="session">
             <span class="main"><span>{{ s.email }} <em>{{ s.role }}</em> · {{ s.accountName }}</span><small>{{ [s.deviceName || s.device, s.ip, s.geo, s.flavor].filter(Boolean).join(' · ') }} · active {{ when(s.lastUsedAt) }}</small></span>
-            <button type="button" class="quiet danger" @click="revoke(s)">Log out</button>
+            <button type="button" class="quiet danger" :disabled="revokingId === s.id" @click="revoke(s)">{{ revokingId === s.id ? 'Logging out…' : 'Log out' }}</button>
           </li>
         </ul>
       </article>
@@ -287,5 +295,5 @@ em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35re
 .sub { margin: .3rem 0 0; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .plain { list-style: none; margin: 0; padding: 0; font-size: .85rem; display: flex; flex-direction: column; gap: .15rem; }
 .log { margin: .3rem 0 0; max-height: 20rem; overflow: auto; padding: .6rem .8rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .72rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.session .quiet { min-height: 1.8rem; font-size: .78rem; }
+.session .quiet { min-height: 2.2rem; font-size: .78rem; }
 </style>

@@ -732,7 +732,7 @@ async function cancelPayment(): Promise<void> {
             </span>
             <small v-if="e.product.sku">{{ e.product.sku }}</small>
             <span v-if="!e.product.variants?.length && bundleQtys(e.product).length" class="bundles">
-              <span v-for="q in bundleQtys(e.product)" :key="q" role="button" class="bundle" @click.stop="addBundle(e.product.id, null, q)">+{{ q }}</span>
+              <span v-for="q in bundleQtys(e.product)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(e.product.id, null, q)" @keydown.enter.stop.prevent="addBundle(e.product.id, null, q)" @keydown.space.stop.prevent="addBundle(e.product.id, null, q)">+{{ q }}</span>
             </span>
             <span class="foot">
               <span :class="stockLabel(e.product.id, null).cls">{{ e.product.variants?.length ? `${e.product.variants.length} sizes` : stockLabel(e.product.id, null).text }}</span>
@@ -803,7 +803,7 @@ async function cancelPayment(): Promise<void> {
           </span>
           <small v-if="p.sku">{{ p.sku }}</small>
           <span v-if="!p.variants?.length && bundleQtys(p).length" class="bundles">
-            <span v-for="q in bundleQtys(p)" :key="q" role="button" class="bundle" @click.stop="addBundle(p.id, null, q)">+{{ q }}</span>
+            <span v-for="q in bundleQtys(p)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(p.id, null, q)" @keydown.enter.stop.prevent="addBundle(p.id, null, q)" @keydown.space.stop.prevent="addBundle(p.id, null, q)">+{{ q }}</span>
           </span>
           <span class="foot">
             <span :class="stockLabel(p.id, null).cls">{{ p.variants?.length ? `${p.variants.length} sizes` : stockLabel(p.id, null).text }}</span>
@@ -825,7 +825,7 @@ async function cancelPayment(): Promise<void> {
           </span>
           <small v-if="v.sku">{{ v.sku }}</small>
           <span v-if="bundleQtys(variantPicker, v.id).length" class="bundles">
-            <span v-for="q in bundleQtys(variantPicker, v.id)" :key="q" role="button" class="bundle" @click.stop="addBundle(variantPicker!.id, v.id, q)">+{{ q }}</span>
+            <span v-for="q in bundleQtys(variantPicker, v.id)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(variantPicker!.id, v.id, q)" @keydown.enter.stop.prevent="addBundle(variantPicker!.id, v.id, q)" @keydown.space.stop.prevent="addBundle(variantPicker!.id, v.id, q)">+{{ q }}</span>
           </span>
           <span class="foot">
             <span :class="stockLabel(variantPicker.id, v.id).cls">{{ stockLabel(variantPicker.id, v.id).text }}</span>
@@ -1005,7 +1005,7 @@ async function cancelPayment(): Promise<void> {
 .cart { display: flex; flex-direction: column; border-left: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; height: calc(100vh - 0px); }
 .cart header { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .cart h2 { margin: 0; font-size: 1rem; flex: 1; }
-.cart .clear { min-height: 1.8rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.cart .clear { min-height: 2.2rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
 .cart .clear.armed { color: var(--zfy-danger, #c6512f); font-weight: 600; }
 .cart .close { display: none; }
 .lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem; }
@@ -1013,8 +1013,8 @@ async function cancelPayment(): Promise<void> {
 .lines li { background: var(--zfy-bg, #f1f4f6); border-radius: 10px; padding: .55rem .7rem; display: flex; flex-direction: column; gap: .3rem; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: .875rem; }
 .row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row.qty { justify-content: flex-start; gap: .4rem; }
-.row.qty button { min-height: 1.9rem; min-width: 1.9rem; padding: 0; font-weight: 700; }
+.row.qty { justify-content: flex-start; gap: .5rem; }
+.row.qty button { min-height: 2.2rem; min-width: 2.2rem; padding: 0; font-weight: 700; }
 .row.qty span { min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .row.qty small { margin-left: auto; color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .cart footer { border-top: 1px solid var(--zfy-line, #d6dde4); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; }
@@ -1022,7 +1022,7 @@ async function cancelPayment(): Promise<void> {
 .row.total { font-size: 1.05rem; font-weight: 700; }
 .row.small { font-size: .78rem; }
 .tools { display: flex; gap: .4rem; }
-.tools button { flex: 1; min-height: 2.1rem; font-size: .8rem; padding: .2rem .4rem; }
+.tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
 .pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }
 .pay button, .confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
@@ -1044,7 +1044,7 @@ async function cancelPayment(): Promise<void> {
 .amount { font-size: 2rem; font-weight: 800; letter-spacing: -.01em; }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pulse, .dot.checking, .tile.added { animation: none; } }
 .chips { display: flex; justify-content: center; gap: .4rem; flex-wrap: wrap; }
 .chip { min-height: 2.2rem; padding: .2rem .8rem; font-weight: 600; }
 .chip.exact { color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); background: var(--zfy-accent-soft, #deeee9); }

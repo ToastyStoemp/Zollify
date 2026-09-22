@@ -253,10 +253,15 @@ const syncLine = computed(() => {
         <div class="calendar">
           <div class="cal-weekday" v-for="w in weekdayLabels" :key="w">{{ w }}</div>
           <template v-for="week in calendarWeeks" :key="week[0]!.iso">
-            <router-link
+            <!-- Only a day that actually has something to show links out - an
+                 empty day (most of the grid) would otherwise be a tab stop
+                 and a click target that lands on the exact same generic
+                 events list as every other empty day. -->
+            <component
+              :is="d.events.length ? 'router-link' : 'div'"
               v-for="d in week"
               :key="d.iso"
-              :to="{ name: 'events' }"
+              :to="d.events.length ? { name: 'events' } : undefined"
               class="cal-day"
               :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length }"
             >
@@ -267,12 +272,12 @@ const syncLine = computed(() => {
                   :key="e.event.id"
                   class="cal-name"
                   :class="[e.event.status, { left: e.continuesLeft, right: e.continuesRight }]"
-                  :title="e.event.name"
+                  :title="`${e.event.name} · ${e.event.status}`"
                   >{{ e.event.name }}</span
                 >
                 <span v-if="d.events.length > 2" class="cal-more">+{{ d.events.length - 2 }} more</span>
               </span>
-            </router-link>
+            </component>
           </template>
         </div>
       </article>
@@ -338,7 +343,7 @@ h2 { margin: 0; font-size: 1rem; }
 .sub.warn { color: var(--zfy-warning-ink); }
 .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted); }
 .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
-.figure { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-bg); }
+.figure { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-bg); max-width: 16rem; }
 .figure strong { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
 .figure.big strong { font-size: 1.75rem; color: var(--zfy-accent-ink); }
 .figure small { color: var(--zfy-muted); font-size: .75rem; }

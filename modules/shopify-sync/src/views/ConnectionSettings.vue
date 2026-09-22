@@ -12,6 +12,7 @@ const state = ref<ConnectionState>({ connected: false, shop: null, apiVersion: n
 const shop = ref('');
 const accessToken = ref('');
 const busy = ref(false);
+const disconnecting = ref(false);
 const error = ref<string | null>(null);
 
 async function refresh(): Promise<void> {
@@ -48,11 +49,16 @@ async function disconnect(): Promise<void> {
     'Disconnect Shopify',
   );
   if (!ok) return;
+  disconnecting.value = true;
+  error.value = null;
   try {
     await sdk().http.del('connection');
     await refresh();
+    sdk().ui.toast('Shopify store disconnected.', { kind: 'success' });
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not disconnect.';
+  } finally {
+    disconnecting.value = false;
   }
 }
 </script>
@@ -88,8 +94,10 @@ async function disconnect(): Promise<void> {
         />
       </label>
       <div class="actions">
-        <button v-if="state.connected" type="button" @click="disconnect">Disconnect</button>
-        <button type="submit" :disabled="busy">
+        <button v-if="state.connected" type="button" :disabled="disconnecting || busy" @click="disconnect">
+          {{ disconnecting ? 'Disconnecting…' : 'Disconnect' }}
+        </button>
+        <button type="submit" :disabled="busy || disconnecting">
           {{ busy ? 'Saving…' : state.connected ? 'Update' : 'Connect' }}
         </button>
       </div>

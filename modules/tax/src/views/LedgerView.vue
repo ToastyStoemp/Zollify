@@ -38,6 +38,11 @@ const totals = computed(() => {
   };
 });
 const canScan = computed(() => Boolean(status.value?.ai.configured));
+// Expenses can each carry their own currency (the form allows it); only sum
+// and show a total when they all agree with the event's currency, same as
+// the overview - otherwise adding e.g. USD to EUR would silently mislead.
+const expenseTotal = computed(() => expenses.value.reduce((s, e) => s + e.amount, 0));
+const expensesMixed = computed(() => expenses.value.some((e) => e.currency && e.currency !== (current.value?.currency || 'EUR')));
 
 async function loadPnl(): Promise<void> {
   error.value = null;
@@ -187,7 +192,7 @@ async function openInvoice(e: Expense): Promise<void> {
             <tr><th>Event</th><th>When</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Margin</th><th>Costs</th></tr>
           </thead>
           <tbody>
-            <tr v-for="r in rows" :key="r.eventId" class="row" @click="openEvent(r)">
+            <tr v-for="r in rows" :key="r.eventId" class="row" role="button" tabindex="0" @click="openEvent(r)" @keydown.enter="openEvent(r)" @keydown.space.prevent="openEvent(r)">
               <td><strong>{{ r.name }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
               <td class="mono">{{ r.start || '-' }}</td>
               <td class="num good">{{ fmt(r.revenue, r.currency) }}</td>
@@ -204,8 +209,8 @@ async function openInvoice(e: Expense): Promise<void> {
     <template v-else>
       <ul class="totals">
         <li><span class="label">Revenue</span><strong class="good">{{ fmt(current.revenue, current.currency) }}</strong></li>
-        <li><span class="label">Expenses</span><strong class="bad">−{{ fmt(expenses.reduce((s, e) => s + e.amount, 0), current.currency) }}</strong></li>
-        <li><span class="label">Margin</span><strong :class="current.revenue - expenses.reduce((s, e) => s + e.amount, 0) >= 0 ? 'good' : 'bad'">{{ fmt(current.revenue - expenses.reduce((s, e) => s + e.amount, 0), current.currency) }}</strong></li>
+        <li><span class="label">Expenses</span><strong class="bad">{{ expensesMixed ? 'mixed currencies' : '−' + fmt(expenseTotal, current.currency) }}</strong></li>
+        <li><span class="label">Margin</span><strong :class="expensesMixed ? '' : (current.revenue - expenseTotal >= 0 ? 'good' : 'bad')">{{ expensesMixed ? '—' : fmt(current.revenue - expenseTotal, current.currency) }}</strong></li>
       </ul>
 
       <form class="card" @submit.prevent="save">
@@ -293,7 +298,7 @@ tr.row:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid .wide { grid-column: 1 / -1; }
 .actions, .rowactions { display: flex; gap: .4rem; }
 .scan, .attach { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; padding: .45rem .95rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; cursor: pointer; font-size: .875rem; }
-.attach { min-height: 2rem; padding: .2rem .6rem; font-size: .8rem; }
+.attach { min-height: 2.2rem; padding: .2rem .6rem; font-size: .8rem; }
 .scan input, .attach input { display: none; }
-.link { color: var(--zfy-accent-ink, #0a5a4a); min-height: 2rem; padding: .2rem .5rem; text-decoration: underline; }
+.link { color: var(--zfy-accent-ink, #0a5a4a); min-height: 2.2rem; padding: .2rem .5rem; text-decoration: underline; }
 </style>

@@ -38,8 +38,12 @@ async function logPurchase(): Promise<void> {
   const qty = parseFloat(purchase.value.qty);
   const cost = parseFloat(purchase.value.cost);
   if (!m || !(qty > 0) || !(cost >= 0)) return emit('error', 'Quantity and cost are required.');
-  await save('materials', { ...m, purchases: [...m.purchases, { id: crypto.randomUUID(), qty, cost, date: purchase.value.date, note: purchase.value.note }] });
-  buying.value = null;
+  try {
+    await save('materials', { ...m, purchases: [...m.purchases, { id: crypto.randomUUID(), qty, cost, date: purchase.value.date, note: purchase.value.note }] });
+    buying.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not log the purchase.');
+  }
 }
 const dropPurchase = (m: Material, id: string) => save('materials', { ...m, purchases: m.purchases.filter((p) => p.id !== id) });
 const usedBy = (m: Material) => snap.value.dossiers.filter((d) => d.recipe.some((r) => r.materialId === m.id)).length;
@@ -116,10 +120,10 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .unit { display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
 .unit small { color: var(--zfy-muted, #5a6472); font-size: .7rem; }
-.head button { min-height: 2rem; padding: .2rem .6rem; font-size: .78rem; }
+.head button { min-height: 2.2rem; padding: .2rem .6rem; font-size: .78rem; }
 .purchases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
 .purchases li { display: grid; grid-template-columns: 6rem 7rem 7rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
-.purchases .quiet { min-height: 1.5rem; padding: 0 .3rem; }
+.purchases .quiet { min-height: 2.2rem; padding: 0 .3rem; }
 .muted { color: var(--zfy-muted, #5a6472); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .form { display: flex; flex-direction: column; gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }

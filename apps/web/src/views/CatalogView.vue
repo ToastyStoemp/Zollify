@@ -236,6 +236,7 @@ const hasPhoto = computed(() => Boolean(imagePreview.value || ((existing.value?.
 
 function resetForm(p?: Product): void {
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
+  for (const v of form.variants) if (v.previewUrl) URL.revokeObjectURL(v.previewUrl);
   imageFile.value = null;
   imagePreview.value = null;
   removeImage.value = false;
@@ -317,6 +318,11 @@ function dropVariantImage(v: VariantForm): void {
   v.newImage = undefined;
   v.previewUrl = undefined;
   v.removeImage = true;
+}
+function removeVariant(i: number): void {
+  const v = form.variants[i];
+  if (v?.previewUrl) URL.revokeObjectURL(v.previewUrl);
+  form.variants.splice(i, 1);
 }
 
 const num = (s: string | number | undefined): number | undefined => {
@@ -435,7 +441,7 @@ async function remove(product: Product): Promise<void> {
             </span>
             <span class="side">
               <strong>{{ fmtPrice(p.price, currency) }}</strong>
-              <span class="sub" :class="{ bad: freeOf(p) < 0 }">{{ onHandOf(p) }} on hand · {{ soldOf(p) }} sold</span>
+              <span class="sub" :class="{ bad: freeOf(p) < 0 }" :title="freeOf(p) < 0 ? 'Oversold: more claimed or sold than counted in' : undefined">{{ onHandOf(p) }} on hand · {{ soldOf(p) }} sold</span>
             </span>
           </button>
         </li>
@@ -558,7 +564,7 @@ async function remove(product: Product): Promise<void> {
             <span class="withbtn"><input v-model="v.sku" type="text" placeholder="SKU" aria-label="Variant SKU" /><button type="button" class="quiet gen" title="Generate a SKU" @click="v.sku = generateSku(v.name)"><Icon name="sparkles" :size="14" /></button></span>
             <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
             <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
-            <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="form.variants.splice(i, 1)"><Icon name="x" :size="14" /></button>
+            <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="removeVariant(i)"><Icon name="x" :size="14" /></button>
           </div>
           <p v-if="form.variants.length" class="hint">Leave a variant price blank to use the product price.</p>
         </fieldset>
@@ -581,8 +587,8 @@ async function remove(product: Product): Promise<void> {
 .title em.issue { color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); }
 .toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .toolbar .spacer { flex: 1; }
-.toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2rem; }
-.thr input { width: 3.5rem; min-height: 1.8rem; padding: .1rem .4rem; }
+.toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2.2rem; }
+.thr input { width: 3.5rem; min-height: 2.2rem; padding: .1rem .4rem; }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .25rem; max-height: 14rem; overflow-y: auto; }
 .picks small { margin-left: .3rem; font-size: .7rem; }
 .mrow { display: grid; grid-template-columns: 1fr 12rem; gap: .5rem; align-items: center; }
@@ -593,7 +599,7 @@ async function remove(product: Product): Promise<void> {
 .reorder li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }
 .reorder .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .reorder small { font-size: .7rem; }
-.reorder button { min-height: 1.8rem; padding: .1rem .4rem; }
+.reorder button { min-height: 2.2rem; padding: .1rem .4rem; }
 .group { display: flex; flex-direction: column; gap: .4rem; }
 .group h2 { margin: 0; display: flex; align-items: center; gap: .5rem; font-size: .9rem; }
 .group h2 small { color: var(--zfy-muted, #5a6472); font-weight: 400; }
@@ -624,11 +630,11 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .toggles { display: flex; gap: 1rem; flex-wrap: wrap; }
 .variants { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-bg, #f1f4f6); }
 .variants legend { font-size: .85rem; font-weight: 600; padding: 0 .3rem; display: flex; align-items: center; gap: .6rem; }
-.add { color: var(--zfy-accent-ink, #0a5a4a); min-height: 1.6rem; padding: 0 .4rem; font-size: .78rem; }
+.add { color: var(--zfy-accent-ink, #0a5a4a); min-height: 2.2rem; padding: 0 .4rem; font-size: .78rem; }
 .variant { display: grid; grid-template-columns: 2.5rem 1fr 8rem 5.5rem 5rem auto; gap: .4rem; align-items: center; }
 .withbtn { display: flex; align-items: center; gap: .2rem; }
 .withbtn input { flex: 1; min-width: 0; }
-.gen { min-height: 2rem; padding: .2rem .4rem; color: var(--zfy-muted, #5a6472); }
+.gen { min-height: 2.2rem; padding: .2rem .4rem; color: var(--zfy-muted, #5a6472); }
 .vphoto { position: relative; width: 2.5rem; height: 2.5rem; cursor: pointer; }
 .vphoto img, .vphoto .ph { width: 2.5rem; height: 2.5rem; border-radius: 8px; object-fit: cover; }
 .vphoto .ph { display: grid; place-items: center; background: var(--zfy-surface, #fff); border: 1px dashed var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); }

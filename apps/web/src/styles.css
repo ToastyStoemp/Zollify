@@ -80,7 +80,7 @@ button .zfy-icon { margin-right: .1rem; }
 
 /* Segmented switch - one choice out of a few, the same on every page. */
 .seg { display: inline-flex; flex-wrap: wrap; gap: .15rem; padding: .15rem; border-radius: 8px; background: var(--zfy-surface-2); }
-.seg button { min-height: 1.9rem; padding: .25rem .8rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted); font-size: .85rem; }
+.seg button { min-height: 2.2rem; padding: .25rem .8rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-muted); font-size: .85rem; }
 .seg button:hover:not(:disabled) { color: var(--zfy-ink); background: transparent; }
 .seg button.active, .seg button.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); font-weight: 600; }
 

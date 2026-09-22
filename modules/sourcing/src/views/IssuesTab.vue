@@ -95,7 +95,7 @@ label.inline { display: flex; flex-direction: row; align-items: center; gap: .4r
 .title em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); vertical-align: middle; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .main p { margin: .2rem 0 0; font-size: .82rem; white-space: pre-wrap; }
-.issues .quiet { min-height: 1.8rem; padding: .1rem .5rem; font-size: .78rem; }
+.issues .quiet { min-height: 2.2rem; padding: .1rem .5rem; font-size: .78rem; }
 .form { display: flex; flex-direction: column; gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; align-items: end; }

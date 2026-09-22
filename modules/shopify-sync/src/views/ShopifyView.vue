@@ -25,6 +25,7 @@ const connected = ref(false);
 const busy = ref(false);
 const error = ref<string | null>(null);
 const ran = ref(false);
+const confirmingId = ref<string | null>(null);
 
 const grouped = computed(() => ({
   sku: matches.value.filter((m) => m.kind === 'sku'),
@@ -72,6 +73,7 @@ async function run(): Promise<void> {
 }
 
 async function confirm(match: ProductMatch): Promise<void> {
+  confirmingId.value = match.ztProductId;
   try {
     await sdk().http.post('matches/save', {
       matches: { [match.ztProductId]: { shopProductId: match.shopProductId, kind: 'manual' } },
@@ -80,6 +82,8 @@ async function confirm(match: ProductMatch): Promise<void> {
     sdk().ui.toast(`Match confirmed for ${match.ztTitle}.`, { kind: 'success' });
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save that match.';
+  } finally {
+    confirmingId.value = null;
   }
 }
 
@@ -120,8 +124,8 @@ function pct(score: number | undefined): string {
               <strong>{{ match.ztTitle }}</strong>
               <span>→ {{ match.shopTitle ?? 'no candidate' }} · {{ pct(match.score) }}</span>
             </div>
-            <button type="button" :disabled="!match.shopProductId" @click="confirm(match)">
-              Confirm
+            <button type="button" :disabled="!match.shopProductId || confirmingId === match.ztProductId" @click="confirm(match)">
+              {{ confirmingId === match.ztProductId ? 'Confirming…' : 'Confirm' }}
             </button>
           </li>
         </ul>

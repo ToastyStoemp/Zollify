@@ -227,7 +227,6 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .devices .main { display: flex; flex-direction: column; }
 .devices em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); vertical-align: middle; }
 .devices small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
-.btn { display: inline-flex; align-items: center; min-height: 2.4rem; padding: .3rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; font-size: .875rem; text-decoration: none; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
@@ -244,6 +243,6 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .themes .label { font-size: .875rem; font-weight: 600; }
 .themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
-.btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; }
+.btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }
 </style>

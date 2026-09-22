@@ -97,14 +97,30 @@ async function loadSessions(): Promise<void> {
   }
 }
 const isMine = (s: Session): boolean => !!s.deviceId && s.deviceId === myDevice.value;
+const revokingId = ref<string | null>(null);
 async function revoke(id: string): Promise<void> {
-  await authFetch(`/sessions/${id}`, { method: 'DELETE' });
-  await loadSessions();
+  revokingId.value = id;
+  try {
+    await authFetch(`/sessions/${id}`, { method: 'DELETE' });
+    await loadSessions();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not log out that session.';
+  } finally {
+    revokingId.value = null;
+  }
 }
+const revokingOthers = ref(false);
 async function revokeOthers(): Promise<void> {
   if (!(await shellConfirm('Every other device is signed out and must log in again.', 'Log out all other devices?'))) return;
-  await authFetch('/sessions/revoke-others', { method: 'POST', body: JSON.stringify({ deviceId: myDevice.value }) });
-  await loadSessions();
+  revokingOthers.value = true;
+  try {
+    await authFetch('/sessions/revoke-others', { method: 'POST', body: JSON.stringify({ deviceId: myDevice.value }) });
+    await loadSessions();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not log out the other sessions.';
+  } finally {
+    revokingOthers.value = false;
+  }
 }
 const ago = (ts: number): string => {
   const m = Math.round((Date.now() - ts) / 60000);
@@ -191,7 +207,7 @@ onMounted(async () => {
       <div class="head">
         <h3>Your login sessions</h3>
         <button type="button" class="quiet" @click="loadSessions">Refresh</button>
-        <button v-if="sessions.length > 1" type="button" class="quiet danger" @click="revokeOthers">Log out all others</button>
+        <button v-if="sessions.length > 1" type="button" class="quiet danger" :disabled="revokingOthers" @click="revokeOthers">{{ revokingOthers ? 'Logging out…' : 'Log out all others' }}</button>
       </div>
       <p class="hint">Devices currently signed in as you.<template v-if="!geo"> Location is off - showing device and IP.</template></p>
       <button type="button" class="signout" @click="leave">Sign out on this device</button>
@@ -202,7 +218,7 @@ onMounted(async () => {
             <span>{{ s.deviceName || s.device || 'Session' }}<em v-if="isMine(s)">this device</em><em v-if="s.flavor && s.flavor !== 'web'">{{ s.flavor }}</em></span>
             <small>{{ [s.device, s.ip, s.geo].filter(Boolean).join(' · ') }} · active {{ ago(s.lastUsedAt) }}</small>
           </span>
-          <button v-if="!isMine(s)" type="button" class="quiet danger" @click="revoke(s.id)">Log out</button>
+          <button v-if="!isMine(s)" type="button" class="quiet danger" :disabled="revokingId === s.id" @click="revoke(s.id)">{{ revokingId === s.id ? 'Logging out…' : 'Log out' }}</button>
         </li>
       </ul>
     </article>

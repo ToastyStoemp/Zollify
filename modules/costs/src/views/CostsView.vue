@@ -148,10 +148,14 @@ async function apply(): Promise<void> {
 }
 async function remove(b: CostBatch): Promise<void> {
   if (!(await sdk().ui.confirm(`Remove the batch from ${b.date}? Product costs are recomputed from the batches that remain.`, 'Remove batch?'))) return;
-  await costsDb().batches.delete(b.id);
-  await load();
-  await applyCosts(batches.value);
-  if (editId.value === b.id) editing.value = false;
+  try {
+    await costsDb().batches.delete(b.id);
+    await load();
+    await applyCosts(batches.value);
+    if (editId.value === b.id) editing.value = false;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not remove that batch.';
+  }
 }
 
 /** Margin view: what every item costs against what it sells for. */
@@ -290,16 +294,16 @@ fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padd
 legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 legend em { font-style: normal; margin-left: .5rem; }
 .source { display: grid; grid-template-columns: 1fr 7rem auto; gap: .4rem; }
-.source .quiet { min-height: 1.8rem; padding: 0 .4rem; }
-.add { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .8rem; min-height: 1.6rem; padding: 0 .3rem; }
+.source .quiet { min-height: 2.2rem; padding: 0 .4rem; }
+.add { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .8rem; min-height: 2.2rem; padding: 0 .3rem; }
 .group ul { list-style: none; margin: 0; padding: 0; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; overflow: hidden; }
 .group li { display: flex; align-items: center; gap: .5rem; padding: .35rem .6rem; }
 .group li + li { border-top: 1px solid var(--zfy-line, #d6dde4); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .label { font-size: .875rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
-.qty { width: 4.5rem; min-height: 1.9rem; padding: .1rem .4rem; text-align: right; }
-.unit { width: 5.5rem; min-height: 1.9rem; padding: .1rem .4rem; text-align: right; }
+.qty { width: 4.5rem; min-height: 2.2rem; padding: .1rem .4rem; text-align: right; }
+.unit { width: 5.5rem; min-height: 2.2rem; padding: .1rem .4rem; text-align: right; }
 .group strong { width: 6rem; text-align: right; font-variant-numeric: tabular-nums; }
 .footer { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .alloc { flex: 1; font-size: .8rem; color: var(--zfy-muted, #5a6472); }

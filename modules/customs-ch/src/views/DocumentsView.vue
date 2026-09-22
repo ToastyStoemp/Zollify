@@ -241,11 +241,19 @@ async function openHtml(source: string, name = 'customs'): Promise<void> {
     }
     return;
   }
-  const opened = await sdk().ui.openDocument(`${name}.html`, source);
-  if (!opened) preview.value = source;
+  try {
+    const opened = await sdk().ui.openDocument(`${name}.html`, source);
+    if (!opened) preview.value = source;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not open the document.';
+  }
 }
-function download(filename: string, text: string, type: string): void {
-  void sdk().ui.saveFile(filename, text, type);
+async function download(filename: string, text: string, type: string): Promise<void> {
+  try {
+    await sdk().ui.saveFile(filename, text, type);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save the file.';
+  }
 }
 const GOODS_LIST_NAMES: Record<GoodsDocNum, string> = { 1: 'import_list', 2: 'sold_goods_list', 3: 'return_goods_list' };
 const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value), safeName(GOODS_LIST_NAMES[docNum]));

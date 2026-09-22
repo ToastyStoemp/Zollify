@@ -349,7 +349,7 @@ header .primary { display: inline-flex; align-items: center; gap: .4rem; }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }
 .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
-.actions button, .actions .btn { min-height: 2rem; padding: .2rem .7rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .3rem; }
+.actions button, .actions .btn { min-height: 2.2rem; padding: .2rem .7rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .3rem; }
 .btn { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; text-decoration: none; }
 .btn:hover { background: var(--zfy-bg, #f1f4f6); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
@@ -359,6 +359,6 @@ label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; 
 fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .6rem; }
 legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .rate { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
-.rate button { min-height: 2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
+.rate button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
 .footer { display: flex; justify-content: flex-end; gap: .5rem; }
 </style>

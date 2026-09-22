@@ -9,7 +9,7 @@ import { bookings, clusters, events, saveWork, status } from '../state';
 import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
 
-const props = defineProps<{ cluster: Cluster }>();
+const props = defineProps<{ cluster: Cluster; booking?: boolean }>();
 const emit = defineEmits<{ book: [uid: string] }>();
 
 const open = ref(false);
@@ -147,7 +147,7 @@ function pdf(mode: 'payments' | 'fees'): void {
 
 <template>
   <article :class="['cluster', { open, editing, booked: booked }]">
-    <header class="head" @click="open = !open">
+    <header class="head" role="button" tabindex="0" :aria-expanded="open" @click="open = !open" @keydown.enter="open = !open" @keydown.space.prevent="open = !open">
       <div class="title">
         <span v-if="booked" class="ready booked" title="Booked to Lexware"><Icon name="send" :size="12" /></span>
         <span v-else-if="isReady" class="ready" title="Ready to book"><Icon name="check" :size="12" /></span>
@@ -286,7 +286,7 @@ function pdf(mode: 'payments' | 'fees'): void {
           <span v-if="c.cashLoaded" class="pill good"><Icon name="banknote" :size="12" /> {{ fmt(c.cashAmount) }}</span>
           <template v-if="canBook">
             <a v-if="booked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${booked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Booked - view <Icon name="external-link" :size="12" /></a>
-            <button v-else type="button" class="primary" @click="emit('book', c.uid)"><Icon name="send" :size="14" /> Book revenue to Lexware</button>
+            <button v-else type="button" class="primary" :disabled="booking" @click="emit('book', c.uid)"><Icon name="send" :size="14" /> {{ booking ? 'Booking…' : 'Book revenue to Lexware' }}</button>
           </template>
         </div>
       </div>
@@ -372,5 +372,5 @@ th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--
 th { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--zfy-muted, #5a6472); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.dim { opacity: .55; }
-.x { min-height: 1.8rem; padding: 0 .4rem; }
+.x { min-height: 2.2rem; padding: 0 .4rem; }
 </style>

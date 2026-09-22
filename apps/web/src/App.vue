@@ -82,6 +82,18 @@ const accountNav = computed(() => allNav.value.filter((e) => e.group === 'accoun
 const openSection = computed(() => sections.value.find((sec) => inSection(sec)) ?? null);
 
 /**
+ * The bottom tab bar holds at most 5 slots (Home, up to 3 sections, then
+ * Settings) so it never crowds a narrow touchscreen. Past 3 sections the rest
+ * fold behind the existing burger drawer instead of a Settings tab, opened by
+ * a "More" tab in its place - still 5 total.
+ */
+const tabSections = computed(() => sections.value.slice(0, 3));
+const tabOverflow = computed(() => sections.value.length > 3);
+const overflowActive = computed(() =>
+  tabOverflow.value && !!openSection.value && !tabSections.value.includes(openSection.value),
+);
+
+/**
  * The tab bar's height, published as --zfy-bottom-nav so a page can keep its
  * own sticky controls (the till's cart button) clear of it. Zero on desktop.
  */
@@ -193,8 +205,9 @@ const syncLabel = computed(() => {
       </div>
       <div class="tabs">
         <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
-        <router-link v-for="sec in sections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
-        <router-link :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
+        <router-link v-for="sec in tabSections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
+        <button v-if="tabOverflow" type="button" class="tab" :class="{ 'router-link-active': overflowActive }" @click="menuOpen = !menuOpen"><Icon name="menu" :size="20" /><span>More</span><i v-if="pendingCount" class="badge"></i></button>
+        <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
       </div>
     </nav>
 
@@ -309,7 +322,7 @@ nav { flex: 1; }
   .chip { white-space: nowrap; font-size: .78rem; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--zfy-line); color: var(--zfy-muted); text-decoration: none; }
   .chip.on { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); border-color: var(--zfy-accent-soft); font-weight: 600; }
   .tabs { display: flex; }
-  .tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: .15rem; padding: .45rem 0 .4rem; font-size: .66rem; color: var(--zfy-muted); text-decoration: none; }
+  .tab { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: .15rem; padding: .45rem 0 .4rem; font-size: .66rem; color: var(--zfy-muted); text-decoration: none; background: none; border: 0; border-radius: 0; min-height: 0; font: inherit; font-size: .66rem; }
   .tab.router-link-active { color: var(--zfy-accent-ink); }
   .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
   .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }

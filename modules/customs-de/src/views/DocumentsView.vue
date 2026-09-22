@@ -196,12 +196,20 @@ async function openHtml(source: string, name: string): Promise<void> {
     }
     return;
   }
-  const opened = await sdk().ui.openDocument(`${name}.html`, source);
-  preview.value = opened ? '' : source;
+  try {
+    const opened = await sdk().ui.openDocument(`${name}.html`, source);
+    preview.value = opened ? '' : source;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not open the document.';
+  }
 }
 async function openXml(source: string, name: string): Promise<void> {
-  const opened = await sdk().ui.openDocument(`${name}.xml`, source, 'application/xml');
-  if (!opened) await sdk().ui.saveFile(`${name}.xml`, source, 'application/xml');
+  try {
+    const opened = await sdk().ui.openDocument(`${name}.xml`, source, 'application/xml');
+    if (!opened) await sdk().ui.saveFile(`${name}.xml`, source, 'application/xml');
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save the file.';
+  }
 }
 const packingFormat = ref<PackingListFormat>('detailed');
 const hasVariantProducts = computed(() => state.value?.products.some((p) => !p.unlisted && (p.variants?.length ?? 0) > 0) ?? false);
@@ -300,12 +308,13 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
           <h2>IAA-Plus filing sheet</h2>
           <div class="docs">
             <button type="button" class="ghost" :disabled="pdfBusy" @click="printIaaPlusSheet">Print / save copy</button>
-            <button type="button" class="chevron" :class="{ open: sheetOpen }" @click="sheetOpen = !sheetOpen" aria-label="Toggle IAA-Plus filing sheet"><span>▸</span></button>
+            <button type="button" class="chevron" :class="{ open: sheetOpen }" @click="sheetOpen = !sheetOpen" aria-label="Toggle IAA-Plus filing sheet" :aria-expanded="sheetOpen"><span>▸</span></button>
           </div>
         </div>
         <template v-if="sheetOpen">
           <p class="hint">Box numbers match the standard EU export declaration (SAD) fields IAA-Plus is built on. Copy each value into the field carrying the same box number on the live form.</p>
 
+          <div class="table-scroll">
           <table class="boxes">
             <tbody>
               <tr v-for="b in sheet.boxes" :key="b.no" :class="{ missing: !b.lines.length }">
@@ -320,7 +329,9 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
               </tr>
             </tbody>
           </table>
+          </div>
 
+          <div class="table-scroll">
           <table class="goods-table">
             <thead>
               <tr>
@@ -354,6 +365,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
               </tr>
             </tfoot>
           </table>
+          </div>
 
           <p class="hint">Box 37 (Procedure/CPC) is left off this sheet on purpose - ask your Hauptzollamt or broker for the correct code; it's the one field here with real legal weight and no safe default.</p>
           <p class="hint">{{ sheet.massNote }}</p>
@@ -363,7 +375,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
       <article class="card">
         <div class="sheet-head">
           <h2>Filing at IAA-Plus - two ways</h2>
-          <button type="button" class="chevron" :class="{ open: filingOpen }" @click="filingOpen = !filingOpen" aria-label="Toggle filing instructions"><span>▸</span></button>
+          <button type="button" class="chevron" :class="{ open: filingOpen }" @click="filingOpen = !filingOpen" aria-label="Toggle filing instructions" :aria-expanded="filingOpen"><span>▸</span></button>
         </div>
         <template v-if="filingOpen">
           <p class="hint">Either fill the web form by hand using the filing sheet above, or upload the XML file directly. Both end at the same place: a precheck MRN.</p>
@@ -464,9 +476,10 @@ label.wide { grid-column: 1 / -1; }
 
 .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
 .ghost { background: transparent; border: 1px solid var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); }
-.chevron { background: transparent; border: 1px solid var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); line-height: 1; padding: .3rem .6rem; }
+.chevron { background: transparent; border: 1px solid var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); line-height: 1; padding: .3rem .6rem; min-height: 2.2rem; }
 .chevron > * { display: inline-block; transition: transform .15s ease; }
 .chevron.open > * { transform: rotate(90deg); }
+.table-scroll { overflow-x: auto; }
 table.boxes, table.goods-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
 table.boxes td { border: 1px solid var(--zfy-line, #d6dde4); padding: .4rem .55rem; vertical-align: top; }
 table.boxes td.no { width: 3em; font-weight: 600; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f3f5f7); text-align: center; }

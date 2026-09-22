@@ -298,7 +298,11 @@ async function printAll(): Promise<void> {
         progress.value = { done: progress.value!.done + 1, total: progress.value!.total };
       }
     }
-    if (cancelRequested.value) error.value = `Stopped after ${progress.value!.done} of ${progress.value!.total} labels.`;
+    if (cancelRequested.value) {
+      error.value = `Stopped after ${progress.value!.done} of ${progress.value!.total} labels.`;
+    } else {
+      sdk().ui.toast(`Printed ${progress.value!.total} label${progress.value!.total === 1 ? '' : 's'}.`, { kind: 'success' });
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Printing failed partway through.';
   } finally {
@@ -347,6 +351,7 @@ async function exportPngs(): Promise<void> {
       // some of them instead of queuing all.
       await new Promise((r) => setTimeout(r, 150));
     }
+    sdk().ui.toast(`Exported ${exportProgress.value!.total} image${exportProgress.value!.total === 1 ? '' : 's'}.`, { kind: 'success' });
   } finally {
     exporting.value = false;
     exportProgress.value = null;
@@ -413,7 +418,7 @@ async function printTestLabel(): Promise<void> {
             <ul class="products-in-type">
               <li v-for="p in g.products" :key="p.productId">
                 <div class="row product">
-                  <button v-if="p.leaves.length > 1" type="button" class="chevron" :class="{ open: expanded.has(p.productId) }" @click="toggleExpanded(p.productId)" aria-label="Toggle variants"><span>▸</span></button>
+                  <button v-if="p.leaves.length > 1" type="button" class="chevron" :class="{ open: expanded.has(p.productId) }" @click="toggleExpanded(p.productId)" aria-label="Toggle variants" :aria-expanded="expanded.has(p.productId)"><span>▸</span></button>
                   <span v-else class="chevron-spacer"></span>
                   <label class="pick">
                     <input type="checkbox" :checked="leafState(productKeys(p)) === 'all'" v-indeterminate="leafState(productKeys(p)) === 'some'" @change="toggleProduct(p)" />
@@ -574,7 +579,7 @@ h2 { margin: 0; font-size: .95rem; }
 .field.inline { flex-direction: row; align-items: center; gap: .5rem; cursor: pointer; }
 .field.inline > span { font-size: .875rem; color: inherit; }
 .preview { display: flex; justify-content: center; padding: .5rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; }
-.preview canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid var(--zfy-line, #d6dde4); }
+.preview canvas { image-rendering: pixelated; max-width: 100%; max-height: 22rem; width: auto; height: auto; border: 1px solid var(--zfy-line, #d6dde4); }
 .printer-row { display: flex; align-items: center; gap: .6rem; }
 .printer-row .full { flex: 1; width: 100%; }
 .device-info { margin: 0; padding: .6rem .7rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; font-size: .78rem; white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }

@@ -62,6 +62,8 @@ async function run(): Promise<void> {
 
   running.value = true;
   error.value = null;
+  progress.value = '';
+  done.value = null;
   try {
     // Written through core so every row lands in the sync outbox and reaches
     // the other devices on the account. A server-side import would leave this

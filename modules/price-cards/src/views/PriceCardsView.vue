@@ -40,8 +40,12 @@ function selectNone(): void {
 }
 
 async function persist(): Promise<void> {
-  await sdk().config.set('cardSize', size.value);
-  await sdk().config.set('showSku', showSku.value);
+  try {
+    await sdk().config.set('cardSize', size.value);
+    await sdk().config.set('showSku', showSku.value);
+  } catch {
+    /* best effort - printing still proceeds even if the preference save fails */
+  }
 }
 
 function print(): void {
@@ -106,7 +110,7 @@ function print(): void {
 
 /* Only the cards should reach the paper - the controls and picker are workflow. */
 @media print {
-  .controls, .picker, .empty { display: none; }
+  .tools, .picker, .empty { display: none; }
   .card { border-color: #999; }
   .sheet { gap: .35rem; }
 }

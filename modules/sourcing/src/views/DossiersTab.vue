@@ -102,9 +102,13 @@ async function pushPrintCost(): Promise<void> {
   if (!product) return emit('error', 'That product is no longer in the catalogue.');
   const cost = recipeCost.value.total;
   const next = d.vid ? { ...product, variants: product.variants.map((v) => (v.id === d.vid ? { ...v, cost } : v)) } : { ...product, cost };
-  await sdk().data.products.upsert(next);
-  price.value = String(cost);
-  sdk().ui.toast(`Cost ${fmtPrice(cost, currency.value)} written to ${product.title}.`, { kind: 'success' });
+  try {
+    await sdk().data.products.upsert(next);
+    price.value = String(cost);
+    sdk().ui.toast(`Cost ${fmtPrice(cost, currency.value)} written to ${product.title}.`, { kind: 'success' });
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not write the cost to the product.');
+  }
 }
 
 // ── Files ───────────────────────────────────────────────────────────────────
@@ -235,7 +239,7 @@ const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB
                 <button type="button" class="quiet" @click="setApproval(f.id, 'approved')">Approve</button>
                 <button type="button" class="quiet" @click="setApproval(f.id, 'rejected')">Reject</button>
               </template>
-              <button type="button" class="quiet" @click="download(f)"><Icon name="download" :size="14" /></button>
+              <button type="button" class="quiet" aria-label="Download file" @click="download(f)"><Icon name="download" :size="14" /></button>
               <button type="button" class="quiet danger" aria-label="Delete file" @click="deleteFile(f.id)"><Icon name="x" :size="14" /></button>
             </li>
           </ul>
@@ -288,12 +292,12 @@ legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 legend em { font-style: normal; font-weight: 400; color: var(--zfy-accent-ink, #0a5a4a); margin-left: .4rem; }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: .25rem; max-height: 40vh; overflow-y: auto; }
 .rline { display: grid; grid-template-columns: 1fr 6rem auto; gap: .4rem; }
-.rline .quiet { min-height: 1.9rem; padding: 0 .4rem; }
+.rline .quiet { min-height: 2.2rem; padding: 0 .4rem; }
 .rowbtns { display: flex; gap: .5rem; flex-wrap: wrap; }
-.add { color: var(--zfy-accent-ink, #0a5a4a); font-size: .8rem; min-height: 1.6rem; padding: 0 .3rem; }
-.btn { display: inline-flex; flex-direction: row; align-items: center; gap: .35rem; cursor: pointer; min-height: 2.1rem; padding: .25rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); font-size: .8rem; font-weight: 500; }
+.add { color: var(--zfy-accent-ink, #0a5a4a); font-size: .8rem; min-height: 2.2rem; padding: 0 .3rem; }
+.btn { display: inline-flex; flex-direction: row; align-items: center; gap: .35rem; cursor: pointer; min-height: 2.2rem; padding: .25rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); font-size: .8rem; font-weight: 500; }
 .files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
 .files li { display: flex; align-items: center; gap: .3rem; padding: .3rem .5rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .82rem; }
-.files .quiet { min-height: 1.7rem; padding: 0 .4rem; font-size: .75rem; }
+.files .quiet { min-height: 2.2rem; padding: 0 .4rem; font-size: .75rem; }
 .footer { display: flex; align-items: center; gap: .5rem; }
 </style>

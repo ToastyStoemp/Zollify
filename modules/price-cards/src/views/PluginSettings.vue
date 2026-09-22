@@ -98,6 +98,6 @@ label { display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
 small { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 code { font-family: ui-monospace, monospace; font-size: .8rem; padding: .35rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); overflow-wrap: anywhere; }
-.row .quiet { display: inline-flex; align-items: center; gap: .3rem; min-height: 1.9rem; font-size: .8rem; }
+.row .quiet { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; font-size: .8rem; }
 .actions { display: flex; gap: .5rem; }
 </style>

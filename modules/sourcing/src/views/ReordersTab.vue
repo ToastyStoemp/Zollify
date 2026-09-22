@@ -96,8 +96,12 @@ async function saveShip(): Promise<void> {
   const r = shipping.value;
   if (!r) return;
   const advance = ship.value.tracking && STATUSES.indexOf(r.status) < STATUSES.indexOf('shipped');
-  await save('reorders', { ...r, shipment: { ...ship.value }, status: advance ? 'shipped' : r.status, events: advance ? [...r.events, { status: 'shipped', at: Date.now(), note: 'Tracking added' }] : r.events });
-  shipping.value = null;
+  try {
+    await save('reorders', { ...r, shipment: { ...ship.value }, status: advance ? 'shipped' : r.status, events: advance ? [...r.events, { status: 'shipped', at: Date.now(), note: 'Tracking added' }] : r.events });
+    shipping.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not save the shipment.');
+  }
 }
 
 // ── Landed costs → products ─────────────────────────────────────────────────
@@ -106,17 +110,21 @@ const costs = computed(() => (costing.value ? resolveReorderCosts(costing.value,
 async function pushCosts(): Promise<void> {
   if (!costing.value || !costs.value) return;
   let pushed = 0;
-  for (const c of costs.value.resolved) {
-    const product = sdk().data.products.get(c.pid!);
-    if (!product) continue;
-    const nextP = c.vid ? { ...product, variants: product.variants.map((v) => (v.id === c.vid ? { ...v, cost: c.finalUnit } : v)) } : { ...product, cost: c.finalUnit };
-    await sdk().data.products.upsert(nextP);
-    const d = snap.value.dossiers.find((x) => x.id === c.dossierId);
-    if (d) await save('dossiers', { ...d, lastUnitPrice: c.finalUnit });
-    pushed++;
+  try {
+    for (const c of costs.value.resolved) {
+      const product = sdk().data.products.get(c.pid!);
+      if (!product) continue;
+      const nextP = c.vid ? { ...product, variants: product.variants.map((v) => (v.id === c.vid ? { ...v, cost: c.finalUnit } : v)) } : { ...product, cost: c.finalUnit };
+      await sdk().data.products.upsert(nextP);
+      const d = snap.value.dossiers.find((x) => x.id === c.dossierId);
+      if (d) await save('dossiers', { ...d, lastUnitPrice: c.finalUnit });
+      pushed++;
+    }
+    sdk().ui.toast(`Landed cost written to ${pushed} product${pushed === 1 ? '' : 's'}.`, { kind: 'success' });
+    costing.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not write all landed costs.');
   }
-  sdk().ui.toast(`Landed cost written to ${pushed} product${pushed === 1 ? '' : 's'}.`, { kind: 'success' });
-  costing.value = null;
 }
 </script>
 
@@ -217,12 +225,14 @@ async function pushCosts(): Promise<void> {
     <ModalShell v-if="costing && costs" title="Landed costs" @close="costing = null">
       <div class="form">
         <p class="hint">The agreed unit price plus this line's share of the landed extra, spread by line value. Written onto the catalogue products as their cost.</p>
+        <div class="table-scroll">
         <table class="costs">
           <thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Landed</th></tr></thead>
           <tbody>
             <tr v-for="c in costs.resolved" :key="c.dossierId"><td>{{ c.title }}</td><td>{{ c.qty }}</td><td>{{ money(c.unitCost, costing.currency) }}</td><td><strong>{{ money(c.finalUnit, costing.currency) }}</strong></td></tr>
           </tbody>
         </table>
+        </div>
         <p v-if="costs.skipped.length" class="hint">Not linked to a catalogue product, so skipped: {{ costs.skipped.map((c) => c.title).join(', ') }}.</p>
       </div>
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="costing = null">Cancel</button><button type="button" class="primary" :disabled="!costs.resolved.length" @click="pushCosts">Write {{ costs.resolved.length }} cost{{ costs.resolved.length === 1 ? '' : 's' }}</button></div></template>
@@ -244,6 +254,10 @@ label.inline { display: flex; flex-direction: row; align-items: center; gap: .4r
 .main small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.received { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.table-scroll { overflow-x: auto; }
+table.costs { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.costs th, table.costs td { padding: .4rem .5rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); text-align: left; }
+table.costs th { color: var(--zfy-muted, #5a6472); font-weight: 600; font-size: .78rem; }
 .board { list-style: none; margin: 0; padding: 0; display: flex; gap: 0; overflow-x: auto; }
 .board li { flex: 1; min-width: 5rem; display: flex; flex-direction: column; align-items: center; gap: .2rem; font-size: .62rem; color: var(--zfy-faint, #8a94a0); position: relative; }
 .board li i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--zfy-line, #d6dde4); z-index: 1; }
@@ -254,7 +268,7 @@ label.inline { display: flex; flex-direction: row; align-items: center; gap: .4r
 .board li.current { color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 .ship { margin: 0; font-size: .82rem; display: flex; align-items: center; gap: .3rem; color: var(--zfy-muted, #5a6472); }
 .actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-.actions button, .btn { min-height: 2rem; padding: .2rem .7rem; font-size: .78rem; }
+.actions button, .btn { min-height: 2.2rem; padding: .2rem .7rem; font-size: .78rem; }
 .btn { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; text-decoration: none; }
 .form { display: flex; flex-direction: column; gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
@@ -265,8 +279,8 @@ legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .lhead, .line { display: grid; grid-template-columns: 1fr 4.5rem 5.5rem 5.5rem auto; gap: .4rem; align-items: center; }
 .lhead { font-size: .7rem; color: var(--zfy-muted, #5a6472); }
 .line .name { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.line input { min-height: 1.9rem; padding: .1rem .4rem; text-align: right; }
-.line .quiet { min-height: 1.7rem; padding: 0 .3rem; }
+.line input { min-height: 2.2rem; padding: .1rem .4rem; text-align: right; }
+.line .quiet { min-height: 2.2rem; padding: 0 .3rem; }
 .adder { align-self: flex-start; }
 .spec { margin: .4rem 0 0; padding: .6rem .8rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .78rem; white-space: pre-wrap; max-height: 16rem; overflow: auto; }
 .costs { width: 100%; border-collapse: collapse; font-size: .85rem; font-variant-numeric: tabular-nums; }

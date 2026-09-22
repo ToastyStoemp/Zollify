@@ -23,6 +23,7 @@ const busy = ref(false);
 const error = ref<string | null>(null);
 const saved = ref<string | null>(null);
 const copied = ref<string | null>(null);
+const overlayBusy = ref<string | null>(null);
 
 const events = computed(() =>
   [...sdk().data.events.list()].sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? '')),
@@ -86,12 +87,15 @@ function overlayFor(eventId: string): EventOverlay {
 
 async function saveOverlay(eventId: string): Promise<void> {
   error.value = null;
+  overlayBusy.value = eventId;
   try {
     await api.saveOverlay(eventId, overlayFor(eventId));
     preview.value = await api.preview();
     flash(eventId);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save those details.';
+  } finally {
+    overlayBusy.value = null;
   }
 }
 
@@ -244,7 +248,7 @@ async function copy(text: string, what: string): Promise<void> {
               <label><span>Blurb</span><input v-model="overlayFor(event.id).blurb" type="text" placeholder="New prints, limited pins." /></label>
               <div class="actions">
                 <label class="inline"><input v-model="overlayFor(event.id).hidden" type="checkbox" /> <span>Hide from the public</span></label>
-                <button type="submit" class="primary">Save</button>
+                <button type="submit" class="primary" :disabled="overlayBusy === event.id">{{ overlayBusy === event.id ? 'Saving…' : 'Save' }}</button>
                 <span v-if="saved === event.id" class="ok" role="status">Saved.</span>
               </div>
             </form>

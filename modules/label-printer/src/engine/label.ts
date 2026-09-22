@@ -78,10 +78,15 @@ export interface RenderLabelOptions {
   /**
    * What actually gets encoded in the bars - typically shortBarcode() from
    * @zollify/shared, not the SKU itself. Falls back to `sku` when omitted.
-   * The SKU is still what's drawn as the human-readable text underneath
-   * regardless; only the bars' payload can differ from it.
+   * The SKU is still what's drawn as the human-readable text underneath by
+   * default; only the bars' payload can differ from it. See `showSkuText`
+   * to turn that text off (e.g. a shorter code alone reads as more
+   * deliberately designed for some labels, once the bars are legible on
+   * their own).
    */
   barcodeValue?: string;
+  /** Whether the SKU prints as text under the bars. Default true - a short code in the bars doesn't require dropping the human-readable SKU. */
+  showSkuText?: boolean;
 }
 
 /**
@@ -166,10 +171,14 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   ctx.lineTo(widthDots - margin, titleAreaHeight);
   ctx.stroke();
 
+  const showSkuText = options.showSkuText ?? true;
   const skuFontSize = Math.max(14, Math.round(barcodeAreaHeight * 0.18));
   const skuLineHeight = skuFontSize * 1.2;
-  const barsHeight = Math.max(8, barcodeAreaHeight - skuLineHeight - 6);
-  const barcodeTop = titleAreaHeight + 4;
+  const skuGap = 4;
+  // No SKU text to reserve room for: the bars get the space back instead of
+  // leaving it blank.
+  const reservedForSku = showSkuText ? skuGap + skuLineHeight : 0;
+  const barsHeight = Math.max(8, barcodeAreaHeight - reservedForSku);
 
   // The human-readable SKU is drawn separately below, in our own font size -
   // NOT via jsbarcode's `displayValue`, which would get shrunk along with
@@ -186,9 +195,20 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   const scale = scaled ? Math.min(1, (widthDots - margin * 2) / barcodeCanvas.width) : 1;
   const drawWidth = barcodeCanvas.width * scale;
   const drawHeight = barcodeCanvas.height * scale;
+
+  // Centered within the barcode area rather than pinned to the divider: the
+  // bars+SKU block is usually shorter than its budget (the budget has to
+  // cover the widest reasonable case), so top-aligning left the actual
+  // content sitting high with all the slack as blank space at the bottom -
+  // exactly what read as "the barcode should be closer to the centre".
+  const contentHeight = drawHeight + (showSkuText ? skuGap + skuFontSize : 0);
+  const barcodeTop = titleAreaHeight + Math.max(4, (barcodeAreaHeight - contentHeight) / 2);
+
   ctx.drawImage(barcodeCanvas, (widthDots - drawWidth) / 2, barcodeTop, drawWidth, drawHeight);
 
-  ctx.font = `700 ${skuFontSize}px ui-monospace, "Courier New", monospace`;
-  ctx.textAlign = 'center';
-  ctx.fillText(sku, widthDots / 2, barcodeTop + drawHeight + 4, widthDots - margin * 2);
+  if (showSkuText) {
+    ctx.font = `700 ${skuFontSize}px ui-monospace, "Courier New", monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(sku, widthDots / 2, barcodeTop + drawHeight + skuGap, widthDots - margin * 2);
+  }
 }

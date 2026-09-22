@@ -166,6 +166,8 @@ const density = ref(8);
 const printMode = ref<PrintMode>('continuous');
 /** 50-150%, multiplies the title's auto-fit starting size - see RenderLabelOptions in label.ts. */
 const titleScale = ref(1);
+/** See RenderLabelOptions.showSkuText in label.ts - defaults on, matching the previous unconditional behaviour. */
+const showSkuText = ref(true);
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
@@ -174,12 +176,14 @@ onMounted(async () => {
   density.value = (await sdk().config.get<number>('density')) ?? 8;
   printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
   titleScale.value = (await sdk().config.get<number>('titleScale')) ?? 1;
+  showSkuText.value = (await sdk().config.get<boolean>('showSkuText')) ?? true;
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
 watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
 watch(titleScale, (v) => void sdk().config.set('titleScale', v));
+watch(showSkuText, (v) => void sdk().config.set('showSkuText', v));
 
 // ── Test label: preview/print without picking a real product ────────────────
 const TEST_LEAF: Leaf = { key: '__test__', productId: '__test__', variantId: '', sku: 'TEST-0000001', title: 'Test Label', type: 'Test' };
@@ -200,9 +204,10 @@ function redrawPreview(): void {
   renderLabel(canvas, labelSize.value, l.sku, l.title, {
     titleScale: titleScale.value,
     barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
+    showSkuText: showSkuText.value,
   });
 }
-watch([previewLeaf, labelSize, titleScale], redrawPreview, { flush: 'post' });
+watch([previewLeaf, labelSize, titleScale, showSkuText], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
 
 // ── Printer connection ───────────────────────────────────────────────────────
@@ -267,6 +272,7 @@ async function printAll(): Promise<void> {
       renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
+        showSkuText: showSkuText.value,
       });
       const rows = rasterizeCanvas(workCanvas);
       for (let i = 0; i < copies; i++) {
@@ -303,6 +309,7 @@ async function printTestLabel(): Promise<void> {
     renderLabel(workCanvas, labelSize.value, TEST_LEAF.sku, TEST_LEAF.title, {
       titleScale: titleScale.value,
       barcodeValue: shortBarcode(TEST_LEAF.type, TEST_LEAF.productId, TEST_LEAF.variantId || undefined),
+      showSkuText: showSkuText.value,
     });
     const rows = rasterizeCanvas(workCanvas);
     await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value });
@@ -403,6 +410,11 @@ async function printTestLabel(): Promise<void> {
         <label class="field">
           <span>Title size ({{ Math.round(titleScale * 100) }}%)</span>
           <input v-model.number="titleScale" type="range" min="0.5" max="1.5" step="0.05" />
+        </label>
+
+        <label class="field inline">
+          <input v-model="showSkuText" type="checkbox" />
+          <span>Print SKU number under the barcode</span>
         </label>
 
         <h2>Preview</h2>

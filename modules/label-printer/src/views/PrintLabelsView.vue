@@ -298,6 +298,47 @@ function cancelPrint(): void {
   cancelRequested.value = true;
 }
 
+// ── Export as images ─────────────────────────────────────────────────────────
+// A fallback path that needs no printer connection at all: one PNG per
+// selected label, pixel-for-pixel what would otherwise be sent to the
+// Phomemo - for printing a different way (e.g. imported into another app's
+// own "custom label from picture" feature, which drives the printer through
+// its own connection instead of this one).
+const exporting = ref(false);
+const exportProgress = ref<{ done: number; total: number } | null>(null);
+
+async function exportPngs(): Promise<void> {
+  error.value = null;
+  exporting.value = true;
+  exportProgress.value = { done: 0, total: chosen.value.length };
+  try {
+    for (const l of chosen.value) {
+      renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
+        titleScale: titleScale.value,
+        barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
+        showSkuText: showSkuText.value,
+      });
+      const blob = await new Promise<Blob | null>((resolve) => workCanvas.toBlob(resolve, 'image/png'));
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(l.sku || l.key).replace(/[^a-z0-9_-]+/gi, '_')}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+      exportProgress.value = { done: exportProgress.value!.done + 1, total: exportProgress.value!.total };
+      // One tick between files - firing every download synchronously in the
+      // same frame is what gets a browser's multi-download prompt to drop
+      // some of them instead of queuing all.
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  } finally {
+    exporting.value = false;
+    exportProgress.value = null;
+  }
+}
+
 async function printTestLabel(): Promise<void> {
   if (!printer.connected) {
     error.value = 'Connect the printer first.';
@@ -424,6 +465,12 @@ async function printTestLabel(): Promise<void> {
         </label>
         <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
         <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
+
+        <h2>Export</h2>
+        <p class="hint">Printer trouble? Export the selected labels as PNG images instead - pixel-for-pixel what would print, importable into another app's own "custom label from picture" feature (e.g. LabelLife) to print through its own connection.</p>
+        <button type="button" class="quiet" :disabled="!chosen.length || exporting" @click="exportPngs">
+          {{ exporting ? `Exporting ${exportProgress?.done ?? 0} / ${exportProgress?.total ?? 0}…` : `Export ${chosen.length} image${chosen.length === 1 ? '' : 's'}` }}
+        </button>
 
         <h2>Printer</h2>
         <p v-if="error" class="error" role="alert">{{ error }}</p>

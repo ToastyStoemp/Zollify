@@ -231,8 +231,9 @@ const syncLine = computed(() => {
               :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length }"
             >
               <span class="cal-date">{{ d.day }}</span>
-              <span v-if="d.events.length" class="cal-dots">
-                <span v-for="e in d.events.slice(0, 3)" :key="e.id" class="cal-dot" :class="e.status" :title="e.name"></span>
+              <span v-if="d.events.length" class="cal-names">
+                <span v-for="e in d.events.slice(0, 2)" :key="e.id" class="cal-name" :class="e.status" :title="e.name">{{ e.name }}</span>
+                <span v-if="d.events.length > 2" class="cal-more">+{{ d.events.length - 2 }} more</span>
               </span>
             </router-link>
           </template>
@@ -322,17 +323,22 @@ h2 { margin: 0; font-size: 1rem; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }
 .cal-weekday { text-align: center; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--zfy-muted); padding-bottom: .25rem; }
-.cal-day { display: flex; flex-direction: column; align-items: center; gap: .25rem; min-height: 3.2rem; padding: .35rem 0; border-radius: 8px; text-decoration: none; color: inherit; }
+.cal-day { display: flex; flex-direction: column; align-items: center; gap: .2rem; min-height: 4.4rem; padding: .35rem .3rem; border-radius: 8px; text-decoration: none; color: inherit; }
 .cal-day.out-month { color: var(--zfy-muted); opacity: .5; }
 .cal-day.has-events { background: var(--zfy-bg); }
 .cal-day.has-events:hover { background: var(--zfy-surface-2); }
 .cal-day.today .cal-date { background: var(--zfy-accent); color: var(--zfy-on-accent); border-radius: 999px; padding: 0 .4rem; }
 .cal-date { font-size: .85rem; font-variant-numeric: tabular-nums; }
-.cal-dots { display: flex; gap: .2rem; }
-.cal-dot { width: .4rem; height: .4rem; border-radius: 999px; background: var(--zfy-muted); }
-.cal-dot.active { background: var(--zfy-accent); }
-.cal-dot.planned { background: var(--zfy-warning-ink, #8a5a1e); }
-.cal-dot.closed { background: var(--zfy-line); }
+.cal-names { display: flex; flex-direction: column; gap: .15rem; width: 100%; }
+.cal-name {
+  display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: .68rem; line-height: 1.3; padding: .05rem .35rem; border-radius: 4px; text-align: left;
+  border-left: 2px solid var(--zfy-muted); background: var(--zfy-surface-2);
+}
+.cal-name.active { border-left-color: var(--zfy-accent); color: var(--zfy-accent-ink); font-weight: 600; }
+.cal-name.planned { border-left-color: var(--zfy-warning-ink, #8a5a1e); }
+.cal-name.closed { border-left-color: var(--zfy-line); color: var(--zfy-muted); }
+.cal-more { font-size: .65rem; color: var(--zfy-muted); text-align: left; padding: 0 .35rem; }
 .cfoot { margin-top: auto; padding-top: .5rem; border-top: 1px solid var(--zfy-line); display: flex; gap: 1rem; flex-wrap: wrap; }
 .cfoot a { display: inline-flex; align-items: center; gap: .15rem; font-size: .85rem; color: var(--zfy-accent-ink); text-decoration: none; }
 .cfoot a:hover { text-decoration: underline; }

@@ -10,6 +10,10 @@ build/
 *.pem
 *.key
 secrets.json
+*.keystore
+*.jks
+*.b64
+key/
 
 # Server runtime data
 data/

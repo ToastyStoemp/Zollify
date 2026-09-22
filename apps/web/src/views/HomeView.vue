@@ -28,7 +28,14 @@ const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 
-const today = new Date().toISOString().slice(0, 10);
+// NOT toISOString().slice(0, 10) - that converts to UTC first, which shifts
+// the date by the timezone offset (e.g. a UTC+2 local midnight becomes
+// 22:00 the PREVIOUS day in UTC). Reading the local getters instead keeps
+// this matching the calendar day the user actually sees.
+function isoOf(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const today = isoOf(new Date());
 const startOfDay = new Date();
 startOfDay.setHours(0, 0, 0, 0);
 
@@ -111,12 +118,30 @@ const weekdayLabels = computed(() => {
   });
 });
 
+// Stable across days so the same event lands at the same index in every
+// day it touches - filtering a fixed order preserves relative order, which
+// is what keeps a multi-day event's segments vertically aligned from one
+// day cell to the next so the "connect the days" styling below lines up.
+const sortedEvents = computed(() => [...visibleEvents.value].sort((a, b) => (a.dateStart ?? '').localeCompare(b.dateStart ?? '') || a.id.localeCompare(b.id)));
+
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return isoOf(d);
+}
+
+interface CalEventSpan {
+  event: (typeof visibleEvents.value)[number];
+  /** True when this event also covers the day before/after - drawn as one continuous bar rather than a separate pill per day. */
+  continuesLeft: boolean;
+  continuesRight: boolean;
+}
 interface CalDay {
   iso: string;
   day: number;
   inMonth: boolean;
   isToday: boolean;
-  events: (typeof visibleEvents.value)[number][];
+  events: CalEventSpan[];
 }
 const calendarWeeks = computed<CalDay[][]>(() => {
   const first = calMonth.value;
@@ -126,15 +151,20 @@ const calendarWeeks = computed<CalDay[][]>(() => {
   const cursor = new Date(gridStart);
   for (let w = 0; w < 6; w++) {
     const days: CalDay[] = [];
-    for (let d = 0; d < 7; d++) {
-      const iso = cursor.toISOString().slice(0, 10);
-      days.push({
-        iso,
-        day: cursor.getDate(),
-        inMonth: cursor.getMonth() === first.getMonth(),
-        isToday: iso === today,
-        events: visibleEvents.value.filter((e) => e.dateStart && iso >= e.dateStart && iso <= (e.dateEnd ?? e.dateStart)!),
-      });
+    for (let i = 0; i < 7; i++) {
+      const iso = isoOf(cursor);
+      const prevIso = addDays(iso, -1);
+      const nextIso = addDays(iso, 1);
+      const events = sortedEvents.value
+        .filter((e) => e.dateStart && iso >= e.dateStart && iso <= (e.dateEnd ?? e.dateStart)!)
+        .map((e) => ({
+          event: e,
+          // Never bridge across a week row wrap (i===0/6) - the previous/next
+          // day there isn't the visually adjacent cell.
+          continuesLeft: i > 0 && e.dateStart! <= prevIso && (e.dateEnd ?? e.dateStart)! >= prevIso,
+          continuesRight: i < 6 && e.dateStart! <= nextIso && (e.dateEnd ?? e.dateStart)! >= nextIso,
+        }));
+      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today, events });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(days);
@@ -232,7 +262,14 @@ const syncLine = computed(() => {
             >
               <span class="cal-date">{{ d.day }}</span>
               <span v-if="d.events.length" class="cal-names">
-                <span v-for="e in d.events.slice(0, 2)" :key="e.id" class="cal-name" :class="e.status" :title="e.name">{{ e.name }}</span>
+                <span
+                  v-for="e in d.events.slice(0, 2)"
+                  :key="e.event.id"
+                  class="cal-name"
+                  :class="[e.event.status, { left: e.continuesLeft, right: e.continuesRight }]"
+                  :title="e.event.name"
+                  >{{ e.event.name }}</span
+                >
                 <span v-if="d.events.length > 2" class="cal-more">+{{ d.events.length - 2 }} more</span>
               </span>
             </router-link>
@@ -323,7 +360,15 @@ h2 { margin: 0; font-size: 1rem; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }
 .cal-weekday { text-align: center; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--zfy-muted); padding-bottom: .25rem; }
-.cal-day { display: flex; flex-direction: column; align-items: center; gap: .2rem; min-height: 4.4rem; padding: .35rem .3rem; border-radius: 8px; text-decoration: none; color: inherit; }
+.cal-day {
+  display: flex; flex-direction: column; align-items: center; gap: .2rem; min-height: 4.4rem; padding: .35rem .3rem;
+  border-radius: 8px; text-decoration: none; color: inherit;
+  /* A grid item's default min-width is auto (its content's width), not 0 -
+     a long event name in .cal-name would otherwise keep this column wider
+     than its 1fr share instead of letting text-overflow ellipsis it,
+     pushing the whole calendar past the card's edge. */
+  min-width: 0;
+}
 .cal-day.out-month { color: var(--zfy-muted); opacity: .5; }
 .cal-day.has-events { background: var(--zfy-bg); }
 .cal-day.has-events:hover { background: var(--zfy-surface-2); }
@@ -338,6 +383,12 @@ h2 { margin: 0; font-size: 1rem; }
 .cal-name.active { border-left-color: var(--zfy-accent); color: var(--zfy-accent-ink); font-weight: 600; }
 .cal-name.planned { border-left-color: var(--zfy-warning-ink, #8a5a1e); }
 .cal-name.closed { border-left-color: var(--zfy-line); color: var(--zfy-muted); }
+/* Continuation into the next/previous day of the same event: square off
+   that side and eat this cell's own padding on it, so the pill touches its
+   neighbour instead of reading as a separate box - the coloured accent bar
+   only marks the event's actual start, not every day it spans. */
+.cal-name.left { border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -.3rem; padding-left: .1rem; }
+.cal-name.right { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -.3rem; padding-right: .1rem; }
 .cal-more { font-size: .65rem; color: var(--zfy-muted); text-align: left; padding: 0 .35rem; }
 .cfoot { margin-top: auto; padding-top: .5rem; border-top: 1px solid var(--zfy-line); display: flex; gap: 1rem; flex-wrap: wrap; }
 .cfoot a { display: inline-flex; align-items: center; gap: .15rem; font-size: .85rem; color: var(--zfy-accent-ink); text-decoration: none; }

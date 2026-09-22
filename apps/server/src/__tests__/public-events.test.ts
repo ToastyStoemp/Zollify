@@ -150,6 +150,17 @@ describe('public events', () => {
     expect(page.body).toContain('Far Future Con');
     expect(page.body).toContain('Booth B-12');
     expect(page.body).toContain('Old Con'); // past section
+    // Calendar toggle: the data island carries the same event (incl. hall/booth
+    // for the calendar tooltip), and calendar.js is referenced same-origin.
+    expect(page.body).toContain('id="zev-data"');
+    expect(page.body).toContain('"name":"Far Future Con"');
+    expect(page.body).toContain('"booth":"B-12"');
+    expect(page.body).toContain('/p/public-events/harbour-prints/calendar.js"');
+
+    const calendarJs = await app.inject({ method: 'GET', url: '/p/public-events/harbour-prints/calendar.js' });
+    expect(calendarJs.statusCode).toBe(200);
+    expect(calendarJs.headers['content-type']).toContain('javascript');
+    expect(calendarJs.body).toContain('initCalendar');
     // Cross-origin embedding is the point, so the isolation headers are relaxed here.
     expect(page.headers['cross-origin-resource-policy']).toBe('cross-origin');
     expect(page.headers['access-control-allow-origin']).toBe('*');

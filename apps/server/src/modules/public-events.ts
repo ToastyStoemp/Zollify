@@ -171,6 +171,20 @@ h2.sec{font-size:1.05rem;font-weight:700;margin:36px 0 14px;padding-bottom:8px;b
 .past li{padding:10px 0;border-top:1px solid var(--border);color:var(--muted);font-size:.9rem}
 .empty{color:var(--muted);font-size:.92rem;padding:8px 0}
 footer{margin-top:48px;text-align:center;color:var(--muted);font-size:.72rem}
+.view-toggle{display:flex;gap:6px;justify-content:center;margin:20px 0 -6px}
+.view-toggle button{font:inherit;font-weight:700;font-size:.8rem;padding:6px 16px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer}
+.view-toggle button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.cal{display:none}
+.cal.on{display:block}
+.cal-headrow{display:flex;align-items:center;justify-content:center;gap:14px;margin:8px 0 12px;font-weight:700}
+.cal-headrow button{background:var(--surface);border:1px solid var(--border);color:inherit;border-radius:8px;width:30px;height:30px;cursor:pointer;font-size:1.1rem;line-height:1}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.cal-wd{text-align:center;font-size:.66rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding-bottom:4px}
+.cal-day{min-height:70px;border-radius:8px;padding:5px;background:var(--surface);border:1px solid var(--border);font-size:.72rem;display:flex;flex-direction:column;gap:3px}
+.cal-day.out{opacity:.35}
+.cal-day .n{font-weight:700;font-size:.75rem}
+.cal-day .ev{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:1px 5px;border-radius:4px;background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+.cal-day .ev.more{background:transparent;color:var(--muted);font-weight:400;padding:0 5px}
 `;
 
 function card(ev: PublicEvent): string {
@@ -195,6 +209,10 @@ function renderPage(site: Site): string {
           .map((ev) => `<li>${h(ev.name)} · ${range(ev.start, ev.end)}${place(ev) ? ` · ${place(ev)}` : ''}</li>`)
           .join('')}</ul>`
       : '';
+  // Fed to calendar.js as a same-origin external script (CSP allows 'self',
+  // not inline) via a non-executing JSON data island - </script> inside a
+  // field (an event name, say) would otherwise close this tag early.
+  const calendarData = JSON.stringify({ upcoming: site.upcoming }).replace(/<\//g, '<\\/');
   return `<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${h(site.org)} - Events</title>
@@ -209,12 +227,22 @@ function renderPage(site: Site): string {
   </div>
 </header>
 <main>
-  <h2 class="sec">Upcoming events</h2>
-  ${upHtml}
+  <div class="view-toggle" role="tablist" aria-label="View">
+    <button type="button" data-view="list" class="on" aria-pressed="true">List</button>
+    <button type="button" data-view="calendar" aria-pressed="false">Calendar</button>
+  </div>
+  <div id="zev-view-list">
+    <h2 class="sec">Upcoming events</h2>
+    ${upHtml}
+  </div>
+  <div id="zev-view-cal" class="cal"></div>
   ${pastHtml}
 </main>
 <footer>Events update automatically from our sales system.</footer>
-</div></body></html>`;
+</div>
+<script type="application/json" id="zev-data">${calendarData}</script>
+<script src="${site.base}/calendar.js" defer></script>
+</body></html>`;
 }
 
 /**
@@ -315,6 +343,79 @@ function widget(BASE) {
 }
 `;
 
+/**
+ * The list/calendar toggle on the main page. Reads events from the JSON data
+ * island already in the page (no extra fetch) rather than /events.json, so
+ * the calendar always matches what was actually rendered.
+ */
+const CALENDAR_SRC = String.raw`
+function initCalendar() {
+  var dataEl = document.getElementById('zev-data');
+  var listEl = document.getElementById('zev-view-list');
+  var calEl = document.getElementById('zev-view-cal');
+  var buttons = document.querySelectorAll('.view-toggle button');
+  if (!dataEl || !calEl || !buttons.length) return;
+  var events = [];
+  try { events = (JSON.parse(dataEl.textContent).upcoming || []); } catch (e) { events = []; }
+  var month = new Date(); month.setDate(1); month.setHours(0, 0, 0, 0);
+
+  var esc = function (s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  };
+  var iso = function (d) { return d.toISOString().slice(0, 10); };
+  var within = function (day, ev) { return day >= ev.start && day <= (ev.end || ev.start); };
+  var label = function (ev) {
+    var extra = [];
+    if (ev.hall) extra.push('Hall ' + ev.hall);
+    if (ev.booth) extra.push('Booth ' + ev.booth);
+    return extra.length ? ev.name + ' - ' + extra.join(' ') : ev.name;
+  };
+
+  function render() {
+    var first = new Date(month);
+    var gridStart = new Date(first);
+    gridStart.setDate(1 - ((first.getDay() + 6) % 7));
+    var html = '<div class="cal-headrow"><button type="button" id="zev-prev" aria-label="Previous month">&lsaquo;</button><strong>' +
+      month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) + '</strong><button type="button" id="zev-next" aria-label="Next month">&rsaquo;</button></div>';
+    html += '<div class="cal-grid">';
+    ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].forEach(function (w) { html += '<div class="cal-wd">' + w + '</div>'; });
+    var cursor = new Date(gridStart);
+    for (var w = 0; w < 6; w++) {
+      for (var d = 0; d < 7; d++) {
+        var dayIso = iso(cursor);
+        var inMonth = cursor.getMonth() === first.getMonth();
+        var dayEvents = events.filter(function (ev) { return within(dayIso, ev); });
+        html += '<div class="cal-day' + (inMonth ? '' : ' out') + '"><span class="n">' + cursor.getDate() + '</span>';
+        dayEvents.slice(0, 2).forEach(function (ev) {
+          html += '<span class="ev" title="' + esc(label(ev)) + '">' + esc(ev.name) + '</span>';
+        });
+        if (dayEvents.length > 2) html += '<span class="ev more">+' + (dayEvents.length - 2) + ' more</span>';
+        html += '</div>';
+        cursor.setDate(cursor.getDate() + 1);
+      }
+    }
+    html += '</div>';
+    calEl.innerHTML = html;
+    document.getElementById('zev-prev').onclick = function () { month.setMonth(month.getMonth() - 1); render(); };
+    document.getElementById('zev-next').onclick = function () { month.setMonth(month.getMonth() + 1); render(); };
+  }
+
+  buttons.forEach(function (btn) {
+    btn.onclick = function () {
+      buttons.forEach(function (b) { b.classList.remove('on'); b.setAttribute('aria-pressed', 'false'); });
+      btn.classList.add('on');
+      btn.setAttribute('aria-pressed', 'true');
+      var showCal = btn.getAttribute('data-view') === 'calendar';
+      listEl.style.display = showCal ? 'none' : '';
+      if (showCal) { calEl.classList.add('on'); render(); } else { calEl.classList.remove('on'); }
+    };
+  });
+}
+initCalendar();
+`;
+
 // ── The module ──────────────────────────────────────────────────────────────
 
 const CACHE_PUBLIC = 'public, max-age=300';
@@ -405,6 +506,15 @@ export const publicEventsServerModule: ServerModule = {
         .type('text/javascript; charset=utf-8')
         .header('cache-control', 'public, max-age=600')
         .send(`;(${WIDGET_SRC})(${JSON.stringify(site.base)});\n`);
+    });
+
+    app.get<Slug>('/:slug/calendar.js', async (req, reply) => {
+      const site = loadSite(ctx, req, req.params.slug);
+      if (!site) return reply.code(404).type('text/plain').send('');
+      return reply
+        .type('text/javascript; charset=utf-8')
+        .header('cache-control', 'public, max-age=600')
+        .send(`;(function () { ${CALENDAR_SRC} })();\n`);
     });
 
     app.get<Slug>('/:slug/events.ics', async (req, reply) => {

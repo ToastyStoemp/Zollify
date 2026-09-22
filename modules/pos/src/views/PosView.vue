@@ -184,6 +184,32 @@ const entries = computed<Entry[]>(() => {
 const openType = ref<string | null>(null);
 const typeProducts = computed(() => (openType.value === null ? [] : products.value.filter((p) => (p.type || '(no type)') === openType.value)));
 
+// A short beep via WebAudio rather than an audio file - no asset to ship,
+// and it needs no user gesture beyond the one already opening the search/scan
+// flow. Best-effort: some browsers block audio outside a user gesture, and
+// this must never block or fail the actual add.
+function beep(): void {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+    osc.onended = () => void ctx.close();
+  } catch {
+    // best-effort feedback only
+  }
+}
+
+const justAddedId = ref<string | null>(null);
+let justAddedTimer: ReturnType<typeof setTimeout> | undefined;
+
 function submitSearch(): void {
   const match = findSearchMatch(products.value, search.value);
   if (!match) return toast('No product found for that search.', 'bad');
@@ -191,6 +217,11 @@ function submitSearch(): void {
   add(match.productId, match.variantId);
   toast(`Added ${match.label}`);
   search.value = '';
+  navigator.vibrate?.(80);
+  beep();
+  justAddedId.value = match.productId;
+  clearTimeout(justAddedTimer);
+  justAddedTimer = setTimeout(() => (justAddedId.value = null), 1500);
 }
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
@@ -684,7 +715,7 @@ async function cancelPayment(): Promise<void> {
       <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
-          <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0 }" @click="openType = e.group.type">
+          <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
             <span v-if="e.group.inCart" class="count">{{ e.group.inCart }}</span>
             <span class="title" :style="{ color: typeColor(e.group.type) }">{{ e.group.type }}</span>
             <small>{{ e.group.products.length }} products</small>
@@ -693,7 +724,7 @@ async function cancelPayment(): Promise<void> {
               <Icon name="chevron-right" :size="14" />
             </span>
           </button>
-          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (productLeft(e.product) ?? 1) <= 0 }" @click="add(e.product.id, null)">
+          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (productLeft(e.product) ?? 1) <= 0, added: e.product.id === justAddedId }" @click="add(e.product.id, null)">
             <span v-if="productInCart(e.product)" class="count">{{ productInCart(e.product) }}</span>
             <span class="head">
               <ProductThumb v-if="e.product.imageId" :image-id="e.product.imageId" :alt="e.product.title" :size="36" />
@@ -764,7 +795,7 @@ async function cancelPayment(): Promise<void> {
     <!-- ── Type drill-down ───────────────────────────────────────────────── -->
     <ModalShell v-if="openType" :title="openType" wide @close="openType = null">
       <div class="grid inmodal">
-        <button v-for="p in typeProducts" :key="p.id" type="button" class="tile" :aria-label="p.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(p.type) }" @click="add(p.id, null)">
+        <button v-for="p in typeProducts" :key="p.id" type="button" class="tile" :aria-label="p.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(p.type) }" :class="{ added: p.id === justAddedId }" @click="add(p.id, null)">
           <span v-if="productInCart(p)" class="count">{{ productInCart(p) }}</span>
           <span class="head">
             <ProductThumb v-if="p.imageId" :image-id="p.imageId" :alt="p.title" :size="36" />
@@ -950,6 +981,11 @@ async function cancelPayment(): Promise<void> {
 .tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; min-height: 6rem; padding: .7rem .8rem; text-align: left; border-left: 3px solid var(--zfy-accent, #0e7c66); border-radius: 12px; }
 .tile:active { transform: scale(.98); }
 .tile.dim { opacity: .55; }
+.tile.added { animation: tile-added 1.5s ease-out; }
+@keyframes tile-added {
+  0% { box-shadow: 0 0 0 3px var(--zfy-accent, #0e7c66); background: color-mix(in srgb, var(--zfy-accent, #0e7c66) 18%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
 .tile .head { display: flex; align-items: flex-start; gap: .5rem; width: 100%; }
 .tile .title { font-weight: 600; font-size: .9rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .tile small { font-size: .7rem; color: var(--zfy-muted, #5a6472); }

@@ -386,9 +386,16 @@ h2 { margin: 0; font-size: 1rem; }
 /* Continuation into the next/previous day of the same event: square off
    that side and eat this cell's own padding on it, so the pill touches its
    neighbour instead of reading as a separate box - the coloured accent bar
-   only marks the event's actual start, not every day it spans. */
-.cal-name.left { border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -.3rem; padding-left: .1rem; }
-.cal-name.right { border-top-right-radius: 0; border-bottom-right-radius: 0; margin-right: -.3rem; padding-right: .1rem; }
+   only marks the event's actual start, not every day it spans.
+   `width: calc()`, not margin, does the extending: .cal-name has a fixed
+   width (100%), and a negative margin-RIGHT on a fixed-width block box
+   doesn't move its own right edge at all (it only shrinks the gap to
+   whatever comes after it) - only margin-left visibly moves anything,
+   because it shifts the box's start position. Growing the width is what
+   actually pushes an edge outward on either side. */
+.cal-name.left { border-left: none; border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -.3rem; width: calc(100% + .3rem); padding-left: .1rem; }
+.cal-name.right { border-top-right-radius: 0; border-bottom-right-radius: 0; width: calc(100% + .3rem); padding-right: .1rem; }
+.cal-name.left.right { width: calc(100% + .6rem); }
 .cal-more { font-size: .65rem; color: var(--zfy-muted); text-align: left; padding: 0 .35rem; }
 .cfoot { margin-top: auto; padding-top: .5rem; border-top: 1px solid var(--zfy-line); display: flex; gap: 1rem; flex-wrap: wrap; }
 .cfoot a { display: inline-flex; align-items: center; gap: .15rem; font-size: .85rem; color: var(--zfy-accent-ink); text-decoration: none; }

@@ -532,10 +532,14 @@ h2 { margin: 0; font-size: .95rem; }
 .grid { display: grid; grid-template-columns: minmax(20rem, 3fr) minmax(18rem, 2fr); gap: 1rem; align-items: start; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .products { max-height: 40rem; }
-/* More vertical room to work with once the layout is wide enough for two
-   real columns side by side, instead of the same fixed height as a phone. */
+/* On desktop the product list is the thing actually worth scrolling
+   through, not the whole page - pin the card to the viewport and let just
+   its own list fill and scroll inside that, using the full page height
+   instead of an arbitrary guessed cap. `top`/the height's `-3rem` match
+   .content's 1.5rem top+bottom padding in App.vue, so the card's edges
+   line up with the page's own margins rather than floating short of them. */
 @media (min-width: 1024px) {
-  .products { max-height: min(56rem, calc(100vh - 14rem)); }
+  .products { max-height: none; height: calc(100vh - 3rem); position: sticky; top: 1.5rem; }
 }
 .adv { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .6rem; display: flex; flex-direction: column; gap: .6rem; }
 .adv summary { cursor: pointer; font-size: .9rem; font-weight: 600; color: var(--zfy-muted, #5a6472); }
@@ -544,7 +548,7 @@ h2 { margin: 0; font-size: .95rem; }
 .quick { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .quick .count { margin-left: auto; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
 
-.tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; overflow: auto; }
+.tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .2rem; overflow: auto; flex: 1; min-height: 0; }
 .type-row { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .3rem; }
 .type-row:first-child { border-top: none; padding-top: 0; }
 .row { display: flex; flex-direction: row; align-items: center; gap: .5rem; min-height: 2.3rem; }

@@ -135,7 +135,7 @@ const syncLabel = computed(() => {
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
     <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen }]">
-      <div class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></div>
+      <div class="brand"><img src="/favicon.svg" alt="Zollify" class="mark" /><span class="word">Zollify<span>.</span></span></div>
 
       <nav id="main-nav" aria-label="Main">
         <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
@@ -179,7 +179,10 @@ const syncLabel = computed(() => {
         </footer>
       </nav>
 
-      <button type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
+      <!-- Only shown when the bottom tab bar has no "More" tab of its own
+           (few enough sections that they all fit as tabs) - otherwise this
+           and the bottom tab would be two buttons opening the same drawer. -->
+      <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
     </aside>
 
     <main class="content">
@@ -223,9 +226,9 @@ const syncLabel = computed(() => {
 </template>
 
 <style scoped>
-.splash { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; color: var(--zfy-muted); }
+.splash { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; color: var(--zfy-muted); }
 .splash .brand { font-size: 1.6rem; color: var(--zfy-ink); }
-.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; }
+.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100dvh; }
 .shell--bare { grid-template-columns: 1fr; }
 .shell--bare .content { padding: 0; display: grid; }
 .shell--bare .content > .welcome { padding: 1.5rem; width: 100%; }
@@ -298,10 +301,19 @@ nav { flex: 1; }
   .sidebar {
     display: flex; flex-direction: row; align-items: center; gap: .5rem; padding: .5rem .75rem;
     padding-top: calc(.5rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
-    border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 7;
+    border-right: 0; border-bottom: 1px solid var(--zfy-line); height: auto; z-index: 10;
+    /* z-index above .scrim (8): .sidebar is itself a positioned+z-indexed
+       element, so it forms its own stacking context - the drawer nav inside
+       it (z-index: 9) is only ordered against its OWN siblings (.burger),
+       never against .scrim, which sits outside .sidebar entirely. Without
+       this, the drawer painted and hit-tested BELOW the scrim, so every tap
+       inside the open drawer (e.g. Settings) actually landed on the scrim
+       and just closed the menu instead. */
     position: sticky; top: 0;
   }
-  .brand { font-size: 1.1rem; }
+  /* The wordmark costs width the top bar doesn't have on a phone, and once
+     inside the app there's nothing to orient - the icon alone is enough. */
+  .sidebar .brand .word { display: none; }
   .burger { display: inline-flex; margin-left: auto; min-height: 2rem; padding: .25rem .5rem; }
   .sidebar nav {
     display: none; position: fixed; top: calc(3.1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); left: 0; bottom: 0; width: min(18rem, 85vw);

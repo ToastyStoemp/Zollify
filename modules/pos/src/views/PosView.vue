@@ -945,7 +945,7 @@ async function cancelPayment(): Promise<void> {
 </template>
 
 <style scoped>
-.pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100vh - 3rem); margin: -1.5rem; }
+.pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }

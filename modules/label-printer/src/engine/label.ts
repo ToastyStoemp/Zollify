@@ -138,8 +138,17 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   ctx.textBaseline = 'top';
 
   const margin = Math.max(4, Math.round(widthDots * 0.05));
-  const titleAreaHeight = Math.round(heightDots * 0.42);
-  const barcodeAreaHeight = heightDots - titleAreaHeight;
+  // Reserved above the title and below the barcode block, so neither ever
+  // sits flush against the physical edge of the label - the bars are sized
+  // to fill essentially all of their budgeted area (bigger bars decode
+  // better), which left near-zero slack for the earlier "center it"
+  // treatment to work with and put the SKU text right on the bottom edge.
+  const marginV = Math.max(6, Math.round(heightDots * 0.05));
+  const usableHeight = heightDots - marginV * 2;
+  const titleAreaHeight = Math.round(usableHeight * 0.42);
+  const barcodeAreaHeight = usableHeight - titleAreaHeight;
+  const titleTop = marginV;
+  const barcodeAreaTop = marginV + titleAreaHeight;
 
   // Product name, as large as fits in the title area on up to two lines -
   // stops at a legible floor and truncates rather than shrinking further.
@@ -155,7 +164,7 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   }
   const lineHeight = fontSize * 1.15;
   const textBlockHeight = lines.length * lineHeight;
-  let y = (titleAreaHeight - textBlockHeight) / 2;
+  let y = titleTop + (titleAreaHeight - textBlockHeight) / 2;
   for (const line of lines) {
     ctx.textAlign = 'center';
     ctx.fillText(line, widthDots / 2, y, widthDots - margin * 2);
@@ -167,8 +176,8 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   ctx.strokeStyle = '#000';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(margin, titleAreaHeight);
-  ctx.lineTo(widthDots - margin, titleAreaHeight);
+  ctx.moveTo(margin, barcodeAreaTop);
+  ctx.lineTo(widthDots - margin, barcodeAreaTop);
   ctx.stroke();
 
   const showSkuText = options.showSkuText ?? true;
@@ -202,7 +211,7 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   // content sitting high with all the slack as blank space at the bottom -
   // exactly what read as "the barcode should be closer to the centre".
   const contentHeight = drawHeight + (showSkuText ? skuGap + skuFontSize : 0);
-  const barcodeTop = titleAreaHeight + Math.max(4, (barcodeAreaHeight - contentHeight) / 2);
+  const barcodeTop = barcodeAreaTop + Math.max(4, (barcodeAreaHeight - contentHeight) / 2);
 
   ctx.drawImage(barcodeCanvas, (widthDots - drawWidth) / 2, barcodeTop, drawWidth, drawHeight);
 

@@ -16,7 +16,7 @@
     "dev": "npm run dev -w @zollify/web",
     "dev:server": "npm run dev -w @zollify/server",
     "build": "npm run build --workspaces --if-present",
-    "build:modules": "npm run build -w @zollify/pos -w @zollify/customs-ch -w @zollify/customs-de -w @zollify/price-cards -w @zollify/sourcing -w @zollify/migration -w @zollify/shopify-sync -w @zollify/public-events -w @zollify/tax -w @zollify/costs",
+    "build:modules": "npm run build -w @zollify/pos -w @zollify/customs-ch -w @zollify/customs-de -w @zollify/price-cards -w @zollify/sourcing -w @zollify/migration -w @zollify/shopify-sync -w @zollify/public-events -w @zollify/tax -w @zollify/costs -w @zollify/label-printer -w @zollify/convention-checklist",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "audit:deps": "npm audit --audit-level=moderate",
@@ -35,7 +35,8 @@
   "dependencies": {
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.1.1",
-    "@capacitor/core": "^8.0.0"
+    "@capacitor/core": "^8.0.0",
+    "@capacitor-community/bluetooth-le": "^8.3.0"
   },
   "overrides": {
     "xcode": {

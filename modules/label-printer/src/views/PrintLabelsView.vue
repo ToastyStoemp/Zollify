@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch, type Directive } from 'vue';
+import { Capacitor } from '@capacitor/core';
 import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label';
 import { rasterizeCanvas } from '../engine/raster';
-import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
+import { PhomemoPrinter, type NativeBarcode, type PrintMode } from '../engine/phomemo';
 import { sdk } from '../runtime';
 
 /**
- * Prints SKU-barcode + product-name labels to a Phomemo M110 over Web
- * Bluetooth. Chrome/Edge only (desktop or Android) - Web Bluetooth doesn't
- * exist in Safari/iOS. See engine/phomemo.ts for what in this protocol is
- * confirmed vs. reverse-engineered-but-unverified.
+ * Prints SKU-barcode + product-name labels to a Phomemo M110 over Bluetooth.
+ * Works two ways, both through @capacitor-community/bluetooth-le (see
+ * engine/phomemo.ts): as the Android app, via its native BLE plugin; as a
+ * website, via Web Bluetooth (Chrome/Edge, desktop or Android - not
+ * Safari/iOS, which has none). See engine/phomemo.ts for what in this
+ * protocol is confirmed vs. reverse-engineered-but-unverified.
  *
  * Selection is a type > product > variant tree - a label is printed per
  * variant SKU (or per plain product when it has none), which is what a
@@ -158,6 +161,10 @@ const speed = ref(4);
 const density = ref(8);
 /** See PrintMode in phomemo.ts - 'safe' paces off the printer's ff03 notifications when available. */
 const printMode = ref<PrintMode>('continuous');
+/** 50-150%, multiplies the title's auto-fit starting size - see RenderLabelOptions in label.ts. */
+const titleScale = ref(1);
+/** Experimental - see NativeBarcode in phomemo.ts. Off by default; unverified against real hardware. */
+const nativeBarcode = ref(false);
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
@@ -165,11 +172,15 @@ onMounted(async () => {
   speed.value = (await sdk().config.get<number>('speed')) ?? 4;
   density.value = (await sdk().config.get<number>('density')) ?? 8;
   printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
+  titleScale.value = (await sdk().config.get<number>('titleScale')) ?? 1;
+  nativeBarcode.value = (await sdk().config.get<boolean>('nativeBarcode')) ?? false;
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
 watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
+watch(titleScale, (v) => void sdk().config.set('titleScale', v));
+watch(nativeBarcode, (v) => void sdk().config.set('nativeBarcode', v));
 
 // ── Preview: redraws whenever the first chosen leaf or the label size changes ──
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
@@ -183,15 +194,17 @@ function redrawPreview(): void {
     canvas.height = 0;
     return;
   }
-  renderLabel(canvas, labelSize.value, l.sku, l.title);
+  renderLabel(canvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value, nativeBarcode: nativeBarcode.value });
 }
-watch([previewLeaf, labelSize], redrawPreview, { flush: 'post' });
+watch([previewLeaf, labelSize, titleScale, nativeBarcode], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
 
 // ── Printer connection ───────────────────────────────────────────────────────
 const printer = new PhomemoPrinter();
 const printerName = ref<string | null>(null);
-const bluetoothSupported = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+// The Android app has no navigator.bluetooth (no Web Bluetooth in a
+// Capacitor WebView) but bluetooth-le's native plugin covers it there instead.
+const bluetoothSupported = Capacitor.isNativePlatform() || (typeof navigator !== 'undefined' && 'bluetooth' in navigator);
 const busy = ref(false);
 const progress = ref<{ done: number; total: number } | null>(null);
 const error = ref<string | null>(null);
@@ -245,14 +258,20 @@ async function printAll(): Promise<void> {
   try {
     outer: for (const l of chosen.value) {
       const copies = Math.max(1, qty[l.key] ?? 1);
-      renderLabel(workCanvas, labelSize.value, l.sku, l.title);
+      const { barcodeGap } = renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
+        titleScale: titleScale.value,
+        nativeBarcode: nativeBarcode.value,
+      });
       const rows = rasterizeCanvas(workCanvas);
+      const barcode: NativeBarcode | undefined = barcodeGap
+        ? { sku: l.sku, gapTopRow: barcodeGap.top, gapHeightRows: barcodeGap.height }
+        : undefined;
       for (let i = 0; i < copies; i++) {
         // Only checked between whole labels, never mid-transmission - stopping
         // partway through one would leave the printer's buffer holding a
         // half-sent job that corrupts whatever prints next.
         if (cancelRequested.value) break outer;
-        await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value });
+        await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value }, barcode);
         progress.value = { done: progress.value!.done + 1, total: progress.value!.total };
       }
     }
@@ -281,7 +300,7 @@ function cancelPrint(): void {
     </header>
 
     <p v-if="!bluetoothSupported" class="warn">
-      This browser has no Web Bluetooth support. Use Chrome or Edge on desktop, or Chrome on Android - not Safari or iOS.
+      This browser has no Web Bluetooth support. Use Chrome or Edge on desktop, Chrome on Android, or the Android app - not Safari or iOS.
     </p>
 
     <div class="grid">
@@ -357,9 +376,25 @@ function cancelPrint(): void {
         <p class="hint">Safe paces off the printer's own notifications between labels instead of a fixed guess - try it if batches come out ghosted or misaligned.</p>
         <p class="hint">Not verified against real hardware - adjust if prints come out too light, dark, or fast to feed cleanly.</p>
 
+        <label class="field">
+          <span>Title size ({{ Math.round(titleScale * 100) }}%)</span>
+          <input v-model.number="titleScale" type="range" min="0.5" max="1.5" step="0.05" />
+        </label>
+
+        <label class="field inline">
+          <input v-model="nativeBarcode" type="checkbox" />
+          <span>Experimental: print barcode natively (printer-drawn, not a bitmap)</span>
+        </label>
+        <p v-if="nativeBarcode" class="hint">
+          Unverified against real hardware - the bars are sent as raw data for the printer's own firmware to draw, which should be sharper than any bitmap, but could just as easily print garbled or blank if this printer doesn't support it the way this assumes. Test one label before a batch.
+        </p>
+
         <h2>Preview</h2>
         <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
-        <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
+        <template v-else>
+          <div class="preview"><canvas ref="previewCanvas"></canvas></div>
+          <p v-if="nativeBarcode" class="hint">Bars print blank here - the printer draws them itself, so this preview can't show what they'll look like.</p>
+        </template>
 
         <h2>Printer</h2>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -430,6 +465,8 @@ h2 { margin: 0; font-size: .95rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
 .field { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .field > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }
+.field.inline { flex-direction: row; align-items: center; gap: .5rem; cursor: pointer; }
+.field.inline > span { font-size: .875rem; color: inherit; }
 .preview { display: flex; justify-content: center; padding: .5rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; }
 .preview canvas { image-rendering: pixelated; max-width: 100%; border: 1px solid var(--zfy-line, #d6dde4); }
 .printer-row { display: flex; align-items: center; gap: .6rem; }

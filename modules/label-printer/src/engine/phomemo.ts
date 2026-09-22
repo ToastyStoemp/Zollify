@@ -1,6 +1,13 @@
 /**
  * Phomemo M110 Bluetooth LE driver.
  *
+ * Built on @capacitor-community/bluetooth-le rather than raw Web Bluetooth:
+ * that plugin provides ONE API that works both as a real Capacitor native
+ * plugin (the Android app - navigator.bluetooth does not exist inside its
+ * WebView) and, when there is no native platform, falls back to Web
+ * Bluetooth itself (desktop Chrome/Edge, Chrome-for-Android as an ordinary
+ * site). This file no longer needs to know which one it's talking to.
+ *
  * The M110 has no public protocol spec - everything below is reverse-engineered
  * community knowledge (sniffed from the vendor Android app), cross-checked
  * across two independent projects:
@@ -42,11 +49,16 @@
  *     500ms after the footer, on top of the 20ms inter-chunk delay already
  *     used here - added below to match, since skipping them is a plausible
  *     second reason for a connected-but-silent printer.
+ *
+ * Genuinely untested: the Android-native path through bluetooth-le (the web
+ * path above was verified live; switching the write/notify plumbing to this
+ * plugin for Android has not been tried against a real device yet).
  */
+import { BleClient, numberToUUID, type BleDevice } from '@capacitor-community/bluetooth-le';
 
-const SERVICE_UUID = 0xff00;
-const WRITE_CHARACTERISTIC_UUID = 0xff02;
-const NOTIFY_CHARACTERISTIC_UUID = 0xff03;
+const SERVICE_UUID = numberToUUID(0xff00);
+const WRITE_CHARACTERISTIC_UUID = numberToUUID(0xff02);
+const NOTIFY_CHARACTERISTIC_UUID = numberToUUID(0xff03);
 
 /** Print head width - fixed by the hardware, not a label setting. */
 export const PRINTER_DOTS_WIDE = 344;
@@ -80,75 +92,100 @@ export interface PhomemoOptions {
   mode?: PrintMode;
 }
 
+/**
+ * Prints the barcode via the printer's own ESC/POS-style native barcode
+ * command (`GS k`) instead of a rasterized bitmap - `gapTopRow`/`gapHeightRows`
+ * mark the blank rows renderLabel() left for it (see label.ts's
+ * `nativeBarcode` option).
+ *
+ * Entirely unverified against a real M110: no source consulted for this
+ * driver (pyphomemo, vivier/phomemo-tools, pippo-label-studio) uses or
+ * documents this command for this printer family - all three only ever use
+ * raster mode. If the firmware doesn't implement `GS k`, or expects
+ * different type/prefix bytes than guessed here, this will print garbage or
+ * nothing rather than falling back - that is the whole reason it is opt-in.
+ */
+export interface NativeBarcode {
+  sku: string;
+  gapTopRow: number;
+  gapHeightRows: number;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class PhomemoPrinter {
-  private device: BluetoothDevice | null = null;
-  private characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+  private device: BleDevice | null = null;
+  private isConnected = false;
+  private initialized = false;
   /**
    * Confirmed live: this device's ff02 characteristic reports
    * writeWithoutResponse=false (Windows WebBluetooth), unlike most
    * printers this protocol was reverse-engineered from. Writing with
-   * the wrong method throws NotSupportedError - silently, if the call
-   * site doesn't surface it - which reads as "connects but prints
-   * nothing". Picked once at connect() time from the real properties.
+   * the wrong method throws, silently, if the call site doesn't surface
+   * it - which reads as "connects but prints nothing". Picked once at
+   * connect() time from the real properties.
    */
   private useWriteWithResponse = false;
-  private notifyCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
+  private hasNotify = false;
+  private lastNotifyAt = 0;
 
   get connected(): boolean {
-    return this.device?.gatt?.connected ?? false;
+    return this.isConnected;
   }
 
   get name(): string | undefined {
     return this.device?.name;
   }
 
-  /** Must be called from a user gesture (a click handler) - Web Bluetooth requirement. */
+  /** Must be called from a user gesture (a click handler) - Web Bluetooth requirement; bluetooth-le carries this through on the web fallback. */
   async connect(): Promise<void> {
-    if (!navigator.bluetooth) throw new Error('This browser has no Web Bluetooth support (Chrome/Edge on desktop or Android only - not Safari or iOS).');
-    // Not filtered by service UUID: `filters: [{ services: [...] }]` only
-    // matches a device that advertises that UUID in its raw BLE advertisement
-    // packet, before any connection - these printers only expose 0xff00 in
-    // their GATT table once connected, so a services filter hides them from
-    // the picker entirely (confirmed against pyphomemo, which discovers the
-    // M110 by device name, not by an advertised service). `acceptAllDevices`
-    // shows every nearby BLE device instead and lets the user pick the
-    // printer by name; `optionalServices` is still required for the 0xff00
-    // lookup below to be allowed once connected.
-    this.device = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      // Web Bluetooth only allows GATT access to services listed here (or in
-      // `filters`) at request time - an unlisted service is invisible even
-      // to `getPrimaryServices()` after connecting. The standard ones below
-      // cost nothing to declare and let `listServices()` show real
-      // manufacturer/device info if the printer happens to expose it, which
-      // is useful for confirming it's actually the right device.
-      optionalServices: [SERVICE_UUID, 'generic_access', 'device_information', 'battery_service'],
+    if (!this.initialized) {
+      // androidNeverForLocation matches this app's manifest declaration
+      // (BLUETOOTH_SCAN usesPermissionFlags="neverForLocation") - scanning
+      // here genuinely never derives location, so the stricter permission
+      // set applies instead of also requiring ACCESS_FINE_LOCATION on API 31+.
+      await BleClient.initialize({ androidNeverForLocation: true });
+      this.initialized = true;
+    }
+    // Not filtered by service: bluetooth-le only passes a `services` filter
+    // through to Web Bluetooth's own device-advertisement filter, which these
+    // printers fail (they only expose 0xff00 in their GATT table once
+    // connected, not in the raw advertisement packet) - confirmed live, see
+    // the file header. Omitting it shows every nearby device instead and
+    // lets the user pick the printer by name; `optionalServices` is still
+    // required for the 0xff00 lookup below to be allowed once connected.
+    this.device = await BleClient.requestDevice({
+      optionalServices: [SERVICE_UUID, numberToUUID(0x1800), numberToUUID(0x180a), numberToUUID(0x180f)],
     });
-    const server = await this.device.gatt?.connect();
-    if (!server) throw new Error('Could not open a GATT connection to the printer.');
-    const service = await server.getPrimaryService(SERVICE_UUID);
-    this.characteristic = await service.getCharacteristic(WRITE_CHARACTERISTIC_UUID);
-    this.useWriteWithResponse = !this.characteristic.properties.writeWithoutResponse;
+    await BleClient.connect(this.device.deviceId, () => {
+      this.isConnected = false;
+    });
+    this.isConnected = true;
+
+    const services = await BleClient.getServices(this.device.deviceId);
+    const service = services.find((s) => s.uuid.toLowerCase() === SERVICE_UUID.toLowerCase());
+    const writeChar = service?.characteristics.find((c) => c.uuid.toLowerCase() === WRITE_CHARACTERISTIC_UUID.toLowerCase());
+    this.useWriteWithResponse = !writeChar?.properties.writeWithoutResponse;
 
     // Best-effort: 'safe' mode uses this if it shows up, but nothing here
     // depends on it existing or on decoding what it sends.
     try {
-      const notify = await service.getCharacteristic(NOTIFY_CHARACTERISTIC_UUID);
-      await notify.startNotifications();
-      this.notifyCharacteristic = notify;
+      await BleClient.startNotifications(this.device.deviceId, SERVICE_UUID, NOTIFY_CHARACTERISTIC_UUID, () => {
+        this.lastNotifyAt = Date.now();
+      });
+      this.hasNotify = true;
     } catch {
-      this.notifyCharacteristic = null;
+      this.hasNotify = false;
     }
   }
 
   disconnect(): void {
-    this.device?.gatt?.disconnect();
-    this.characteristic = null;
-    this.notifyCharacteristic = null;
+    if (this.device) void BleClient.disconnect(this.device.deviceId).catch(() => undefined);
+    this.device = null;
+    this.isConnected = false;
+    this.hasNotify = false;
   }
 
   /**
@@ -160,14 +197,12 @@ export class PhomemoPrinter {
    * and that's the real thing to chase next (not the write logic).
    */
   async listServices(): Promise<string> {
-    const server = this.device?.gatt;
-    if (!server?.connected) throw new Error('Not connected to a printer.');
-    const services = await server.getPrimaryServices();
-    const lines: string[] = [`Device: ${this.device?.name ?? '(unnamed)'}`];
+    if (!this.device || !this.isConnected) throw new Error('Not connected to a printer.');
+    const services = await BleClient.getServices(this.device.deviceId);
+    const lines: string[] = [`Device: ${this.device.name ?? '(unnamed)'}`];
     for (const service of services) {
       lines.push(`Service ${service.uuid}`);
-      const chars = await service.getCharacteristics();
-      for (const c of chars) {
+      for (const c of service.characteristics) {
         const props = Object.entries(c.properties)
           .filter(([, v]) => v)
           .map(([k]) => k)
@@ -178,33 +213,69 @@ export class PhomemoPrinter {
     return lines.join('\n');
   }
 
-  /** Resolves on the first ff03 notification, or after `timeoutMs` - whichever is first. */
+  /** Resolves once a notification has arrived after this call, or after `timeoutMs` - whichever is first. */
   private waitForNotifyOrTimeout(timeoutMs: number): Promise<void> {
-    const notify = this.notifyCharacteristic;
-    if (!notify) return sleep(timeoutMs);
+    if (!this.hasNotify) return sleep(timeoutMs);
+    const armedAt = Date.now();
     return new Promise((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        notify.removeEventListener('characteristicvaluechanged', onNotify);
+      const poll = setInterval(() => {
+        if (this.lastNotifyAt >= armedAt) {
+          clearInterval(poll);
+          resolve();
+        }
+      }, 20);
+      setTimeout(() => {
+        clearInterval(poll);
         resolve();
-      };
-      const onNotify = () => finish();
-      notify.addEventListener('characteristicvaluechanged', onNotify);
-      setTimeout(finish, timeoutMs);
+      }, timeoutMs);
     });
   }
 
   private async write(bytes: number[]): Promise<void> {
-    if (!this.characteristic) throw new Error('Not connected to a printer.');
+    if (!this.device || !this.isConnected) throw new Error('Not connected to a printer.');
+    const deviceId = this.device.deviceId;
     const data = new Uint8Array(bytes);
     for (let i = 0; i < data.length; i += CHUNK_SIZE) {
       const chunk = data.slice(i, i + CHUNK_SIZE);
-      if (this.useWriteWithResponse) await this.characteristic.writeValueWithResponse(chunk);
-      else await this.characteristic.writeValueWithoutResponse(chunk);
+      const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      if (this.useWriteWithResponse) await BleClient.write(deviceId, SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, view);
+      else await BleClient.writeWithoutResponse(deviceId, SERVICE_UUID, WRITE_CHARACTERISTIC_UUID, view);
       await sleep(WRITE_DELAY_MS);
     }
+  }
+
+  /** Sends `rows` as one or more GS-v-0 raster blocks (see printRaster's own docs for the header shape). */
+  private async writeRasterRows(rows: Uint8Array[], bytesPerLine: number): Promise<void> {
+    for (let start = 0; start < rows.length; start += MAX_LINES_PER_BLOCK) {
+      const block = rows.slice(start, start + MAX_LINES_PER_BLOCK);
+      const lineCount = block.length;
+      const header = [
+        0x1d, 0x76, 0x30, 0x00,
+        bytesPerLine & 0xff, (bytesPerLine >> 8) & 0xff,
+        lineCount & 0xff, (lineCount >> 8) & 0xff,
+      ];
+      const body: number[] = [];
+      for (const row of block) body.push(...row);
+      await this.write([...header, ...body]);
+    }
+  }
+
+  /**
+   * Experimental (see NativeBarcode's own doc comment). Guessed shape:
+   * `GS w n` sets module width, `GS h n` sets bar height, `GS H 0` turns off
+   * the printer's own human-readable text under the bars (this driver
+   * already draws the SKU itself, in its own font), and `GS k m n d1..dn`
+   * with m=73 requests CODE128 - prefixed with `{B` per the ESC/POS spec's
+   * code-set selector, the common convention for an alphanumeric payload.
+   */
+  private async writeNativeBarcode(sku: string, heightDots: number): Promise<void> {
+    const moduleWidth = 2;
+    const height = Math.min(255, Math.max(1, Math.round(heightDots)));
+    await this.write([0x1d, 0x77, moduleWidth]);
+    await this.write([0x1d, 0x68, height]);
+    await this.write([0x1d, 0x48, 0x00]);
+    const payload = [0x7b, 0x42, ...[...sku].map((c) => c.charCodeAt(0) & 0xff)]; // '{B' + data
+    await this.write([0x1d, 0x6b, 73, payload.length, ...payload]);
   }
 
   /**
@@ -216,7 +287,7 @@ export class PhomemoPrinter {
    * difference (confirmed live: this is what produced a diagonally
    * garbled print). Split into blocks of `MAX_LINES_PER_BLOCK` automatically.
    */
-  async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}): Promise<void> {
+  async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}, nativeBarcode?: NativeBarcode): Promise<void> {
     const speed = Math.min(5, Math.max(1, options.speed ?? 4));
     const density = Math.min(15, Math.max(1, options.density ?? 8));
     const bytesPerLine = rows[0]?.length ?? PRINTER_BYTES_WIDE;
@@ -232,17 +303,12 @@ export class PhomemoPrinter {
     // same amount of blank stock left over at the bottom).
     await sleep(30);
 
-    for (let start = 0; start < rows.length; start += MAX_LINES_PER_BLOCK) {
-      const block = rows.slice(start, start + MAX_LINES_PER_BLOCK);
-      const lineCount = block.length;
-      const header = [
-        0x1d, 0x76, 0x30, 0x00,
-        bytesPerLine & 0xff, (bytesPerLine >> 8) & 0xff,
-        lineCount & 0xff, (lineCount >> 8) & 0xff,
-      ];
-      const body: number[] = [];
-      for (const row of block) body.push(...row);
-      await this.write([...header, ...body]);
+    if (nativeBarcode) {
+      await this.writeRasterRows(rows.slice(0, nativeBarcode.gapTopRow), bytesPerLine);
+      await this.writeNativeBarcode(nativeBarcode.sku, nativeBarcode.gapHeightRows);
+      await this.writeRasterRows(rows.slice(nativeBarcode.gapTopRow + nativeBarcode.gapHeightRows), bytesPerLine);
+    } else {
+      await this.writeRasterRows(rows, bytesPerLine);
     }
 
     await sleep(300);

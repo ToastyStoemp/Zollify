@@ -1,6 +1,6 @@
 {
   "name": "@zollify/label-printer",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -16,11 +16,12 @@
   "dependencies": {
     "@zollify/sdk": "*",
     "@zollify/shared": "*",
-    "jsbarcode": "^3.11.6"
+    "jsbarcode": "^3.11.6",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor-community/bluetooth-le": "^8.3.0"
   },
   "devDependencies": {
     "@types/jsbarcode": "^3.11.4",
-    "@types/web-bluetooth": "^0.0.20",
     "@vitejs/plugin-vue": "^5.2.0",
     "vite": "^6.0.0",
     "vitest": "^5.0.1",

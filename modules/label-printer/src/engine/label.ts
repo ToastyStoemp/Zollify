@@ -143,12 +143,16 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   // to fill essentially all of their budgeted area (bigger bars decode
   // better), which left near-zero slack for the earlier "center it"
   // treatment to work with and put the SKU text right on the bottom edge.
-  const marginV = Math.max(6, Math.round(heightDots * 0.05));
-  const usableHeight = heightDots - marginV * 2;
+  // Bottom gets more than top: the title's own centering within its area
+  // already gives it visible breathing room, so the bottom needed a bigger
+  // explicit reserve to look even.
+  const marginTop = Math.max(6, Math.round(heightDots * 0.05));
+  const marginBottom = Math.max(14, Math.round(heightDots * 0.1));
+  const usableHeight = heightDots - marginTop - marginBottom;
   const titleAreaHeight = Math.round(usableHeight * 0.42);
   const barcodeAreaHeight = usableHeight - titleAreaHeight;
-  const titleTop = marginV;
-  const barcodeAreaTop = marginV + titleAreaHeight;
+  const titleTop = marginTop;
+  const barcodeAreaTop = marginTop + titleAreaHeight;
 
   // Product name, as large as fits in the title area on up to two lines -
   // stops at a legible floor and truncates rather than shrinking further.

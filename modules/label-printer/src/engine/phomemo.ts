@@ -72,6 +72,8 @@ const WRITE_DELAY_MS = 20;
 const CHUNK_SIZE = 128;
 /** 'safe' mode's cushion on top of the same fixed wait 'continuous' uses - see printRaster. */
 const SAFE_EXTRA_MS = 300;
+/** How long after the last printRaster() call to let the screen-wake lock go - see holdWakeLockDuringPrint. */
+const WAKE_LOCK_RELEASE_DELAY_MS = 5000;
 
 /**
  * 'continuous' (default): paces jobs with the fixed, height-scaled delay
@@ -116,6 +118,43 @@ export class PhomemoPrinter {
   private lastNotifyAt = 0;
   /** Reset on every connect() - see printRaster's own use of this. */
   private printedSinceConnect = false;
+  /**
+   * Android reported issue: the screen locking mid-batch interrupts
+   * printing (same underlying risk as the pacing bugs above - the app
+   * losing foreground can stall or drop the BLE write/notify stream
+   * partway through a job, corrupting whatever prints next). The Screen
+   * Wake Lock API stops the screen itself from locking during a print
+   * run - no new dependency, it's a standard web API the Capacitor
+   * WebView already supports.
+   *
+   * It does NOT cover the other half of that report, switching to a
+   * different app entirely: the wake lock (and, per spec, most page
+   * activity) is released automatically once the WebView is backgrounded,
+   * not just when the screen locks. Keeping BLE alive through that would
+   * need a native Android foreground service - real native/manifest work
+   * this codebase can't build or verify without an APK and a device, so
+   * it isn't attempted here. Switching apps mid-batch is still a real risk.
+   */
+  private wakeLock: { release(): Promise<void> } | null = null;
+  private wakeLockReleaseTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Acquires the wake lock if needed, and (re)starts the timer that releases it a few seconds after the last call - so it stays held continuously across a whole batch without printAll() having to remember to release it itself. Best-effort: unsupported browsers/WebViews just print unprotected, same as before this existed. */
+  private holdWakeLockDuringPrint(): void {
+    clearTimeout(this.wakeLockReleaseTimer);
+    if (!this.wakeLock) {
+      const nav = navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<{ release(): Promise<void> }> } };
+      if (nav.wakeLock) {
+        nav.wakeLock.request('screen').then(
+          (lock) => (this.wakeLock = lock),
+          () => undefined, // e.g. no permission, or the tab isn't visible right now
+        );
+      }
+    }
+    this.wakeLockReleaseTimer = setTimeout(() => {
+      this.wakeLock?.release().catch(() => undefined);
+      this.wakeLock = null;
+    }, WAKE_LOCK_RELEASE_DELAY_MS);
+  }
 
   get connected(): boolean {
     return this.isConnected;
@@ -211,6 +250,9 @@ export class PhomemoPrinter {
     this.device = null;
     this.isConnected = false;
     this.hasNotify = false;
+    clearTimeout(this.wakeLockReleaseTimer);
+    this.wakeLock?.release().catch(() => undefined);
+    this.wakeLock = null;
   }
 
   /**
@@ -295,6 +337,7 @@ export class PhomemoPrinter {
    * garbled print). Split into blocks of `MAX_LINES_PER_BLOCK` automatically.
    */
   async printRaster(rows: Uint8Array[], options: PhomemoOptions = {}): Promise<void> {
+    this.holdWakeLockDuringPrint();
     const speed = Math.min(5, Math.max(1, options.speed ?? 4));
     const density = Math.min(15, Math.max(1, options.density ?? 8));
     const bytesPerLine = rows[0]?.length ?? PRINTER_BYTES_WIDE;

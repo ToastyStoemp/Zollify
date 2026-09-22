@@ -26,12 +26,14 @@ interface Leaf {
   key: string; // `${productId}:${variantId}`
   productId: string;
   variantId: string; // '' for a plain product
-  sku: string;
+  sku: string; // '' for an art print without one - see subLabelFor()
   title: string;
   /** Just the variant's own name, for the indented row - `title` carries the full "Product - Variant" for the printed label and the preview. */
   variantName?: string;
   /** The product's normalized type ('Other' fallback) - fed to shortBarcode() as a cosmetic prefix, not part of what makes the code unique. */
   type: string;
+  /** Product-level (not per-variant) - used by subLabelFor() for art prints. */
+  year?: number;
 }
 interface ProductGroup {
   productId: string;
@@ -43,20 +45,27 @@ interface TypeGroup {
   products: ProductGroup[];
 }
 
+const isArtPrint = (type: string): boolean => type.trim().toLowerCase() === 'art print';
+
 const typeGroups = computed<TypeGroup[]>(() => {
   const byType = new Map<string, ProductGroup[]>();
   for (const p of sdk().data.products.list()) {
     const type = p.type?.trim() || 'Other';
+    // Art prints in this catalogue are rarely given a SKU (there's nothing
+    // to code - each is a one-off piece), which used to drop all of them
+    // from this list entirely (barcode encoding still works fine without
+    // one: shortBarcode() is derived from productId/variantId, not sku).
+    const artPrint = isArtPrint(type);
     const leaves: Leaf[] =
       p.variants.length > 0
         ? p.variants
             .filter((v) => !v.unlisted)
             .map((v) => {
               const variantName = v.name?.trim() || '(unnamed)';
-              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type };
+              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type, year: p.year };
             })
-            .filter((l) => l.sku)
-        : (p.sku?.trim() ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku.trim(), title: p.title || '(untitled)', type }] : []);
+            .filter((l) => l.sku || artPrint)
+        : (p.sku?.trim() || artPrint ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku?.trim() || '', title: p.title || '(untitled)', type, year: p.year }] : []);
     if (!leaves.length) continue;
     const group: ProductGroup = { productId: p.id, title: p.title || '(untitled)', leaves };
     (byType.get(type) ?? byType.set(type, []).get(type)!).push(group);
@@ -65,6 +74,20 @@ const typeGroups = computed<TypeGroup[]>(() => {
 });
 const allLeaves = computed(() => typeGroups.value.flatMap((g) => g.products.flatMap((p) => p.leaves)));
 const skippedCount = computed(() => sdk().data.products.list().length - typeGroups.value.reduce((n, g) => n + g.products.length, 0));
+
+/**
+ * Text under the barcode, and the identifying code shown in the product
+ * tree: the real SKU when there is one, otherwise (art prints) the artist's
+ * name and the artwork's year - the same "Title (Year)" pairing customs
+ * documents already use, just artist-led here since the title is already
+ * the label's own heading.
+ */
+function subLabelFor(l: Leaf): string {
+  if (l.sku) return l.sku;
+  const a = sdk().account()?.profile.artist;
+  const artist = (a?.companyName || a?.fullName || '').trim();
+  return [artist, l.year].filter(Boolean).join(' · ');
+}
 
 // ── Search ───────────────────────────────────────────────────────────────────
 const search = ref('');
@@ -200,7 +223,7 @@ function redrawPreview(): void {
   const canvas = previewCanvas.value;
   const l = previewLeaf.value;
   if (!canvas) return;
-  renderLabel(canvas, labelSize.value, l.sku, l.title, {
+  renderLabel(canvas, labelSize.value, subLabelFor(l), l.title, {
     titleScale: titleScale.value,
     barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
     showSkuText: showSkuText.value,
@@ -283,7 +306,7 @@ async function printAll(): Promise<void> {
   try {
     outer: for (const l of chosen.value) {
       const copies = Math.max(1, qty[l.key] ?? 1);
-      renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
+      renderLabel(workCanvas, labelSize.value, subLabelFor(l), l.title, {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
@@ -331,7 +354,7 @@ async function exportPngs(): Promise<void> {
   exportProgress.value = { done: 0, total: chosen.value.length };
   try {
     for (const l of chosen.value) {
-      renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
+      renderLabel(workCanvas, labelSize.value, subLabelFor(l), l.title, {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
@@ -423,7 +446,7 @@ async function printTestLabel(): Promise<void> {
                   <label class="pick">
                     <input type="checkbox" :checked="leafState(productKeys(p)) === 'all'" v-indeterminate="leafState(productKeys(p)) === 'some'" @change="toggleProduct(p)" />
                     <span class="label">{{ p.title }}</span>
-                    <span v-if="p.leaves.length === 1" class="sku">{{ p.leaves[0]!.sku }}</span>
+                    <span v-if="p.leaves.length === 1" class="sku">{{ subLabelFor(p.leaves[0]!) }}</span>
                     <span v-else class="sub">{{ p.leaves.length }} variants</span>
                   </label>
                   <input v-if="p.leaves.length === 1 && selected.has(p.leaves[0]!.key)" v-model.number="qty[p.leaves[0]!.key]" type="number" min="1" inputmode="numeric" class="qty" aria-label="Copies" />
@@ -433,7 +456,7 @@ async function printTestLabel(): Promise<void> {
                     <label class="pick">
                       <input type="checkbox" :checked="selected.has(l.key)" @change="toggleLeaf(l)" />
                       <span class="label">{{ l.variantName }}</span>
-                      <span class="sku">{{ l.sku }}</span>
+                      <span class="sku">{{ subLabelFor(l) }}</span>
                     </label>
                     <input v-if="selected.has(l.key)" v-model.number="qty[l.key]" type="number" min="1" inputmode="numeric" class="qty" aria-label="Copies" />
                   </li>

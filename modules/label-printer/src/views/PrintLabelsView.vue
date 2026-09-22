@@ -181,9 +181,13 @@ watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
 watch(titleScale, (v) => void sdk().config.set('titleScale', v));
 
+// ── Test label: preview/print without picking a real product ────────────────
+const TEST_LEAF: Leaf = { key: '__test__', productId: '__test__', variantId: '', sku: 'TEST-0000001', title: 'Test Label', type: 'Test' };
+const showTestPreview = ref(false);
+
 // ── Preview: redraws whenever the first chosen leaf or the label size changes ──
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
-const previewLeaf = computed(() => chosen.value[0] ?? null);
+const previewLeaf = computed(() => (showTestPreview.value ? TEST_LEAF : chosen.value[0] ?? null));
 function redrawPreview(): void {
   const canvas = previewCanvas.value;
   const l = previewLeaf.value;
@@ -287,6 +291,27 @@ async function printAll(): Promise<void> {
 function cancelPrint(): void {
   cancelRequested.value = true;
 }
+
+async function printTestLabel(): Promise<void> {
+  if (!printer.connected) {
+    error.value = 'Connect the printer first.';
+    return;
+  }
+  error.value = null;
+  busy.value = true;
+  try {
+    renderLabel(workCanvas, labelSize.value, TEST_LEAF.sku, TEST_LEAF.title, {
+      titleScale: titleScale.value,
+      barcodeValue: shortBarcode(TEST_LEAF.type, TEST_LEAF.productId, TEST_LEAF.variantId || undefined),
+    });
+    const rows = rasterizeCanvas(workCanvas);
+    await printer.printRaster(rows, { speed: speed.value, density: density.value, mode: printMode.value });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Test print failed.';
+  } finally {
+    busy.value = false;
+  }
+}
 </script>
 
 <template>
@@ -381,6 +406,10 @@ function cancelPrint(): void {
         </label>
 
         <h2>Preview</h2>
+        <label class="field inline">
+          <input v-model="showTestPreview" type="checkbox" />
+          <span>Show a test label instead</span>
+        </label>
         <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
         <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
 
@@ -402,6 +431,7 @@ function cancelPrint(): void {
           <button type="button" class="quiet" v-if="busy" :disabled="cancelRequested" @click="cancelPrint">
             {{ cancelRequested ? 'Stopping…' : 'Cancel' }}
           </button>
+          <button type="button" class="quiet" :disabled="!printerName || busy" @click="printTestLabel">Print test label</button>
         </div>
 
         <template v-if="printerName">
@@ -460,4 +490,20 @@ h2 { margin: 0; font-size: .95rem; }
 .printer-row { display: flex; align-items: center; gap: .6rem; }
 .printer-row .full { flex: 1; width: 100%; }
 .device-info { margin: 0; padding: .6rem .7rem; background: var(--zfy-bg, #f1f4f6); border-radius: 8px; font-size: .78rem; white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto; }
+
+/* The grid's column minimums (20rem + 16rem + gap) never fit a phone width,
+   so the columns overflowed the viewport instead of shrinking - confirmed
+   from a phone screenshot showing the product list bleeding off the left
+   edge and the settings card floating over it rather than stacking below. */
+@media (max-width: 640px) {
+  /* A 1fr track still won't shrink below its content's intrinsic min-width
+     by default (grid items get an implicit min-width:auto) - confirmed
+     live, the card was 425px wide forcing horizontal scroll on a 375px
+     phone even after this collapsed to one column, because the SKU column's
+     nowrap text set that minimum. min-width:0 here is what actually lets it
+     shrink to the viewport; ellipsis further down still keeps SKUs legible. */
+  .grid, .grid > .card { min-width: 0; }
+  .grid { grid-template-columns: 1fr; }
+  .products { max-height: none; }
+}
 </style>

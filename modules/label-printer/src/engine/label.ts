@@ -99,11 +99,21 @@ export interface RenderLabelOptions {
  * doesn't fit - a long SKU on a small label - does this fall back to
  * scaling, which is unavoidable at that point.
  */
-function fitBarcodeCanvas(payload: string, maxWidth: number, height: number): { canvas: HTMLCanvasElement; scaled: boolean } {
+/** jsbarcode adds this much white space on every side of the canvas ON TOP of the `height`/`width` it's given - `height` sizes the bars themselves, not the output canvas. */
+const BARCODE_MARGIN = 8;
+
+function fitBarcodeCanvas(payload: string, maxWidth: number, totalHeight: number): { canvas: HTMLCanvasElement; scaled: boolean } {
+  // Not accounting for BARCODE_MARGIN here used to size the bars to
+  // `totalHeight` directly, so the real output canvas came back
+  // `totalHeight + 2*BARCODE_MARGIN` tall - taller than the space this was
+  // budgeted for. Confirmed live: it pushed the SKU text drawn right below
+  // it partway off the bottom edge of the label, clipping the last few
+  // pixel-rows of every character.
+  const barsOnlyHeight = Math.max(4, totalHeight - BARCODE_MARGIN * 2);
   let last: HTMLCanvasElement | null = null;
   for (let width = 3; width >= 1; width--) {
     const canvas = document.createElement('canvas');
-    JsBarcode(canvas, payload, { format: 'CODE128', displayValue: false, margin: 8, width, height });
+    JsBarcode(canvas, payload, { format: 'CODE128', displayValue: false, margin: BARCODE_MARGIN, width, height: barsOnlyHeight });
     if (canvas.width <= maxWidth) return { canvas, scaled: false };
     last = canvas;
   }

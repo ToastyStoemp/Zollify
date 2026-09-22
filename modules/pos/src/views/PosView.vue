@@ -82,6 +82,7 @@ function tapTerminalState(): void {
 onMounted(async () => {
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
+  cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
   const event = activeEvent.value;
   cart.eventId = event?.id ?? null;
   const base = event?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'CHF';
@@ -219,6 +220,84 @@ const scannerVideo = ref<HTMLVideoElement | null>(null);
 let scannerStream: MediaStream | null = null;
 let scannerTimer: ReturnType<typeof setInterval> | undefined;
 
+// Chrome/Android has a known unfixed bug (crbug 40749120): facingMode
+// "environment" sometimes binds to a phone's telephoto lens instead of the
+// main wide one, which looks exactly like "the camera is zoomed in" and
+// can't be fixed with a zoom constraint (that only zooms *within* whichever
+// lens got picked). No reliable way to detect which lens is which from
+// enumerateDevices() labels across vendors, so instead: let the user cycle
+// through the phone's cameras once and remember which one worked.
+const cameraDeviceId = ref<string | null>(null);
+const cameraDevices = ref<MediaDeviceInfo[]>([]);
+const currentCameraId = ref<string | null>(null);
+
+/** ideal, not exact: zoom/focusMode are non-standard and a bare value would be an EXACT constraint - if the device's range doesn't include it exactly, the whole `advanced` set gets skipped rather than getting as close as it can. */
+const BASE_CAMERA_CONSTRAINTS: ScannerVideoConstraints = {
+  // 1920x1080 ideal, not a smaller size: some phones asked for a resolution
+  // well under their native sensor mode hand back a CENTER-CROPPED region
+  // instead of a full-frame downscale - a real Android camera-HAL quirk
+  // that also looks exactly like "zoomed in".
+  width: { ideal: 1920 },
+  height: { ideal: 1080 },
+  advanced: [{ focusMode: 'continuous' }, { zoom: { ideal: 1 } }],
+};
+
+async function startCamera(deviceId?: string): Promise<void> {
+  scannerStream?.getTracks().forEach((t) => t.stop());
+  const constraints: ScannerVideoConstraints = deviceId
+    ? { ...BASE_CAMERA_CONSTRAINTS, deviceId: { exact: deviceId } }
+    : { ...BASE_CAMERA_CONSTRAINTS, facingMode: { ideal: 'environment' } };
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: constraints });
+  } catch {
+    // Saved device is gone (unplugged, permissions reset elsewhere) - fall
+    // back to the default pick rather than failing outright.
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { ...BASE_CAMERA_CONSTRAINTS, facingMode: { ideal: 'environment' } } });
+  }
+  const video = scannerVideo.value;
+  if (!video) throw new Error('Could not open the camera view.');
+  video.srcObject = scannerStream;
+  await video.play();
+
+  // Genuinely can't verify camera behaviour remotely - this is the
+  // practical alternative: show exactly what the device actually granted,
+  // so "still zoomed in" becomes a fact (the wrong resolution/zoom value)
+  // instead of another guess to chase blind.
+  const track = scannerStream.getVideoTracks()[0];
+  const settings = track?.getSettings() as MediaTrackSettings & { zoom?: number; focusMode?: string };
+  currentCameraId.value = settings?.deviceId ?? null;
+  if (settings) {
+    const bits = [
+      settings.width && settings.height ? `${settings.width}x${settings.height}` : null,
+      settings.zoom != null ? `zoom ${settings.zoom}` : null,
+      settings.facingMode ? settings.facingMode : null,
+      track?.label || null,
+    ].filter(Boolean);
+    scannerInfo.value = bits.join(' · ');
+  }
+
+  // Device labels are only populated once permission is granted - the
+  // getUserMedia call above is what grants it, so this has to run after.
+  // Only once per session: the device list doesn't change while open.
+  if (!cameraDevices.value.length) {
+    const all = await navigator.mediaDevices.enumerateDevices();
+    cameraDevices.value = all.filter((d) => d.kind === 'videoinput');
+  }
+}
+
+async function cycleCamera(): Promise<void> {
+  if (cameraDevices.value.length < 2) return;
+  const i = cameraDevices.value.findIndex((d) => d.deviceId === currentCameraId.value);
+  const next = cameraDevices.value[(i + 1) % cameraDevices.value.length]!;
+  try {
+    await startCamera(next.deviceId);
+    cameraDeviceId.value = next.deviceId;
+    void sdk().config.set('cameraDeviceId', next.deviceId);
+  } catch (err) {
+    scannerError.value = err instanceof Error ? err.message : 'Could not switch camera.';
+  }
+}
+
 async function openScanner(): Promise<void> {
   if (!scannerSupported) return toast('Barcode scanning needs a newer Chrome or Edge - not available on this device.', 'bad');
   scannerError.value = null;
@@ -226,46 +305,7 @@ async function openScanner(): Promise<void> {
   scannerOpen.value = true;
   await nextTick();
   try {
-    // Ideal, not a bare/exact value: zoom and focusMode are non-standard
-    // (hence `advanced`, which a browser that doesn't understand them just
-    // ignores instead of rejecting the request), but a bare value there is
-    // an EXACT constraint - if the device's zoom range doesn't include
-    // exactly 1.0, the whole advanced set gets skipped rather than getting
-    // as close as it can. `ideal` degrades instead of giving up.
-    //
-    // width/height ideal closer to a real 16:9 sensor mode (1920x1080)
-    // rather than a small one (1280x720 previously): some phones, asked for
-    // a resolution well under their native mode, hand back a CENTER-CROPPED
-    // region of the sensor instead of a full-frame downscale - a real
-    // Android camera-HAL quirk on some devices, and would look exactly like
-    // "zoomed in" independent of any actual optical zoom or CSS cropping.
-    const videoConstraints: ScannerVideoConstraints = {
-      facingMode: { ideal: 'environment' },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-      advanced: [{ focusMode: 'continuous' }, { zoom: { ideal: 1 } }],
-    };
-    scannerStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
-    const video = scannerVideo.value;
-    if (!video) throw new Error('Could not open the camera view.');
-    video.srcObject = scannerStream;
-    await video.play();
-
-    // Genuinely can't verify camera behaviour remotely - this is the
-    // practical alternative: show exactly what the device actually granted,
-    // so "still zoomed in" becomes a fact (the wrong resolution/zoom value)
-    // instead of another guess to chase blind.
-    const track = scannerStream.getVideoTracks()[0];
-    const settings = track?.getSettings() as MediaTrackSettings & { zoom?: number; focusMode?: string };
-    if (settings) {
-      const bits = [
-        settings.width && settings.height ? `${settings.width}x${settings.height}` : null,
-        settings.zoom != null ? `zoom ${settings.zoom}` : null,
-        settings.facingMode ? settings.facingMode : null,
-        track?.label || null,
-      ].filter(Boolean);
-      scannerInfo.value = bits.join(' · ');
-    }
+    await startCamera(cameraDeviceId.value ?? undefined);
 
     const Detector = (window as unknown as { BarcodeDetector: BarcodeDetectorCtor }).BarcodeDetector;
     const detector = new Detector({ formats: ['code_128'] });
@@ -767,7 +807,12 @@ async function cancelPayment(): Promise<void> {
     <!-- ── Barcode scanner ───────────────────────────────────────────────── -->
     <ModalShell v-if="scannerOpen" title="Scan barcode" @close="closeScanner">
       <p v-if="scannerError" class="warn">{{ scannerError }}</p>
-      <video ref="scannerVideo" class="scanner-video" autoplay playsinline muted></video>
+      <div class="scanner-wrap">
+        <video ref="scannerVideo" class="scanner-video" autoplay playsinline muted></video>
+        <button v-if="cameraDevices.length > 1" type="button" class="quiet iconbtn scanner-switch" aria-label="Switch camera" title="Switch camera" @click="cycleCamera">
+          <Icon name="refresh-cw" :size="16" />
+        </button>
+      </div>
       <p class="hint">Point the camera at a barcode.</p>
       <p v-if="scannerInfo" class="hint mono">{{ scannerInfo }}</p>
     </ModalShell>
@@ -885,7 +930,10 @@ async function cancelPayment(): Promise<void> {
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
+.scanner-wrap { position: relative; }
 .scanner-video { width: 100%; max-height: 60vh; border-radius: 10px; background: #000; object-fit: contain; }
+.scanner-switch { position: absolute; top: .5rem; right: .5rem; background: rgba(0, 0, 0, .5); color: #fff; }
+.scanner-switch:hover { background: rgba(0, 0, 0, .7); color: #fff; }
 .hint.mono { font-family: ui-monospace, monospace; font-size: .72rem; word-break: break-word; }
 .modes { display: flex; gap: .3rem; }
 .pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }

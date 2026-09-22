@@ -70,17 +70,20 @@ const MAX_LINES_PER_BLOCK = 240;
 /** Delay between GATT writes - the M110's BLE stack is slow; back-to-back writes without this drop bytes in practice on similar community drivers. Tune down if reliable. */
 const WRITE_DELAY_MS = 20;
 const CHUNK_SIZE = 128;
+/** 'safe' mode's cushion on top of the same fixed wait 'continuous' uses - see printRaster. */
+const SAFE_EXTRA_MS = 300;
 
 /**
  * 'continuous' (default): paces jobs with the fixed, height-scaled delay
  * only - fast, but that delay is a guess (see printRaster).
- * 'safe': after each label, also arms a race between any notification on
- * ff03 and that same delay as a timeout ceiling, proceeding on whichever
- * comes first. Whether this printer's ff03 notifications actually mean
- * "done printing" is unconfirmed - nothing here decodes their content, it
- * only treats arrival as a hint - so 'safe' is a best-effort adaptive
- * pacing, not a verified handshake. If ff03 never notifies (unsupported
- * firmware), it behaves identically to 'continuous'.
+ * 'safe': waits that same fixed delay first, THEN an extra cushion on top -
+ * shortened if a fresh ff03 notification arrives during the cushion, but
+ * never shorter than 'continuous' outright. (An earlier version raced the
+ * notification against the fixed delay instead of adding to it, so it could
+ * finish at or before 'continuous' - strictly no safer, and worse if this
+ * printer's ff03 fires on something other than "done printing", which is
+ * unconfirmed; nothing here decodes what it actually sends.) If ff03 never
+ * notifies (unsupported firmware), the cushion just runs its full length.
  */
 export type PrintMode = 'continuous' | 'safe';
 
@@ -297,7 +300,15 @@ export class PhomemoPrinter {
     // was enough) with headroom; not verified against real hardware at
     // other heights - tighten only with a batch print that stays clean.
     const settleMs = Math.max(500, Math.round(rows.length * 3));
-    if ((options.mode ?? 'continuous') === 'safe') await this.waitForNotifyOrTimeout(settleMs);
-    else await sleep(settleMs);
+    // Always the same base wait as 'continuous' first - 'safe' is meant to
+    // be the MORE cautious option, but racing notify-vs-settleMs (as this
+    // used to) can only ever finish at or before settleMs, never after.
+    // Confirmed live: switching to 'safe' did not fix batches still coming
+    // out corrupted at the boundary between different labels, consistent
+    // with ff03 notifying on something other than "motor fully done" and
+    // that race cutting the wait short. Notify can now only ADD wait time
+    // on top of the same guess 'continuous' uses, never remove it.
+    await sleep(settleMs);
+    if ((options.mode ?? 'continuous') === 'safe') await this.waitForNotifyOrTimeout(SAFE_EXTRA_MS);
   }
 }

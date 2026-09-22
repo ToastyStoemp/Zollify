@@ -125,8 +125,11 @@ export class PhomemoPrinter {
     return this.device?.name;
   }
 
-  /** Must be called from a user gesture (a click handler) - Web Bluetooth requirement; bluetooth-le carries this through on the web fallback. */
-  async connect(): Promise<void> {
+  get deviceId(): string | undefined {
+    return this.device?.deviceId;
+  }
+
+  private async ensureInitialized(): Promise<void> {
     if (!this.initialized) {
       // androidNeverForLocation matches this app's manifest declaration
       // (BLUETOOTH_SCAN usesPermissionFlags="neverForLocation") - scanning
@@ -135,6 +138,11 @@ export class PhomemoPrinter {
       await BleClient.initialize({ androidNeverForLocation: true });
       this.initialized = true;
     }
+  }
+
+  /** Must be called from a user gesture (a click handler) - Web Bluetooth requirement; bluetooth-le carries this through on the web fallback. */
+  async connect(): Promise<void> {
+    await this.ensureInitialized();
     // Not filtered by service: bluetooth-le only passes a `services` filter
     // through to Web Bluetooth's own device-advertisement filter, which these
     // printers fail (they only expose 0xff00 in their GATT table once
@@ -145,6 +153,36 @@ export class PhomemoPrinter {
     this.device = await BleClient.requestDevice({
       optionalServices: [SERVICE_UUID, numberToUUID(0x1800), numberToUUID(0x180a), numberToUUID(0x180f)],
     });
+    await this.finishConnecting();
+  }
+
+  /**
+   * Reconnect to a device this page already has permission for, from a
+   * remembered deviceId - no requestDevice() picker, and so no user gesture
+   * needed (only requestDevice's chooser UI has that requirement; connecting
+   * a device already granted does not). This is what a plain page reload
+   * "why do I have to reconnect a paired device" runs into: Web Bluetooth
+   * has no automatic reconnect at all, but Chrome (desktop and Android, not
+   * Safari/iOS) exposes getDevices() to look up a previously-granted device
+   * by id without a new chooser - this uses that where it's available and
+   * falls back to `false` everywhere else, so the caller can silently fall
+   * back to the manual Connect button.
+   */
+  async tryReconnect(deviceId: string): Promise<boolean> {
+    try {
+      await this.ensureInitialized();
+      const [device] = await BleClient.getDevices([deviceId]);
+      if (!device) return false;
+      this.device = device;
+      await this.finishConnecting();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async finishConnecting(): Promise<void> {
+    if (!this.device) throw new Error('No device to connect to.');
     await BleClient.connect(this.device.deviceId, () => {
       this.isConnected = false;
     });

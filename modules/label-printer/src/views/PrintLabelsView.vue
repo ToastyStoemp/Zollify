@@ -191,16 +191,15 @@ const showTestPreview = ref(false);
 
 // ── Preview: redraws whenever the first chosen leaf or the label size changes ──
 const previewCanvas = ref<HTMLCanvasElement | null>(null);
-const previewLeaf = computed(() => (showTestPreview.value ? TEST_LEAF : chosen.value[0] ?? null));
+// Falls back to the test label rather than an empty state whenever nothing
+// real is picked yet - a blank "pick a product" preview told the operator
+// nothing about whether the printer/settings actually work, and the test
+// label exists for exactly that.
+const previewLeaf = computed(() => (showTestPreview.value ? TEST_LEAF : (chosen.value[0] ?? TEST_LEAF)));
 function redrawPreview(): void {
   const canvas = previewCanvas.value;
   const l = previewLeaf.value;
   if (!canvas) return;
-  if (!l) {
-    canvas.width = 0;
-    canvas.height = 0;
-    return;
-  }
   renderLabel(canvas, labelSize.value, l.sku, l.title, {
     titleScale: titleScale.value,
     barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
@@ -228,6 +227,7 @@ async function connect(): Promise<void> {
   try {
     await printer.connect();
     printerName.value = printer.name ?? 'Printer';
+    if (printer.deviceId) void sdk().config.set('printerDeviceId', printer.deviceId);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not connect to the printer.';
   }
@@ -238,6 +238,20 @@ function disconnect(): void {
   deviceInfo.value = null;
 }
 onUnmounted(() => printer.disconnect());
+
+// A plain page reload always drops the JS connection even though the
+// browser/OS still has the device paired - Web Bluetooth has no automatic
+// reconnect, and a fresh requestDevice() would need another user click just
+// to pick the same device again. This tries the silent path instead (see
+// tryReconnect's own docs for what "silent" can and can't do) and just
+// leaves the normal Connect button in place if it doesn't pan out.
+onMounted(async () => {
+  if (!bluetoothSupported) return;
+  const savedId = await sdk().config.get<string>('printerDeviceId');
+  if (!savedId) return;
+  const ok = await printer.tryReconnect(savedId);
+  if (ok) printerName.value = printer.name ?? 'Printer';
+});
 
 /**
  * Web Bluetooth has no "list nearby devices" API - only the native picker
@@ -426,51 +440,12 @@ async function printTestLabel(): Promise<void> {
       </article>
 
       <article class="card">
-        <h2>Label size</h2>
-        <div class="two">
-          <label class="field"><span>Width (mm)</span><input v-model.number="labelSize.widthMm" type="number" min="10" max="43" inputmode="numeric" /></label>
-          <label class="field"><span>Height (mm)</span><input v-model.number="labelSize.heightMm" type="number" min="10" max="200" inputmode="numeric" /></label>
-        </div>
-        <p class="hint">Print head is fixed at 43mm wide - width above that is clamped. Match this to the label roll actually loaded.</p>
-
-        <h2>Print settings</h2>
-        <div class="two">
-          <label class="field"><span>Speed (1-5)</span><input v-model.number="speed" type="number" min="1" max="5" inputmode="numeric" /></label>
-          <label class="field"><span>Density (1-15)</span><input v-model.number="density" type="number" min="1" max="15" inputmode="numeric" /></label>
-        </div>
-        <label class="field">
-          <span>Batch pacing</span>
-          <select v-model="printMode">
-            <option value="continuous">Continuous - fixed delay, fastest</option>
-            <option value="safe">Safe - waits on printer feedback when available</option>
-          </select>
-        </label>
-        <p class="hint">Safe paces off the printer's own notifications between labels instead of a fixed guess - try it if batches come out ghosted or misaligned.</p>
-        <p class="hint">Not verified against real hardware - adjust if prints come out too light, dark, or fast to feed cleanly.</p>
-
-        <label class="field">
-          <span>Title size ({{ Math.round(titleScale * 100) }}%)</span>
-          <input v-model.number="titleScale" type="range" min="0.5" max="1.5" step="0.05" />
-        </label>
-
-        <label class="field inline">
-          <input v-model="showSkuText" type="checkbox" />
-          <span>Print SKU number under the barcode</span>
-        </label>
-
         <h2>Preview</h2>
         <label class="field inline">
           <input v-model="showTestPreview" type="checkbox" />
           <span>Show a test label instead</span>
         </label>
-        <p v-if="!previewLeaf" class="empty">Pick a product to preview its label.</p>
-        <div v-else class="preview"><canvas ref="previewCanvas"></canvas></div>
-
-        <h2>Export</h2>
-        <p class="hint">Printer trouble? Export the selected labels as PNG images instead - pixel-for-pixel what would print, importable into another app's own "custom label from picture" feature (e.g. LabelLife) to print through its own connection.</p>
-        <button type="button" class="quiet" :disabled="!chosen.length || exporting" @click="exportPngs">
-          {{ exporting ? `Exporting ${exportProgress?.done ?? 0} / ${exportProgress?.total ?? 0}…` : `Export ${chosen.length} image${chosen.length === 1 ? '' : 's'}` }}
-        </button>
+        <div class="preview"><canvas ref="previewCanvas"></canvas></div>
 
         <h2>Printer</h2>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -498,13 +473,55 @@ async function printTestLabel(): Promise<void> {
           <p class="hint">Nothing prints? This lists what GATT services this exact device has - if 0xff00 isn't in there, this driver's assumptions don't match your unit's firmware.</p>
           <pre v-if="deviceInfo" class="device-info">{{ deviceInfo }}</pre>
         </template>
+
+        <h2>Export</h2>
+        <p class="hint">Printer trouble? Export the selected labels as PNG images instead - pixel-for-pixel what would print, importable into another app's own "custom label from picture" feature (e.g. LabelLife) to print through its own connection.</p>
+        <button type="button" class="quiet" :disabled="!chosen.length || exporting" @click="exportPngs">
+          {{ exporting ? `Exporting ${exportProgress?.done ?? 0} / ${exportProgress?.total ?? 0}…` : `Export ${chosen.length} image${chosen.length === 1 ? '' : 's'}` }}
+        </button>
+
+        <details class="adv">
+          <summary>Label &amp; printer settings</summary>
+
+          <h2>Label size</h2>
+          <div class="two">
+            <label class="field"><span>Width (mm)</span><input v-model.number="labelSize.widthMm" type="number" min="10" max="43" inputmode="numeric" /></label>
+            <label class="field"><span>Height (mm)</span><input v-model.number="labelSize.heightMm" type="number" min="10" max="200" inputmode="numeric" /></label>
+          </div>
+          <p class="hint">Print head is fixed at 43mm wide - width above that is clamped. Match this to the label roll actually loaded.</p>
+
+          <h2>Print settings</h2>
+          <div class="two">
+            <label class="field"><span>Speed (1-5)</span><input v-model.number="speed" type="number" min="1" max="5" inputmode="numeric" /></label>
+            <label class="field"><span>Density (1-15)</span><input v-model.number="density" type="number" min="1" max="15" inputmode="numeric" /></label>
+          </div>
+          <label class="field">
+            <span>Batch pacing</span>
+            <select v-model="printMode">
+              <option value="continuous">Continuous - fixed delay, fastest</option>
+              <option value="safe">Safe - waits on printer feedback when available</option>
+            </select>
+          </label>
+          <p class="hint">Safe paces off the printer's own notifications between labels instead of a fixed guess - try it if batches come out ghosted or misaligned.</p>
+          <p class="hint">Not verified against real hardware - adjust if prints come out too light, dark, or fast to feed cleanly.</p>
+
+          <label class="field">
+            <span>Title size ({{ Math.round(titleScale * 100) }}%)</span>
+            <input v-model.number="titleScale" type="range" min="0.5" max="1.5" step="0.05" />
+          </label>
+
+          <label class="field inline">
+            <input v-model="showSkuText" type="checkbox" />
+            <span>Print SKU number under the barcode</span>
+          </label>
+        </details>
       </article>
     </div>
   </section>
 </template>
 
 <style scoped>
-.labels { display: flex; flex-direction: column; gap: 1rem; max-width: 64rem; }
+.labels { display: flex; flex-direction: column; gap: 1rem; max-width: 96rem; }
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: .95rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); margin: 0; }
@@ -512,9 +529,17 @@ h2 { margin: 0; font-size: .95rem; }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); font-size: .9rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; }
-.grid { display: grid; grid-template-columns: minmax(20rem, 2fr) minmax(16rem, 1fr); gap: 1rem; align-items: start; }
+.grid { display: grid; grid-template-columns: minmax(20rem, 3fr) minmax(18rem, 2fr); gap: 1rem; align-items: start; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .products { max-height: 40rem; }
+/* More vertical room to work with once the layout is wide enough for two
+   real columns side by side, instead of the same fixed height as a phone. */
+@media (min-width: 1024px) {
+  .products { max-height: min(56rem, calc(100vh - 14rem)); }
+}
+.adv { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .6rem; display: flex; flex-direction: column; gap: .6rem; }
+.adv summary { cursor: pointer; font-size: .9rem; font-weight: 600; color: var(--zfy-muted, #5a6472); }
+.adv[open] summary { color: inherit; margin-bottom: .2rem; }
 
 .quick { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .quick .count { margin-left: auto; font-size: .8rem; color: var(--zfy-muted, #5a6472); }

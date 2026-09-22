@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import type { EventStock, SalesEvent } from '@zollify/shared';
+import { htmlToPdf } from '@zollify/ui';
 import { buildCustomsDeState, readCustomsDeBlob } from '../engine/adapter';
 import { calcDeProduct, fmtWeightKg } from '../engine/calc';
 import { buildPackingListHtml, type PackingListFormat } from '../engine/packing-list';
@@ -173,7 +174,28 @@ const reimportTotals = computed(() => {
 const safeName = (suffix: string): string => `${(event.value?.name || 'event').replace(/[^\w-]+/g, '_')}_${suffix}`;
 /** Inline fallback for when the browser blocks the new-tab popup - same behaviour as the CH module. */
 const preview = ref('');
+/**
+ * "Save as PDF" generates a real PDF client-side instead of relying on the
+ * browser's print dialog, which has no equivalent in the Android app's
+ * Capacitor WebView (window.print() is a no-op there) - see htmlToPdf() in
+ * @zollify/ui for the mechanism, shared with the Swiss customs module.
+ */
+const saveAsPdf = ref(false);
+const pdfBusy = ref(false);
 async function openHtml(source: string, name: string): Promise<void> {
+  if (saveAsPdf.value) {
+    pdfBusy.value = true;
+    error.value = null;
+    try {
+      const pdf = await htmlToPdf(source);
+      await sdk().ui.saveFile(`${name}.pdf`, pdf, 'application/pdf');
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Could not generate the PDF.';
+    } finally {
+      pdfBusy.value = false;
+    }
+    return;
+  }
   const opened = await sdk().ui.openDocument(`${name}.html`, source);
   preview.value = opened ? '' : source;
 }
@@ -277,7 +299,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
         <div class="sheet-head">
           <h2>IAA-Plus filing sheet</h2>
           <div class="docs">
-            <button type="button" class="ghost" @click="printIaaPlusSheet">Print / save copy</button>
+            <button type="button" class="ghost" :disabled="pdfBusy" @click="printIaaPlusSheet">Print / save copy</button>
             <button type="button" class="chevron" :class="{ open: sheetOpen }" @click="sheetOpen = !sheetOpen" aria-label="Toggle IAA-Plus filing sheet"><span>▸</span></button>
           </div>
         </div>
@@ -388,10 +410,19 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
             <button v-for="o in packingFormatOptions" :key="o.value" type="button" :class="{ on: packingFormat === o.value }" @click="packingFormat = o.value">{{ o.label }}</button>
           </div>
         </div>
+        <div class="fmt">
+          <span class="hint">On open</span>
+          <div class="seg">
+            <button type="button" :class="{ on: !saveAsPdf }" @click="saveAsPdf = false">View</button>
+            <button type="button" :class="{ on: saveAsPdf }" @click="saveAsPdf = true">Save as PDF</button>
+          </div>
+          <span v-if="saveAsPdf" class="hint">Generates a PDF file directly and hands it to you - a download here, the save/share sheet in the Android app.</span>
+        </div>
+        <p v-if="pdfBusy" class="hint">Generating PDF…</p>
         <div class="docs">
-          <button type="button" @click="openExportList">Export packing list</button>
-          <button type="button" @click="openReimportList">Re-import packing list</button>
-          <button type="button" class="primary" @click="openProforma">Proforma invoice</button>
+          <button type="button" :disabled="pdfBusy" @click="openExportList">Export packing list</button>
+          <button type="button" :disabled="pdfBusy" @click="openReimportList">Re-import packing list</button>
+          <button type="button" class="primary" :disabled="pdfBusy" @click="openProforma">Proforma invoice</button>
         </div>
       </article>
 

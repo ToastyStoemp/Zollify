@@ -29,3 +29,4 @@ export { default as CurrencyPicker } from './CurrencyPicker.vue';
 export { default as DateRangePicker } from './DateRangePicker.vue';
 export { default as DeclarantForm } from './DeclarantForm.vue';
 export type { DeclarantFormModel } from './DeclarantForm.vue';
+export { htmlToPdf } from './pdf';

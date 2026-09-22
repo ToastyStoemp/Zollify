@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import type { EventStock, SalesEvent } from '@zollify/shared';
-import { CountryPicker, Icon } from '@zollify/ui';
+import { CountryPicker, htmlToPdf, Icon } from '@zollify/ui';
 import { buildAllVersionsHtml } from '../engine/all-versions';
 import { buildCustomsState, readCustomsBlob } from '../engine/adapter';
 import { compute1174Groups, computeLRP, fmtWeightKg, hasCustomsInfo } from '../engine/calc';
@@ -214,25 +214,46 @@ watch(hasVariantProducts, (has) => {
 
 const safeName = (suffix: string): string => `${(event.value?.name || 'event').replace(/[^\w-]+/g, '_')}_${suffix}`;
 
-/** Opens a generated document in its own tab - that is where it gets printed or saved as PDF. */
-/** "Save as PDF" is the browser's print dialog: the opened document asks for it as soon as it has rendered. */
+/**
+ * Opens a generated document in its own tab, or generates and saves a real
+ * PDF - the two "On open" modes below.
+ *
+ * The PDF path used to inject a script that called window.print() as soon as
+ * the tab loaded, relying on the browser's print dialog to offer "Save as
+ * PDF". That is a no-op in the Android app: the Capacitor WebView has no
+ * print pipeline, so the button did nothing there. htmlToPdf() renders the
+ * same HTML into a real PDF client-side instead, which sdk.ui.saveFile()
+ * already knows how to hand to the user on either platform.
+ */
 const saveAsPdf = ref(false);
-// Assembled so the SFC compiler does not read the tag as the end of this block.
-const PRINT_ON_LOAD = `<${'script'}>addEventListener("load",function(){setTimeout(function(){print()},250)})</${'script'}>`;
+const pdfBusy = ref(false);
 async function openHtml(source: string, name = 'customs'): Promise<void> {
-  const html = saveAsPdf.value ? source.replace(/<\/body>/i, `${PRINT_ON_LOAD}</body>`) : source;
-  const opened = await sdk().ui.openDocument(`${name}.html`, html);
-  if (!opened) preview.value = html;
+  if (saveAsPdf.value) {
+    pdfBusy.value = true;
+    error.value = null;
+    try {
+      const pdf = await htmlToPdf(source);
+      await sdk().ui.saveFile(`${name}.pdf`, pdf, 'application/pdf');
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Could not generate the PDF.';
+    } finally {
+      pdfBusy.value = false;
+    }
+    return;
+  }
+  const opened = await sdk().ui.openDocument(`${name}.html`, source);
+  if (!opened) preview.value = source;
 }
 function download(filename: string, text: string, type: string): void {
   void sdk().ui.saveFile(filename, text, type);
 }
-const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value));
-const openAll = () => state.value && openHtml(buildAllVersionsHtml(state.value));
-const openProforma = () => state.value && openHtml(buildProformaHtml(state.value));
-const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value));
-const open1174 = () => state.value && openHtml(build1174Html(state.value));
-const open1187 = () => state.value && openHtml(build1187Html(state.value));
+const GOODS_LIST_NAMES: Record<GoodsDocNum, string> = { 1: 'import_list', 2: 'sold_goods_list', 3: 'return_goods_list' };
+const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value), safeName(GOODS_LIST_NAMES[docNum]));
+const openAll = () => state.value && openHtml(buildAllVersionsHtml(state.value), safeName('all_formats'));
+const openProforma = () => state.value && openHtml(buildProformaHtml(state.value), safeName('proforma'));
+const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value), safeName('proforma_eu'));
+const open1174 = () => state.value && openHtml(build1174Html(state.value), safeName('form_1174'));
+const open1187 = () => state.value && openHtml(build1187Html(state.value), safeName('form_1187'));
 function exportEdec(): void {
   if (!state.value) return;
   const result = buildEdecXml(state.value);
@@ -306,17 +327,18 @@ const TRANSPORT_MODES = [
             <button type="button" :class="{ on: !saveAsPdf }" @click="saveAsPdf = false">View</button>
             <button type="button" :class="{ on: saveAsPdf }" @click="saveAsPdf = true">Save as PDF</button>
           </div>
-          <span v-if="saveAsPdf" class="hint">Opens the print dialog straight away - choose “Save as PDF” as the printer.</span>
+          <span v-if="saveAsPdf" class="hint">Generates a PDF file directly and hands it to you - a download here, the save/share sheet in the Android app. Works where the browser print dialog doesn't (there is no print pipeline in the Android app).</span>
         </div>
+        <p v-if="pdfBusy" class="hint">Generating PDF…</p>
         <div class="docs">
-          <button type="button" @click="openGoodsList(1)"><Icon name="download" :size="14" /> Import list</button>
-          <button type="button" @click="openGoodsList(2)"><Icon name="coins" :size="14" /> Sold goods list</button>
-          <button type="button" @click="openGoodsList(3)"><Icon name="upload" :size="14" /> Return goods list</button>
-          <button type="button" @click="openAll"><Icon name="layers" :size="14" /> All formats bundle</button>
-          <button type="button" @click="openProforma"><Icon name="file-text" :size="14" /> Proforma invoice</button>
-          <button type="button" @click="openProformaEu"><Icon name="file-text" :size="14" /> Proforma invoice (EU)</button>
-          <button type="button" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
-          <button type="button" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
+          <button type="button" :disabled="pdfBusy" @click="openGoodsList(1)"><Icon name="download" :size="14" /> Import list</button>
+          <button type="button" :disabled="pdfBusy" @click="openGoodsList(2)"><Icon name="coins" :size="14" /> Sold goods list</button>
+          <button type="button" :disabled="pdfBusy" @click="openGoodsList(3)"><Icon name="upload" :size="14" /> Return goods list</button>
+          <button type="button" :disabled="pdfBusy" @click="openAll"><Icon name="layers" :size="14" /> All formats bundle</button>
+          <button type="button" :disabled="pdfBusy" @click="openProforma"><Icon name="file-text" :size="14" /> Proforma invoice</button>
+          <button type="button" :disabled="pdfBusy" @click="openProformaEu"><Icon name="file-text" :size="14" /> Proforma invoice (EU)</button>
+          <button type="button" :disabled="pdfBusy" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
+          <button type="button" :disabled="pdfBusy" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
           <button type="button" class="primary" @click="exportEdec"><Icon name="download" :size="14" /> e-dec XML</button>
         </div>
       </article>

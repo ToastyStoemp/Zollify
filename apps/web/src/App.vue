@@ -179,9 +179,16 @@ const syncLabel = computed(() => {
 
     <!-- Phone: the bottom tab bar from ZollTool - thumbs reach it, and the
          open section's pages sit in a row above it. The burger still opens
-         the full list for what does not fit here. -->
+         the full list for what does not fit here.
+
+         Hidden on the till itself: it already has its own History link in
+         its header, so this row would only repeat "Sell" (the page you're
+         already on) and duplicate that History link - screen space the
+         product grid needs more, on the one screen a booth stares at all
+         day (confirmed from a phone screenshot: three redundant chips plus
+         the six-tab row below leave very little of the viewport for products). -->
     <nav v-if="account && !settingUp" ref="bottomNav" class="bottom" aria-label="Main">
-      <div v-if="openSection?.children.length" class="subrow">
+      <div v-if="openSection?.children.length && route.name !== 'pos:index'" class="subrow">
         <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
       </div>
       <div class="tabs">

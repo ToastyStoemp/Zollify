@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch, type Directive } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import { shortBarcode } from '@zollify/shared';
 import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label';
 import { rasterizeCanvas } from '../engine/raster';
 import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
@@ -29,6 +30,8 @@ interface Leaf {
   title: string;
   /** Just the variant's own name, for the indented row - `title` carries the full "Product - Variant" for the printed label and the preview. */
   variantName?: string;
+  /** The product's normalized type ('Other' fallback) - fed to shortBarcode() as a cosmetic prefix, not part of what makes the code unique. */
+  type: string;
 }
 interface ProductGroup {
   productId: string;
@@ -50,10 +53,10 @@ const typeGroups = computed<TypeGroup[]>(() => {
             .filter((v) => !v.unlisted)
             .map((v) => {
               const variantName = v.name?.trim() || '(unnamed)';
-              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName };
+              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type };
             })
             .filter((l) => l.sku)
-        : (p.sku?.trim() ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku.trim(), title: p.title || '(untitled)' }] : []);
+        : (p.sku?.trim() ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku.trim(), title: p.title || '(untitled)', type }] : []);
     if (!leaves.length) continue;
     const group: ProductGroup = { productId: p.id, title: p.title || '(untitled)', leaves };
     (byType.get(type) ?? byType.set(type, []).get(type)!).push(group);
@@ -190,7 +193,10 @@ function redrawPreview(): void {
     canvas.height = 0;
     return;
   }
-  renderLabel(canvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value });
+  renderLabel(canvas, labelSize.value, l.sku, l.title, {
+    titleScale: titleScale.value,
+    barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
+  });
 }
 watch([previewLeaf, labelSize, titleScale], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
@@ -254,7 +260,10 @@ async function printAll(): Promise<void> {
   try {
     outer: for (const l of chosen.value) {
       const copies = Math.max(1, qty[l.key] ?? 1);
-      renderLabel(workCanvas, labelSize.value, l.sku, l.title, { titleScale: titleScale.value });
+      renderLabel(workCanvas, labelSize.value, l.sku, l.title, {
+        titleScale: titleScale.value,
+        barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
+      });
       const rows = rasterizeCanvas(workCanvas);
       for (let i = 0; i < copies; i++) {
         // Only checked between whole labels, never mid-transmission - stopping

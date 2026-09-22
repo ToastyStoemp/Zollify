@@ -1,4 +1,4 @@
-import type { Product } from '@zollify/shared';
+import { shortBarcode, type Product } from '@zollify/shared';
 
 /** Ported from ZollTool: exact SKU / title / variant wins, else a unique partial match. */
 
@@ -20,10 +20,25 @@ export function findSearchMatch(products: Product[], query: string): SearchResul
   for (const p of products) {
     if (p.forSale === false) continue;
     const label = p.title || '(untitled)';
-    if ((norm(p.sku) && norm(p.sku) === needle) || norm(p.title) === needle) return { productId: p.id, variantId: null, label };
+    // Printed labels can encode a short derived code instead of the SKU
+    // (see shortBarcode() / @zollify/label-printer) - a camera or gun scan
+    // decodes to that code, not the SKU, so it needs the same exact-match
+    // treatment right alongside it.
+    if (
+      (norm(p.sku) && norm(p.sku) === needle) ||
+      norm(p.title) === needle ||
+      (p.variants.length === 0 && norm(shortBarcode(p.type, p.id)) === needle)
+    ) {
+      return { productId: p.id, variantId: null, label };
+    }
     for (const v of p.variants ?? []) {
       const vLabel = `${label} - ${v.name || v.sku || 'variant'}`;
-      if ((norm(v.sku) && norm(v.sku) === needle) || (norm(v.name) && norm(v.name) === needle) || norm(`${p.title} ${v.name}`) === needle) {
+      if (
+        (norm(v.sku) && norm(v.sku) === needle) ||
+        (norm(v.name) && norm(v.name) === needle) ||
+        norm(`${p.title} ${v.name}`) === needle ||
+        norm(shortBarcode(p.type, p.id, v.id)) === needle
+      ) {
         return { productId: p.id, variantId: v.id, label: vLabel };
       }
       if (text(p, v).includes(needle)) partial.push({ productId: p.id, variantId: v.id, label: vLabel });

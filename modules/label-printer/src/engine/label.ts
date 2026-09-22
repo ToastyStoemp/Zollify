@@ -60,9 +60,11 @@ export function wrapText(ctx: Pick<CanvasRenderingContext2D, 'measureText'>, tex
 
 /**
  * Draws the label onto `canvas`, resizing it to the label's dot dimensions.
- * `sku` must be non-empty and barcode-safe (Code128 covers full ASCII, so any
- * real SKU works); products without one should be filtered out before this
- * is called, since a barcode with nothing to encode is not a useful label.
+ * `sku` is drawn as human-readable text under the bars and must be non-empty
+ * (products without one should be filtered out before this is called, since
+ * a label naming nothing isn't useful); it's also what's encoded in the bars
+ * unless `options.barcodeValue` says otherwise. Code128 covers full ASCII,
+ * so any real SKU or derived code works.
  */
 /** Below this, text stops shrinking and truncates instead - smaller is not legible on a real label. */
 const MIN_TITLE_FONT_PX = 12;
@@ -73,6 +75,13 @@ const TITLE_FONT_FRACTION = 0.3;
 export interface RenderLabelOptions {
   /** 0.5-1.5 - multiplies the title's auto-fit starting size; a knob for tuning by eye, not a guarantee (the fit loop can still shrink further). */
   titleScale?: number;
+  /**
+   * What actually gets encoded in the bars - typically shortBarcode() from
+   * @zollify/shared, not the SKU itself. Falls back to `sku` when omitted.
+   * The SKU is still what's drawn as the human-readable text underneath
+   * regardless; only the bars' payload can differ from it.
+   */
+  barcodeValue?: string;
 }
 
 /**
@@ -90,11 +99,11 @@ export interface RenderLabelOptions {
  * doesn't fit - a long SKU on a small label - does this fall back to
  * scaling, which is unavoidable at that point.
  */
-function fitBarcodeCanvas(sku: string, maxWidth: number, height: number): { canvas: HTMLCanvasElement; scaled: boolean } {
+function fitBarcodeCanvas(payload: string, maxWidth: number, height: number): { canvas: HTMLCanvasElement; scaled: boolean } {
   let last: HTMLCanvasElement | null = null;
   for (let width = 3; width >= 1; width--) {
     const canvas = document.createElement('canvas');
-    JsBarcode(canvas, sku, { format: 'CODE128', displayValue: false, margin: 8, width, height });
+    JsBarcode(canvas, payload, { format: 'CODE128', displayValue: false, margin: 8, width, height });
     if (canvas.width <= maxWidth) return { canvas, scaled: false };
     last = canvas;
   }
@@ -156,7 +165,7 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   // NOT via jsbarcode's `displayValue`, which would get shrunk along with
   // the bars by the width-fit scale a few lines down and end up illegibly
   // small whenever the barcode itself is wider than the label.
-  const { canvas: barcodeCanvas, scaled } = fitBarcodeCanvas(sku, widthDots - margin * 2, barsHeight);
+  const { canvas: barcodeCanvas, scaled } = fitBarcodeCanvas(options.barcodeValue ?? sku, widthDots - margin * 2, barsHeight);
 
   // Smoothing off in the (now rare) scaled case: the default bilinear
   // resample turns crisp bar edges into a grey fringe, which

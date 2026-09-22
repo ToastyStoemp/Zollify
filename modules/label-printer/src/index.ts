@@ -10,7 +10,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'label-printer',
-  version: '0.1.16',
+  version: '0.1.17',
   sdk: '^0.1.0',
   title: 'Label Printer',
   description: 'Print SKU barcode + product name labels to a Phomemo M110 over Bluetooth.',

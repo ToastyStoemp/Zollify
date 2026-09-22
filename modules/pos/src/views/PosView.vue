@@ -207,6 +207,10 @@ interface BarcodeDetectorLike {
 interface BarcodeDetectorCtor {
   new (options?: { formats?: string[] }): BarcodeDetectorLike;
 }
+/** focusMode/zoom aren't in the standard MediaTrackConstraints type yet either, same reasoning as BarcodeDetectorLike above. */
+interface ScannerVideoConstraints extends MediaTrackConstraints {
+  advanced?: (MediaTrackConstraintSet & { focusMode?: string; zoom?: number })[];
+}
 const scannerSupported = typeof window !== 'undefined' && 'BarcodeDetector' in window;
 const scannerOpen = ref(false);
 const scannerError = ref<string | null>(null);
@@ -220,7 +224,23 @@ async function openScanner(): Promise<void> {
   scannerOpen.value = true;
   await nextTick();
   try {
-    scannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    // width/height ideal: without them some phones hand back their full
+    // sensor resolution, which is slower to run detect() on every tick and,
+    // combined with the video element's CSS box, is part of what read as
+    // "zoomed in". focusMode/zoom are non-standard, so they're inside
+    // `advanced` - a browser that doesn't understand them ignores them
+    // instead of rejecting the whole request. Confirmed live only that they
+    // don't break anything on desktop Chrome (no rear camera to test the
+    // actual effect); the "doesn't autofocus, doesn't scan" report is
+    // exactly what a phone defaulting to a fixed-focus or 2x-tele capture
+    // for video calls would look like.
+    const videoConstraints: ScannerVideoConstraints = {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      advanced: [{ focusMode: 'continuous' }, { zoom: 1 }],
+    };
+    scannerStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
     const video = scannerVideo.value;
     if (!video) throw new Error('Could not open the camera view.');
     video.srcObject = scannerStream;
@@ -842,7 +862,7 @@ async function cancelPayment(): Promise<void> {
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
-.scanner-video { width: 100%; max-height: 60vh; border-radius: 10px; background: #000; object-fit: cover; }
+.scanner-video { width: 100%; max-height: 60vh; border-radius: 10px; background: #000; object-fit: contain; }
 .modes { display: flex; gap: .3rem; }
 .pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }

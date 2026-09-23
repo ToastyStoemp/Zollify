@@ -23,7 +23,7 @@ interface BundleInfo {
 interface CapacitorUpdaterPlugin {
   notifyAppReady(): Promise<{ bundle: BundleInfo }>;
   current(): Promise<{ bundle: BundleInfo; native: boolean }>;
-  download(opts: { url: string; version: string }): Promise<BundleInfo>;
+  download(opts: { url: string; version: string; checksum: string }): Promise<BundleInfo>;
   next(opts: { id: string }): Promise<BundleInfo>;
 }
 
@@ -61,6 +61,8 @@ export interface ShellUpdateCheck {
   latestVersion: string;
   available: boolean;
   url: string;
+  /** SHA-256 hex of bundle.zip - the plugin's own download() rejects outright with "Checksum required" if this is missing, before even attempting the request. */
+  integrity: string;
 }
 
 /**
@@ -78,15 +80,28 @@ export async function checkShellUpdate(): Promise<ShellUpdateCheck | null> {
   if (!res.ok) return null;
   const latest = (await res.json()) as ShellManifest;
   if (!latest.version) return null;
-  return { currentVersion: current.bundle.version, latestVersion: latest.version, available: latest.version !== current.bundle.version, url: latest.url };
+  return { currentVersion: current.bundle.version, latestVersion: latest.version, available: latest.version !== current.bundle.version, url: latest.url, integrity: latest.integrity };
 }
 
-/** Downloads and queues (next(), not set()) the update a checkShellUpdate() call found - same "never mid-sale" reasoning as checkAndQueueShellUpdate(). */
+/**
+ * Downloads and queues (next(), not set()) the update a checkShellUpdate()
+ * call found - same "never mid-sale" reasoning as checkAndQueueShellUpdate().
+ *
+ * checksum is required, not optional: the plugin's manual download() throws
+ * "Checksum required" and never even starts the HTTP request without one -
+ * confirmed live, this was missing and every attempt failed before it left
+ * the device, which looked exactly like a network/download failure
+ * ("Failed to download from: <url>", the plugin's own generic wrapper
+ * around whatever it threw) with no indication it was actually a
+ * pre-flight validation error. Server already computes this SHA-256 for
+ * its own manifest.json - same algorithm the plugin's own
+ * CryptoCipher.calcChecksum() uses, so no separate computation is needed here.
+ */
 export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
   const plugin = updater();
   const server = getServerUrl();
   if (!plugin || !server) return;
-  const downloaded = await plugin.download({ url: `${server}${check.url}`, version: check.latestVersion });
+  const downloaded = await plugin.download({ url: `${server}${check.url}`, version: check.latestVersion, checksum: check.integrity });
   await plugin.next({ id: downloaded.id });
 }
 

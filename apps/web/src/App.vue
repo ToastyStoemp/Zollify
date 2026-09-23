@@ -210,19 +210,12 @@ const syncLabel = computed(() => {
          open section's pages sit in a row above it. The burger still opens
          the full list for what does not fit here.
 
-         Hidden on the till itself: it already has its own History link in
-         its header, so this row would only repeat "Sell" (the page you're
-         already on) and duplicate that History link - screen space the
-         product grid needs more, on the one screen a booth stares at all
-         day (confirmed from a phone screenshot: three redundant chips plus
-         the six-tab row below leave very little of the viewport for products).
-
-         The tab row itself also goes compact there (icon only, tighter
-         padding) rather than disappearing outright - every tab stays
-         reachable, it's just not worth a full label's height of the one
-         screen a booth spends its whole shift on. -->
-    <nav v-if="account && !settingUp" ref="bottomNav" class="bottom" :class="{ compact: route.name === 'pos:index' }" aria-label="Main">
-      <div v-if="openSection?.children.length && route.name !== 'pos:index'" class="subrow">
+         Hidden entirely on the till: it already has its own back arrow (to
+         Events) as a way out, so the whole bar - tabs, "More"/Settings, the
+         open-section chip row - is space the product grid gets back
+         instead, on the one screen a booth stares at all day. -->
+    <nav v-if="account && !settingUp && route.name !== 'pos:index'" ref="bottomNav" class="bottom" aria-label="Main">
+      <div v-if="openSection?.children.length" class="subrow">
         <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
       </div>
       <div class="tabs">
@@ -405,9 +398,5 @@ nav { flex: 1; }
   .tab.router-link-active { color: var(--zfy-accent-ink); }
   .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
   .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }
-  /* The till: every tab stays reachable, just icon-only and tighter - a
-     label's worth of height back on the one screen a shift lives on. */
-  .bottom.compact .tab { padding: .3rem 0; }
-  .bottom.compact .tab span { display: none; }
 }
 </style>

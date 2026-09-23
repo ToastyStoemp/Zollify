@@ -323,11 +323,24 @@ nav { flex: 1; }
   }
   .sidebar.menu-open nav { display: flex; }
   .scrim { display: block; position: fixed; inset: 0; background: var(--zfy-shadow); opacity: .35; z-index: 8; }
-  .content { padding: 1rem; padding-bottom: 1.5rem; }
+  /* --zfy-bottom-nav accounted for here too, not just by pages that opt in
+     (e.g. POS's .floor) - .bottom is `fixed` below, so nothing reserves its
+     space in normal flow any more; every page needs this or its last row
+     renders underneath the bar. */
+  .content { padding: 1rem; padding-bottom: calc(1.5rem + var(--zfy-bottom-nav, 0px)); }
   .bottom {
-    display: flex; flex-direction: column; position: sticky; bottom: 0; z-index: 6;
+    display: flex; flex-direction: column; z-index: 6;
     background: var(--zfy-surface); border-top: 1px solid var(--zfy-line);
     padding-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+    /* `fixed`, not `sticky`: sticky still reserves its own row in normal
+       flow at its unscrolled position - on any page taller than the
+       viewport, that reserved slot sits below the fold and only gets
+       visually pinned back to the viewport bottom once you scroll all
+       the way down, leaving its true flow slot as empty, scrollable
+       space past the real content (confirmed live: shell scrollHeight
+       was 62px taller than the viewport with nothing rendered in that
+       gap). `fixed` removes it from flow entirely instead. */
+    position: fixed; left: 0; right: 0; bottom: 0;
   }
   .subrow { display: flex; gap: .3rem; padding: .4rem .6rem 0; overflow-x: auto; scrollbar-width: none; }
   .subrow::-webkit-scrollbar { display: none; }

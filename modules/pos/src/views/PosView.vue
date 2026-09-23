@@ -1051,13 +1051,30 @@ async function cancelPayment(): Promise<void> {
 .chip.cardc { color: #2f6fb8; border-color: #2f6fb8; }
 
 @media (max-width: 860px) {
-  .pos { grid-template-columns: 1fr; margin: -1rem; }
+  /* Cancels .content's own padding (a bleed-to-edges trick, not new) - the
+     bottom value now also cancels the --zfy-bottom-nav clearance .content
+     added for pages that don't otherwise account for the fixed tab bar.
+     POS already handles that clearance itself (.floor / .cartbar below),
+     so left as plain -1rem this would double-reserve it - confirmed live,
+     a 62px scrollable gap below the tab bar with nothing in it. */
+  .pos { grid-template-columns: 1fr; margin: -1rem -1rem calc(-1rem - var(--zfy-bottom-nav, 0px)) -1rem; }
+  /* .pos's own base rule (min-height: 100dvh - 3rem) is what was actually
+     forcing this, not .floor - .floor is a CSS Grid item and grid items
+     default to align-items: stretch, so it stretched to fill .pos's forced
+     height regardless of any min-height set on .floor itself. That height
+     only ever existed so .cartbar could dock at the screen bottom via
+     margin-top: auto even with a short product list - useless overhead
+     with an empty cart (.cartbar is v-if="itemCount", so it isn't rendered
+     at all then). Confirmed live: with an empty cart this left genuinely
+     blank space below a short product list, reachable by scrolling past
+     all real content. */
+  .pos:not(:has(.cartbar)) { min-height: auto; }
   .cart { display: none; }
   .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
   .cart.sheet .close { display: inline-flex; }
-  /* The floor fills the viewport so the cart button sits at the bottom even
-     with a short list, and stays there while a long one scrolls. */
-  .floor { display: flex; flex-direction: column; min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
+  .floor { display: flex; flex-direction: column; }
+  /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
+  .floor:has(.cartbar) { min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
   .grid { flex: 1; }
   /* Sticks just above the shell's tab bar, whose height the shell publishes. */
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }

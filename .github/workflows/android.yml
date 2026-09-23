@@ -1,13 +1,28 @@
 name: Android
 
-# Every push to main produces the three APKs, signed with the release keystore
-# held in secrets, and publishes them as a GitHub Release. The server pulls
-# the latest release into its APK directory (scripts/fetch-apks.mjs) so
-# devices self-update; the carbon build is published too but installed by
-# hand through myPOS's channel.
+# Builds and publishes the three APKs, signed with the release keystore held
+# in secrets, as a GitHub Release. The server pulls the latest release into
+# its APK directory (scripts/fetch-apks.mjs) so devices self-update; the
+# carbon build is published too but installed by hand through myPOS's channel.
+#
+# Only runs when something native could actually be different: the Android
+# project itself, Capacitor's own config, a dependency change (root
+# package[-lock].json - a new/updated native Capacitor plugin surfaces here,
+# even though most edits to this file are not native), the release pipeline
+# scripts, or this workflow file. A routine UI/module/logic change ships via
+# `npm run publish:shell` instead (see scripts/publish-shell.mjs) - the whole
+# point of that change was to stop needing this expensive rebuild for those.
 on:
   push:
     branches: [master]
+    paths:
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/bump-android-version.mjs'
+      - 'scripts/pack-apk.mjs'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 concurrency:

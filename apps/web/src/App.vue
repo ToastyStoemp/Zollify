@@ -299,6 +299,16 @@ nav { flex: 1; }
    an ancestor's max-width by itself (its own negative-margin bleed only
    cancels .content's padding, not this), so this opts .pos out here. */
 .content:has(.pos) { max-width: none; }
+/* .content is a plain block box, not flex/grid, so a page that sets its OWN
+   smaller max-width (a settings form, say) got no free centering from that -
+   a block child just sits at margin-left: 0 by default regardless of how
+   much wider its parent is. Invisible while .content itself rendered too
+   narrow to matter (the bug above); once .content correctly fills the full
+   width, every one of those narrower pages was visibly pinned to the left
+   edge instead of centered in the space .content now actually has. Centers
+   whatever the router paints as the page root, whatever its own width - a
+   page that already fills 100% (no opinion, or POS) computes 0 either way. */
+.content > :deep(*) { margin-inline: auto; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
 .toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }
 .toast.error { border-color: var(--zfy-danger); }

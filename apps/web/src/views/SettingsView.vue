@@ -173,6 +173,13 @@ nav { display: flex; flex-direction: column; gap: .2rem; }
 .group:first-child { margin-top: 0; }
 nav button { text-align: left; border-color: transparent; background: transparent; justify-content: flex-start; }
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
+/* Each panel is a different component (SecuritySettings, ProfileSettings, …)
+   loaded into .panel via <component :is>, so this can't reach its own root
+   element without :deep() - scoped styles only tag elements the OWNING
+   component's own template renders, and that root belongs to the panel
+   component, not this one. Centers whatever max-width a panel sets for
+   itself; a panel with no opinion (fills 100%) is unaffected either way. */
+.panel > :deep(*) { margin-inline: auto; }
 @media (max-width: 720px) {
   .layout { grid-template-columns: 1fr; }
   nav { gap: .35rem; }

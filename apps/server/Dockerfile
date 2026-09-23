@@ -34,6 +34,19 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 # ── build ───────────────────────────────────────────────────────────────────
 FROM deps AS build
 WORKDIR /repo
+# .dockerignore excludes .git from the build context entirely (line 7), so
+# `git rev-parse` inside this stage always fails silently - both
+# apps/web/vite.config.ts's buildStamp() and publish-shell.mjs fell back to a
+# bare "0.1.0" on every single Docker build, identical every time. Since
+# publish-shell.mjs treats a version's directory as immutable (skips if it
+# already exists), that meant exactly ONE successful publish ever, on
+# whichever commit first built this Dockerfile - every deploy since silently
+# no-op'd, and latest.json never moved again. Passed through the same way
+# the runtime stage already stamps ZOLLIFY_COMMIT_SHA for Server admin -
+# docker.yml already sends --build-arg ZOLLIFY_COMMIT=${{ github.sha }}, it
+# just never reached this stage before.
+ARG ZOLLIFY_COMMIT=unknown
+ENV ZOLLIFY_COMMIT=$ZOLLIFY_COMMIT
 COPY . .
 RUN npm run build -w @zollify/web
 # Publishes each module bundle plus its manifest and SHA-256 into the store the

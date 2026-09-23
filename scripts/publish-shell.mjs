@@ -31,14 +31,28 @@ const store = process.env.ZOLLIFY_SHELL_STORE
   ? resolve(process.env.ZOLLIFY_SHELL_STORE)
   : join(root, 'apps', 'server', 'shell-store');
 
-/** Identical to apps/web/vite.config.ts's buildStamp() - the published version has to match what that same build baked into __ZOLLIFY_VERSION__, or the app's own "build" display and the server's idea of "latest" would disagree. */
+/**
+ * Identical to apps/web/vite.config.ts's buildStamp() - the published version
+ * has to match what that same build baked into __ZOLLIFY_VERSION__, or the
+ * app's own "build" display and the server's idea of "latest" would disagree.
+ *
+ * ZOLLIFY_COMMIT first, `git rev-parse` only as a local-dev fallback: the
+ * Docker build context has no .git at all (.dockerignore excludes it), so
+ * git always failed silently there, producing the same bare version on
+ * every build - and since a version's directory is immutable, that meant
+ * exactly one real publish ever, followed by silent no-ops on every deploy
+ * since (confirmed live: production was still serving "0.1.0" with nothing
+ * newer, weeks of commits later).
+ */
 function buildStamp() {
   const version = JSON.parse(readFileSync(join(webDir, 'package.json'), 'utf8')).version;
-  let sha = '';
-  try {
-    sha = execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    /* no git */
+  let sha = process.env.ZOLLIFY_COMMIT && process.env.ZOLLIFY_COMMIT !== 'unknown' ? process.env.ZOLLIFY_COMMIT.slice(0, 7) : '';
+  if (!sha) {
+    try {
+      sha = execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      /* no git, and no env override either - version stays bare */
+    }
   }
   return sha ? `${version}+${sha}` : version;
 }

@@ -15,14 +15,27 @@ const hostInputs = Object.fromEntries(
   HOST_ENTRIES.map((name) => [`host-${name}`, resolve(__dirname, `src/host/${name}.ts`)]),
 );
 
-/** Build stamp shown in the sidebar and attached to diagnostic uploads: version + short commit. */
+/**
+ * Build stamp shown in the sidebar and attached to diagnostic uploads:
+ * version + short commit.
+ *
+ * ZOLLIFY_COMMIT first, `git rev-parse` only as a local-dev fallback: inside
+ * the server's Docker build .git isn't even in the build context
+ * (.dockerignore excludes it), so git always failed silently there and this
+ * baked a bare, sha-less version into every Docker-built bundle - the same
+ * bug that left scripts/publish-shell.mjs's published version frozen, since
+ * that script computes this identically and treats a version as immutable
+ * once its directory exists.
+ */
 function buildStamp(): string {
   const version = (JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string }).version;
-  let sha = '';
-  try {
-    sha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-  } catch {
-    /* no git */
+  let sha = process.env.ZOLLIFY_COMMIT && process.env.ZOLLIFY_COMMIT !== 'unknown' ? process.env.ZOLLIFY_COMMIT.slice(0, 7) : '';
+  if (!sha) {
+    try {
+      sha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      /* no git, and no env override either - version stays bare */
+    }
   }
   return sha ? `${version}+${sha}` : version;
 }

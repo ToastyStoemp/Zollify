@@ -275,26 +275,29 @@ nav { flex: 1; }
 .who .role { overflow-wrap: anywhere; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
 /* Capped and centered so a page with no width opinion of its own doesn't
-   stretch full-bleed on an ultrawide monitor - most pages have no reason to
-   use more room than this and read worse stretched (a settings form, a
-   short list). 96rem matches print-labels' own comfortable width - most
-   views take this default as-is; a page that genuinely wants more (a wide
-   table) or less (a form) still sets its own max-width, which wins over
-   this regardless of what this default is.
-   96% rather than a flat cap: it grows with the window up to 96rem, so
+   stretch full-bleed on an ultrawide monitor - most pages set no max-width,
+   relying on this. A page that needs more room (a wide table, say) can still
+   set its own smaller/larger max-width, which wins over this regardless of
+   what this default is; this only sets what an opinion-less page gets.
+   96% rather than a flat cap: it grows with the window up to 120rem, so
    moderately wide screens still use nearly all the space, and only clamps
    once there is more room than that to spare - never a full edge-to-edge fill.
-   No explicit `width` here - a grid item's default justify-self:stretch only
-   fills the track (and lets these auto margins split the leftover space) when
-   its own width is 'auto'; setting width:100% here disables that and the
-   margins compute to 0, leaving the content flush against the sidebar. */
-.content { padding: 1.5rem; min-width: 0; max-width: min(96%, 96rem); margin: 0 auto; }
+   `width: 100%` is required, not decorative - a grid item with auto
+   left/right margins does NOT get the default justify-self: stretch (that's
+   what auto margins are for: absorbing leftover space to center an item
+   that ISN'T already filling the track), so without an explicit width this
+   silently collapsed to .content's own max-content size instead of filling
+   up to max-width - confirmed live at a 2400px viewport, it rendered at
+   767px instead of the intended 1920px cap. width: 100% forces the stretch;
+   max-width then still clamps that 100% down once the track exceeds it, and
+   *that* is the leftover space the auto margins center within. */
+.content { padding: 1.5rem; min-width: 0; width: 100%; max-width: min(96%, 120rem); margin: 0 auto; }
 /* POS is the one page built to actually use extra width well: the cart
    column stays a fixed 20rem and the product grid is auto-fill/minmax, so
    it just grows more columns instead of stretching tiles - no reason to
-   cap it at 120rem and leave empty margins on a wide monitor. A child can't
-   override an ancestor's max-width by itself (its own negative-margin bleed
-   only cancels .content's padding, not this), so this opts .pos out here. */
+   cap it and leave empty margins on a wide monitor. A child can't override
+   an ancestor's max-width by itself (its own negative-margin bleed only
+   cancels .content's padding, not this), so this opts .pos out here. */
 .content:has(.pos) { max-width: none; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
 .toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }

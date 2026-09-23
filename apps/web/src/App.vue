@@ -94,6 +94,20 @@ const overflowActive = computed(() =>
 );
 
 /**
+ * Phone only: collapses the top bar's own row (brand mark + burger) to
+ * nothing once the burger itself is gone - it only ever disappears when
+ * tabOverflow is true (v-if="!tabOverflow" below), in favour of the bottom
+ * bar's own "More" tab, which opens the exact same drawer. With neither
+ * shown, the row holds nothing but a static logo - confirmed from a real
+ * screenshot: a whole bar's worth of height for zero function. Not
+ * route-specific: with tabOverflow false the burger is this account's only
+ * way into anything not pinned as a bottom tab, so it has to stay, till
+ * screen or not. The drawer itself still works when collapsed: it's
+ * `position: fixed` inside .sidebar, not sized by .sidebar's own box.
+ */
+const hideTopBar = tabOverflow;
+
+/**
  * The tab bar's height, published as --zfy-bottom-nav so a page can keep its
  * own sticky controls (the till's cart button) clear of it. Zero on desktop.
  */
@@ -134,7 +148,7 @@ const syncLabel = computed(() => {
        column - otherwise the login card is squeezed into a 15rem track. -->
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
-    <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen }]">
+    <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen, 'collapsed-top': hideTopBar }]">
       <div class="brand"><img src="/favicon.svg" alt="Zollify" class="mark" /><span class="word">Zollify<span>.</span></span></div>
 
       <nav id="main-nav" aria-label="Main">
@@ -201,8 +215,13 @@ const syncLabel = computed(() => {
          already on) and duplicate that History link - screen space the
          product grid needs more, on the one screen a booth stares at all
          day (confirmed from a phone screenshot: three redundant chips plus
-         the six-tab row below leave very little of the viewport for products). -->
-    <nav v-if="account && !settingUp" ref="bottomNav" class="bottom" aria-label="Main">
+         the six-tab row below leave very little of the viewport for products).
+
+         The tab row itself also goes compact there (icon only, tighter
+         padding) rather than disappearing outright - every tab stays
+         reachable, it's just not worth a full label's height of the one
+         screen a booth spends its whole shift on. -->
+    <nav v-if="account && !settingUp" ref="bottomNav" class="bottom" :class="{ compact: route.name === 'pos:index' }" aria-label="Main">
       <div v-if="openSection?.children.length && route.name !== 'pos:index'" class="subrow">
         <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
       </div>
@@ -338,6 +357,18 @@ nav { flex: 1; }
      inside the app there's nothing to orient - the icon alone is enough. */
   .sidebar .brand .word { display: none; }
   .burger { display: inline-flex; margin-left: auto; min-height: 2rem; padding: .25rem .5rem; }
+  /* See hideTopBar's own comment: with the burger gone (tabOverflow), this
+     row has nothing left in it but a static logo - collapse the row itself
+     rather than just hiding its contents, or the border/padding would still
+     draw an empty bar. `.sidebar nav` (the drawer) is unaffected: it's
+     `position: fixed`, sized independently of this box, not by it - EXCEPT
+     for its own `top` offset a few lines down, which is a hard-coded 3.1rem
+     assuming the normal (uncollapsed) bar height. `:not(.menu-open)` keeps
+     the bar at that normal height while the drawer is actually open (from
+     the bottom bar's "More" tab), so that offset still lines up; it only
+     collapses once closed again. */
+  .sidebar.collapsed-top:not(.menu-open) { padding-top: 0; padding-bottom: 0; min-height: 0; border-bottom: 0; overflow: hidden; }
+  .sidebar.collapsed-top:not(.menu-open) .brand { display: none; }
   .sidebar nav {
     display: none; position: fixed; top: calc(3.1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); left: 0; bottom: 0; width: min(18rem, 85vw);
     padding: .75rem; padding-bottom: calc(.75rem + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
@@ -374,5 +405,9 @@ nav { flex: 1; }
   .tab.router-link-active { color: var(--zfy-accent-ink); }
   .tab.router-link-active .zfy-icon { color: var(--zfy-accent); }
   .badge { position: absolute; top: .3rem; right: calc(50% - .9rem); width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-warning); }
+  /* The till: every tab stays reachable, just icon-only and tighter - a
+     label's worth of height back on the one screen a shift lives on. */
+  .bottom.compact .tab { padding: .3rem 0; }
+  .bottom.compact .tab span { display: none; }
 }
 </style>

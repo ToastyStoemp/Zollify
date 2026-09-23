@@ -66,3 +66,4 @@ export * from './core';
 export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './native';
 export { nativeHeaders } from './session';
 export { selfUpdates, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
+export { notifyShellUpdateReady, checkAndQueueShellUpdate } from './shell-updates';

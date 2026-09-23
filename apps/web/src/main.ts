@@ -3,9 +3,11 @@ import {
   applyStoredTheme,
   installDiagnostics,
   checkForUpdate,
+  checkAndQueueShellUpdate,
   configureApiBase,
   createShellUi,
   downloadUpdate,
+  notifyShellUpdateReady,
   updateDownload,
   getServerUrl,
   isNative,
@@ -92,14 +94,22 @@ async function boot(): Promise<void> {
     startRealtime();
   }
   markBooted();
+  // Confirms this boot to the shell-content updater before anything else -
+  // it must hear this once per successful start or it assumes the active
+  // bundle crashed and rolls back to the previous one.
+  void notifyShellUpdateReady();
   void autoUpdateCheck();
+  void checkAndQueueShellUpdate();
 }
 
 /**
  * The Android app fetches a newer build in the background and says so once
  * it is ready; installing stays a tap under Settings → This device, because
  * the system's install dialog taking over mid-sale would be worse than an
- * old build for one more shift. Carbon terminals never update from here.
+ * old build for one more shift. Carbon terminals never update from here -
+ * they still get most fixes through checkAndQueueShellUpdate() below, which
+ * needs no install dialog at all; this path only matters for changes that
+ * need a new APK (a native plugin, a permission).
  */
 async function autoUpdateCheck(): Promise<void> {
   try {

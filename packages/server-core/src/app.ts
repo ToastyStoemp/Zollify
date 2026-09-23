@@ -20,6 +20,7 @@ import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
 import { registerUpdateRoutes } from './routes/updates';
+import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { Rooms, registerWs } from './ws';
 
 export interface GatewayOptions {
@@ -36,6 +37,8 @@ export interface GatewayOptions {
   deployDir?: string;
   /** Directory with the Android APKs + version.json for self-update; omit to serve none. */
   apkDir?: string;
+  /** Directory with published shell content bundles (npm run publish:shell); omit to serve none. */
+  shellStoreDir?: string;
   /** Server halves compiled into this deploy. */
   serverModules: ServerModule[];
   /** Modules a new account starts with. */
@@ -199,6 +202,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
+  if (opts.shellStoreDir) registerShellUpdateRoutes(app, opts.shellStoreDir);
   await registerWs(app, rooms, db);
 
   // ── Module plane ──────────────────────────────────────────────────────────

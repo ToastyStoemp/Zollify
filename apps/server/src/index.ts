@@ -55,6 +55,8 @@ async function main(): Promise<void> {
   const webDistDir = process.env.ZOLLIFY_WEB_DIST ? resolve(process.env.ZOLLIFY_WEB_DIST) : undefined;
   // Android self-update APKs (written by `npm run android:pack` or scripts/fetch-apks.mjs).
   const apkDir = resolve(process.env.ZOLLIFY_APK_DIR ?? './apk');
+  // Content-only shell updates for @capgo/capacitor-updater (written by `npm run publish:shell`).
+  const shellStoreDir = resolve(process.env.ZOLLIFY_SHELL_STORE ?? './shell-store');
   const jwtSecret = process.env.ZOLLIFY_JWT_SECRET || persistentSecret(dataDir);
 
   // Shopify derives its credential-encryption key from the same secret, so it
@@ -72,6 +74,7 @@ async function main(): Promise<void> {
     moduleStoreDir,
     webDistDir,
     apkDir,
+    shellStoreDir,
     deployDir: process.env.ZOLLIFY_DEPLOY_DIR ? resolve(process.env.ZOLLIFY_DEPLOY_DIR) : undefined,
     jwtSecret,
     serverModules,

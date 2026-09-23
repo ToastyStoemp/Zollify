@@ -19,6 +19,7 @@ key/
 data/
 apps/server/data/
 apps/server/modules-store/
+apps/server/shell-store/
 
 # Editor / OS
 .DS_Store

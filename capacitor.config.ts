@@ -20,6 +20,11 @@ const config: CapacitorConfig = {
   plugins: {
     // The app UI is always dark - light system-bar icons regardless of device theme.
     SystemBars: { style: 'DARK' },
+    // Manual mode: this app drives its own check/download/apply against its
+    // own server (see packages/platform/src/shell-updates.ts) rather than
+    // Capgo's hosted channel API - autoUpdate: true would try to talk to
+    // Capgo Cloud, which this deploy doesn't use.
+    CapacitorUpdater: { autoUpdate: false },
   },
 };
 

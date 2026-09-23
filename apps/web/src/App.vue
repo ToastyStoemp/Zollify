@@ -360,7 +360,16 @@ nav { flex: 1; }
      the bar at that normal height while the drawer is actually open (from
      the bottom bar's "More" tab), so that offset still lines up; it only
      collapses once closed again. */
-  .sidebar.collapsed-top:not(.menu-open) { padding-top: 0; padding-bottom: 0; min-height: 0; border-bottom: 0; overflow: hidden; }
+  /* padding-top keeps exactly the safe-area inset, not 0 - that padding was
+     doing double duty (decorative breathing room AND pushing everything
+     below the status bar/notch on an edge-to-edge Android layout), and
+     zeroing it entirely along with the rest left every page's own content
+     starting flush at y=0, overlapping the status bar (confirmed from a
+     phone screenshot: "Good evening" rendered directly behind the clock and
+     signal icons). The bar still visually vanishes - .brand is hidden below,
+     the burger is already gone via v-if - it just keeps reserving the one
+     bit of height that was never about the logo or burger in the first place. */
+  .sidebar.collapsed-top:not(.menu-open) { padding: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) 0 0; min-height: 0; border-bottom: 0; overflow: hidden; }
   .sidebar.collapsed-top:not(.menu-open) .brand { display: none; }
   .sidebar nav {
     display: none; position: fixed; top: calc(3.1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); left: 0; bottom: 0; width: min(18rem, 85vw);

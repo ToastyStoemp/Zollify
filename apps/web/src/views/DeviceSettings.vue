@@ -77,6 +77,11 @@ onMounted(async () => {
 
 // ── Content updates (every flavour, including Carbon) ───────────────────────
 const shellCheck = ref<ShellUpdateCheck | null>(null);
+// Distinguishes "haven't checked yet" from "checked, and there's genuinely
+// nothing to report" (checkShellUpdate() returns null without throwing when
+// the plugin isn't in this build, or the server has never published) -
+// without this, both looked identical: no status line at all.
+const shellChecked = ref(false);
 const shellQueuing = ref(false);
 const shellQueued = ref(false);
 const shellError = ref<string | null>(null);
@@ -95,6 +100,7 @@ async function checkUpdate(): Promise<void> {
   }
   try {
     shellCheck.value = await checkShellUpdate();
+    shellChecked.value = true;
     if (shellCheck.value?.available) {
       shellQueuing.value = true;
       await queueShellUpdate(shellCheck.value);
@@ -236,7 +242,7 @@ function when(ts: number): string {
         <dt>Package</dt>
         <dd class="mono">{{ appVersion ? `${appVersion.flavor} · v${appVersion.versionName} (${appVersion.versionCode})` : '…' }}</dd>
         <dt>Content build</dt>
-        <dd class="mono">{{ shellVersion ?? build }}</dd>
+        <dd class="mono">{{ shellVersion ?? build }}<span v-if="!shellVersion" class="warn"> (content updates unavailable on this install)</span></dd>
       </dl>
       <p class="hint">
         "Check for updates" covers both halves: the app itself (not on Carbon terminals - they take their APK through myPOS instead) and the content it runs, which updates on every flavour without a new install.
@@ -251,6 +257,7 @@ function when(ts: number): string {
       <p v-else-if="shellQueuing" class="hint">Downloading content update…</p>
       <p v-else-if="shellQueued" class="ok" role="status">Content {{ shellCheck?.latestVersion }} downloaded - ready next time the app opens.</p>
       <p v-else-if="shellCheck && !shellCheck.available" class="ok" role="status">Content up to date ({{ shellCheck.currentVersion }}).</p>
+      <p v-else-if="shellChecked && !shellCheck" class="warn" role="status">Content updates aren't available here - either this install predates them (reinstall the app) or the server has nothing published (check Server admin).</p>
 
       <div class="row">
         <button type="button" :disabled="checking || updateDownload.active" @click="checkUpdate">{{ checking ? 'Checking…' : 'Check for updates' }}</button>
@@ -275,6 +282,7 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .devices small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.warn { color: var(--zfy-warning-ink, #8a5a1e); margin: 0; }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
 .form { display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); align-items: flex-start; width: 100%; }
 .form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }

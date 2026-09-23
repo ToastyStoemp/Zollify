@@ -20,6 +20,17 @@ import {
 import type { CustomsState } from './model';
 import type { GoodsDocNum, GoodsFormat } from './goods-list';
 
+/**
+ * Line name with material suffix, e.g. "Enamel Pin - Zinc alloy, no precious
+ * metal" - deliberately does NOT also apply the artist/year suffix goods-list.ts
+ * gives art prints: this document already omitted that (a pre-existing,
+ * legacy-matched difference from goods-list.ts, not something to change here).
+ */
+function titleWithMaterial(p: { title?: string; material?: string }): string {
+  const t = esc(p.title || '');
+  return p.material?.trim() ? `${t} - ${esc(p.material)}` : t;
+}
+
 export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNum | null = null): string {
   const m = state.meta;
   const a = state.artist;
@@ -73,14 +84,14 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totAmt += varAmt;
               totWkg += varTWkg;
               if (varTV != null) totVal += varTV;
-              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const i = rowNum++;
             totAmt += c.amount || 0;
             totWkg += c.totalWeightKg;
             if (c.totalValue != null) totVal += c.totalValue;
-            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.length} variants)` : `${esc(p.title || '')}`;
+            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.length} variants)` : titleWithMaterial(p);
             rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(p.sku || '')}</td><td>${td}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${c.amount ?? ''}</td><td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${c.totalValue != null ? c.totalValue : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });
@@ -134,7 +145,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totSQ += v.soldQty || 0;
               totSV += rowSV;
               totSWkg += varSWkg;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
             });
           } else if (c.soldQty > 0) {
             rowNum++;
@@ -142,7 +153,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
             totSQ += c.soldQty || 0;
             totSV += rowSV;
             totSWkg += c.soldWeightKg;
-            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.length} variants)` : esc(p.title || '');
+            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.length} variants)` : titleWithMaterial(p);
             rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${c.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(c.soldWeightKg)}</td></tr>`);
           }
         });
@@ -203,7 +214,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totRQ += varRetQty;
               totRWkg += varRWkg;
               if (varRVal != null) totRVal += varRVal;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const rs = calcReturnStats(p);
@@ -214,7 +225,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
             totRQ += retQty;
             totRWkg += retWkg;
             if (retVal != null) totRVal += retVal;
-            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.filter((v) => !v.unlisted).length} variants)` : esc(p.title || '');
+            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.filter((v) => !v.unlisted).length} variants)` : titleWithMaterial(p);
             rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td><td class="r">${c2.amount ?? ''}</td><td class="r">${c2.soldQty || 0}</td><td class="r"><strong>${retQty}</strong></td><td class="r">${c2.effectiveUnitWeightG != null ? Math.round(c2.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(retWkg)}</td><td class="r">${p.priceNote || (c2.effectiveUnitPrice != null ? formatNum(floorN(c2.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${retVal != null ? retVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });

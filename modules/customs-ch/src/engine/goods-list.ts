@@ -18,13 +18,17 @@ import {
   hasVariants,
 } from './calc';
 import type { CustomsState } from './model';
-import { isArtwork, isPurse } from '../lib/artwork';
+import { isArtwork } from '../lib/artwork';
 
 export type GoodsDocNum = 1 | 2 | 3;
 
 /**
  * Customs line name. Art prints read as "Title (Year) - Artist" (the artist's
- * full name attributes the work on the declaration); purses add their material.
+ * full name attributes the work on the declaration); everything else with a
+ * material on file adds it the same way ("Title - Material") - originally a
+ * purse-only special case, generalized since customs wants material specifics
+ * (polyester vs. "vegan leather", precious-metal status on pins, ...) on any
+ * product now, not just bags.
  */
 function titleForCustoms(
   p: { title?: string; type?: string; year?: number; material?: string },
@@ -36,17 +40,18 @@ function titleForCustoms(
     const artist = (artistName ?? '').trim();
     return artist ? `${base} - ${esc(artist)}` : base;
   }
-  if (isPurse(p.type) && p.material) return `${t} - ${esc(p.material)}`;
+  if (p.material?.trim()) return `${t} - ${esc(p.material)}`;
   return t;
 }
 
 /**
- * Name for the Sold / Return lists: art prints gain the year + artist so the
- * attribution is consistent across every goods list; every other product keeps
- * its plain title (unchanged from the legacy output).
+ * Name for the Sold / Return lists: art prints gain the year + artist, and
+ * anything with a material on file gains that, the same suffix titleForCustoms
+ * applies to the Import list - the point is one consistent name across every
+ * goods list, not different rules for sold/returned than for on-hand stock.
  */
-function soldReturnName(p: { title?: string; type?: string; year?: number }, artistName?: string): string {
-  return isArtwork(p.type) ? titleForCustoms(p, artistName) : esc(p.title || '');
+function soldReturnName(p: { title?: string; type?: string; year?: number; material?: string }, artistName?: string): string {
+  return titleForCustoms(p, artistName);
 }
 
 /**

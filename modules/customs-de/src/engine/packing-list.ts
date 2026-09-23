@@ -21,7 +21,7 @@
  */
 import { calcDeProduct, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
 import type { CustomsDeProduct, CustomsDeState } from './model';
-import { isArtwork, isPurse } from '../lib/artwork';
+import { isArtwork } from '../lib/artwork';
 
 export type PackingListKind = 'export' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
@@ -35,7 +35,9 @@ function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: s
 /**
  * Customs line name - an item is only as identifiable as its title, and two
  * booths' "Sunset" print aren't the same thing. Art prints read as
- * "Title (Year) - Artist"; purses add their material. Mirrors
+ * "Title (Year) - Artist"; anything with a material on file adds that the
+ * same way, generalized from a purse-only special case since customs wants
+ * material specifics on any product now, not just bags. Mirrors
  * customs-ch/engine/goods-list.ts's titleForCustoms().
  */
 function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
@@ -45,7 +47,7 @@ function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
     const artist = (artistName ?? '').trim();
     return artist ? `${base} - ${esc(artist)}` : base;
   }
-  if (isPurse(p.type) && p.material) return `${t} - ${esc(p.material)}`;
+  if (p.material?.trim()) return `${t} - ${esc(p.material)}`;
   return t;
 }
 

@@ -58,7 +58,7 @@ export function buildIaaPlusSheetData(state: CustomsDeState, now: Date = new Dat
     totValue += c.totalValue ?? 0;
     return {
       no: i + 1,
-      title: p.title || '',
+      title: p.material?.trim() ? `${p.title || ''} - ${p.material}` : p.title || '',
       tariffNo: p.tariffNo || '-',
       origin: (p.originCountry || d.countryOfOrigin || '').toUpperCase(),
       grossKg: c.totalWeightKg,

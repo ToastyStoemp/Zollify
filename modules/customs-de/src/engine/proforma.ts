@@ -65,7 +65,7 @@ export function buildProformaHtml(state: CustomsDeState, now: Date = new Date())
       const originCc = (p.originCountry || d.countryOfOrigin || '').toUpperCase();
       return `<tr>
       <td class="r">${i + 1}</td>
-      <td>${esc(p.title || '')}</td>
+      <td>${esc(p.title || '')}${p.material?.trim() ? ` - ${esc(p.material)}` : ''}</td>
       <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
       <td class="r">${fmtWeightKg(c.totalWeightKg)}</td>

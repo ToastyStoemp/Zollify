@@ -92,6 +92,8 @@ function customsIssues(p: Product): string[] {
   // Art prints are declared as artworks by title and year; everything else is identified by SKU.
   const skuMissing = p.variants.length ? p.variants.some((v) => !v.unlisted && !(v.sku ?? p.sku)?.trim()) : !p.sku?.trim();
   if (!isArtwork(p.type ?? '') && skuMissing) out.push('no SKU');
+  // Same exemption as SKU: art prints are paper, not a material declaration.
+  if (!isArtwork(p.type ?? '') && !p.material?.trim()) out.push('no material');
   return out;
 }
 
@@ -198,8 +200,7 @@ const onHandOf = (p: Product): number => (p.variants.length ? p.variants.reduce(
 const freeOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + freeFor(p.id, v.id), 0) : freeFor(p.id, ''));
 const soldOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + soldTotal(p.id, v.id), 0) : soldTotal(p.id, ''));
 
-// Customs wants title + year for art prints and the material for purses.
-const isPurse = (type: string): boolean => /purse|wallet|bag/i.test(type);
+// Customs wants title + year for art prints.
 
 // ── Editor ──────────────────────────────────────────────────────────────────
 interface VariantForm extends Variant {
@@ -537,10 +538,10 @@ async function remove(product: Product): Promise<void> {
             <input v-model="form.year" type="number" inputmode="numeric" placeholder="2024" />
             <small>Listed on customs documents as “{{ form.title || 'Title' }}{{ form.year ? ` (${form.year})` : '' }}”.</small>
           </label>
-          <label v-if="isPurse(form.type)">
+          <label v-if="!isArtwork(form.type)">
             <span>Material</span>
-            <input v-model="form.material" type="text" placeholder="Genuine leather" />
-            <small>Listed on customs documents as “{{ form.title || 'Title' }}{{ form.material ? ` - ${form.material}` : '' }}”.</small>
+            <input v-model="form.material" type="text" placeholder="Polyester, 100%" />
+            <small>Specific composition, not a category - “vegan leather” isn’t enough, say “polyester” or “PU”; for enamel pins say whether it’s a precious metal, e.g. “zinc alloy, no precious metal”. Listed on customs documents as “{{ form.title || 'Title' }}{{ form.material ? ` - ${form.material}` : '' }}”.</small>
           </label>
         </details>
 

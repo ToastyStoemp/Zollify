@@ -60,7 +60,7 @@ export function buildProformaHtml(state: CustomsState, now: Date = new Date()): 
       totWkg += c.totalWeightKg;
       return `<tr>
       <td class="r">${i + 1}</td>
-      <td>${esc(p.title || '')}</td>
+      <td>${esc(p.title || '')}${p.material?.trim() ? ` - ${esc(p.material)}` : ''}</td>
       <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
       <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : '-'}</td>

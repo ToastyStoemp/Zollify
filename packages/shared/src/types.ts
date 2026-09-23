@@ -71,7 +71,9 @@ export interface Product {
   permitOverride?: number;
   /** Year the artwork was produced. Customs wants title + year for art prints. */
   year?: number;
-  /** Material composition (e.g. "Genuine leather"). Customs wants it for purses. */
+  /** Material composition (e.g. "Polyester, 100%" or "Zinc alloy, no precious metal").
+   *  Customs wants this specific, not a generic material family - required for
+   *  everything but art prints, same exemption as sku (see customsIssues()). */
   material?: string;
   variants: Variant[];
   imageId?: string;

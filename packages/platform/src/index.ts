@@ -65,5 +65,5 @@ export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';
 export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './native';
 export { nativeHeaders } from './session';
-export { selfUpdates, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
-export { notifyShellUpdateReady, checkAndQueueShellUpdate } from './shell-updates';
+export { selfUpdates, currentAppVersion, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
+export { notifyShellUpdateReady, checkAndQueueShellUpdate, currentShellVersion, checkShellUpdate, queueShellUpdate, type ShellUpdateCheck } from './shell-updates';

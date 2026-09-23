@@ -45,6 +45,20 @@ export async function selfUpdates(): Promise<boolean> {
   return flavor !== 'carbon';
 }
 
+/**
+ * The native package's own identity, for a settings screen - unlike
+ * selfUpdates(), this works on Carbon too (the plugin itself is present on
+ * every flavour; it's only the self-update UI that's withheld there), so
+ * "what am I actually running" is answerable regardless of update path.
+ * Null on the web or if the plugin genuinely isn't there.
+ */
+export async function currentAppVersion(): Promise<{ versionCode: number; versionName: string; flavor: Flavor } | null> {
+  const plugin = updater();
+  if (!plugin) return null;
+  const c = await plugin.getCurrentVersion();
+  return { versionCode: Number(c.versionCode), versionName: c.versionName, flavor: c.flavor as Flavor };
+}
+
 /** Compares this install against what the server publishes; null when self-update is not possible here. */
 export async function checkForUpdate(): Promise<UpdateCheck | null> {
   const plugin = updater();

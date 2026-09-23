@@ -6,10 +6,15 @@ import {
   getApiBase,
   isNative,
   checkForUpdate,
+  checkShellUpdate,
+  currentAppVersion,
+  currentShellVersion,
   downloadUpdate,
   installDownloadedUpdate,
+  queueShellUpdate,
   selfUpdates,
   updateDownload,
+  type ShellUpdateCheck,
   type UpdateCheck,
   currentAccount,
   deviceFlavor,
@@ -59,19 +64,47 @@ const canSelfUpdate = ref(false);
 const update = ref<UpdateCheck | null>(null);
 const checking = ref(false);
 const updateError = ref<string | null>(null);
+// The package this install actually is, independent of whether it can
+// self-update from here (Carbon can't, but "what am I running" is still
+// worth answering) - shown unconditionally, not only after a check.
+const appVersion = ref<{ versionCode: number; versionName: string; flavor: string } | null>(null);
+const shellVersion = ref<string | null>(null);
 onMounted(async () => {
   canSelfUpdate.value = await selfUpdates().catch(() => false);
+  appVersion.value = await currentAppVersion().catch(() => null);
+  shellVersion.value = await currentShellVersion().catch(() => null);
 });
+
+// ── Content updates (every flavour, including Carbon) ───────────────────────
+const shellCheck = ref<ShellUpdateCheck | null>(null);
+const shellQueuing = ref(false);
+const shellQueued = ref(false);
+const shellError = ref<string | null>(null);
+
+/** One button drives both checks: the native APK path (withheld on Carbon) and the content path (works everywhere). Either half can fail without blocking the other. */
 async function checkUpdate(): Promise<void> {
   checking.value = true;
   updateError.value = null;
+  shellError.value = null;
+  shellQueued.value = false;
   try {
     update.value = await checkForUpdate();
     if (update.value?.available) await downloadUpdate(update.value);
   } catch (err) {
     updateError.value = err instanceof Error ? err.message : 'Could not check for updates.';
+  }
+  try {
+    shellCheck.value = await checkShellUpdate();
+    if (shellCheck.value?.available) {
+      shellQueuing.value = true;
+      await queueShellUpdate(shellCheck.value);
+      shellQueued.value = true;
+    }
+  } catch (err) {
+    shellError.value = err instanceof Error ? err.message : 'Could not check for content updates.';
   } finally {
     checking.value = false;
+    shellQueuing.value = false;
   }
 }
 const progressPct = (): number => (updateDownload.totalBytes > 0 ? Math.round((updateDownload.bytesWritten / updateDownload.totalBytes) * 100) : 0);
@@ -197,18 +230,31 @@ function when(ts: number): string {
       </div>
     </template>
 
-    <template v-if="canSelfUpdate">
+    <template v-if="isNative()">
       <h3>App updates</h3>
+      <dl class="facts">
+        <dt>Package</dt>
+        <dd class="mono">{{ appVersion ? `${appVersion.flavor} · v${appVersion.versionName} (${appVersion.versionCode})` : '…' }}</dd>
+        <dt>Content build</dt>
+        <dd class="mono">{{ shellVersion ?? build }}</dd>
+      </dl>
       <p class="hint">
-        Build {{ build }}. The app checks the server on every start and downloads a newer build in the background; installing is always your tap.
+        "Check for updates" covers both halves: the app itself (not on Carbon terminals - they take their APK through myPOS instead) and the content it runs, which updates on every flavour without a new install.
       </p>
+
       <p v-if="updateError" class="error" role="alert">{{ updateError }}</p>
-      <p v-else-if="update && !update.available" class="ok" role="status">Up to date ({{ update.currentVersionName }}).</p>
-      <p v-else-if="update?.available && updateDownload.active" class="hint">Downloading {{ update.versionName }}… {{ progressPct() }}%</p>
-      <p v-else-if="update?.available && updateDownload.error" class="error" role="alert">Download failed: {{ updateDownload.error }}</p>
+      <p v-else-if="canSelfUpdate && update && !update.available" class="ok" role="status">App up to date ({{ update.currentVersionName }}).</p>
+      <p v-else-if="canSelfUpdate && update?.available && updateDownload.active" class="hint">Downloading app {{ update.versionName }}… {{ progressPct() }}%</p>
+      <p v-else-if="canSelfUpdate && update?.available && updateDownload.error" class="error" role="alert">App download failed: {{ updateDownload.error }}</p>
+
+      <p v-if="shellError" class="error" role="alert">{{ shellError }}</p>
+      <p v-else-if="shellQueuing" class="hint">Downloading content update…</p>
+      <p v-else-if="shellQueued" class="ok" role="status">Content {{ shellCheck?.latestVersion }} downloaded - ready next time the app opens.</p>
+      <p v-else-if="shellCheck && !shellCheck.available" class="ok" role="status">Content up to date ({{ shellCheck.currentVersion }}).</p>
+
       <div class="row">
         <button type="button" :disabled="checking || updateDownload.active" @click="checkUpdate">{{ checking ? 'Checking…' : 'Check for updates' }}</button>
-        <button v-if="updateDownload.ready" type="button" class="primary" @click="installDownloadedUpdate">Install {{ updateDownload.versionName }}</button>
+        <button v-if="canSelfUpdate && updateDownload.ready" type="button" class="primary" @click="installDownloadedUpdate">Install {{ updateDownload.versionName }}</button>
       </div>
     </template>
 

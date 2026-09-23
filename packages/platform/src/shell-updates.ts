@@ -50,6 +50,46 @@ interface ShellManifest {
   sizeBytes: number;
 }
 
+/** Just what's active right now, for a settings screen to show even before checking anything. Null outside the native app. */
+export async function currentShellVersion(): Promise<string | null> {
+  const current = await updater()?.current();
+  return current?.bundle.version ?? null;
+}
+
+export interface ShellUpdateCheck {
+  currentVersion: string;
+  latestVersion: string;
+  available: boolean;
+  url: string;
+}
+
+/**
+ * Read-only half of the flow, for a "Check for updates" button that wants to
+ * show a result either way (a settings screen), unlike the silent
+ * background check below. Null when there's nothing to report at all: not
+ * native, offline, or the server has never published a bundle.
+ */
+export async function checkShellUpdate(): Promise<ShellUpdateCheck | null> {
+  const plugin = updater();
+  const server = getServerUrl();
+  if (!plugin || !server) return null;
+  const current = await plugin.current();
+  const res = await fetch(`${server}/api/shell/latest`);
+  if (!res.ok) return null;
+  const latest = (await res.json()) as ShellManifest;
+  if (!latest.version) return null;
+  return { currentVersion: current.bundle.version, latestVersion: latest.version, available: latest.version !== current.bundle.version, url: latest.url };
+}
+
+/** Downloads and queues (next(), not set()) the update a checkShellUpdate() call found - same "never mid-sale" reasoning as checkAndQueueShellUpdate(). */
+export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
+  const plugin = updater();
+  const server = getServerUrl();
+  if (!plugin || !server) return;
+  const downloaded = await plugin.download({ url: `${server}${check.url}`, version: check.latestVersion });
+  await plugin.next({ id: downloaded.id });
+}
+
 /**
  * Background convenience only, same as checkForUpdate() in updates.ts: never
  * throws somewhere the caller has to notice, and does nothing at all outside
@@ -62,19 +102,11 @@ interface ShellManifest {
  * check/download itself failed).
  */
 export async function checkAndQueueShellUpdate(): Promise<string | null> {
-  const plugin = updater();
-  const server = getServerUrl();
-  if (!plugin || !server) return null;
   try {
-    const current = await plugin.current();
-    const res = await fetch(`${server}/api/shell/latest`);
-    if (!res.ok) return null;
-    const latest = (await res.json()) as ShellManifest;
-    if (!latest.version || latest.version === current.bundle.version) return null;
-
-    const downloaded = await plugin.download({ url: `${server}${latest.url}`, version: latest.version });
-    await plugin.next({ id: downloaded.id });
-    return latest.version;
+    const check = await checkShellUpdate();
+    if (!check?.available) return null;
+    await queueShellUpdate(check);
+    return check.latestVersion;
   } catch {
     /* background convenience, never an error the user has to see */
     return null;

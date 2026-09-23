@@ -43,6 +43,12 @@ const store = process.env.ZOLLIFY_SHELL_STORE
  * exactly one real publish ever, followed by silent no-ops on every deploy
  * since (confirmed live: production was still serving "0.1.0" with nothing
  * newer, weeks of commits later).
+ *
+ * `-`, not the semver-conventional `+`: this string becomes a URL path
+ * segment (the bundle.zip route below), and `+` has special meaning in URL
+ * encoding - confirmed live, the shell-updater plugin's native downloader
+ * failed on a `+`-containing URL while the identical URL opened fine in a
+ * browser. `-` needs no encoding in a path at all.
  */
 function buildStamp() {
   const version = JSON.parse(readFileSync(join(webDir, 'package.json'), 'utf8')).version;
@@ -54,7 +60,7 @@ function buildStamp() {
       /* no git, and no env override either - version stays bare */
     }
   }
-  return sha ? `${version}+${sha}` : version;
+  return sha ? `${version}-${sha}` : version;
 }
 
 function zipDist(outPath) {

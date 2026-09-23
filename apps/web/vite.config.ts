@@ -26,6 +26,15 @@ const hostInputs = Object.fromEntries(
  * bug that left scripts/publish-shell.mjs's published version frozen, since
  * that script computes this identically and treats a version as immutable
  * once its directory exists.
+ *
+ * `-`, not the semver-conventional `+`: this string is used verbatim as a
+ * URL path segment (publish-shell.mjs's bundle.zip route), and `+` has
+ * special meaning in URL encoding - confirmed live, the shell-updater
+ * plugin's own native downloader failed on a `+`-containing URL while the
+ * exact same URL opened fine in a browser (more lenient about it). `-` is
+ * unambiguous in a path with zero encoding involved, at the minor cost of
+ * this no longer being a strict semver build-metadata suffix - nothing here
+ * ever semver-parses it, only compares it for exact string equality.
  */
 function buildStamp(): string {
   const version = (JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string }).version;
@@ -37,7 +46,7 @@ function buildStamp(): string {
       /* no git, and no env override either - version stays bare */
     }
   }
-  return sha ? `${version}+${sha}` : version;
+  return sha ? `${version}-${sha}` : version;
 }
 
 export default defineConfig({

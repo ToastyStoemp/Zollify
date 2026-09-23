@@ -99,7 +99,17 @@ async function boot(): Promise<void> {
   // bundle crashed and rolls back to the previous one.
   void notifyShellUpdateReady();
   void autoUpdateCheck();
-  void checkAndQueueShellUpdate();
+  void shellUpdateCheck();
+}
+
+/**
+ * Same background-convenience shape as autoUpdateCheck() above, for the
+ * content-only path: queued with next(), so - unlike the APK toast - there's
+ * nothing to tap, just a heads-up that it'll be there next time the app opens.
+ */
+async function shellUpdateCheck(): Promise<void> {
+  const queuedVersion = await checkAndQueueShellUpdate();
+  if (queuedVersion) createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, { timeoutMs: 8000 });
 }
 
 /**

@@ -56,21 +56,27 @@ interface ShellManifest {
  * the native app. Downloads a newer bundle and queues it with next() rather
  * than set(), so it activates on the app's next cold start instead of
  * reloading out from under whatever the till is doing right now.
+ *
+ * Returns the queued version so the caller can tell the user, or null when
+ * there was nothing to queue (already current, offline, not native, or the
+ * check/download itself failed).
  */
-export async function checkAndQueueShellUpdate(): Promise<void> {
+export async function checkAndQueueShellUpdate(): Promise<string | null> {
   const plugin = updater();
   const server = getServerUrl();
-  if (!plugin || !server) return;
+  if (!plugin || !server) return null;
   try {
     const current = await plugin.current();
     const res = await fetch(`${server}/api/shell/latest`);
-    if (!res.ok) return;
+    if (!res.ok) return null;
     const latest = (await res.json()) as ShellManifest;
-    if (!latest.version || latest.version === current.bundle.version) return;
+    if (!latest.version || latest.version === current.bundle.version) return null;
 
     const downloaded = await plugin.download({ url: `${server}${latest.url}`, version: latest.version });
     await plugin.next({ id: downloaded.id });
+    return latest.version;
   } catch {
     /* background convenience, never an error the user has to see */
+    return null;
   }
 }

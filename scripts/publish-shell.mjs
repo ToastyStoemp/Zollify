@@ -56,12 +56,20 @@ function zipDist(outPath) {
 }
 
 async function main() {
-  console.log('building apps/web…');
-  // Same reasoning as publish-modules.mjs: Node 24 refuses to spawn npm.cmd
-  // without shell:true, and shell:true then needs argument escaping - calling
-  // Vite's own binary directly sidesteps both (confirmed live: `npm run
-  // build:web` via execFileSync fails here with EINVAL).
-  execFileSync(process.execPath, [viteBin, 'build'], { cwd: webDir, stdio: 'inherit' });
+  // ZOLLIFY_SKIP_BUILD=1 for callers that already built apps/web/dist
+  // themselves (the Docker build stage runs `npm run build -w @zollify/web`
+  // right before this) - rebuilding again here would just burn CI time on an
+  // identical output.
+  if (process.env.ZOLLIFY_SKIP_BUILD) {
+    console.log('ZOLLIFY_SKIP_BUILD set - using the existing apps/web/dist');
+  } else {
+    console.log('building apps/web…');
+    // Same reasoning as publish-modules.mjs: Node 24 refuses to spawn npm.cmd
+    // without shell:true, and shell:true then needs argument escaping - calling
+    // Vite's own binary directly sidesteps both (confirmed live: `npm run
+    // build:web` via execFileSync fails here with EINVAL).
+    execFileSync(process.execPath, [viteBin, 'build'], { cwd: webDir, stdio: 'inherit' });
+  }
 
   if (!existsSync(distDir)) {
     console.error('apps/web/dist was not produced - build failed');

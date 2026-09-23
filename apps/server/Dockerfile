@@ -39,6 +39,10 @@ RUN npm run build -w @zollify/web
 # Publishes each module bundle plus its manifest and SHA-256 into the store the
 # gateway serves from.
 RUN node scripts/publish-modules.mjs
+# Zips the just-built apps/web/dist into the content-update store
+# @capgo/capacitor-updater's clients fetch from - ZOLLIFY_SKIP_BUILD since
+# apps/web was already built by the line above.
+RUN ZOLLIFY_SKIP_BUILD=1 node scripts/publish-shell.mjs
 
 # ── runtime ─────────────────────────────────────────────────────────────────
 FROM node:22-bookworm-slim AS runtime
@@ -53,6 +57,7 @@ ENV NODE_ENV=production \
     ZOLLIFY_MODULE_STORE=/repo/apps/server/modules-store \
     ZOLLIFY_WEB_DIST=/repo/apps/web/dist \
     ZOLLIFY_APK_DIR=/data/apk \
+    ZOLLIFY_SHELL_STORE=/repo/apps/server/shell-store \
     ZOLLIFY_DEPLOY_DIR=/data/deploy \
     PORT=8787 \
     HOST=0.0.0.0
@@ -74,6 +79,7 @@ COPY apps/server/tsconfig.json apps/server/
 # Built artefacts from the build stage - sources for these are not shipped.
 COPY --from=build /repo/apps/web/dist apps/web/dist
 COPY --from=build /repo/apps/server/modules-store apps/server/modules-store
+COPY --from=build /repo/apps/server/shell-store apps/server/shell-store
 
 # Drop privileges. The node image ships an unprivileged `node` user. /data is
 # created here, owned by it, so a fresh named volume inherits that ownership

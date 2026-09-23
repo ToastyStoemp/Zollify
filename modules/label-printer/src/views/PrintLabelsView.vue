@@ -549,7 +549,7 @@ async function printTestLabel(): Promise<void> {
 </template>
 
 <style scoped>
-.labels { display: flex; flex-direction: column; gap: 1rem; max-width: 96rem; }
+.labels { display: flex; flex-direction: column; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: .95rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); margin: 0; }

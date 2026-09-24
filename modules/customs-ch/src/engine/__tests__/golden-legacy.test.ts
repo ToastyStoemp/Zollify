@@ -291,6 +291,16 @@ function nothingSoldState(): CustomsState {
 
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
+/**
+ * The Material column (goods-list.ts, all-versions.ts, proforma.ts) is a
+ * deliberate, permanent divergence from legacy - the old tool has no concept
+ * of material at all, so there is no fixture to reconcile against. Every
+ * `<th>`/`<td>` for it carries `class="mat"` for exactly this: strip it from
+ * the PORTED html before diffing, so every other cell still has to match
+ * legacy byte-for-byte and a real regression there still fails loudly.
+ */
+const stripMaterialColumn = (html: string): string => html.replace(/\n?[ \t]*<(th|td) class="mat">.*?<\/\1>/g, '');
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -342,7 +352,7 @@ describe('customs port vs legacy (golden diff)', () => {
           legacy.printGoodsList(docNum, format);
           const ported = buildGoodsListHtml(clone(make()), docNum, format);
           expect(captured.html, `doc ${docNum} / ${format}`).toHaveLength(1);
-          expect(ported, `doc ${docNum} / ${format}`).toBe(captured.html[0]);
+          expect(stripMaterialColumn(ported), `doc ${docNum} / ${format}`).toBe(captured.html[0]);
         }
       }
     }
@@ -356,7 +366,7 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.printAllVersions(only);
       const ported = buildAllVersionsHtml(clone(richState()), only);
       expect(captured.html).toHaveLength(1);
-      expect(ported).toBe(captured.html[0]);
+      expect(stripMaterialColumn(ported)).toBe(captured.html[0]);
     }
   });
 
@@ -367,7 +377,7 @@ describe('customs port vs legacy (golden diff)', () => {
     legacy.printProformaInvoice();
     const ported = buildProformaHtml(clone(richState()), new Date());
     expect(captured.html).toHaveLength(1);
-    expect(ported).toBe(captured.html[0]);
+    expect(stripMaterialColumn(ported)).toBe(captured.html[0]);
   });
 
   it('produces an identical form 11.74', () => {

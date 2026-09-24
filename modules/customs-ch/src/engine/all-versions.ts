@@ -6,7 +6,9 @@
  */
 import {
   calcProduct,
+  calcProductByMaterial,
   calcReturnStats,
+  calcReturnStatsByMaterial,
   computeLRP,
   countryToCode,
   esc,
@@ -18,21 +20,7 @@ import {
   hasVariants,
 } from './calc';
 import type { CustomsState } from './model';
-import { byTypeGroupName, type GoodsDocNum, type GoodsFormat } from './goods-list';
-
-/**
- * Line name with material suffix, e.g. "Enamel Pin - Zinc alloy, no precious
- * metal" - deliberately does NOT also apply the artist/year suffix goods-list.ts
- * gives art prints: this document already omitted that (a pre-existing,
- * legacy-matched difference from goods-list.ts, not something to change here).
- * A variant row passes itself as v so its own material override (if any)
- * wins over the product's.
- */
-function titleWithMaterial(p: { title?: string; material?: string }, v?: { material?: string }): string {
-  const t = esc(p.title || '');
-  const material = v?.material ?? p.material;
-  return material?.trim() ? `${t} - ${esc(material)}` : t;
-}
+import { byTypeGroupName, materialCell, resolveMaterial, type GoodsDocNum, type GoodsFormat } from './goods-list';
 
 export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNum | null = null): string {
   const m = state.meta;
@@ -52,27 +40,28 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
       if (format === 'bytype') {
         const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; amount: number; wkg: number; val: number; hasVal: boolean }> = {};
         state.products.filter(hasCustomsInfo).forEach((p) => {
-          const c = calcProduct(p);
-          const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
-          if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: p.material || '', tariffRate: p.tariffRate, vatRate: p.vatRate, amount: 0, wkg: 0, val: 0, hasVal: false };
-          const g = groups[key];
-          g.amount += c.amount || 0;
-          g.wkg += c.totalWeightKg;
-          if (c.totalValue != null) {
-            g.val += c.totalValue;
-            g.hasVal = true;
+          for (const mc of calcProductByMaterial(p)) {
+            const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, amount: 0, wkg: 0, val: 0, hasVal: false };
+            const g = groups[key];
+            g.amount += mc.amount;
+            g.wkg += mc.totalWeightKg;
+            if (mc.totalValue != null) {
+              g.val += mc.totalValue;
+              g.hasVal = true;
+            }
+            totAmt += mc.amount;
+            totWkg += mc.totalWeightKg;
+            if (mc.totalValue != null) totVal += mc.totalValue;
           }
-          totAmt += c.amount || 0;
-          totWkg += c.totalWeightKg;
-          if (c.totalValue != null) totVal += c.totalValue;
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(groupList, g)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
         });
         tableHtml = `<div class="section-title">List of goods (By Type)</div>
-<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Total Amount</th><th class="r">Total Weight</th><th class="r">Total Value (${cur})</th></tr></thead>
-<tbody>${rows.join('')}</tbody><tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="r">${totAmt}</td><td class="r">${fmtWeightKg(totWkg)}</td><td class="r" style="color:#c00">${Math.floor(totVal)}</td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Total Amount</th><th class="r">Total Weight</th><th class="r">Total Value (${cur})</th></tr></thead>
+<tbody>${rows.join('')}</tbody><tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r">${totAmt}</td><td class="r">${fmtWeightKg(totWkg)}</td><td class="r" style="color:#c00">${Math.floor(totVal)}</td></tr></tfoot></table>`;
       } else {
         state.products.filter(hasCustomsInfo).forEach((p) => {
           const c = calcProduct(p);
@@ -88,21 +77,21 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totAmt += varAmt;
               totWkg += varTWkg;
               if (varTV != null) totVal += varTV;
-              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td>${materialCell(resolveMaterial(p, v))}<td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const i = rowNum++;
             totAmt += c.amount || 0;
             totWkg += c.totalWeightKg;
             if (c.totalValue != null) totVal += c.totalValue;
-            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.length} variants)` : titleWithMaterial(p);
-            rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(p.sku || '')}</td><td>${td}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${c.amount ?? ''}</td><td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${c.totalValue != null ? c.totalValue : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.length} variants)` : esc(p.title || '');
+            rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(p.sku || '')}</td><td>${td}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td>${materialCell(p.material)}<td class="r">${c.amount ?? ''}</td><td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${c.totalValue != null ? c.totalValue : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });
         const fl = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
         tableHtml = `<div class="section-title">List of goods${fl}</div>
-<table class="goods"><thead><tr><th>#</th><th>SKU</th><th>Title</th><th>For Sale / Not For Sale</th><th>Type</th><th class="r">Amount</th><th class="r">Unit Weight</th><th class="r">Total Weight</th><th class="r">Unit Price (${cur})</th><th class="r">Total Value (${cur})</th><th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th></tr></thead>
-<tbody>${rows.join('')}</tbody><tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="r">${totAmt}</td><td></td><td class="r">${fmtWeightKg(totWkg)}</td><td></td><td class="r" style="color:#c00">${Math.floor(totVal)}</td><td colspan="4"></td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>SKU</th><th>Title</th><th>For Sale / Not For Sale</th><th>Type</th><th class="mat">Material</th><th class="r">Amount</th><th class="r">Unit Weight</th><th class="r">Total Weight</th><th class="r">Unit Price (${cur})</th><th class="r">Total Value (${cur})</th><th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th></tr></thead>
+<tbody>${rows.join('')}</tbody><tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r">${totAmt}</td><td></td><td class="r">${fmtWeightKg(totWkg)}</td><td></td><td class="r" style="color:#c00">${Math.floor(totVal)}</td><td colspan="4"></td></tr></tfoot></table>`;
       }
 
       // ── SOLD ──
@@ -116,26 +105,27 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; soldQty: number; soldVal: number; soldWkg: number }> = {};
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
-          const c = calcProduct(p);
-          if (!(c.soldQty > 0)) return;
-          const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
-          if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: p.material || '', tariffRate: p.tariffRate, vatRate: p.vatRate, soldQty: 0, soldVal: 0, soldWkg: 0 };
-          const g = groups[key];
-          g.soldQty += c.soldQty || 0;
-          g.soldVal += floorN(c.soldValue || 0, 2);
-          g.soldWkg += c.soldWeightKg;
-          totSQ += c.soldQty || 0;
-          totSV += floorN(c.soldValue || 0, 2);
-          totSWkg += c.soldWeightKg;
+          for (const mc of calcProductByMaterial(p)) {
+            if (!(mc.soldQty > 0)) continue;
+            const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, soldQty: 0, soldVal: 0, soldWkg: 0 };
+            const g = groups[key];
+            g.soldQty += mc.soldQty;
+            g.soldVal += floorN(mc.soldValue, 2);
+            g.soldWkg += mc.soldWeightKg;
+            totSQ += mc.soldQty;
+            totSV += floorN(mc.soldValue, 2);
+            totSWkg += mc.soldWeightKg;
+          }
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(groupList, g)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.soldQty}</td><td class="r">${formatNum(floorN(g.soldVal, 2), 2)}</td><td class="r">${fmtWeightKg(g.soldWkg)}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.soldQty}</td><td class="r">${formatNum(floorN(g.soldVal, 2), 2)}</td><td class="r">${fmtWeightKg(g.soldWkg)}</td></tr>`);
         });
         tableHtml = `<div class="section-title">List of goods sold (By Type)</div>
-<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Qty Sold</th><th class="r">Value Sold (${cur})</th><th class="r">Sold Weight</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>'}</tbody>
-<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="r">${totSQ}</td><td class="r">${formatNum(floorN(totSV, 2), 2)}</td><td class="r">${fmtWeightKg(totSWkg)}</td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Qty Sold</th><th class="r">Value Sold (${cur})</th><th class="r">Sold Weight</th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="9" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>'}</tbody>
+<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r">${totSQ}</td><td class="r">${formatNum(floorN(totSV, 2), 2)}</td><td class="r">${fmtWeightKg(totSWkg)}</td></tr></tfoot></table>`;
       } else {
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
@@ -150,7 +140,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totSQ += v.soldQty || 0;
               totSV += rowSV;
               totSWkg += varSWkg;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>${materialCell(resolveMaterial(p, v))}<td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
             });
           } else if (c.soldQty > 0) {
             rowNum++;
@@ -158,15 +148,15 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
             totSQ += c.soldQty || 0;
             totSV += rowSV;
             totSWkg += c.soldWeightKg;
-            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.length} variants)` : titleWithMaterial(p);
-            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${c.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(c.soldWeightKg)}</td></tr>`);
+            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.length} variants)` : esc(p.title || '');
+            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td>${materialCell(p.material)}<td class="r">${esc(p.tariffNo || '')}</td><td class="r">${c.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(c.soldWeightKg)}</td></tr>`);
           }
         });
         const fl = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
         tableHtml = `<div class="section-title">List of goods sold${fl}</div>
-<table class="goods"><thead><tr><th>#</th><th>Title</th><th>Type</th><th class="r">Tariff no.</th><th class="r">Qty Sold</th><th class="r">Value Sold (${cur})</th><th class="r">Sold Weight</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="7" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>'}</tbody>
-<tfoot><tr><td colspan="4" style="text-align:right">TOTALS</td><td class="r">${totSQ}</td><td class="r">${formatNum(floorN(totSV, 2), 2)}</td><td class="r">${fmtWeightKg(totSWkg)}</td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th><th class="r">Tariff no.</th><th class="r">Qty Sold</th><th class="r">Value Sold (${cur})</th><th class="r">Sold Weight</th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>'}</tbody>
+<tfoot><tr><td colspan="4" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r">${totSQ}</td><td class="r">${formatNum(floorN(totSV, 2), 2)}</td><td class="r">${fmtWeightKg(totSWkg)}</td></tr></tfoot></table>`;
       }
 
       // ── RETURN ──
@@ -180,30 +170,29 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; retQty: number; retWkg: number; retVal: number; hasVal: boolean }> = {};
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
-          const rs = calcReturnStats(p);
-          if (rs.retQty <= 0) return;
-          const { retQty, retWkg, retVal } = rs;
-          const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
-          if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: p.material || '', tariffRate: p.tariffRate, vatRate: p.vatRate, retQty: 0, retWkg: 0, retVal: 0, hasVal: false };
-          const g = groups[key];
-          g.retQty += retQty;
-          g.retWkg += retWkg;
-          if (retVal != null) {
-            g.retVal += retVal;
-            g.hasVal = true;
+          for (const mc of calcReturnStatsByMaterial(p)) {
+            const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, retQty: 0, retWkg: 0, retVal: 0, hasVal: false };
+            const g = groups[key];
+            g.retQty += mc.retQty;
+            g.retWkg += mc.retWkg;
+            if (mc.retVal != null) {
+              g.retVal += mc.retVal;
+              g.hasVal = true;
+            }
+            totRQ += mc.retQty;
+            totRWkg += mc.retWkg;
+            if (mc.retVal != null) totRVal += mc.retVal;
           }
-          totRQ += retQty;
-          totRWkg += retWkg;
-          if (retVal != null) totRVal += retVal;
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(groupList, g)}</strong></td><td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
         });
         tableHtml = `<div class="section-title">Return goods list (re-export) (By Type)</div>
-<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Return Qty</th><th class="r">Return Weight</th><th class="r">Return Value (${cur})</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="8" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>'}</tbody>
-<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="r"><strong>${totRQ}</strong></td><td class="r">${fmtWeightKg(totRWkg)}</td><td class="r" style="color:#c00">${Math.floor(totRVal)}</td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Return Qty</th><th class="r">Return Weight</th><th class="r">Return Value (${cur})</th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="9" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>'}</tbody>
+<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r"><strong>${totRQ}</strong></td><td class="r">${fmtWeightKg(totRWkg)}</td><td class="r" style="color:#c00">${Math.floor(totRVal)}</td></tr></tfoot></table>`;
       } else {
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
@@ -220,7 +209,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totRQ += varRetQty;
               totRWkg += varRWkg;
               if (varRVal != null) totRVal += varRVal;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${esc(p.title || '')} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>${materialCell(resolveMaterial(p, v))}<td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const rs = calcReturnStats(p);
@@ -231,15 +220,15 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
             totRQ += retQty;
             totRWkg += retWkg;
             if (retVal != null) totRVal += retVal;
-            const td = hasVariants(p) ? `${titleWithMaterial(p)} (${p.variants!.filter((v) => !v.unlisted).length} variants)` : titleWithMaterial(p);
-            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td><td class="r">${c2.amount ?? ''}</td><td class="r">${c2.soldQty || 0}</td><td class="r"><strong>${retQty}</strong></td><td class="r">${c2.effectiveUnitWeightG != null ? Math.round(c2.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(retWkg)}</td><td class="r">${p.priceNote || (c2.effectiveUnitPrice != null ? formatNum(floorN(c2.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${retVal != null ? retVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+            const td = hasVariants(p) ? `${esc(p.title || '')} (${p.variants!.filter((v) => !v.unlisted).length} variants)` : esc(p.title || '');
+            rows.push(`<tr><td class="c">${rowNum}</td><td>${td}</td><td>${esc(p.type || '')}</td>${materialCell(p.material)}<td class="r">${c2.amount ?? ''}</td><td class="r">${c2.soldQty || 0}</td><td class="r"><strong>${retQty}</strong></td><td class="r">${c2.effectiveUnitWeightG != null ? Math.round(c2.effectiveUnitWeightG as number) + ' g' : ''}</td><td class="r">${fmtWeightKg(retWkg)}</td><td class="r">${p.priceNote || (c2.effectiveUnitPrice != null ? formatNum(floorN(c2.effectiveUnitPrice, 2), 2) : '-')}</td><td class="r">${retVal != null ? retVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
           }
         });
         const fl = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
         tableHtml = `<div class="section-title">Return goods list (re-export)${fl}</div>
-<table class="goods"><thead><tr><th>#</th><th>Title</th><th>Type</th><th class="r">Original Qty</th><th class="r">Sold Qty</th><th class="r">Return Qty</th><th class="r">Unit Weight</th><th class="r">Return Weight</th><th class="r">Unit Price (${cur})</th><th class="r">Return Value (${cur})</th><th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th></tr></thead>
-<tbody>${rows.join('') || '<tr><td colspan="14" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>'}</tbody>
-<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="r"><strong>${totRQ}</strong></td><td></td><td class="r">${fmtWeightKg(totRWkg)}</td><td></td><td class="r" style="color:#c00">${Math.floor(totRVal)}</td><td colspan="4"></td></tr></tfoot></table>`;
+<table class="goods"><thead><tr><th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th><th class="r">Original Qty</th><th class="r">Sold Qty</th><th class="r">Return Qty</th><th class="r">Unit Weight</th><th class="r">Return Weight</th><th class="r">Unit Price (${cur})</th><th class="r">Return Value (${cur})</th><th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th></tr></thead>
+<tbody>${rows.join('') || '<tr><td colspan="15" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>'}</tbody>
+<tfoot><tr><td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td><td class="r"><strong>${totRQ}</strong></td><td></td><td class="r">${fmtWeightKg(totRWkg)}</td><td></td><td class="r" style="color:#c00">${Math.floor(totRVal)}</td><td colspan="4"></td></tr></tfoot></table>`;
       }
     }
     return tableHtml;

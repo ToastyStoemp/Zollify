@@ -75,22 +75,73 @@ describe('import document - excludes zero-stock products', () => {
   });
 });
 
-describe('goods list - by-type HS disambiguation', () => {
-  it('appends the HS code only when two groups share a type', () => {
+describe('goods list - by-type grouping', () => {
+  it('never repeats the HS code in the name column - it already has its own column', () => {
     const html = buildGoodsListHtml(
       state([
         product({ id: 'c1', title: 'Cotton cap', type: 'Cap', tariffNo: '6505.00.30' }),
         product({ id: 'c2', title: 'Print cap', type: 'Cap', tariffNo: '4911.91.00' }),
-        product({ id: 'b1', title: 'Artbook', type: 'Book', tariffNo: '4901.99.00', tariffRate: 2.6, vatRate: 2.6 }),
       ]),
       1,
       'bytype',
     );
-    // Same type, different HS → each group name carries its code.
-    expect(html).toContain('Cap (6505.00.30)');
-    expect(html).toContain('Cap (4911.91.00)');
-    // Unique type → shown plainly, no HS suffix in the name column.
-    expect(html).toContain('<strong>Book</strong>');
-    expect(html).not.toContain('Book (4901.99.00)');
+    // Two groups sharing a type still both show plainly - the HS Code column
+    // (checked below) is what tells them apart, not the name.
+    expect(html).toContain('<strong>Cap</strong>');
+    expect(html).not.toContain('Cap (6505.00.30)');
+    expect(html).not.toContain('Cap (4911.91.00)');
+    expect(html).toContain('6505.00.30');
+    expect(html).toContain('4911.91.00');
+  });
+
+  it('shows material as its own column even when every product of a type shares the same one', () => {
+    const html = buildGoodsListHtml(
+      state([
+        product({ id: 'r1', title: 'Rubber duck', type: 'Toy', material: 'Rubber' }),
+        product({ id: 'r2', title: 'Rubber ball', type: 'Toy', material: 'Rubber' }),
+      ]),
+      1,
+      'bytype',
+    );
+    // One group for the type (same material too) - still shows the material,
+    // not just when there's a second group to disambiguate from.
+    expect(html).toContain('<strong>Toy</strong>');
+    expect(html).toContain('<td class="mat">Rubber</td>');
+  });
+
+  it('splits a type into separate rows when material differs across products', () => {
+    const html = buildGoodsListHtml(
+      state([
+        product({ id: 'p1', title: 'Zinc pin', type: 'Pin', material: 'Zinc alloy' }),
+        product({ id: 'p2', title: 'Silver pin', type: 'Pin', material: 'Sterling silver' }),
+      ]),
+      1,
+      'bytype',
+    );
+    expect(html).toContain('<td class="mat">Zinc alloy</td>');
+    expect(html).toContain('<td class="mat">Sterling silver</td>');
+  });
+
+  it('splits a type into separate rows when one product\'s own VARIANTS differ in material', () => {
+    const html = buildGoodsListHtml(
+      state([
+        product({
+          id: 'p3', title: 'Enamel Pin', type: 'Pin', material: undefined, sku: undefined,
+          amount: 0, variants: [
+            { name: 'Dragon', sku: 'PIN-DRG', amount: 30, soldQty: 0, soldValue: 0, material: 'Zinc alloy' },
+            { name: 'Gold Edition', sku: 'PIN-GLD', amount: 5, soldQty: 0, soldValue: 0, material: 'Gold plate' },
+          ],
+        }),
+      ]),
+      1,
+      'bytype',
+    );
+    // One product, two variant materials - the by-type table splits it into
+    // two rows (one per material), each carrying only that variant's amount.
+    const rows = html.split('<tr>');
+    const zincRow = rows.find((r) => r.includes('Zinc alloy'));
+    const goldRow = rows.find((r) => r.includes('Gold plate'));
+    expect(zincRow).toContain('<td class="r">30</td>');
+    expect(goldRow).toContain('<td class="r">5</td>');
   });
 });

@@ -79,7 +79,8 @@ export function buildProformaEuHtml(state: CustomsState, now: Date = new Date())
       totWkg += c.totalWeightKg;
       return `<tr>
       <td class="r">${i + 1}</td>
-      <td>${esc(p.title || '')}${p.material?.trim() ? ` - ${esc(p.material)}` : ''}</td>
+      <td>${esc(p.title || '')}</td>
+      <td class="mat">${esc(p.material || '')}</td>
       <td>${esc(p.tariffNo || '-')}</td>
       <td class="r">${qty}</td>
       <td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : '-'}</td>
@@ -149,6 +150,7 @@ export function buildProformaEuHtml(state: CustomsState, now: Date = new Date())
   <thead><tr>
     <th class="r">#</th>
     <th>Description</th>
+    <th class="mat">Material</th>
     <th>HS / Tariff Code</th>
     <th class="r">Qty</th>
     <th class="r">Unit Weight</th>
@@ -157,9 +159,9 @@ export function buildProformaEuHtml(state: CustomsState, now: Date = new Date())
     <th class="r">Total Value (${esc(cur)})</th>
     <th class="r">Origin</th>
   </tr></thead>
-  <tbody>${rows || '<tr><td colspan="9" style="text-align:center;padding:8px;color:#888">No products with customs information</td></tr>'}</tbody>
+  <tbody>${rows || '<tr><td colspan="10" style="text-align:center;padding:8px;color:#888">No products with customs information</td></tr>'}</tbody>
   <tfoot><tr>
-    <td></td><td style="text-align:right">TOTALS</td><td></td>
+    <td></td><td style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
     <td class="r">${totQty}</td><td></td>
     <td class="r">${fmtWeightKg(totWkg)}</td><td></td>
     <td class="r">${Math.floor(totVal)}</td><td></td>

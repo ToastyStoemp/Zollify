@@ -210,6 +210,106 @@ export function calcProduct(p: CustomsProduct, skipUnlistedVariants = false): Pr
   };
 }
 
+export interface MaterialGroupCalc {
+  material: string;
+  amount: number;
+  totalWeightKg: number;
+  totalValue: number | null;
+  soldQty: number;
+  soldValue: number;
+  soldWeightKg: number;
+}
+
+/**
+ * calcProduct(p), split by each variant's own resolved material - the by-type
+ * documents group by material and can't tell two differently-overridden
+ * variants of the same product apart otherwise. A product with no variants,
+ * or whose variants all resolve to the same material, returns a single entry
+ * with numbers identical to calcProduct(p) (same formulas, same rounding -
+ * unlisted variants included, matching calcProduct's own default).
+ */
+export function calcProductByMaterial(p: CustomsProduct): MaterialGroupCalc[] {
+  if (!hasVariants(p)) {
+    const c = calcProduct(p);
+    return [{ material: p.material || '', amount: c.amount, totalWeightKg: c.totalWeightKg, totalValue: c.totalValue, soldQty: c.soldQty, soldValue: c.soldValue, soldWeightKg: c.soldWeightKg }];
+  }
+  const byMaterial = new Map<string, CustomsVariant[]>();
+  for (const v of p.variants!) {
+    const material = (v.material ?? p.material) || '';
+    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
+  }
+  return [...byMaterial.entries()].map(([material, variants]) => {
+    let amount = 0,
+      totalWeightKg = 0,
+      totalValue = 0,
+      soldQty = 0,
+      soldValue = 0,
+      soldWeightKg = 0;
+    for (const v of variants) {
+      const amt = v.amount || 0;
+      const wg = variantWeight(p, v);
+      const price = variantPrice(p, v);
+      amount += amt;
+      totalWeightKg += Math.round(amt * wg) / 1000;
+      if (price != null) totalValue += price * amt;
+      soldQty += v.soldQty || 0;
+      soldValue += v.soldValue || 0;
+      soldWeightKg += ((v.soldQty || 0) * wg) / 1000;
+    }
+    return {
+      material,
+      amount,
+      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
+      totalValue: totalValue > 0 ? Math.round(totalValue) : null,
+      soldQty,
+      soldValue,
+      soldWeightKg,
+    };
+  });
+}
+
+export interface ReturnMaterialGroupCalc {
+  material: string;
+  retQty: number;
+  retWkg: number;
+  retVal: number | null;
+}
+
+/** calcReturnStats(p), split by each variant's own resolved material - see calcProductByMaterial(). */
+export function calcReturnStatsByMaterial(p: CustomsProduct): ReturnMaterialGroupCalc[] {
+  if (!hasVariants(p)) {
+    const r = calcReturnStats(p);
+    return r.retQty > 0 ? [{ material: p.material || '', ...r }] : [];
+  }
+  const byMaterial = new Map<string, CustomsVariant[]>();
+  for (const v of p.variants!) {
+    if (v.unlisted) continue;
+    const material = (v.material ?? p.material) || '';
+    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
+  }
+  const result: ReturnMaterialGroupCalc[] = [];
+  for (const [material, variants] of byMaterial) {
+    let retQty = 0,
+      retWkg = 0,
+      retVal = 0,
+      hasVal = false;
+    for (const v of variants) {
+      const vRet = (v.amount || 0) - (v.soldQty || 0);
+      if (vRet <= 0) continue;
+      const wg = variantWeight(p, v);
+      const price = variantPrice(p, v);
+      retQty += vRet;
+      retWkg += Math.round(vRet * wg) / 1000;
+      if (price != null) {
+        retVal += Math.round(price * vRet);
+        hasVal = true;
+      }
+    }
+    if (retQty > 0) result.push({ material, retQty, retWkg: Math.round(retWkg * 1000) / 1000, retVal: hasVal ? retVal : null });
+  }
+  return result;
+}
+
 export function calcReturnStats(p: CustomsProduct): { retQty: number; retWkg: number; retVal: number | null } {
   if (hasVariants(p)) {
     let retQty = 0,

@@ -301,6 +301,16 @@ const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
  */
 const stripMaterialColumn = (html: string): string => html.replace(/\n?[ \t]*<(th|td) class="mat">.*?<\/\1>/g, '');
 
+/**
+ * A by-type group of exactly one product now names itself after that
+ * product's title instead of its type (also a deliberate, permanent
+ * divergence - legacy always shows the type). The cell carries its type in a
+ * data-type attribute for exactly this: swap it back before diffing, so a
+ * real regression to the type-only case (or anywhere else on the page) still
+ * fails loudly.
+ */
+const normalizeByTypeGroupName = (html: string): string => html.replace(/<strong data-type="([^"]*)">.*?<\/strong>/g, '<strong>$1</strong>');
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -352,7 +362,7 @@ describe('customs port vs legacy (golden diff)', () => {
           legacy.printGoodsList(docNum, format);
           const ported = buildGoodsListHtml(clone(make()), docNum, format);
           expect(captured.html, `doc ${docNum} / ${format}`).toHaveLength(1);
-          expect(stripMaterialColumn(ported), `doc ${docNum} / ${format}`).toBe(captured.html[0]);
+          expect(normalizeByTypeGroupName(stripMaterialColumn(ported)), `doc ${docNum} / ${format}`).toBe(captured.html[0]);
         }
       }
     }
@@ -366,7 +376,7 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.printAllVersions(only);
       const ported = buildAllVersionsHtml(clone(richState()), only);
       expect(captured.html).toHaveLength(1);
-      expect(stripMaterialColumn(ported)).toBe(captured.html[0]);
+      expect(normalizeByTypeGroupName(stripMaterialColumn(ported))).toBe(captured.html[0]);
     }
   });
 

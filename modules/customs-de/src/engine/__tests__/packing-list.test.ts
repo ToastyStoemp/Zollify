@@ -64,6 +64,22 @@ describe('buildPackingListHtml', () => {
     expect(html).toContain('By type');
   });
 
+  it('names a single-product group by the product, not the shared type - same as customs-ch', () => {
+    const twoTypesState: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Zurich Pop Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), companyName: 'Phuong Ninjin' },
+      products: [
+        { id: 't1', title: 'Cotton cap', type: 'Cap', tariffNo: '6505000000', originCountry: 'Germany', amount: 10, soldQty: 0, soldValue: 0 },
+        { id: 't2', title: 'Wool cap', type: 'Cap', tariffNo: '6505000000', originCountry: 'Germany', amount: 5, soldQty: 0, soldValue: 0 },
+      ],
+    };
+    const html = buildPackingListHtml(twoTypesState, 'export', 'bytype');
+    // Same type and tariff code - one group, two products, falls back to the type name.
+    expect(html).toContain('<strong>Cap</strong>');
+    expect(html).not.toContain('Cotton cap');
+    expect(html).not.toContain('Wool cap');
+  });
+
   it('re-import list uses amount minus sold, not the brought amount', () => {
     const html = buildPackingListHtml(state(), 'reimport', 'compressed');
     // Sticker: 20 brought - 20 sold = 0, so it drops out entirely.

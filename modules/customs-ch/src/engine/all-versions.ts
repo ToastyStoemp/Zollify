@@ -19,7 +19,7 @@ import {
   hasCustomsInfo,
   hasVariants,
 } from './calc';
-import type { CustomsState } from './model';
+import type { CustomsProduct, CustomsState } from './model';
 import { byTypeGroupName, materialCell, resolveMaterial, type GoodsDocNum, type GoodsFormat } from './goods-list';
 
 export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNum | null = null): string {
@@ -38,11 +38,11 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         rowNum = 0;
       const rows: string[] = [];
       if (format === 'bytype') {
-        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; amount: number; wkg: number; val: number; hasVal: boolean }> = {};
+        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; amount: number; wkg: number; val: number; hasVal: boolean; products: Set<CustomsProduct> }> = {};
         state.products.filter(hasCustomsInfo).forEach((p) => {
           for (const mc of calcProductByMaterial(p)) {
             const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
-            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, amount: 0, wkg: 0, val: 0, hasVal: false };
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, amount: 0, wkg: 0, val: 0, hasVal: false, products: new Set() };
             const g = groups[key];
             g.amount += mc.amount;
             g.wkg += mc.totalWeightKg;
@@ -50,6 +50,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               g.val += mc.totalValue;
               g.hasVal = true;
             }
+            g.products.add(p);
             totAmt += mc.amount;
             totWkg += mc.totalWeightKg;
             if (mc.totalValue != null) totVal += mc.totalValue;
@@ -57,7 +58,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.amount}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
         });
         tableHtml = `<div class="section-title">List of goods (By Type)</div>
 <table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Total Amount</th><th class="r">Total Weight</th><th class="r">Total Value (${cur})</th></tr></thead>
@@ -102,17 +103,18 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         rowNum = 0;
       const rows: string[] = [];
       if (format === 'bytype') {
-        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; soldQty: number; soldVal: number; soldWkg: number }> = {};
+        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; soldQty: number; soldVal: number; soldWkg: number; products: Set<CustomsProduct> }> = {};
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
           for (const mc of calcProductByMaterial(p)) {
             if (!(mc.soldQty > 0)) continue;
             const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
-            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, soldQty: 0, soldVal: 0, soldWkg: 0 };
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, soldQty: 0, soldVal: 0, soldWkg: 0, products: new Set() };
             const g = groups[key];
             g.soldQty += mc.soldQty;
             g.soldVal += floorN(mc.soldValue, 2);
             g.soldWkg += mc.soldWeightKg;
+            g.products.add(p);
             totSQ += mc.soldQty;
             totSV += floorN(mc.soldValue, 2);
             totSWkg += mc.soldWeightKg;
@@ -120,7 +122,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.soldQty}</td><td class="r">${formatNum(floorN(g.soldVal, 2), 2)}</td><td class="r">${fmtWeightKg(g.soldWkg)}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r">${g.soldQty}</td><td class="r">${formatNum(floorN(g.soldVal, 2), 2)}</td><td class="r">${fmtWeightKg(g.soldWkg)}</td></tr>`);
         });
         tableHtml = `<div class="section-title">List of goods sold (By Type)</div>
 <table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Qty Sold</th><th class="r">Value Sold (${cur})</th><th class="r">Sold Weight</th></tr></thead>
@@ -167,12 +169,12 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         rowNum = 0;
       const rows: string[] = [];
       if (format === 'bytype') {
-        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; retQty: number; retWkg: number; retVal: number; hasVal: boolean }> = {};
+        const groups: Record<string, { type: string; tariffNo: string; material: string; tariffRate: unknown; vatRate: unknown; retQty: number; retWkg: number; retVal: number; hasVal: boolean; products: Set<CustomsProduct> }> = {};
         state.products.forEach((p) => {
           if (!hasCustomsInfo(p)) return;
           for (const mc of calcReturnStatsByMaterial(p)) {
             const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
-            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, retQty: 0, retWkg: 0, retVal: 0, hasVal: false };
+            if (!groups[key]) groups[key] = { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, tariffRate: p.tariffRate, vatRate: p.vatRate, retQty: 0, retWkg: 0, retVal: 0, hasVal: false, products: new Set() };
             const g = groups[key];
             g.retQty += mc.retQty;
             g.retWkg += mc.retWkg;
@@ -180,6 +182,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               g.retVal += mc.retVal;
               g.hasVal = true;
             }
+            g.products.add(p);
             totRQ += mc.retQty;
             totRWkg += mc.retWkg;
             if (mc.retVal != null) totRVal += mc.retVal;
@@ -187,7 +190,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
         });
         const groupList = Object.values(groups);
         groupList.forEach((g, i) => {
-          rows.push(`<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
+          rows.push(`<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo)}</td><td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td><td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td><td class="r"><strong>${g.retQty}</strong></td><td class="r">${fmtWeightKg(g.retWkg)}</td><td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
         });
         tableHtml = `<div class="section-title">Return goods list (re-export) (By Type)</div>
 <table class="goods"><thead><tr><th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="r">Return Qty</th><th class="r">Return Weight</th><th class="r">Return Value (${cur})</th></tr></thead>

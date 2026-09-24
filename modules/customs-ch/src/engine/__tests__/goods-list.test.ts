@@ -85,13 +85,42 @@ describe('goods list - by-type grouping', () => {
       1,
       'bytype',
     );
-    // Two groups sharing a type still both show plainly - the HS Code column
-    // (checked below) is what tells them apart, not the name.
-    expect(html).toContain('<strong>Cap</strong>');
     expect(html).not.toContain('Cap (6505.00.30)');
     expect(html).not.toContain('Cap (4911.91.00)');
     expect(html).toContain('6505.00.30');
     expect(html).toContain('4911.91.00');
+  });
+
+  it('names a single-product group by the product, not the shared type', () => {
+    const html = buildGoodsListHtml(
+      state([
+        product({ id: 'c1', title: 'Cotton cap', type: 'Cap', tariffNo: '6505.00.30' }),
+        product({ id: 'c2', title: 'Print cap', type: 'Cap', tariffNo: '4911.91.00' }),
+      ]),
+      1,
+      'bytype',
+    );
+    // Different tariff codes split them into two single-product groups -
+    // each names itself after the product, not the type they both share.
+    expect(html).toContain('Cotton cap');
+    expect(html).toContain('Print cap');
+    expect(html).not.toContain('<strong>Cap</strong>');
+  });
+
+  it('names a multi-product group by the shared type', () => {
+    const html = buildGoodsListHtml(
+      state([
+        product({ id: 't1', title: 'Cotton cap', type: 'Cap', tariffNo: '6505.00.30' }),
+        product({ id: 't2', title: 'Wool cap', type: 'Cap', tariffNo: '6505.00.30' }),
+      ]),
+      1,
+      'bytype',
+    );
+    // Same type AND tariff code - one group, two products, so it falls back
+    // to the type name since no single product name could speak for both.
+    expect(html).toContain('<strong>Cap</strong>');
+    expect(html).not.toContain('Cotton cap');
+    expect(html).not.toContain('Wool cap');
   });
 
   it('shows material as its own column even when every product of a type shares the same one', () => {

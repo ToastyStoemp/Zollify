@@ -19,7 +19,7 @@ import {
   hasCustomsInfo,
   hasVariants,
 } from './calc';
-import type { CustomsState } from './model';
+import type { CustomsProduct, CustomsState } from './model';
 import { isArtwork } from '../lib/artwork';
 
 export type GoodsDocNum = 1 | 2 | 3;
@@ -59,9 +59,17 @@ function soldReturnName(p: { title?: string; type?: string; year?: number }, art
   return titleForCustoms(p, artistName);
 }
 
-/** By-type group label. HS code and Material both have their own column now, so this is just the type. */
-export function byTypeGroupName(g: { type: string }): string {
-  return esc(g.type);
+/**
+ * By-type group label, wrapped in its own <strong>. HS code and Material both
+ * have their own column now, so this is just the name. A group with only one
+ * product in it is more useful named by that product than by its shared type
+ * - its cell carries a data-type attribute so the golden test can tell what
+ * type it stood in for (see golden-legacy.test.ts's normalizeByTypeGroupName).
+ */
+export function byTypeGroupName(g: { type: string; products: Set<CustomsProduct> }, artistName?: string): string {
+  const typeEsc = esc(g.type);
+  if (g.products.size === 1) return `<strong data-type="${typeEsc}">${titleForCustoms([...g.products][0]!, artistName)}</strong>`;
+  return `<strong>${typeEsc}</strong>`;
 }
 export type GoodsFormat = 'detailed' | 'compressed' | 'bytype';
 
@@ -155,6 +163,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           wkg: number;
           val: number;
           hasVal: boolean;
+          products: Set<CustomsProduct>;
         }
       > = {};
       state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0).forEach((p) => {
@@ -172,6 +181,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
               wkg: 0,
               val: 0,
               hasVal: false,
+              products: new Set(),
             };
           const g = groups[key];
           g.amount += mc.amount;
@@ -180,6 +190,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             g.val += mc.totalValue;
             g.hasVal = true;
           }
+          g.products.add(p);
           totAmt += mc.amount;
           totWkg += mc.totalWeightKg;
           if (mc.totalValue != null) totVal += mc.totalValue;
@@ -188,7 +199,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
       const groupList = Object.values(groups);
       groupList.forEach((g, i) => {
         detailedRows.push(`<tr>
-          <td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>
+          <td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>
           ${materialCell(g.material)}
           <td class="r">${esc(g.tariffNo)}</td>
           <td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td>
@@ -301,6 +312,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           soldQty: number;
           soldVal: number;
           soldWkg: number;
+          products: Set<CustomsProduct>;
         }
       > = {};
       state.products.forEach((p) => {
@@ -318,11 +330,13 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
               soldQty: 0,
               soldVal: 0,
               soldWkg: 0,
+              products: new Set(),
             };
           const g = groups[key];
           g.soldQty += mc.soldQty;
           g.soldVal += floorN(mc.soldValue, 2);
           g.soldWkg += mc.soldWeightKg;
+          g.products.add(p);
           totSQ += mc.soldQty;
           totSV += floorN(mc.soldValue, 2);
           totSWkg += mc.soldWeightKg;
@@ -331,7 +345,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
       const groupList = Object.values(groups);
       groupList.forEach((g, i) => {
         detailedRows.push(`<tr>
-          <td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>
+          <td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>
           ${materialCell(g.material)}
           <td class="r">${esc(g.tariffNo)}</td>
           <td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td>
@@ -442,6 +456,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           retWkg: number;
           retVal: number;
           hasVal: boolean;
+          products: Set<CustomsProduct>;
         }
       > = {};
       state.products.forEach((p) => {
@@ -459,6 +474,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
               retWkg: 0,
               retVal: 0,
               hasVal: false,
+              products: new Set(),
             };
           const g = groups[key];
           g.retQty += mc.retQty;
@@ -467,6 +483,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             g.retVal += mc.retVal;
             g.hasVal = true;
           }
+          g.products.add(p);
           totRetQty += mc.retQty;
           totRetWkg += mc.retWkg;
           if (mc.retVal != null) totRetVal += mc.retVal;
@@ -475,7 +492,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
       const groupList = Object.values(groups);
       groupList.forEach((g, i) => {
         detailedRows.push(`<tr>
-          <td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>
+          <td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>
           ${materialCell(g.material)}
           <td class="r">${esc(g.tariffNo)}</td>
           <td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td>

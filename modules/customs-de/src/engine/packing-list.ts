@@ -26,9 +26,15 @@ import { isArtwork } from '../lib/artwork';
 export type PackingListKind = 'export' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
 
-/** By-type group label. Material and HS code both have their own column on this table, so neither is repeated here. Mirrors customs-ch/engine/goods-list.ts's byTypeGroupName(). */
-function byTypeGroupName(g: { type: string }): string {
-  return esc(g.type);
+/**
+ * By-type group label. Material and HS code both have their own column on
+ * this table, so neither is repeated here. A group with only one product in
+ * it is more useful named by that product than by its shared type. Mirrors
+ * customs-ch/engine/goods-list.ts's byTypeGroupName().
+ */
+function byTypeGroupName(g: { type: string; products: Set<CustomsDeProduct> }, artistName?: string): string {
+  if (g.products.size === 1) return `<strong>${titleForCustoms([...g.products][0]!, artistName)}</strong>`;
+  return `<strong>${esc(g.type)}</strong>`;
 }
 
 /**
@@ -101,7 +107,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     // material, so a product whose own variants use different materials
     // splits across groups too (calcDeProductByMaterial). Mirrors
     // customs-ch/engine/goods-list.ts's by-type grouping.
-    const groups = new Map<string, { type: string; tariffNo: string; material: string; qty: number; wkg: number; val: number; hasVal: boolean }>();
+    const groups = new Map<string, { type: string; tariffNo: string; material: string; qty: number; wkg: number; val: number; hasVal: boolean; products: Set<CustomsDeProduct> }>();
     for (const p of products) {
       for (const mc of calcDeProductByMaterial(p)) {
         const qty = kind === 'export' ? mc.amount : mc.reimportQty;
@@ -109,13 +115,14 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const wkg = kind === 'export' ? mc.totalWeightKg : mc.reimportWeightKg;
         const val = kind === 'export' ? mc.totalValue : mc.reimportValue;
         const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
-        const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, qty: 0, wkg: 0, val: 0, hasVal: false };
+        const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, qty: 0, wkg: 0, val: 0, hasVal: false, products: new Set() };
         g.qty += qty;
         g.wkg += wkg;
         if (val != null) {
           g.val += val;
           g.hasVal = true;
         }
+        g.products.add(p);
         groups.set(key, g);
         totQty += qty;
         totWkg += wkg;
@@ -129,7 +136,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const rows = groupList
       .map(
         (g, i) =>
-          `<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo || '-')}</td><td class="r">${g.qty}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`,
+          `<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, d.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo || '-')}</td><td class="r">${g.qty}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`,
       )
       .join('');
     tableHtml = `<div class="section-title">List of goods (By type)</div>

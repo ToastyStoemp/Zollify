@@ -76,6 +76,7 @@ export function buildCustomsDeState(
         return {
           name: v.name,
           sku: v.sku,
+          material: v.material,
           price: v.price ?? null,
           weightG: v.weightG ?? null,
           unlisted: v.unlisted,

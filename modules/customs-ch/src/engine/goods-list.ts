@@ -28,7 +28,9 @@ export type GoodsDocNum = 1 | 2 | 3;
  * material on file adds it the same way ("Title - Material") - originally a
  * purse-only special case, generalized since customs wants material specifics
  * (polyester vs. "vegan leather", precious-metal status on pins, ...) on any
- * product now, not just bags.
+ * product now, not just bags. A variant row passes its own material (falls
+ * back to the product's in the caller, resolveMaterial()) to override the
+ * product's, e.g. one colourway in a different material.
  */
 function titleForCustoms(
   p: { title?: string; type?: string; year?: number; material?: string },
@@ -42,6 +44,11 @@ function titleForCustoms(
   }
   if (p.material?.trim()) return `${t} - ${esc(p.material)}`;
   return t;
+}
+
+/** A variant's own material overrides the product's when set. */
+function resolveMaterial(p: { material?: string }, v?: { material?: string }): string | undefined {
+  return v?.material ?? p.material;
 }
 
 /**
@@ -225,7 +232,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             totAmt += varAmt;
             totWkg += varTotalWkg;
             if (varTotalVal != null) totVal += varTotalVal;
-            detailedRows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleForCustoms(p, a.fullName)} - ${esc(v.name || '')}</td>
+            detailedRows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleForCustoms({ ...p, material: resolveMaterial(p, v) }, a.fullName)} - ${esc(v.name || '')}</td>
               <td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td>
               <td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td>
               <td class="r">${fmtWeightKg(varTotalWkg)}</td><td class="r">${esc(pd)}</td>
@@ -359,7 +366,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             totSQ += v.soldQty || 0;
             totSV += rowSV;
             totSWkg += varSoldWkg;
-            detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${soldReturnName(p, a.fullName)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>
+            detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${soldReturnName({ ...p, material: resolveMaterial(p, v) }, a.fullName)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>
               <td class="r">${esc(p.tariffNo || '')}</td>
               <td class="r">${v.soldQty || 0}</td>
               <td class="r">${formatNum(rowSV, 2)}</td>
@@ -506,7 +513,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
             if (varRetVal != null) totRetVal += varRetVal;
             const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
             const retValStr = varRetVal != null ? varRetVal : '-';
-            detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${soldReturnName(p, a.fullName)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>
+            detailedRows.push(`<tr><td class="c">${rowNum}</td><td>${soldReturnName({ ...p, material: resolveMaterial(p, v) }, a.fullName)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td>
               <td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td>
               <td class="r"><strong>${varRetQty}</strong></td>
               <td class="r">${varWg != null ? varWg + ' g' : ''}</td>

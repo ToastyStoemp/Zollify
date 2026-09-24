@@ -20,7 +20,7 @@
  *     precheck office) instead of customs-ch's LRP/artist fields.
  */
 import { calcDeProduct, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
-import type { CustomsDeProduct, CustomsDeState } from './model';
+import type { CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { isArtwork } from '../lib/artwork';
 
 export type PackingListKind = 'export' | 'reimport';
@@ -38,16 +38,18 @@ function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: s
  * "Title (Year) - Artist"; anything with a material on file adds that the
  * same way, generalized from a purse-only special case since customs wants
  * material specifics on any product now, not just bags. Mirrors
- * customs-ch/engine/goods-list.ts's titleForCustoms().
+ * customs-ch/engine/goods-list.ts's titleForCustoms(). A variant row passes
+ * itself as v so its own material override (if any) wins over the product's.
  */
-function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
+function titleForCustoms(p: CustomsDeProduct, artistName?: string, v?: CustomsDeVariant): string {
   const t = esc(p.title || '');
   if (isArtwork(p.type)) {
     const base = p.year ? `${t} (${p.year})` : t;
     const artist = (artistName ?? '').trim();
     return artist ? `${base} - ${esc(artist)}` : base;
   }
-  if (p.material?.trim()) return `${t} - ${esc(p.material)}`;
+  const material = v?.material ?? p.material;
+  if (material?.trim()) return `${t} - ${esc(material)}`;
   return t;
 }
 
@@ -175,7 +177,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
             row([
               { text: rowNum, align: 'c' },
               { text: esc(v.sku || p.sku || '-') },
-              { text: `${titleForCustoms(p, d.fullName)} - ${esc(v.name || '')}` },
+              { text: `${titleForCustoms(p, d.fullName, v)} - ${esc(v.name || '')}` },
               { text: forSaleLabel },
               { text: esc(p.type || '') },
               { text: qty, align: 'r' },

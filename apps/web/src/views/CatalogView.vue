@@ -93,7 +93,8 @@ function customsIssues(p: Product): string[] {
   const skuMissing = p.variants.length ? p.variants.some((v) => !v.unlisted && !(v.sku ?? p.sku)?.trim()) : !p.sku?.trim();
   if (!isArtwork(p.type ?? '') && skuMissing) out.push('no SKU');
   // Same exemption as SKU: art prints are paper, not a material declaration.
-  if (!isArtwork(p.type ?? '') && !p.material?.trim()) out.push('no material');
+  const materialMissing = p.variants.length ? p.variants.some((v) => !v.unlisted && !(v.material ?? p.material)?.trim()) : !p.material?.trim();
+  if (!isArtwork(p.type ?? '') && materialMissing) out.push('no material');
   return out;
 }
 
@@ -349,6 +350,7 @@ async function save(): Promise<void> {
         ...v,
         name: v.name.trim(),
         sku: v.sku?.trim() || undefined,
+        material: v.material?.trim() || undefined,
         price: num(v.price),
         imageId: rm ? undefined : newImage ? await saveProductImage(productId, newImage) : v.imageId,
       });
@@ -565,7 +567,14 @@ async function remove(product: Product): Promise<void> {
             <span class="withbtn"><input v-model="v.sku" type="text" placeholder="SKU" aria-label="Variant SKU" /><button type="button" class="quiet gen" title="Generate a SKU" @click="v.sku = generateSku(v.name)"><Icon name="sparkles" :size="14" /></button></span>
             <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
             <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
-            <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="removeVariant(i)"><Icon name="x" :size="14" /></button>
+            <span class="vbtns">
+              <button v-if="!isArtwork(form.type) && v.material === undefined" type="button" class="quiet" title="Override material for this variant" :aria-label="`Override material for ${v.name || 'this variant'}`" @click="v.material = ''"><Icon name="plus" :size="12" /></button>
+              <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="removeVariant(i)"><Icon name="x" :size="14" /></button>
+            </span>
+            <div v-if="v.material !== undefined" class="vmaterial">
+              <input v-model="v.material" type="text" :placeholder="form.material || 'Material'" :aria-label="`Material override for ${v.name || 'this variant'}`" />
+              <button type="button" class="quiet" title="Remove override - use the product's material" :aria-label="`Remove material override for ${v.name || 'this variant'}`" @click="v.material = undefined"><Icon name="x" :size="12" /></button>
+            </div>
           </div>
           <p v-if="form.variants.length" class="hint">Leave a variant price blank to use the product price.</p>
         </fieldset>
@@ -636,6 +645,14 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .withbtn { display: flex; align-items: center; gap: .2rem; }
 .withbtn input { flex: 1; min-width: 0; }
 .gen { min-height: 2.2rem; padding: .2rem .4rem; color: var(--zfy-muted, #5a6472); }
+.vbtns { display: flex; align-items: center; gap: .1rem; }
+.vbtns button { min-height: 2.2rem; min-width: 2.2rem; padding: .2rem; color: var(--zfy-muted, #5a6472); }
+/* grid-column: 1/-1 wraps this onto its own full-width row below the rest
+   of that variant's fields, instead of adding a permanent 7th column every
+   variant carries whether it needs an override or not. */
+.vmaterial { grid-column: 1 / -1; display: flex; align-items: center; gap: .3rem; padding-left: 2.9rem; }
+.vmaterial input { flex: 1; min-width: 0; }
+.vmaterial button { min-height: 2.2rem; min-width: 2.2rem; padding: .2rem; color: var(--zfy-muted, #5a6472); }
 .vphoto { position: relative; width: 2.5rem; height: 2.5rem; cursor: pointer; }
 .vphoto img, .vphoto .ph { width: 2.5rem; height: 2.5rem; border-radius: 8px; object-fit: cover; }
 .vphoto .ph { display: grid; place-items: center; background: var(--zfy-surface, #fff); border: 1px dashed var(--zfy-line, #d6dde4); color: var(--zfy-muted, #5a6472); }

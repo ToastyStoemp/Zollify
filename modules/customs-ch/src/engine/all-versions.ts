@@ -25,10 +25,13 @@ import type { GoodsDocNum, GoodsFormat } from './goods-list';
  * metal" - deliberately does NOT also apply the artist/year suffix goods-list.ts
  * gives art prints: this document already omitted that (a pre-existing,
  * legacy-matched difference from goods-list.ts, not something to change here).
+ * A variant row passes itself as v so its own material override (if any)
+ * wins over the product's.
  */
-function titleWithMaterial(p: { title?: string; material?: string }): string {
+function titleWithMaterial(p: { title?: string; material?: string }, v?: { material?: string }): string {
   const t = esc(p.title || '');
-  return p.material?.trim() ? `${t} - ${esc(p.material)}` : t;
+  const material = v?.material ?? p.material;
+  return material?.trim() ? `${t} - ${esc(material)}` : t;
 }
 
 export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNum | null = null): string {
@@ -84,7 +87,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totAmt += varAmt;
               totWkg += varTWkg;
               if (varTV != null) totVal += varTV;
-              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td><td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varTWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varTV != null ? varTV : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const i = rowNum++;
@@ -145,7 +148,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totSQ += v.soldQty || 0;
               totSV += rowSV;
               totSWkg += varSWkg;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${v.soldQty || 0}</td><td class="r">${formatNum(rowSV, 2)}</td><td class="r">${fmtWeightKg(varSWkg)}</td></tr>`);
             });
           } else if (c.soldQty > 0) {
             rowNum++;
@@ -214,7 +217,7 @@ export function buildAllVersionsHtml(state: CustomsState, onlyDocNum: GoodsDocNu
               totRQ += varRetQty;
               totRWkg += varRWkg;
               if (varRVal != null) totRVal += varRVal;
-              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
+              rows.push(`<tr><td class="c">${rowNum}</td><td>${titleWithMaterial(p, v)} - ${esc(v.name || '')}</td><td>${esc(p.type || '')}</td><td class="r">${v.amount || 0}</td><td class="r">${v.soldQty || 0}</td><td class="r"><strong>${varRetQty}</strong></td><td class="r">${varWg != null ? varWg + ' g' : ''}</td><td class="r">${fmtWeightKg(varRWkg)}</td><td class="r">${p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-')}</td><td class="r">${varRVal != null ? varRVal : '-'}</td><td class="r">${esc(p.tariffNo || '')}</td><td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td><td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td><td class="c">${esc(pOrig)}</td></tr>`);
             });
           } else {
             const rs = calcReturnStats(p);

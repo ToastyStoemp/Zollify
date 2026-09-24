@@ -63,6 +63,8 @@ export interface CustomsVariant {
   amount?: number;
   soldQty?: number;
   soldValue?: number;
+  /** Overrides the product's material for this variant only, when set. */
+  material?: string;
 }
 
 export interface CustomsProduct {
@@ -84,7 +86,8 @@ export interface CustomsProduct {
   permitOverride?: number | null;
   /** Year an art print was produced - shown as "Title (Year)" on customs docs. */
   year?: number;
-  /** Material of a purse - shown as "Title - Material" on customs docs. */
+  /** Material composition - shown as "Title - Material" on customs docs.
+   *  A variant's own material (CustomsVariant.material) overrides this. */
   material?: string;
   amount?: number;
   soldQty?: number;

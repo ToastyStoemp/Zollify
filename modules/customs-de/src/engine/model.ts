@@ -86,6 +86,8 @@ export interface CustomsDeVariant {
   amount?: number;
   soldQty?: number;
   soldValue?: number;
+  /** Overrides the product's material for this variant only, when set. */
+  material?: string;
 }
 
 export interface CustomsDeProduct {
@@ -102,7 +104,8 @@ export interface CustomsDeProduct {
   originCountry?: string;
   /** Year an art print was produced - shown as "Title (Year)" on the packing list. */
   year?: number;
-  /** Material composition of a purse - shown as "Title - Material" on the packing list. */
+  /** Material composition - shown as "Title - Material" on the packing list.
+   *  A variant's own material (CustomsDeVariant.material) overrides this. */
   material?: string;
   /** Brought to the event (what was declared for export). */
   amount: number;

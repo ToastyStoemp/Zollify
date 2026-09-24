@@ -47,6 +47,9 @@ export interface Variant {
   unlisted?: boolean;
   /** Variant-specific photo; falls back to the product photo in the UI. */
   imageId?: string;
+  /** Overrides Product.material for this variant only (e.g. one colourway is
+   *  a different material) - falls back to the product's material when unset. */
+  material?: string;
 }
 
 export interface Product {

@@ -63,12 +63,16 @@ function soldReturnName(p: { title?: string; type?: string; year?: number; mater
 
 /**
  * By-type group label. When two groups share the same Type but differ by HS
- * code, the code is appended so the rows are not identically named; a type with
- * a single group is shown exactly as before.
+ * code and/or material (both split the grouping - a group can only have one
+ * of each, never "mixed", so the declared line stays accurate), whichever of
+ * the two actually differs is appended so the rows are not identically named;
+ * a type with a single group is shown exactly as before.
  */
-function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo?: string }): string {
+export function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo?: string; material?: string }): string {
   const shared = all.filter((x) => x.type === g.type).length > 1;
-  return shared ? `${esc(g.type)} (${esc(g.tariffNo || 'no HS code')})` : esc(g.type);
+  if (!shared) return esc(g.type);
+  const bits = [g.tariffNo || 'no HS code', g.material?.trim()].filter((x): x is string => !!x);
+  return `${esc(g.type)} (${bits.map(esc).join(', ')})`;
 }
 export type GoodsFormat = 'detailed' | 'compressed' | 'bytype';
 
@@ -148,12 +152,14 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
     const detailedRows: string[] = [];
 
     if (format === 'bytype') {
-      // By-type: group by type + tariff code (different HS codes are never combined)
+      // By-type: group by type + tariff code + material (none of the three are
+      // ever combined across groups, so a group's material is never ambiguous)
       const groups: Record<
         string,
         {
           type: string;
           tariffNo: string;
+          material: string;
           tariffRate: unknown;
           vatRate: unknown;
           amount: number;
@@ -164,11 +170,12 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
       > = {};
       state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0).forEach((p) => {
         const c = calcProduct(p);
-        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}`;
+        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
         if (!groups[key])
           groups[key] = {
             type: p.type || 'Other',
             tariffNo: p.tariffNo || '',
+            material: p.material || '',
             tariffRate: p.tariffRate,
             vatRate: p.vatRate,
             amount: 0,
@@ -287,12 +294,14 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
     const detailedRows: string[] = [];
 
     if (format === 'bytype') {
-      // By-type: group by type + tariff code (different HS codes are never combined)
+      // By-type: group by type + tariff code + material (none of the three are
+      // ever combined across groups, so a group's material is never ambiguous)
       const groups: Record<
         string,
         {
           type: string;
           tariffNo: string;
+          material: string;
           tariffRate: unknown;
           vatRate: unknown;
           soldQty: number;
@@ -304,11 +313,12 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
         if (!hasCustomsInfo(p)) return;
         const c = calcProduct(p);
         if (!(c.soldQty > 0)) return;
-        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}`;
+        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
         if (!groups[key])
           groups[key] = {
             type: p.type || 'Other',
             tariffNo: p.tariffNo || '',
+            material: p.material || '',
             tariffRate: p.tariffRate,
             vatRate: p.vatRate,
             soldQty: 0,
@@ -420,12 +430,14 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
     const detailedRows: string[] = [];
 
     if (format === 'bytype') {
-      // By-type: group by type + tariff code (different HS codes are never combined)
+      // By-type: group by type + tariff code + material (none of the three are
+      // ever combined across groups, so a group's material is never ambiguous)
       const groups: Record<
         string,
         {
           type: string;
           tariffNo: string;
+          material: string;
           tariffRate: unknown;
           vatRate: unknown;
           retQty: number;
@@ -439,11 +451,12 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
         const rs = calcReturnStats(p);
         if (rs.retQty <= 0) return;
         const { retQty, retWkg, retVal } = rs;
-        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}`;
+        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
         if (!groups[key])
           groups[key] = {
             type: p.type || 'Other',
             tariffNo: p.tariffNo || '',
+            material: p.material || '',
             tariffRate: p.tariffRate,
             vatRate: p.vatRate,
             retQty: 0,

@@ -26,10 +26,16 @@ import { isArtwork } from '../lib/artwork';
 export type PackingListKind = 'export' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
 
-/** By-type group label; the HS code is appended only when two groups share a type. */
-function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: string }): string {
+/**
+ * By-type group label. HS code and/or material (both split the grouping - a
+ * group can only have one of each, never "mixed") are appended only when two
+ * groups share a type. Mirrors customs-ch/engine/goods-list.ts's byTypeGroupName().
+ */
+function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: string; material?: string }): string {
   const shared = all.filter((x) => x.type === g.type).length > 1;
-  return shared ? `${esc(g.type)} (${esc(g.tariffNo || 'no HS code')})` : esc(g.type);
+  if (!shared) return esc(g.type);
+  const bits = [g.tariffNo || 'no HS code', g.material?.trim()].filter((x): x is string => !!x);
+  return `${esc(g.type)} (${bits.map(esc).join(', ')})`;
 }
 
 /**
@@ -99,15 +105,15 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   let tableHtml: string;
 
   if (format === 'bytype') {
-    const groups = new Map<string, { type: string; tariffNo: string; qty: number; wkg: number; val: number; hasVal: boolean }>();
+    const groups = new Map<string, { type: string; tariffNo: string; material: string; qty: number; wkg: number; val: number; hasVal: boolean }>();
     for (const p of products) {
       const c = calcDeProduct(p);
       const qty = kind === 'export' ? c.amount : c.reimportQty;
       if (qty <= 0) continue;
       const wkg = kind === 'export' ? c.totalWeightKg : c.reimportWeightKg;
       const val = kind === 'export' ? c.totalValue : c.reimportValue;
-      const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}`;
-      const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', qty: 0, wkg: 0, val: 0, hasVal: false };
+      const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
+      const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: p.material || '', qty: 0, wkg: 0, val: 0, hasVal: false };
       g.qty += qty;
       g.wkg += wkg;
       if (val != null) {

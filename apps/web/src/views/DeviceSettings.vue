@@ -12,6 +12,7 @@ import {
   downloadUpdate,
   installDownloadedUpdate,
   queueShellUpdate,
+  reloadShellNow,
   selfUpdates,
   updateDownload,
   type ShellUpdateCheck,
@@ -261,6 +262,7 @@ function when(ts: number): string {
 
       <div class="row">
         <button type="button" :disabled="checking || updateDownload.active" @click="checkUpdate">{{ checking ? 'Checking…' : 'Check for updates' }}</button>
+        <button v-if="shellQueued" type="button" class="primary" @click="reloadShellNow">Reload now</button>
         <button v-if="canSelfUpdate && updateDownload.ready" type="button" class="primary" @click="installDownloadedUpdate">Install {{ updateDownload.versionName }}</button>
       </div>
     </template>

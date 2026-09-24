@@ -543,7 +543,7 @@ async function remove(product: Product): Promise<void> {
           <label v-if="!isArtwork(form.type)">
             <span>Material</span>
             <input v-model="form.material" type="text" placeholder="Polyester, 100%" />
-            <small>Specific composition, not a category - “vegan leather” isn’t enough, say “polyester” or “PU”; for enamel pins say whether it’s a precious metal, e.g. “zinc alloy, no precious metal”. Listed on customs documents as “{{ form.title || 'Title' }}{{ form.material ? ` - ${form.material}` : '' }}”.</small>
+            <small>Specific composition, not a category - “vegan leather” isn’t enough, say “polyester” or “PU”; for enamel pins say whether it’s a precious metal, e.g. “zinc alloy, no precious metal”. Shown in its own Material column on customs documents.</small>
           </label>
         </details>
 

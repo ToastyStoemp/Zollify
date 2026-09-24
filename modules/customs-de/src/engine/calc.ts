@@ -154,3 +154,71 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
 
   return { totalWeightKg, totalValue, effectiveUnitPrice: price, effectiveUnitWeightG: weightG, amount: p.amount, reimportQty, reimportWeightKg, reimportValue };
 }
+
+export interface DeMaterialGroupCalc {
+  material: string;
+  amount: number;
+  totalWeightKg: number;
+  totalValue: number | null;
+  reimportQty: number;
+  reimportWeightKg: number;
+  reimportValue: number | null;
+}
+
+/**
+ * calcDeProduct(p), split by each variant's own resolved material (mirrors
+ * customs-ch/engine/calc.ts's calcProductByMaterial() - same formulas, same
+ * rounding). The by-type packing list groups by material and can't tell two
+ * differently-overridden variants of the same product apart otherwise.
+ */
+export function calcDeProductByMaterial(p: CustomsDeProduct): DeMaterialGroupCalc[] {
+  if (!hasVariants(p)) {
+    const c = calcDeProduct(p);
+    return [{ material: p.material || '', amount: c.amount, totalWeightKg: c.totalWeightKg, totalValue: c.totalValue, reimportQty: c.reimportQty, reimportWeightKg: c.reimportWeightKg, reimportValue: c.reimportValue }];
+  }
+  const byMaterial = new Map<string, CustomsDeVariant[]>();
+  for (const v of p.variants!) {
+    if (v.unlisted) continue;
+    const material = (v.material ?? p.material) || '';
+    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
+  }
+  return [...byMaterial.entries()].map(([material, variants]) => {
+    let amount = 0,
+      totalWeightKg = 0,
+      totalValue = 0,
+      hasValue = false,
+      reimportQty = 0,
+      reimportWeightKg = 0,
+      reimportValue = 0,
+      hasReimportValue = false;
+    for (const v of variants) {
+      const vAmount = v.amount || 0;
+      const wg = variantWeight(p, v);
+      const price = variantPrice(p, v);
+      const line = calcLine(vAmount, wg, price);
+      amount += vAmount;
+      totalWeightKg += line.totalWeightKg;
+      if (line.totalValue != null) {
+        totalValue += line.totalValue;
+        hasValue = true;
+      }
+      const vReimportQty = Math.max(0, vAmount - (v.soldQty || 0));
+      const reimportLine = calcLine(vReimportQty, wg, price);
+      reimportQty += vReimportQty;
+      reimportWeightKg += reimportLine.totalWeightKg;
+      if (reimportLine.totalValue != null) {
+        reimportValue += reimportLine.totalValue;
+        hasReimportValue = true;
+      }
+    }
+    return {
+      material,
+      amount,
+      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
+      totalValue: hasValue ? totalValue : null,
+      reimportQty,
+      reimportWeightKg: Math.round(reimportWeightKg * 1000) / 1000,
+      reimportValue: hasReimportValue ? reimportValue : null,
+    };
+  });
+}

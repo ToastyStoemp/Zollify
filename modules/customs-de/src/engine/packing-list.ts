@@ -19,49 +19,41 @@
  *   - The info-table's declarant fields are this module's own (EORI,
  *     precheck office) instead of customs-ch's LRP/artist fields.
  */
-import { calcDeProduct, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
+import { calcDeProduct, calcDeProductByMaterial, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
 import type { CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { isArtwork } from '../lib/artwork';
 
 export type PackingListKind = 'export' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
 
-/**
- * By-type group label. HS code and/or material (both split the grouping - a
- * group can only have one of each, never "mixed") are appended only when two
- * groups share a type. Mirrors customs-ch/engine/goods-list.ts's byTypeGroupName().
- */
-function byTypeGroupName(all: { type: string }[], g: { type: string; tariffNo: string; material?: string }): string {
-  const shared = all.filter((x) => x.type === g.type).length > 1;
-  if (!shared) return esc(g.type);
-  const bits = [g.tariffNo || 'no HS code', g.material?.trim()].filter((x): x is string => !!x);
-  return `${esc(g.type)} (${bits.map(esc).join(', ')})`;
+/** By-type group label. Material and HS code both have their own column on this table, so neither is repeated here. Mirrors customs-ch/engine/goods-list.ts's byTypeGroupName(). */
+function byTypeGroupName(g: { type: string }): string {
+  return esc(g.type);
 }
 
 /**
  * Customs line name - an item is only as identifiable as its title, and two
  * booths' "Sunset" print aren't the same thing. Art prints read as
- * "Title (Year) - Artist"; anything with a material on file adds that the
- * same way, generalized from a purse-only special case since customs wants
- * material specifics on any product now, not just bags. Mirrors
- * customs-ch/engine/goods-list.ts's titleForCustoms(). A variant row passes
- * itself as v so its own material override (if any) wins over the product's.
+ * "Title (Year) - Artist". Mirrors customs-ch/engine/goods-list.ts's
+ * titleForCustoms().
  */
-function titleForCustoms(p: CustomsDeProduct, artistName?: string, v?: CustomsDeVariant): string {
+function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
   const t = esc(p.title || '');
   if (isArtwork(p.type)) {
     const base = p.year ? `${t} (${p.year})` : t;
     const artist = (artistName ?? '').trim();
     return artist ? `${base} - ${esc(artist)}` : base;
   }
-  const material = v?.material ?? p.material;
-  if (material?.trim()) return `${t} - ${esc(material)}`;
   return t;
 }
 
-type Align = 'l' | 'r' | 'c';
-function row(cells: { text: string | number; align?: Align }[]): string {
-  return `<tr>${cells.map((c) => `<td${c.align && c.align !== 'l' ? ` class="${c.align}"` : ''}>${c.text}</td>`).join('')}</tr>`;
+/** A variant's own material override, falling back to the product's. Mirrors customs-ch/engine/goods-list.ts's resolveMaterial(). */
+function resolveMaterial(p: CustomsDeProduct, v: CustomsDeVariant): string {
+  return (v.material ?? p.material) || '';
+}
+
+function materialCell(material?: string): string {
+  return `<td class="mat">${esc(material || '')}</td>`;
 }
 
 export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKind, format: PackingListFormat = 'detailed', now: Date = new Date()): string {
@@ -105,49 +97,48 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   let tableHtml: string;
 
   if (format === 'bytype') {
+    // Group by type + tariff code + material - a group can only ever have one
+    // material, so a product whose own variants use different materials
+    // splits across groups too (calcDeProductByMaterial). Mirrors
+    // customs-ch/engine/goods-list.ts's by-type grouping.
     const groups = new Map<string, { type: string; tariffNo: string; material: string; qty: number; wkg: number; val: number; hasVal: boolean }>();
     for (const p of products) {
-      const c = calcDeProduct(p);
-      const qty = kind === 'export' ? c.amount : c.reimportQty;
-      if (qty <= 0) continue;
-      const wkg = kind === 'export' ? c.totalWeightKg : c.reimportWeightKg;
-      const val = kind === 'export' ? c.totalValue : c.reimportValue;
-      const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${p.material || ''}`;
-      const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: p.material || '', qty: 0, wkg: 0, val: 0, hasVal: false };
-      g.qty += qty;
-      g.wkg += wkg;
-      if (val != null) {
-        g.val += val;
-        g.hasVal = true;
-      }
-      groups.set(key, g);
-      totQty += qty;
-      totWkg += wkg;
-      if (val != null) {
-        totVal += val;
-        hasVal = true;
+      for (const mc of calcDeProductByMaterial(p)) {
+        const qty = kind === 'export' ? mc.amount : mc.reimportQty;
+        if (qty <= 0) continue;
+        const wkg = kind === 'export' ? mc.totalWeightKg : mc.reimportWeightKg;
+        const val = kind === 'export' ? mc.totalValue : mc.reimportValue;
+        const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
+        const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, qty: 0, wkg: 0, val: 0, hasVal: false };
+        g.qty += qty;
+        g.wkg += wkg;
+        if (val != null) {
+          g.val += val;
+          g.hasVal = true;
+        }
+        groups.set(key, g);
+        totQty += qty;
+        totWkg += wkg;
+        if (val != null) {
+          totVal += val;
+          hasVal = true;
+        }
       }
     }
     const groupList = [...groups.values()];
     const rows = groupList
-      .map((g, i) =>
-        row([
-          { text: i + 1, align: 'c' },
-          { text: `<strong>${byTypeGroupName(groupList, g)}</strong>` },
-          { text: esc(g.tariffNo || '-'), align: 'r' },
-          { text: g.qty, align: 'r' },
-          { text: fmtWeightKg(g.wkg), align: 'r' },
-          { text: g.hasVal ? g.val : '-', align: 'r' },
-        ]),
+      .map(
+        (g, i) =>
+          `<tr><td class="c">${i + 1}</td><td><strong>${byTypeGroupName(g)}</strong></td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo || '-')}</td><td class="r">${g.qty}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`,
       )
       .join('');
     tableHtml = `<div class="section-title">List of goods (By type)</div>
 <table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="r">HS / tariff code</th>
+  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS / tariff code</th>
   <th class="r">Qty</th><th class="r">Weight</th><th class="r">Value (${esc(cur)})</th>
-</tr></thead><tbody>${rows || `<tr><td colspan="6" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
+</tr></thead><tbody>${rows || `<tr><td colspan="7" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
 <tfoot><tr>
-  <td colspan="2" style="text-align:right">TOTALS</td><td></td>
+  <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
   <td class="r">${totQty}</td>
   <td class="r">${fmtWeightKg(totWkg)}</td>
   <td class="r">${hasVal ? Math.floor(totVal) : '-'}</td>
@@ -180,20 +171,8 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
           }
           rowNum++;
           rowsArr.push(
-            row([
-              { text: rowNum, align: 'c' },
-              { text: esc(v.sku || p.sku || '-') },
-              { text: `${titleForCustoms(p, d.fullName, v)} - ${esc(v.name || '')}` },
-              { text: forSaleLabel },
-              { text: esc(p.type || '') },
-              { text: qty, align: 'r' },
-              { text: wg ? Math.round(wg) + ' g' : '-', align: 'r' },
-              { text: fmtWeightKg(weightKg), align: 'r' },
-              { text: price != null ? price : '-', align: 'r' },
-              { text: value != null ? value : '-', align: 'r' },
-              { text: esc(p.tariffNo || '-'), align: 'r' },
-              { text: origin, align: 'c' },
-            ]),
+            `<tr><td class="c">${rowNum}</td><td>${esc(v.sku || p.sku || '-')}</td><td>${titleForCustoms(p, d.fullName)} - ${esc(v.name || '')}</td><td>${forSaleLabel}</td><td>${esc(p.type || '')}</td>${materialCell(resolveMaterial(p, v))}` +
+              `<td class="r">${qty}</td><td class="r">${wg ? Math.round(wg) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${price != null ? price : '-'}</td><td class="r">${value != null ? value : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
           );
         }
       } else {
@@ -212,20 +191,8 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const listedVariants = hasVariants(p) ? p.variants!.filter((v) => !v.unlisted).length : 0;
         const titleDisplay = listedVariants ? `${titleForCustoms(p, d.fullName)} (${listedVariants} variant${listedVariants === 1 ? '' : 's'})` : titleForCustoms(p, d.fullName);
         rowsArr.push(
-          row([
-            { text: rowNum, align: 'c' },
-            { text: esc(p.sku || '-') },
-            { text: titleDisplay },
-            { text: forSaleLabel },
-            { text: esc(p.type || '') },
-            { text: qty, align: 'r' },
-            { text: c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-', align: 'r' },
-            { text: fmtWeightKg(weightKg), align: 'r' },
-            { text: c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-', align: 'r' },
-            { text: value != null ? value : '-', align: 'r' },
-            { text: esc(p.tariffNo || '-'), align: 'r' },
-            { text: origin, align: 'c' },
-          ]),
+          `<tr><td class="c">${rowNum}</td><td>${esc(p.sku || '-')}</td><td>${titleDisplay}</td><td>${forSaleLabel}</td><td>${esc(p.type || '')}</td>${materialCell(p.material)}` +
+            `<td class="r">${qty}</td><td class="r">${c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-'}</td><td class="r">${value != null ? value : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
         );
       }
     }
@@ -233,13 +200,13 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const formatLabel = format === 'detailed' ? 'Detailed' : 'Compressed';
     tableHtml = `<div class="section-title">List of goods (${formatLabel})</div>
 <table class="goods"><thead><tr>
-  <th>#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th>
+  <th>#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th><th class="mat">Material</th>
   <th class="r">Qty</th><th class="r">Unit weight</th><th class="r">Total weight</th>
   <th class="r">Unit value (${esc(cur)})</th><th class="r">Total value (${esc(cur)})</th>
   <th class="r">HS / tariff code</th><th class="c">Origin</th>
-</tr></thead><tbody>${rowsArr.join('') || `<tr><td colspan="12" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
+</tr></thead><tbody>${rowsArr.join('') || `<tr><td colspan="13" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
 <tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td>
+  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totQty}</td><td></td>
   <td class="r">${fmtWeightKg(totWkg)}</td><td></td>
   <td class="r">${hasVal ? Math.floor(totVal) : '-'}</td>

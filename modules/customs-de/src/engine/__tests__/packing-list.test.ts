@@ -84,17 +84,47 @@ describe('buildPackingListHtml', () => {
     expect(html).toContain('Not for sale');
   });
 
-  it('identifies art prints by year and the declarant name, and purses by material - same rule as customs-ch', () => {
+  it('identifies art prints by year and the declarant name - same rule as customs-ch', () => {
     const artState: CustomsDeState = {
       meta: { ...defaultCustomsDeMeta(), event: 'Zurich Pop Con', currency: 'EUR' },
       declarant: { ...defaultCustomsDeDeclarant(), fullName: 'Phuong Ninjin' },
-      products: [
-        { id: 'p1', title: 'Sunset', type: 'Art Print', year: 2024, originCountry: 'Germany', price: 25, amount: 3, soldQty: 0, soldValue: 0 },
-        { id: 'p2', title: 'Tote', type: 'Purse', material: 'Genuine leather', originCountry: 'Germany', price: 40, amount: 2, soldQty: 0, soldValue: 0 },
-      ],
+      products: [{ id: 'p1', title: 'Sunset', type: 'Art Print', year: 2024, originCountry: 'Germany', price: 25, amount: 3, soldQty: 0, soldValue: 0 }],
     };
     const html = buildPackingListHtml(artState, 'export', 'compressed');
     expect(html).toContain('Sunset (2024) - Phuong Ninjin');
-    expect(html).toContain('Tote - Genuine leather');
+  });
+
+  it('shows material as its own column - same as customs-ch', () => {
+    const matState: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Zurich Pop Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), fullName: 'Phuong Ninjin' },
+      products: [{ id: 'p2', title: 'Tote', type: 'Purse', material: 'Genuine leather', originCountry: 'Germany', price: 40, amount: 2, soldQty: 0, soldValue: 0 }],
+    };
+    const html = buildPackingListHtml(matState, 'export', 'compressed');
+    expect(html).toContain('<td>Tote</td>');
+    expect(html).not.toContain('Tote - Genuine leather');
+    expect(html).toContain('<td class="mat">Genuine leather</td>');
+  });
+
+  it('splits a by-type group when a product\'s own variants differ in material', () => {
+    const varState: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Zurich Pop Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), fullName: 'Phuong Ninjin' },
+      products: [
+        {
+          id: 'p3', title: 'Enamel Pin', type: 'Pin', originCountry: 'Germany', amount: 0, soldQty: 0, soldValue: 0,
+          variants: [
+            { name: 'Dragon', amount: 30, soldQty: 0, soldValue: 0, material: 'Zinc alloy' },
+            { name: 'Gold Edition', amount: 5, soldQty: 0, soldValue: 0, material: 'Gold plate' },
+          ],
+        },
+      ],
+    };
+    const html = buildPackingListHtml(varState, 'export', 'bytype');
+    const rows = html.split('<tr>');
+    const zincRow = rows.find((r) => r.includes('Zinc alloy'));
+    const goldRow = rows.find((r) => r.includes('Gold plate'));
+    expect(zincRow).toContain('<td class="r">30</td>');
+    expect(goldRow).toContain('<td class="r">5</td>');
   });
 });

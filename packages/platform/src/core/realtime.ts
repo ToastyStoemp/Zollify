@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue';
-import type { DisplayCart, DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage } from '@zollify/shared';
+import type { DisplayCart, DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage, ShellUpdateMessage } from '@zollify/shared';
 import { getAccessToken, getAccount, getApiBase } from '../session';
+import { announceShellUpdate } from '../shell-updates';
 import { deviceFlavor, deviceId } from './device';
 import { syncNow } from './sync';
 
@@ -12,7 +13,7 @@ import { syncNow } from './sync';
  */
 
 export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
-type Incoming = NudgeMessage | DisplayCartMessage | PaymentMessage;
+type Incoming = NudgeMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage;
 
 const paymentListeners = new Set<(msg: PaymentMessage) => void>();
 /** Point-to-point payment trigger/result messages addressed to this device. */
@@ -68,6 +69,7 @@ async function connect(): Promise<void> {
       return;
     }
     if (msg?.type === 'nudge') void syncNow();
+    else if (msg?.type === 'shell.update') void announceShellUpdate();
     else if (msg?.type === 'display.cart' && msg.from && msg.cart && typeof msg.cart === 'object') {
       displayCarts[msg.from] = { ...msg.cart, deviceId: msg.from, receivedAt: Date.now() };
     } else if ((msg?.type === 'payment.trigger' || msg?.type === 'payment.result') && typeof msg.requestId === 'string') {

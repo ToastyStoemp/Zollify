@@ -175,6 +175,16 @@ export interface NudgeMessage {
   latestSeq: number;
 }
 
+/**
+ * Sent once, right when a device connects (or reconnects) - the shell content
+ * only ever changes by redeploying the whole server, so a fresh connection is
+ * exactly when there might be something new to check for. Same doorbell
+ * shape as NudgeMessage: carries no version, the client re-checks over HTTP.
+ */
+export interface ShellUpdateMessage {
+  type: 'shell.update';
+}
+
 // ── Customer display (ephemeral cart relay over the sync WS) ────────────────
 
 /** Self-contained cart snapshot a register broadcasts for customer displays. */

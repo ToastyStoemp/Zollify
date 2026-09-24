@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import type Database from 'better-sqlite3';
-import type { DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage } from '@zollify/shared';
+import type { DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage, ShellUpdateMessage } from '@zollify/shared';
 import type { JwtClaims } from './auth';
 import { touchDevice } from './db';
 
@@ -79,6 +79,12 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       return;
     }
     rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
+    // The shell store only ever changes by redeploying the whole server, so a
+    // fresh connection - the first one after boot, or any reconnect a deploy
+    // itself just caused - is exactly the moment to check, rather than
+    // waiting for this device's own next full cold start.
+    const shellMsg: ShellUpdateMessage = { type: 'shell.update' };
+    socket.send(JSON.stringify(shellMsg));
     if (deviceId) {
       // Best-effort presence touch - a device that mostly just listens (e.g.
       // a Carbon in customer-display mode) may rarely push its own ops, so a

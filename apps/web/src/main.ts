@@ -3,12 +3,11 @@ import {
   applyStoredTheme,
   installDiagnostics,
   checkForUpdate,
-  checkAndQueueShellUpdate,
+  announceShellUpdate,
   configureApiBase,
   createShellUi,
   downloadUpdate,
   notifyShellUpdateReady,
-  reloadShellNow,
   updateDownload,
   getServerUrl,
   isNative,
@@ -100,25 +99,10 @@ async function boot(): Promise<void> {
   // bundle crashed and rolls back to the previous one.
   void notifyShellUpdateReady();
   void autoUpdateCheck();
-  void shellUpdateCheck();
-}
-
-/**
- * Same background-convenience shape as autoUpdateCheck() above, for the
- * content-only path: queued with next(), so it applies on its own at the
- * app's next cold start - but a terminal left running all shift might not
- * see one of those for days, so "Reload now" lets a cashier apply it between
- * customers instead of waiting. No timeout: unlike a fire-and-forget notice,
- * this offers an action, so it should stay until acted on or dismissed.
- */
-async function shellUpdateCheck(): Promise<void> {
-  const queuedVersion = await checkAndQueueShellUpdate();
-  if (queuedVersion) {
-    createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, {
-      timeoutMs: 0,
-      action: { label: 'Reload now', onClick: () => void reloadShellNow() },
-    });
-  }
+  // Also re-run on the WS shell.update doorbell (see realtime.ts) - a
+  // terminal left running all shift might not see another cold start for
+  // days, so a server redeploy nudges it the moment it (re)connects instead.
+  void announceShellUpdate();
 }
 
 /**

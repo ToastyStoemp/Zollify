@@ -1,4 +1,5 @@
 import { getServerUrl, isNative } from './native';
+import { createShellUi } from './shell-ui';
 
 /**
  * Content-only self-update of the Android shell, through @capgo/capacitor-updater
@@ -108,17 +109,6 @@ export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
 }
 
 /**
- * Background convenience only, same as checkForUpdate() in updates.ts: never
- * throws somewhere the caller has to notice, and does nothing at all outside
- * the native app. Downloads a newer bundle and queues it with next() rather
- * than set(), so it activates on the app's next cold start instead of
- * reloading out from under whatever the till is doing right now.
- *
- * Returns the queued version so the caller can tell the user, or null when
- * there was nothing to queue (already current, offline, not native, or the
- * check/download itself failed).
- */
-/**
  * Applies a queued update right now instead of waiting for the app's next
  * cold start - for a "Reload now" toast action, so a cashier can pick a
  * moment between customers rather than the update landing silently whenever
@@ -129,6 +119,17 @@ export async function reloadShellNow(): Promise<void> {
   await updater()?.reload();
 }
 
+/**
+ * Background convenience only, same as checkForUpdate() in updates.ts: never
+ * throws somewhere the caller has to notice, and does nothing at all outside
+ * the native app. Downloads a newer bundle and queues it with next() rather
+ * than set(), so it activates on the app's next cold start instead of
+ * reloading out from under whatever the till is doing right now.
+ *
+ * Returns the queued version so the caller can tell the user, or null when
+ * there was nothing to queue (already current, offline, not native, or the
+ * check/download itself failed).
+ */
 export async function checkAndQueueShellUpdate(): Promise<string | null> {
   try {
     const check = await checkShellUpdate();
@@ -139,4 +140,21 @@ export async function checkAndQueueShellUpdate(): Promise<string | null> {
     /* background convenience, never an error the user has to see */
     return null;
   }
+}
+
+/**
+ * checkAndQueueShellUpdate() plus the user-facing toast, with a "Reload now"
+ * action - shared by every trigger that should surface the same result: the
+ * boot-time check and the WS shell.update doorbell (server sends this once
+ * per connection, since the shell store only ever changes by redeploying the
+ * whole server - see ws.ts). Both just call this; no separate toast wiring
+ * per trigger.
+ */
+export async function announceShellUpdate(): Promise<void> {
+  const queuedVersion = await checkAndQueueShellUpdate();
+  if (!queuedVersion) return;
+  createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, {
+    timeoutMs: 0,
+    action: { label: 'Reload now', onClick: () => void reloadShellNow() },
+  });
 }

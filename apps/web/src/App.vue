@@ -8,6 +8,7 @@ import {
   syncNow,
   syncState,
   toasts,
+  type Toast,
 } from '@zollify/platform';
 import { booted, contributions } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
@@ -19,6 +20,12 @@ const route = useRoute();
 /** First-run setup gets the whole screen; the nav would only bounce back to it. */
 const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
 const settingUp = computed(() => route.name === 'welcome' || route.meta.bare === true);
+
+function runToastAction(toast: Toast) {
+  toast.action?.onClick();
+  const i = toasts.findIndex((t) => t.id === toast.id);
+  if (i >= 0) toasts.splice(i, 1);
+}
 
 type Group = NavGroup | 'addons';
 interface Entry { routeName: string; label: string; icon: string; group: Group; order: number; minRole?: Role }
@@ -230,6 +237,7 @@ const syncLabel = computed(() => {
     <div class="toasts" aria-live="polite">
       <p v-for="toast in toasts" :key="toast.id" :class="['toast', toast.kind]">
         {{ toast.message }}
+        <button v-if="toast.action" type="button" class="toast-action" @click="runToastAction(toast)">{{ toast.action.label }}</button>
       </p>
     </div>
 
@@ -322,9 +330,10 @@ nav { flex: 1; }
    page that already fills 100% (no opinion, or POS) computes 0 either way. */
 .content > :deep(*) { margin-inline: auto; }
 .toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
-.toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); }
+.toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); display: flex; align-items: center; gap: .75rem; }
 .toast.error { border-color: var(--zfy-danger); }
 .toast.success { border-color: var(--zfy-accent); }
+.toast-action { flex: none; padding: .3rem .7rem; border-radius: 6px; border: 1px solid currentColor; background: transparent; color: var(--zfy-accent); font-weight: 600; min-height: 32px; }
 
 /* Phone and narrow tablets: a slim top bar (brand, sync, burger); the nav
    becomes a drawer under it, opened by the burger. */

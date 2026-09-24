@@ -7,6 +7,7 @@ export interface Toast {
   message: string;
   kind: NonNullable<ToastOptions['kind']>;
   moduleId: string;
+  action?: ToastOptions['action'];
 }
 
 export const toasts = reactive<Toast[]>([]);
@@ -41,6 +42,7 @@ export function createShellUi(moduleId: string): ShellUi {
         message: String(message),
         kind: options.kind ?? 'info',
         moduleId,
+        action: options.action,
       };
       toasts.push(toast);
       const timeout = options.timeoutMs ?? 4000;

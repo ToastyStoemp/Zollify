@@ -25,6 +25,8 @@ interface CapacitorUpdaterPlugin {
   current(): Promise<{ bundle: BundleInfo; native: boolean }>;
   download(opts: { url: string; version: string; checksum: string }): Promise<BundleInfo>;
   next(opts: { id: string }): Promise<BundleInfo>;
+  /** Applies whatever next() queued right now instead of waiting for the app's own next cold start. */
+  reload(): Promise<void>;
 }
 
 function updater(): CapacitorUpdaterPlugin | null {
@@ -116,6 +118,17 @@ export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
  * there was nothing to queue (already current, offline, not native, or the
  * check/download itself failed).
  */
+/**
+ * Applies a queued update right now instead of waiting for the app's next
+ * cold start - for a "Reload now" toast action, so a cashier can pick a
+ * moment between customers rather than the update landing silently whenever
+ * the terminal next happens to restart (which, left running all shift, might
+ * be days). No-op outside the native app.
+ */
+export async function reloadShellNow(): Promise<void> {
+  await updater()?.reload();
+}
+
 export async function checkAndQueueShellUpdate(): Promise<string | null> {
   try {
     const check = await checkShellUpdate();

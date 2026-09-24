@@ -349,6 +349,8 @@ export interface Logger {
 export interface ToastOptions {
   kind?: 'info' | 'success' | 'warning' | 'error';
   timeoutMs?: number;
+  /** Optional single action button, e.g. "Reload now" - the toast stays until dismissed or clicked. */
+  action?: { label: string; onClick(): void };
 }
 
 export interface ShellUi {

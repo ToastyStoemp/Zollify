@@ -8,6 +8,7 @@ import {
   createShellUi,
   downloadUpdate,
   notifyShellUpdateReady,
+  reloadShellNow,
   updateDownload,
   getServerUrl,
   isNative,
@@ -104,12 +105,20 @@ async function boot(): Promise<void> {
 
 /**
  * Same background-convenience shape as autoUpdateCheck() above, for the
- * content-only path: queued with next(), so - unlike the APK toast - there's
- * nothing to tap, just a heads-up that it'll be there next time the app opens.
+ * content-only path: queued with next(), so it applies on its own at the
+ * app's next cold start - but a terminal left running all shift might not
+ * see one of those for days, so "Reload now" lets a cashier apply it between
+ * customers instead of waiting. No timeout: unlike a fire-and-forget notice,
+ * this offers an action, so it should stay until acted on or dismissed.
  */
 async function shellUpdateCheck(): Promise<void> {
   const queuedVersion = await checkAndQueueShellUpdate();
-  if (queuedVersion) createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, { timeoutMs: 8000 });
+  if (queuedVersion) {
+    createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, {
+      timeoutMs: 0,
+      action: { label: 'Reload now', onClick: () => void reloadShellNow() },
+    });
+  }
 }
 
 /**

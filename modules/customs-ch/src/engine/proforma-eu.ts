@@ -23,7 +23,10 @@ export function buildProformaEuHtml(state: CustomsState, now: Date = new Date())
   const pad = (n: number): string => String(n).padStart(2, '0');
   const invoiceNo = `PF-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
 
-  const products = state.products.filter(hasCustomsInfo);
+  // hasCustomsInfo alone lets a zero-quantity item onto the invoice (nothing
+  // brought/on hand this event) - the goods-list import doc already guards
+  // against that (calcProduct(p).amount > 0), this didn't.
+  const products = state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0);
 
   const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }

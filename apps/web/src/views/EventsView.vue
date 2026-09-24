@@ -126,7 +126,6 @@ const form = reactive({
   city: '',
   country: '',
   tin: '',
-  currency: 'CHF',
   localCurrency: '',
   exchangeRate: '',
   roundingIncrement: '0',
@@ -144,7 +143,6 @@ function openNew(): void {
     city: '',
     country: account.value?.profile.artist.countryOfOrigin || 'Switzerland',
     tin: '',
-    currency: baseCurrency.value,
     localCurrency: '',
     exchangeRate: '',
     roundingIncrement: '0',
@@ -165,7 +163,6 @@ function openEdit(e: SalesEvent): void {
     city: e.venue?.city ?? '',
     country: e.venue?.country ?? '',
     tin: e.venue?.tin ?? '',
-    currency: e.currency,
     localCurrency: e.localCurrency ?? '',
     exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
     roundingIncrement: String(e.roundingIncrement ?? 0),
@@ -177,10 +174,10 @@ function openEdit(e: SalesEvent): void {
 }
 
 async function fetchRate(): Promise<void> {
-  if (!form.currency.trim() || !form.localCurrency.trim()) return;
+  if (!form.localCurrency.trim()) return;
   fetchingRate.value = true;
   rateError.value = '';
-  const rate = await fetchExchangeRate(form.currency, form.localCurrency);
+  const rate = await fetchExchangeRate(baseCurrency.value, form.localCurrency);
   fetchingRate.value = false;
   if (rate == null) {
     rateError.value = 'Could not fetch a rate - enter it by hand.';
@@ -192,7 +189,7 @@ async function fetchRate(): Promise<void> {
 const localExample = computed(() => {
   const rate = parseFloat(form.exchangeRate);
   if (!form.localCurrency || !(rate > 0)) return '';
-  return `${form.currency} 100 is charged as ${form.localCurrency} ${toLocalPrice(100, rate, Number(form.roundingIncrement) || 0).toFixed(2)}`;
+  return `${baseCurrency.value} 100 is charged as ${form.localCurrency} ${toLocalPrice(100, rate, Number(form.roundingIncrement) || 0).toFixed(2)}`;
 });
 
 async function save(): Promise<void> {
@@ -217,7 +214,7 @@ async function save(): Promise<void> {
       country: form.country.trim() || undefined,
       tin: form.tin.trim() || undefined,
     },
-    currency: form.currency.trim().toUpperCase() || baseCurrency.value,
+    currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
     roundingIncrement: Number(form.roundingIncrement) || 0,
@@ -289,20 +286,17 @@ async function save(): Promise<void> {
 
         <fieldset>
           <legend>Currency</legend>
-          <div class="two">
-            <label><span>Base currency (your books)</span><CurrencyPicker v-model="form.currency" /></label>
-          </div>
-          <p class="hint">Charging in another currency - for a convention abroad. Prices stay in {{ form.currency || 'base' }} for your books; the till charges the converted amount. Leave blank to sell in {{ form.currency || 'base' }} directly.</p>
+          <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Booth profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
           <div class="three">
             <label><span>Local currency</span><CurrencyPicker v-model="form.localCurrency" placeholder="SEK" /></label>
-            <label><span>Rate (1 {{ form.currency || 'base' }} =)</span><input v-model="form.exchangeRate" type="number" min="0" step="0.0001" inputmode="decimal" /></label>
+            <label><span>Rate (1 {{ baseCurrency }} =)</span><input v-model="form.exchangeRate" type="number" min="0" step="0.0001" inputmode="decimal" /></label>
             <label>
               <span>Round to nearest</span>
               <select v-model="form.roundingIncrement"><option v-for="[v, l] in ROUNDING" :key="v" :value="v">{{ l }}</option></select>
             </label>
           </div>
           <div class="rate">
-            <button type="button" :disabled="!form.currency.trim() || !form.localCurrency.trim() || fetchingRate" @click="fetchRate">
+            <button type="button" :disabled="!form.localCurrency.trim() || fetchingRate" @click="fetchRate">
               <Icon name="refresh-cw" :size="14" /> {{ fetchingRate ? 'Fetching…' : "Fetch today's rate" }}
             </button>
             <span v-if="rateError" class="warn">{{ rateError }}</span>

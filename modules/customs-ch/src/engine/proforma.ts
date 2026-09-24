@@ -8,7 +8,10 @@ export function buildProformaHtml(state: CustomsState, now: Date = new Date()): 
   const cur = state.meta && state.meta.currency ? state.meta.currency : 'CHF';
   const today = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
 
-  const products = state.products.filter(hasCustomsInfo);
+  // hasCustomsInfo alone lets a zero-quantity item onto the invoice (nothing
+  // brought/on hand this event) - the goods-list import doc already guards
+  // against that (calcProduct(p).amount > 0), this didn't.
+  const products = state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0);
 
   const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }

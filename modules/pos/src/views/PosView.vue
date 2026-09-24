@@ -1072,6 +1072,12 @@ async function cancelPayment(): Promise<void> {
   .cart { display: none; }
   .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
   .cart.sheet .close { display: inline-flex; }
+  /* As a fixed inset:0 overlay this sits completely outside .content's own
+     padding (which already gets the safe-area treatment) - without its own
+     copy, "Cart"/"Clear"/the close button rendered straight under the
+     status bar, confirmed from a phone screenshot showing them behind the
+     clock and battery icons. */
+  .cart.sheet header { padding-top: calc(.75rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); }
   .floor { display: flex; flex-direction: column; }
   /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
   .floor:has(.cartbar) { min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }

@@ -57,6 +57,11 @@ if [[ "$mode" == "--auto" ]]; then
   latest="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
   if [[ -n "$running" && "$running" == "$latest" ]]; then
     echo "✓ already up to date ($image)"
+    # Every push tags a new :sha image in GHCR - once it's pulled once, the
+    # last one is now unused and never gets cleaned up on its own. Also
+    # covers the case a previous deploy failed outright (disk full pulling
+    # the blob) before ever reaching this cleanup step further down.
+    docker image prune -a -f >/dev/null
     exit 0
   fi
 fi
@@ -89,6 +94,11 @@ for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1; then
     echo "✓ healthy"
     docker compose "${compose_args[@]}" ps
+    # The old image (and any stale build cache from the --build path) is now
+    # unused - the exact accumulation that filled the disk mid-pull before.
+    echo "→ cleaning up old images"
+    docker image prune -a -f >/dev/null
+    docker builder prune -f >/dev/null
     exit 0
   fi
   sleep 2

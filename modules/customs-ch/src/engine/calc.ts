@@ -2,23 +2,28 @@
  * Customs calculation core - exact port of the legacy www/app.js functions.
  * Do not "improve" rounding or formatting here: outputs are golden-tested
  * byte-for-byte against the legacy generators.
+ *
+ * The generic pieces (escaping, country codes, variant amount/weight/value
+ * aggregation, the stock-eligibility primitive) live in @zollify/customs-core,
+ * shared with customs-de - see that package's own doc comment for why. What's
+ * left here is genuinely CH-specific: tariff/VAT-law math, e-dec, and
+ * customs-ch's own return-stats and 11.74/11.87 grouping.
  */
-import { COUNTRY_CODES, HS_CODES } from './data';
+import {
+  calcCoreProduct,
+  esc,
+  escapeXml,
+  countryToCode,
+  parsePostCodeCity,
+  fmtEventDates,
+  hasVariants,
+  variantPrice,
+  variantWeight,
+} from '@zollify/customs-core';
+import { HS_CODES } from './data';
 import type { CustomsProduct, CustomsState, CustomsVariant, NumLike } from './model';
 
-// ── Formatting ──────────────────────────────────────────────────────────────
-
-export function fmtEventDates(start: string, end: string): string {
-  if (!start) return '';
-  const s = new Date(start + 'T00:00:00');
-  const d1 = s.getDate();
-  const mm = String(s.getMonth() + 1).padStart(2, '0');
-  const yyyy = s.getFullYear();
-  if (!end) return `${d1}.${mm}.${yyyy}`;
-  const e = new Date(end + 'T00:00:00');
-  const d2 = e.getDate();
-  return `${d1}. - ${d2}.${mm}.${yyyy}`;
-}
+export { esc, escapeXml, countryToCode, parsePostCodeCity, fmtEventDates, hasVariants, variantPrice, variantWeight };
 
 export function formatNum(n: NumLike, decimals: number): string {
   return parseFloat(n as string).toFixed(decimals);
@@ -35,45 +40,7 @@ export function fmtWeightKg(kg: NumLike): string {
   return formatNum(kg, 2).replace('.', ',') + ' kg';
 }
 
-// ── Escaping ────────────────────────────────────────────────────────────────
-
-/** HTML escape incl. double quotes (legacy `esc`). */
-export function esc(str: unknown): string {
-  return String(str == null ? '' : str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-export function escapeXml(str: unknown): string {
-  return String(str == null ? '' : str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
 // ── Country / code helpers ──────────────────────────────────────────────────
-
-export function countryToCode(name: string | undefined): string {
-  if (!name) return '';
-  const trimmed = name.trim();
-  if (/^[A-Z]{2}$/.test(trimmed)) return trimmed;
-  const code = COUNTRY_CODES[trimmed.toLowerCase()];
-  if (code) return code;
-  return trimmed.toUpperCase().slice(0, 2);
-}
-
-export function parsePostCodeCity(str: string): { postCode: string; city: string } {
-  if (!str) return { postCode: '', city: '' };
-  const match = str.match(/^(\S+)\s+(.+)$/);
-  // The regex has two capture groups, so both are present whenever it matches;
-  // the fallbacks satisfy noUncheckedIndexedAccess without changing behaviour.
-  if (match) return { postCode: match[1] ?? '', city: match[2] ?? '' };
-  return { postCode: '', city: str };
-}
 
 /** "4911.91.00" → "4911.9100" */
 export function toEdecHsCode(code: string | undefined): string {
@@ -110,22 +77,6 @@ export function computeLRP(state: CustomsState, docNum: number): string {
   return `${originCC}CH_${code}_${year}_${mm}_${nnn}`;
 }
 
-// ── Variant helpers ─────────────────────────────────────────────────────────
-
-export function hasVariants(p: CustomsProduct): boolean {
-  return Array.isArray(p.variants) && p.variants.length > 0;
-}
-
-export function variantPrice(p: CustomsProduct, v: CustomsVariant): number | null {
-  const raw = v.price != null && v.price !== '' ? v.price : p.price;
-  return raw != null && !isNaN(parseFloat(raw as string)) ? parseFloat(raw as string) : null;
-}
-
-export function variantWeight(p: CustomsProduct, v: CustomsVariant): number {
-  const raw = v.weightG != null && v.weightG !== '' ? v.weightG : p.weightG;
-  return parseFloat(raw as string) || 0;
-}
-
 // ── Product calculations ────────────────────────────────────────────────────
 
 export interface ProductCalc {
@@ -140,74 +91,30 @@ export interface ProductCalc {
 }
 
 export function calcProduct(p: CustomsProduct, skipUnlistedVariants = false): ProductCalc {
+  // totalValueCHF is CH-specific (a whole-product value override) - not a
+  // customs-core concept, so it's resolved here and handed in as an option
+  // rather than pushed into the shared aggregation.
+  const core = calcCoreProduct(p, {
+    skipUnlistedVariants,
+    totalValueOverride: p.totalValueCHF != null ? parseFloat(p.totalValueCHF as string) : null,
+  });
+
   if (hasVariants(p)) {
-    let amount = 0,
-      totalWeightKg = 0,
-      totalValue = 0;
     let soldQty = 0,
       soldValue = 0,
       soldWeightKg = 0;
     for (const v of p.variants!) {
       if (skipUnlistedVariants && v.unlisted) continue;
-      const amt = v.amount || 0;
       const wg = variantWeight(p, v);
-      const price = variantPrice(p, v);
-      amount += amt;
-      totalWeightKg += Math.round(amt * wg) / 1000;
-      if (price != null) totalValue += price * amt;
       soldQty += v.soldQty || 0;
       soldValue += v.soldValue || 0;
       soldWeightKg += ((v.soldQty || 0) * wg) / 1000;
     }
-    totalWeightKg = Math.round(totalWeightKg * 1000) / 1000;
-    const activeVariants = skipUnlistedVariants ? p.variants!.filter((v) => !v.unlisted) : p.variants!;
-    const prices = activeVariants.map((v) => variantPrice(p, v)).filter((x): x is number => x != null);
-    const weights = activeVariants.map((v) => variantWeight(p, v));
-    const allSamePrice = prices.length > 0 && prices.every((x) => x === prices[0]);
-    const allSameWeight = weights.length > 0 && weights.every((x) => x === weights[0]);
-    const effectiveUnitPrice = allSamePrice
-      ? (prices[0] ?? null)
-      : amount > 0 && totalValue > 0
-        ? totalValue / amount
-        : null;
-    const effectiveUnitWeightG = allSameWeight
-      ? weights[0]
-      : amount > 0
-        ? Math.round((totalWeightKg * 1000) / amount)
-        : p.weightG || 0;
-    return {
-      totalWeightKg,
-      totalValue: totalValue > 0 ? Math.round(totalValue) : null,
-      effectiveUnitPrice,
-      effectiveUnitWeightG,
-      soldWeightKg,
-      amount,
-      soldQty,
-      soldValue,
-    };
+    return { ...core, soldQty, soldValue, soldWeightKg };
   }
 
-  const amount = p.amount || 0;
-  // Weight: round to nearest gram first to eliminate floating-point noise, then convert to kg
-  const totalWeightKg = Math.round(amount * ((p.weightG as number) || 0)) / 1000;
-  // Value: round to whole CHF - the total is the authoritative number
-  let totalValue = p.totalValueCHF != null ? Math.round(parseFloat(p.totalValueCHF as string)) : null;
-  if (totalValue == null && p.price != null && p.price !== '') {
-    totalValue = Math.round(parseFloat(p.price as string) * amount);
-  }
-  const effectiveUnitPrice = totalValue != null && amount > 0 ? totalValue / amount : null;
-  const effectiveUnitWeightG = amount > 0 ? (totalWeightKg * 1000) / amount : p.weightG || 0;
   const soldWeightKg = ((p.soldQty || 0) * ((p.weightG as number) || 0)) / 1000;
-  return {
-    totalWeightKg,
-    totalValue,
-    effectiveUnitPrice,
-    effectiveUnitWeightG,
-    soldWeightKg,
-    amount,
-    soldQty: p.soldQty || 0,
-    soldValue: p.soldValue || 0,
-  };
+  return { ...core, soldWeightKg, soldQty: p.soldQty || 0, soldValue: p.soldValue || 0 };
 }
 
 export interface MaterialGroupCalc {

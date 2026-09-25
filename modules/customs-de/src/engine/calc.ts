@@ -1,79 +1,18 @@
+import { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, hasVariants, variantPrice, variantWeight } from '@zollify/customs-core';
 import type { CustomsDeProduct, CustomsDeVariant } from './model';
 
-export function esc(str: unknown): string {
-  return String(str == null ? '' : str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+export { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, hasVariants };
 
-/** XML escape (also encodes apostrophes, unlike HTML `esc`). */
-export function escapeXml(str: unknown): string {
-  return String(str == null ? '' : str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/** "12349 Berlin" -> { postCode: "12349", city: "Berlin" }. */
-export function parsePostCodeCity(str: string): { postCode: string; city: string } {
-  if (!str) return { postCode: '', city: '' };
-  const match = str.match(/^(\S+)\s+(.+)$/);
-  if (match) return { postCode: match[1] ?? '', city: match[2] ?? '' };
-  return { postCode: '', city: str };
-}
-
-/** "Germany" / "DE" -> "DE". Falls back to the first two letters, uppercased. */
-export function countryToCode(name: string | undefined): string {
-  if (!name) return '';
-  const trimmed = name.trim();
-  if (/^[A-Z]{2}$/.test(trimmed)) return trimmed;
-  const known: Record<string, string> = {
-    germany: 'DE',
-    deutschland: 'DE',
-    switzerland: 'CH',
-    schweiz: 'CH',
-  };
-  const code = known[trimmed.toLowerCase()];
-  if (code) return code;
-  return trimmed.toUpperCase().slice(0, 2);
-}
+// calcDeProduct's own eligibility (`!p.unlisted && calcDeProduct(p).amount > 0`,
+// used by proforma.ts/iaa-plus-sheet.ts/dexpdf-xml.ts) is NOT customs-core's
+// hasStock(): calcDeProduct always excludes unlisted variants from the sum,
+// while hasStock()'s default does not - the two only agree when a product has
+// no unlisted variants. Left as its own check rather than swapping in a
+// shared primitive that would silently change behavior for that case.
 
 export function fmtWeightKg(kg: number): string {
   if (!kg) return '0 kg';
   return (Math.round(kg * 100) / 100).toFixed(2).replace('.', ',') + ' kg';
-}
-
-/** "2026-05-14", "2026-05-16" -> "14. - 16.05.2026" (mirrors customs-ch/engine/calc.ts). */
-export function fmtEventDates(start: string, end: string): string {
-  if (!start) return '';
-  const s = new Date(start + 'T00:00:00');
-  const d1 = s.getDate();
-  const mm = String(s.getMonth() + 1).padStart(2, '0');
-  const yyyy = s.getFullYear();
-  if (!end) return `${d1}.${mm}.${yyyy}`;
-  const e = new Date(end + 'T00:00:00');
-  const d2 = e.getDate();
-  return `${d1}. - ${d2}.${mm}.${yyyy}`;
-}
-
-// ── Variant helpers (mirrors customs-ch/engine/calc.ts) ─────────────────────
-
-export function hasVariants(p: CustomsDeProduct): boolean {
-  return Array.isArray(p.variants) && p.variants.length > 0;
-}
-
-function variantPrice(p: CustomsDeProduct, v: CustomsDeVariant): number | null {
-  const raw = v.price != null && v.price !== '' ? v.price : p.price;
-  return raw != null && raw !== '' && !isNaN(parseFloat(String(raw))) ? parseFloat(String(raw)) : null;
-}
-
-function variantWeight(p: CustomsDeProduct, v: CustomsDeVariant): number {
-  const raw = v.weightG != null && v.weightG !== '' ? v.weightG : p.weightG;
-  return parseFloat(String(raw ?? '')) || 0;
 }
 
 export interface ProductCalc {

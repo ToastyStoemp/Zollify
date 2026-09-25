@@ -10,6 +10,7 @@ import { buildEdecXml } from '../engine/edec-xml';
 import { build1174Html } from '../engine/form1174';
 import { build1187Html } from '../engine/form1187';
 import { buildGoodsListHtml, type GoodsDocNum, type GoodsFormat } from '../engine/goods-list';
+import { buildPackingListHtml } from '../engine/packing-list';
 import { buildProformaHtml } from '../engine/proforma';
 import { buildProformaEuHtml } from '../engine/proforma-eu';
 import {
@@ -255,8 +256,9 @@ async function download(filename: string, text: string, type: string): Promise<v
     error.value = err instanceof Error ? err.message : 'Could not save the file.';
   }
 }
-const GOODS_LIST_NAMES: Record<GoodsDocNum, string> = { 1: 'import_list', 2: 'sold_goods_list', 3: 'return_goods_list' };
+const GOODS_LIST_NAMES: Record<GoodsDocNum, string> = { 2: 'sold_goods_list', 3: 'return_goods_list' };
 const openGoodsList = (docNum: GoodsDocNum) => state.value && openHtml(buildGoodsListHtml(state.value, docNum, goodsFormat.value), safeName(GOODS_LIST_NAMES[docNum]));
+const openPackingList = () => state.value && openHtml(buildPackingListHtml(state.value, goodsFormat.value), safeName('packing_list'));
 const openAll = () => state.value && openHtml(buildAllVersionsHtml(state.value), safeName('all_formats'));
 const openProforma = () => state.value && openHtml(buildProformaHtml(state.value), safeName('proforma'));
 const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value), safeName('proforma_eu'));
@@ -279,7 +281,7 @@ watch(
     try {
       const c = previewChoice.value;
       preview.value =
-        c === 'all' ? buildAllVersionsHtml(state.value) : c === 'proforma' ? buildProformaHtml(state.value) : c === 'proforma-eu' ? buildProformaEuHtml(state.value) : c === '1174' ? build1174Html(state.value) : c === '1187' ? build1187Html(state.value) : buildGoodsListHtml(state.value, Number(c) as GoodsDocNum, goodsFormat.value);
+        c === 'all' ? buildAllVersionsHtml(state.value) : c === 'proforma' ? buildProformaHtml(state.value) : c === 'proforma-eu' ? buildProformaEuHtml(state.value) : c === '1174' ? build1174Html(state.value) : c === '1187' ? build1187Html(state.value) : c === '1' ? buildPackingListHtml(state.value, goodsFormat.value) : buildGoodsListHtml(state.value, Number(c) as GoodsDocNum, goodsFormat.value);
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err);
       preview.value = '';
@@ -339,7 +341,7 @@ const TRANSPORT_MODES = [
         </div>
         <p v-if="pdfBusy" class="hint">Generating PDF…</p>
         <div class="docs">
-          <button type="button" :disabled="pdfBusy" @click="openGoodsList(1)"><Icon name="download" :size="14" /> Import list</button>
+          <button type="button" :disabled="pdfBusy" @click="openPackingList"><Icon name="download" :size="14" /> Packing list</button>
           <button type="button" :disabled="pdfBusy" @click="openGoodsList(2)"><Icon name="coins" :size="14" /> Sold goods list</button>
           <button type="button" :disabled="pdfBusy" @click="openGoodsList(3)"><Icon name="upload" :size="14" /> Return goods list</button>
           <button type="button" :disabled="pdfBusy" @click="openAll"><Icon name="layers" :size="14" /> All formats bundle</button>
@@ -425,7 +427,7 @@ const TRANSPORT_MODES = [
           <h2>Preview</h2>
           <select v-model="previewChoice" aria-label="Document">
             <option value="all">All documents</option>
-            <option value="1">Import list</option>
+            <option value="1">Packing list</option>
             <option value="2">Sold goods list</option>
             <option value="3">Return goods list</option>
             <option value="proforma">Proforma invoice</option>

@@ -1,8 +1,13 @@
 /**
- * Goods-list documents (Import / Sold / Return) - exact ports of legacy
+ * Goods-list documents (Sold / Return) - exact ports of legacy
  * printGoodsList() and printAllVersions() minus the window.open call.
  * The two legacy functions build the tables independently with small
  * differences; both are preserved verbatim (golden-tested).
+ *
+ * The former docNum 1 ("Import") was replaced by packing-list.ts - a
+ * dedicated, simpler document without Tariff Rate/VAT Rate columns, mirroring
+ * customs-de's own packing list. Sold/Return keep their tariffRate/vatRate
+ * columns; those weren't part of this change.
  */
 import {
   calcProduct,
@@ -22,7 +27,7 @@ import {
 import type { CustomsProduct, CustomsState } from './model';
 import { isArtwork } from '../lib/artwork';
 
-export type GoodsDocNum = 1 | 2 | 3;
+export type GoodsDocNum = 2 | 3;
 
 /**
  * Customs line name. Art prints read as "Title (Year) - Artist" (the artist's
@@ -74,7 +79,6 @@ export function byTypeGroupName(g: { type: string; products: Set<CustomsProduct>
 export type GoodsFormat = 'detailed' | 'compressed' | 'bytype';
 
 const DOC_TITLES: Record<number, string> = {
-  1: 'Auxiliary Document for the Customs Declaration - Import',
   2: 'Auxiliary Document for the Customs Declaration - Sold Goods',
   3: 'Return Goods List - Re-export Declaration',
 };
@@ -119,7 +123,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
 
   const header = `<div class="doc-top">
   <div class="doc-top-left">
-    <div class="doc-title">${esc(docTitles[docNum] || docTitles[1])}</div>
+    <div class="doc-title">${esc(docTitles[docNum])}</div>
     <div class="doc-subtitle">${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}</div>
   </div>
   <div class="doc-top-right">
@@ -139,157 +143,7 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
 
   let tableHtml = '';
 
-  if (docNum === 1) {
-    // ── IMPORT: no sold columns ──
-    let totAmt = 0,
-      totWkg = 0,
-      totVal = 0;
-    let rowNum = 0;
-
-    const detailedRows: string[] = [];
-
-    if (format === 'bytype') {
-      // By-type: group by type + tariff code + material (none of the three are
-      // ever combined across groups, so a group's material is never ambiguous)
-      const groups: Record<
-        string,
-        {
-          type: string;
-          tariffNo: string;
-          material: string;
-          tariffRate: unknown;
-          vatRate: unknown;
-          amount: number;
-          wkg: number;
-          val: number;
-          hasVal: boolean;
-          products: Set<CustomsProduct>;
-        }
-      > = {};
-      state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0).forEach((p) => {
-        for (const mc of calcProductByMaterial(p)) {
-          if (mc.amount <= 0) continue;
-          const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
-          if (!groups[key])
-            groups[key] = {
-              type: p.type || 'Other',
-              tariffNo: p.tariffNo || '',
-              material: mc.material,
-              tariffRate: p.tariffRate,
-              vatRate: p.vatRate,
-              amount: 0,
-              wkg: 0,
-              val: 0,
-              hasVal: false,
-              products: new Set(),
-            };
-          const g = groups[key];
-          g.amount += mc.amount;
-          g.wkg += mc.totalWeightKg;
-          if (mc.totalValue != null) {
-            g.val += mc.totalValue;
-            g.hasVal = true;
-          }
-          g.products.add(p);
-          totAmt += mc.amount;
-          totWkg += mc.totalWeightKg;
-          if (mc.totalValue != null) totVal += mc.totalValue;
-        }
-      });
-      const groupList = Object.values(groups);
-      groupList.forEach((g, i) => {
-        detailedRows.push(`<tr>
-          <td class="c">${i + 1}</td><td>${byTypeGroupName(g, a.fullName)}</td>
-          ${materialCell(g.material)}
-          <td class="r">${esc(g.tariffNo)}</td>
-          <td class="r">${g.tariffRate != null ? g.tariffRate + '%' : ''}</td>
-          <td class="r">${g.vatRate != null ? g.vatRate + '%' : ''}</td>
-          <td class="r">${g.amount}</td>
-          <td class="r">${fmtWeightKg(g.wkg)}</td>
-          <td class="r">${g.hasVal ? g.val : '-'}</td></tr>`);
-      });
-      const rows = detailedRows.join('');
-      tableHtml = `<div class="section-title">List of goods (By Type)</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th>
-  <th class="r">Tariff Rate</th><th class="r">VAT Rate</th>
-  <th class="r">Total Amount</th><th class="r">Total Weight</th>
-  <th class="r">Total Value (${getCurrency(state)})</th>
-</tr></thead><tbody>${rows}</tbody><tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
-  <td class="r">${totAmt}</td><td class="r">${fmtWeightKg(totWkg)}</td>
-  <td class="r" style="color:#c00">${Math.floor(totVal)}</td>
-</tr></tfoot></table>`;
-    } else {
-      state.products.filter((p) => hasCustomsInfo(p) && calcProduct(p).amount > 0).forEach((p) => {
-        const c = calcProduct(p);
-        const pOrig =
-          p.originCountry && p.originCountry.trim()
-            ? p.originCountry.trim().toUpperCase()
-            : countryToCode(a.countryOfOrigin) || '';
-
-        if (format === 'detailed' && hasVariants(p)) {
-          // Detailed: each variant gets its own row (skip unlisted + zero-stock variants)
-          p.variants!.filter((v) => !v.unlisted && (v.amount || 0) > 0).forEach((v) => {
-            const i = rowNum++;
-            const varWg = v.weightG != null ? v.weightG : p.weightG;
-            const varPrice = v.price != null ? v.price : p.price;
-            const varAmt = v.amount || 0;
-            const varTotalWkg = Math.round(varAmt * ((varWg as number) || 0)) / 1000;
-            const varTotalVal = varPrice != null ? Math.round((varPrice as number) * varAmt) : null;
-            const pd = p.priceNote || (varPrice != null ? formatNum(floorN(varPrice, 2), 2) : '-');
-            const tv = varTotalVal != null ? varTotalVal : '-';
-            totAmt += varAmt;
-            totWkg += varTotalWkg;
-            if (varTotalVal != null) totVal += varTotalVal;
-            detailedRows.push(`<tr><td class="c">${i + 1}</td><td>${esc(v.sku || p.sku || '')}</td><td>${titleForCustoms(p, a.fullName)} - ${esc(v.name || '')}</td>
-              <td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td>
-              ${materialCell(resolveMaterial(p, v))}
-              <td class="r">${varAmt}</td><td class="r">${varWg != null ? varWg + ' g' : ''}</td>
-              <td class="r">${fmtWeightKg(varTotalWkg)}</td><td class="r">${esc(pd)}</td>
-              <td class="r">${tv}</td><td class="r">${esc(p.tariffNo || '')}</td>
-              <td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td>
-              <td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td>
-              <td class="c">${esc(pOrig)}</td></tr>`);
-          });
-        } else {
-          // Compressed or non-variant: one row per product
-          const i = rowNum++;
-          const pd = p.priceNote || (c.effectiveUnitPrice != null ? formatNum(floorN(c.effectiveUnitPrice, 2), 2) : '-');
-          const tv = c.totalValue != null ? c.totalValue : '-';
-          totAmt += c.amount || 0;
-          totWkg += c.totalWeightKg;
-          if (c.totalValue != null) totVal += c.totalValue;
-          const titleDisplay = hasVariants(p)
-            ? `${titleForCustoms(p, a.fullName)} (${p.variants!.filter((v) => !v.unlisted).length} variants)`
-            : titleForCustoms(p, a.fullName);
-          detailedRows.push(`<tr><td class="c">${i + 1}</td><td>${esc(p.sku || '')}</td><td>${titleDisplay}</td>
-            <td>${p.forSale ? 'For Sale' : 'Not For Sale'}</td><td>${esc(p.type || '')}</td>
-            ${materialCell(p.material)}
-            <td class="r">${c.amount ?? ''}</td><td class="r">${c.effectiveUnitWeightG != null ? Math.round(c.effectiveUnitWeightG as number) + ' g' : ''}</td>
-            <td class="r">${fmtWeightKg(c.totalWeightKg)}</td><td class="r">${esc(pd)}</td>
-            <td class="r">${tv}</td><td class="r">${esc(p.tariffNo || '')}</td>
-            <td class="r">${p.tariffRate != null ? p.tariffRate + '%' : ''}</td>
-            <td class="r">${p.vatRate != null ? p.vatRate + '%' : ''}</td>
-            <td class="c">${esc(pOrig)}</td></tr>`);
-        }
-      });
-
-      const rows = detailedRows.join('');
-      const formatLabel = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
-      tableHtml = `<div class="section-title">List of goods${formatLabel}</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>SKU</th><th>Title</th><th>For Sale / Not For Sale</th><th>Type</th><th class="mat">Material</th>
-  <th class="r">Amount</th><th class="r">Unit Weight</th><th class="r">Total Weight</th>
-  <th class="r">Unit Price (${getCurrency(state)})</th><th class="r">Total Value (${getCurrency(state)})</th>
-  <th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th>
-</tr></thead><tbody>${rows}</tbody><tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
-  <td class="r">${totAmt}</td><td></td><td class="r">${fmtWeightKg(totWkg)}</td><td></td>
-  <td class="r" style="color:#c00">${Math.floor(totVal)}</td><td colspan="4"></td>
-</tr></tfoot></table>`;
-    }
-  } else if (docNum === 2) {
+  if (docNum === 2) {
     // ── SOLD: only sold goods ──
     let totSQ = 0,
       totSV = 0,

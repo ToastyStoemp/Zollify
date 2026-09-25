@@ -368,9 +368,11 @@ describe('customs port vs legacy (golden diff)', () => {
     expect(buildEdecXml(clone(nothingSoldState()), new Date())).toBeNull();
   });
 
-  it('produces identical goods lists (3 documents × 3 formats)', () => {
+  it('produces identical goods lists (2 documents × 3 formats)', () => {
+    // docNum 1 (Import) was replaced by packing-list.ts - no longer a legacy
+    // port, so no legacy oracle to diff against here. See packing-list.test.ts.
     for (const [, make] of fixtures) {
-      for (const docNum of [1, 2, 3] as GoodsDocNum[]) {
+      for (const docNum of [2, 3] as GoodsDocNum[]) {
         for (const format of ['detailed', 'compressed', 'bytype'] as GoodsFormat[]) {
           const captured: Captured = { html: [], blobs: [] };
           const legacy = loadLegacy(captured);

@@ -369,6 +369,13 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
   while (asn.length < state.products.length) asn.push(0);
   if (asn.length > state.products.length) asn.length = state.products.length;
 
+  // Same eligibility as the goods list and both proformas (hasCustomsInfo +
+  // a nonzero computed amount) - without it, a product with nothing brought
+  // this event still added its (zero) weight/value here, which was harmless
+  // on its own, but a product missing tariff/VAT info could still get summed
+  // into a group, so G1+G2 no longer matched those documents' own totals.
+  const eligible = (p: CustomsProduct): boolean => hasCustomsInfo(p) && calcProduct(p).amount > 0;
+
   function makeGroup(products: CustomsProduct[]): Form1174Group {
     let tariffNo = '-',
       maxVal = -1;
@@ -392,24 +399,29 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
   }
 
   if (state.form1174.groupMode === 'manual') {
-    const g1prods = state.products.filter((_, i) => asn[i] === 1);
-    const g2prods = state.products.filter((_, i) => asn[i] !== 1);
+    // asn[i] still indexes the full, unfiltered state.products (the manual
+    // assignment UI lists every product, eligible or not) - eligible() is
+    // applied after, so an ineligible product's own assignment is simply
+    // never summed into either group.
+    const g1prods = state.products.filter((p, i) => asn[i] === 1 && eligible(p));
+    const g2prods = state.products.filter((p, i) => asn[i] !== 1 && eligible(p));
     const g1 = makeGroup(g1prods);
     const g2 = makeGroup(g2prods);
     return { g1, g2, hasG2: g2.qty > 0, g1prods, g2prods };
   }
 
   // auto mode - group by tariff code, top value = g1, rest = g2
+  const eligibleProducts = state.products.filter(eligible);
   const tariffValues: Record<string, number> = {};
-  state.products.forEach((p) => {
+  eligibleProducts.forEach((p) => {
     const key = (p.tariffNo || '').trim() || '-';
     const c = calcProduct(p);
     if (!tariffValues[key]) tariffValues[key] = 0;
     if (c.totalValue != null) tariffValues[key] += c.totalValue;
   });
   const topKey = Object.entries(tariffValues).sort((a, b) => b[1] - a[1])[0]?.[0];
-  const g1prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '-') === topKey);
-  const g2prods = state.products.filter((p) => ((p.tariffNo || '').trim() || '-') !== topKey);
+  const g1prods = eligibleProducts.filter((p) => ((p.tariffNo || '').trim() || '-') === topKey);
+  const g2prods = eligibleProducts.filter((p) => ((p.tariffNo || '').trim() || '-') !== topKey);
   const g1 = makeGroup(g1prods);
   const g2 = makeGroup(g2prods);
   return { g1, g2, hasG2: g2.qty > 0, g1prods, g2prods };

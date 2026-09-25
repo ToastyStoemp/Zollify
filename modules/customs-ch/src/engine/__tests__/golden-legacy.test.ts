@@ -311,6 +311,22 @@ const stripMaterialColumn = (html: string): string => html.replace(/\n?[ \t]*<(t
  */
 const normalizeByTypeGroupName = (html: string): string => html.replace(/<strong data-type="([^"]*)">.*?<\/strong>/g, '<strong>$1</strong>');
 
+/**
+ * compute1174Groups (calc.ts) now excludes products that fail hasCustomsInfo
+ * or have a zero computed amount from Group 1/2's sums - the same filter the
+ * goods list and both proformas already apply, so 11.74/11.87's totals stay
+ * consistent with the import list/proforma instead of a hidden/zero-stock
+ * product quietly inflating just these two forms' weight and value. Legacy
+ * never had this filter here, so richState()'s "Display Stand" (unlisted, so
+ * hasCustomsInfo is false) legitimately produces different group numbers,
+ * and on 11.87 a different return-goods description list, from legacy - a
+ * deliberate, permanent divergence, same idea as stripMaterialColumn above.
+ * `.gfv` is used nowhere else in either form, so this only ever touches the
+ * cells the fix can actually change - a real regression anywhere else on the
+ * page still fails loudly.
+ */
+const normalizeGroupNumbers = (html: string): string => html.replace(/<span class="gfv">.*?<\/span>/g, '<span class="gfv"></span>');
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -398,7 +414,7 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1174();
       const ported = build1174Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(ported).toBe(captured.html[0]);
+      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
     }
   });
 
@@ -410,7 +426,7 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1187();
       const ported = build1187Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(ported).toBe(captured.html[0]);
+      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
     }
   });
 });

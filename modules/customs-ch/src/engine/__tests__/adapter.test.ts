@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Product, SalesEvent } from '@zollify/shared';
+import type { Product, SalesEvent, Transaction } from '@zollify/shared';
 import { buildCustomsState } from '../adapter';
 
 const event: SalesEvent = {
@@ -36,5 +36,43 @@ describe('buildCustomsState - HS-code-derived rates', () => {
   it('leaves rates unset when there is no (or an unknown) HS code', () => {
     expect(rateOf(product({}))).toEqual({ vatRate: undefined, tariffRate: undefined });
     expect(rateOf(product({ tariffNo: '9999.99.99' }))).toEqual({ vatRate: undefined, tariffRate: undefined });
+  });
+});
+
+describe('buildCustomsState - Swiss documents declare in the event\'s local currency', () => {
+  const euroEvent: SalesEvent = { ...event, currency: 'EUR' };
+
+  it('leaves the price and currency as the base currency when no local pricing is set up', () => {
+    const state = buildCustomsState(euroEvent, [product({ price: 20 })], [], []);
+    expect(state.meta.currency).toBe('EUR');
+    expect(state.products[0]!.price).toBe(20);
+  });
+
+  it('converts to the local currency and labels the document with it', () => {
+    const chfEvent: SalesEvent = { ...euroEvent, localCurrency: 'CHF', exchangeRate: 0.95, roundingIncrement: 0.5 };
+    const state = buildCustomsState(chfEvent, [product({ price: 20 })], [], []);
+    expect(state.meta.currency).toBe('CHF');
+    // 20 * 0.95 = 19, rounded to the nearest 0.5 -> 19.
+    expect(state.products[0]!.price).toBe(19);
+  });
+
+  it('an explicit local price override wins over the computed rate', () => {
+    const chfEvent: SalesEvent = {
+      ...euroEvent, localCurrency: 'CHF', exchangeRate: 0.95, roundingIncrement: 0.5,
+      localPriceOverrides: { 'p1:': 18 },
+    };
+    const state = buildCustomsState(chfEvent, [product({ price: 20 })], [], []);
+    expect(state.products[0]!.price).toBe(18);
+  });
+
+  it('sold value is the amount actually charged (local currency), not the base-currency figure', () => {
+    const chfEvent: SalesEvent = { ...euroEvent, localCurrency: 'CHF', exchangeRate: 0.95, roundingIncrement: 0 };
+    const tx: Transaction = {
+      id: 't1', eventId: 'ev1', deviceId: 'd1', timestamp: 1, method: 'cash', payments: [], discounts: [],
+      total: 19, currency: 'CHF', baseCurrency: 'EUR', baseTotal: 20,
+      items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 1, unitPrice: 19, lineTotal: 19, baseUnitPrice: 20, baseLineTotal: 20 }],
+    };
+    const state = buildCustomsState(chfEvent, [product({ price: 20 })], [], [tx]);
+    expect(state.products[0]!.soldValue).toBe(19);
   });
 });

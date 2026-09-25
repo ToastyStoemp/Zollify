@@ -5,6 +5,7 @@
  * from non-reverted transactions - never stored.
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
+import { toLocalPrice } from '@zollify/shared';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';
@@ -31,6 +32,21 @@ export function buildCustomsState(
 ): CustomsState {
   const blob = readCustomsBlob(event);
 
+  // Swiss customs declares in CHF, not the account's own base/tracking
+  // currency - an event's local price (set under Prices, e.g. CHF for a
+  // Swiss venue) is what was actually charged there, so that's what these
+  // documents use whenever it's configured. Falls back to the base currency
+  // untouched for an event with no local pricing set up.
+  const hasLocal = !!(event.localCurrency && event.exchangeRate);
+  const localRate = event.exchangeRate ?? 1;
+  const localIncrement = event.roundingIncrement ?? 0;
+  const localOverrides = event.localPriceOverrides ?? {};
+  const localize = (basePrice: number, key: string): number => {
+    if (!hasLocal) return basePrice;
+    const override = localOverrides[key];
+    return override != null ? override : toLocalPrice(basePrice, localRate, localIncrement);
+  };
+
   // Brought quantities: key "productId:variantId" ('' for the product itself)
   const broughtByKey = new Map<string, number>();
   for (const row of stock) {
@@ -46,9 +62,10 @@ export function buildCustomsState(
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
       cur.qty += item.qty;
-      // Customs declarations are always in the event's base/tracking
-      // currency, even for sales charged in a converted local currency.
-      cur.value += item.baseLineTotal ?? item.lineTotal;
+      // The amount actually charged - already in the event's local currency
+      // when one is configured (equal to the base amount otherwise), so this
+      // stays consistent with the localized brought-stock prices below.
+      cur.value += item.lineTotal;
       soldByKey.set(key, cur);
     }
   }
@@ -77,7 +94,7 @@ export function buildCustomsState(
         type: p.type,
         forSale: p.forSale,
         unlisted: p.unlisted,
-        price: p.price,
+        price: localize(p.price, `${p.id}:`),
         priceNote: p.priceNote,
         weightG: p.weightG,
         tariffNo: p.tariffNo,
@@ -97,7 +114,7 @@ export function buildCustomsState(
             name: v.name,
             sku: v.sku,
             material: v.material,
-            price: v.price ?? null,
+            price: v.price != null ? localize(v.price, `${p.id}:${v.id}`) : null,
             weightG: v.weightG ?? null,
             unlisted: v.unlisted,
             amount: broughtByKey.get(`${p.id}:${v.id}`) ?? 0,
@@ -122,7 +139,7 @@ export function buildCustomsState(
     venueCity: event.venue.city || bm.venueCity || '',
     venueCountry: event.venue.country || bm.venueCountry || 'Switzerland',
     venueTIN: event.venue.tin || bm.venueTIN || defaultCustomsMeta().venueTIN,
-    currency: event.currency,
+    currency: hasLocal ? event.localCurrency! : event.currency,
   };
 
   const form1174 = { ...defaultCustomsForm1174(), ...(blob.form1174 ?? {}) };

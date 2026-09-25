@@ -154,8 +154,11 @@ const syncLabel = computed(() => {
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column - otherwise the login card is squeezed into a 15rem track. -->
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
-  <div v-else :class="['shell', { 'shell--bare': !account || settingUp }]">
-    <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen, 'collapsed-top': hideTopBar }]">
+  <div v-else :class="['shell', { 'shell--bare': !account || settingUp, 'shell--full': route.name === 'pos:index' }]">
+    <!-- Hidden entirely on the till, same reasoning as the bottom bar below:
+         it already has its own back arrow, so the nav column is space the
+         product grid and cart get back instead. -->
+    <aside v-if="account && !settingUp && route.name !== 'pos:index'" :class="['sidebar', { 'menu-open': menuOpen, 'collapsed-top': hideTopBar }]">
       <div class="brand"><img src="/favicon.svg" alt="Zollify" class="mark" /><span class="word">Zollify<span>.</span></span></div>
 
       <nav id="main-nav" aria-label="Main">
@@ -252,6 +255,9 @@ const syncLabel = computed(() => {
 .shell--bare { grid-template-columns: 1fr; }
 .shell--bare .content { padding: 0; display: grid; }
 .shell--bare .content > .welcome { padding: 1.5rem; width: 100%; }
+/* Till only: same column collapse as shell--bare, without its content-padding
+   reset - the till keeps its own normal .content padding. */
+.shell--full { grid-template-columns: 1fr; }
 .sidebar {
   display: flex; flex-direction: column; gap: 1rem; padding: 1rem;
   background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);

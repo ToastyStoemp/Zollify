@@ -68,4 +68,19 @@ describe('buildProformaHtml (customs-de)', () => {
     const html = buildProformaHtml(state());
     expect(html).toContain('250'); // 10 * 25
   });
+
+  it('includes a variant product whose own amount field is 0 but whose variants have stock', () => {
+    // A variant product carries its real quantity in p.variants[].amount, not
+    // its own flat p.amount (typically left at 0) - filtering eligibility on
+    // the flat field alone silently dropped every variant product from this
+    // document entirely, which is why its totals stopped matching the
+    // packing list (packing-list.ts already used the computed amount).
+    const s = state();
+    s.products = [
+      { title: 'Enamel Pin', tariffNo: '7117190000', originCountry: 'Germany', weightG: 20, price: 8, amount: 0, soldQty: 0, soldValue: 0, variants: [{ name: 'Dragon', amount: 12, soldQty: 4, soldValue: 32 }] },
+    ];
+    const html = buildProformaHtml(s);
+    expect(html).toContain('Enamel Pin');
+    expect(html).toContain('96'); // 12 * 8
+  });
 });

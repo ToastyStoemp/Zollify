@@ -48,7 +48,10 @@ export function buildIaaPlusSheetData(state: CustomsDeState, now: Date = new Dat
   const d = state.declarant;
   const cur = m.currency || 'EUR';
   const today = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
-  const products = state.products.filter((p) => !p.unlisted && p.amount > 0);
+  // Same fix as proforma.ts: p.amount is the flat/non-variant field, a
+  // variant product's real quantity only shows up through
+  // calcDeProduct(p).amount, which sums p.variants[].amount.
+  const products = state.products.filter((p) => !p.unlisted && calcDeProduct(p).amount > 0);
 
   let totWeightKg = 0,
     totValue = 0;

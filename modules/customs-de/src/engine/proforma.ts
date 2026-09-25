@@ -17,7 +17,14 @@ export function buildProformaHtml(state: CustomsDeState, now: Date = new Date())
   const pad = (n: number): string => String(n).padStart(2, '0');
   const invoiceNo = `PF-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
 
-  const products = state.products.filter((p) => !p.unlisted && p.amount > 0);
+  // p.amount alone is the flat/non-variant field - a variant product (the
+  // common case) carries its real quantity across p.variants[].amount
+  // instead, calcDeProduct(p).amount is what actually sums that. Filtering
+  // on the raw field silently dropped every variant product with stock from
+  // this document entirely, which is exactly why its totals stopped
+  // matching the packing list (which already used the computed amount) and
+  // customs-ch's own documents.
+  const products = state.products.filter((p) => !p.unlisted && calcDeProduct(p).amount > 0);
 
   const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -57,7 +64,7 @@ export function buildProformaHtml(state: CustomsDeState, now: Date = new Date())
   const rows = products
     .map((p, i) => {
       const c = calcDeProduct(p);
-      const qty = p.amount || 0;
+      const qty = c.amount;
       const unitPrice = p.price != null && p.price !== '' ? Number(p.price) : null;
       totQty += qty;
       totVal += c.totalValue ?? 0;

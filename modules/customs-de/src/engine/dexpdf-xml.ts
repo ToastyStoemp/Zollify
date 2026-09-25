@@ -61,7 +61,10 @@ export function buildDexpdfXml(state: CustomsDeState, now: Date = new Date()): D
   const d = state.declarant;
   const warnings: string[] = [];
 
-  const products = state.products.filter((p) => !p.unlisted && p.amount > 0);
+  // Same fix as proforma.ts: p.amount is the flat/non-variant field, a
+  // variant product's real quantity only shows up through
+  // calcDeProduct(p).amount, which sums p.variants[].amount.
+  const products = state.products.filter((p) => !p.unlisted && calcDeProduct(p).amount > 0);
   if (products.length === 0) warnings.push('No products with a claimed quantity > 0 - the message would have zero GoodsItem entries, which the schema does not allow (minOccurs="1").');
   if (products.length > 0) warnings.push('Packaging is emitted as one generic "CS" (case) package per item - this model has no per-product packaging-group field, so it does not reflect the real box breakdown (e.g. the cardboard box for art prints, or boxes shared across several products via Packstück-Verweis). Fix by hand before real use, or add that field to the model.');
 

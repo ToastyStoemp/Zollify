@@ -120,6 +120,18 @@ describe('buildDexpdfXml', () => {
     expect(items).toHaveLength(2);
   });
 
+  it('includes a variant product whose own amount field is 0 but whose variants have stock', () => {
+    // p.amount is the flat/non-variant field - a variant product's real
+    // quantity only shows up through calcDeProduct(p).amount, which sums
+    // p.variants[].amount. Filtering eligibility on the flat field alone
+    // silently dropped every variant product from this export entirely.
+    const state = fullState();
+    state.products.push({ title: 'Enamel Pin', tariffNo: '711719', amount: 0, soldQty: 0, soldValue: 0, variants: [{ name: 'Dragon', amount: 12, soldQty: 4, soldValue: 32 }] });
+    const { xml } = buildDexpdfXml(state);
+    const items = parse(xml).GoodsShipment.GoodsItem;
+    expect(items).toHaveLength(3);
+  });
+
   it('flags a missing BIN, LRN, EORI and consignee as warnings rather than silently emitting an invalid message', () => {
     const state = fullState({ eori: '', messageSenderBin: '', lrn: '', consigneeName: '' });
     const { warnings } = buildDexpdfXml(state);

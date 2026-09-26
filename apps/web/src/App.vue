@@ -348,7 +348,15 @@ nav { flex: 1; }
    whatever the router paints as the page root, whatever its own width - a
    page that already fills 100% (no opinion, or POS) computes 0 either way. */
 .content > :deep(*) { margin-inline: auto; }
-.toasts { position: fixed; right: 1rem; bottom: 1rem; display: flex; flex-direction: column; gap: .5rem; }
+/* Clears both the app's own bottom tab bar (--zfy-bottom-nav, 0 where it
+   doesn't exist) and the phone's own gesture-nav bar underneath that -
+   without the safe-area term this sat right on top of the gesture bar even
+   with no tab bar in the way (e.g. on the till). */
+.toasts {
+  position: fixed; right: 1rem;
+  bottom: calc(1rem + var(--zfy-bottom-nav, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
+  display: flex; flex-direction: column; gap: .5rem;
+}
 .toast { margin: 0; padding: .6rem .9rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px -14px var(--zfy-shadow); display: flex; align-items: center; gap: .75rem; }
 .toast.error { border-color: var(--zfy-danger); }
 .toast.success { border-color: var(--zfy-accent); }

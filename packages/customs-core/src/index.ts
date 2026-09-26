@@ -124,7 +124,6 @@ export interface CoreProductCalc {
 }
 
 export interface CalcCoreOptions {
-  skipUnlistedVariants?: boolean;
   /** Whole-product value override (customs-ch's totalValueCHF) - takes
    *  precedence over price*amount when set. Non-variant products only. */
   totalValueOverride?: number | null;
@@ -136,16 +135,27 @@ export interface CalcCoreOptions {
  * amount field when there are no variants), same rounding both ways. This is
  * the exact computation that drifted in the DE bug - DE's eligibility
  * filters read the flat field directly instead of this.
+ *
+ * A variant flagged unlisted is always excluded, unconditionally - same
+ * meaning as the product-level flag (the product editor's own label calls it
+ * "left off customs documents"). This is a deliberate business-rule choice,
+ * not a legacy port: customs-ch's real, byte-tested legacy tool actually
+ * includes unlisted-variant stock on its Proforma/Sold documents (confirmed
+ * against the golden fixture), but the account explicitly asked for it
+ * excluded everywhere for consistency, accepting that customs-ch's port now
+ * diverges from that historical behavior for this one case. DE's
+ * calcDeProduct already excluded it unconditionally before this - CH is the
+ * one that changed to match.
  */
 export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): CoreProductCalc {
-  const { skipUnlistedVariants = false, totalValueOverride = null } = opts;
+  const { totalValueOverride = null } = opts;
 
   if (hasVariants(p)) {
     let amount = 0,
       totalWeightKg = 0,
       totalValue = 0;
     for (const v of p.variants!) {
-      if (skipUnlistedVariants && v.unlisted) continue;
+      if (v.unlisted) continue;
       const amt = v.amount || 0;
       const wg = variantWeight(p, v);
       const price = variantPrice(p, v);
@@ -154,7 +164,7 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
       if (price != null) totalValue += price * amt;
     }
     totalWeightKg = Math.round(totalWeightKg * 1000) / 1000;
-    const activeVariants = skipUnlistedVariants ? p.variants!.filter((v) => !v.unlisted) : p.variants!;
+    const activeVariants = p.variants!.filter((v) => !v.unlisted);
     const prices = activeVariants.map((v) => variantPrice(p, v)).filter((x): x is number => x != null);
     const weights = activeVariants.map((v) => variantWeight(p, v));
     const allSamePrice = prices.length > 0 && prices.every((x) => x === prices[0]);

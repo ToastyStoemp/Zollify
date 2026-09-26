@@ -38,4 +38,19 @@ describe('calcCoreProduct / hasStock', () => {
     const c = calcCoreProduct({ amount: 4, price: 10 }, { totalValueOverride: 999 });
     expect(c.totalValue).toBe(999);
   });
+
+  it('excludes an unlisted variant\'s stock from amount/weight/value, even with real brought stock', () => {
+    // Deliberate business-rule choice, not a legacy-parity one - see the
+    // doc comment on calcCoreProduct.
+    const p = {
+      variants: [
+        { amount: 5, price: 10, weightG: 100 },
+        { amount: 2, price: 250, weightG: 500, unlisted: true },
+      ],
+    };
+    const c = calcCoreProduct(p);
+    expect(c.amount).toBe(5);
+    expect(c.totalValue).toBe(50);
+    expect(c.totalWeightKg).toBe(0.5);
+  });
 });

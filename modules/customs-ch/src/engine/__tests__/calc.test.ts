@@ -74,3 +74,23 @@ describe('compute1174Groups - totals match the import list / proforma', () => {
     expect(g2prods.map((p) => p.id)).toEqual(['b']);
   });
 });
+
+describe('calcProduct - excludes an unlisted variant\'s stock', () => {
+  // Deliberate business-rule choice, not a legacy port: the real, byte-tested
+  // legacy tool actually includes unlisted-variant stock on Proforma/Sold
+  // (see golden-legacy.test.ts's fixture note), but the account explicitly
+  // asked for it excluded everywhere so packing list/proforma/11.74 agree.
+  it('a variant flagged unlisted contributes nothing, even with real brought stock', () => {
+    const p = product({
+      id: 'v', title: 'Enamel Pin', amount: 0, soldQty: 0, soldValue: 0,
+      variants: [
+        { name: 'Dragon', amount: 30, soldQty: 10, soldValue: 120 },
+        { name: 'Prototype', amount: 5, price: 250, weightG: 500, soldQty: 2, soldValue: 24, unlisted: true },
+      ],
+    });
+    const c = calcProduct(p);
+    expect(c.amount).toBe(30);
+    expect(c.soldQty).toBe(10);
+    expect(c.soldValue).toBe(120);
+  });
+});

@@ -90,12 +90,21 @@ export interface ProductCalc {
   soldValue: number;
 }
 
-export function calcProduct(p: CustomsProduct, skipUnlistedVariants = false): ProductCalc {
+/**
+ * A variant flagged unlisted is always excluded - same meaning as the
+ * product-level flag (the product editor's own label calls it "left off
+ * customs documents"). Deliberate business-rule choice, not a legacy port:
+ * the real, byte-tested legacy tool actually includes unlisted-variant
+ * stock on Proforma/Sold, but the account explicitly asked for it excluded
+ * everywhere for consistency across documents, accepting that this
+ * function's output now diverges from that historical behavior for this
+ * one case (see golden-legacy.test.ts's fixture note).
+ */
+export function calcProduct(p: CustomsProduct): ProductCalc {
   // totalValueCHF is CH-specific (a whole-product value override) - not a
   // customs-core concept, so it's resolved here and handed in as an option
   // rather than pushed into the shared aggregation.
   const core = calcCoreProduct(p, {
-    skipUnlistedVariants,
     totalValueOverride: p.totalValueCHF != null ? parseFloat(p.totalValueCHF as string) : null,
   });
 
@@ -104,7 +113,7 @@ export function calcProduct(p: CustomsProduct, skipUnlistedVariants = false): Pr
       soldValue = 0,
       soldWeightKg = 0;
     for (const v of p.variants!) {
-      if (skipUnlistedVariants && v.unlisted) continue;
+      if (v.unlisted) continue;
       const wg = variantWeight(p, v);
       soldQty += v.soldQty || 0;
       soldValue += v.soldValue || 0;
@@ -132,8 +141,8 @@ export interface MaterialGroupCalc {
  * documents group by material and can't tell two differently-overridden
  * variants of the same product apart otherwise. A product with no variants,
  * or whose variants all resolve to the same material, returns a single entry
- * with numbers identical to calcProduct(p) (same formulas, same rounding -
- * unlisted variants included, matching calcProduct's own default).
+ * with numbers identical to calcProduct(p) (same formulas, same rounding,
+ * same unlisted-variant exclusion).
  */
 export function calcProductByMaterial(p: CustomsProduct): MaterialGroupCalc[] {
   if (!hasVariants(p)) {
@@ -142,6 +151,7 @@ export function calcProductByMaterial(p: CustomsProduct): MaterialGroupCalc[] {
   }
   const byMaterial = new Map<string, CustomsVariant[]>();
   for (const v of p.variants!) {
+    if (v.unlisted) continue;
     const material = (v.material ?? p.material) || '';
     (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
   }

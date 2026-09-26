@@ -236,7 +236,14 @@ function richState(): CustomsState {
         variants: [
           { name: 'Dragon', sku: 'PIN-DRG', amount: 30, soldQty: 10, soldValue: 120 },
           { name: 'Wolf', price: 14, weightG: 30, amount: 20, soldQty: 5, soldValue: 70 },
-          { name: 'Prototype', amount: 5, soldQty: 2, soldValue: 24, unlisted: true },
+          // Zero stock deliberately: the real legacy tool includes an
+          // unlisted variant's stock on Proforma/Sold, but the port now
+          // excludes it everywhere (a deliberate, non-legacy business-rule
+          // change - see calc.ts's calcProduct doc comment) - giving it real
+          // stock here would make this fixture disagree with legacy for a
+          // reason that has nothing to do with a real regression. Direct
+          // coverage for the exclusion itself lives in calc.test.ts instead.
+          { name: 'Prototype', amount: 0, soldQty: 0, soldValue: 0, unlisted: true },
         ],
       },
       {

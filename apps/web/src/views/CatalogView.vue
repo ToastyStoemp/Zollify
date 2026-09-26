@@ -414,18 +414,20 @@ async function remove(product: Product): Promise<void> {
           <option value="notForSale">Not for sale</option>
           <option value="unlisted">Unlisted</option>
         </select>
+        <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
+        <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
         <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
       </div>
     </header>
 
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
-    <div class="toolbar">
-      <label v-if="lowOnly && activeEventId" class="inline thr">≤ <input v-model="lowThreshold" type="number" min="0" inputmode="numeric" aria-label="Threshold" /> left</label>
-      <button v-if="lowOnly && activeEventId" type="button" class="quiet" :disabled="!filtered.length" @click="exportRestockCsv"><Icon name="download" :size="14" /> Restock CSV</button>
-      <span class="spacer"></span>
-      <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
-      <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
+    <!-- Only exists when there's a left side to it - Merge/Reorder moved into
+         the header's own tools row, so this no longer needs to render just
+         to hold two buttons flush right with nothing beside them. -->
+    <div v-if="lowOnly && activeEventId" class="toolbar">
+      <label class="inline thr">≤ <input v-model="lowThreshold" type="number" min="0" inputmode="numeric" aria-label="Threshold" /> left</label>
+      <button type="button" class="quiet" :disabled="!filtered.length" @click="exportRestockCsv"><Icon name="download" :size="14" /> Restock CSV</button>
     </div>
     <p v-if="!activeEventId" class="hint">No active event - open one under Events to see what is running low there.</p>
     <p v-if="filter === 'customs'" class="hint">These would be left off or mis-weighed on customs documents. Set the tariff no., weight and origin under each product's Customs details.</p>
@@ -596,7 +598,6 @@ async function remove(product: Product): Promise<void> {
 .title em { font-style: normal; font-weight: 500; font-size: .68rem; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f1f4f6); border-radius: 4px; padding: .05rem .35rem; margin-left: .3rem; vertical-align: middle; }
 .title em.issue { color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); }
 .toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
-.toolbar .spacer { flex: 1; }
 .toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2.2rem; }
 .thr input { width: 3.5rem; min-height: 2.2rem; padding: .1rem .4rem; }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: .25rem; max-height: 14rem; overflow-y: auto; }

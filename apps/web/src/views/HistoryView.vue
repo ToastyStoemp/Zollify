@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
 import { fmtPrice, round2 } from '@zollify/shared';
-import { Icon, ModalShell, typeColor } from '@zollify/ui';
+import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
   allProducts,
@@ -99,8 +99,13 @@ const stats = computed(() => {
 });
 
 // ── Compare to another event ────────────────────────────────────────────────
-const compareId = ref('');
+// TypeaheadPicker stores by name (an event id means nothing to type or read),
+// so the id everything else here wants is looked back up from it.
+const compareName = ref('');
 const comparable = computed(() => visibleEvents.value.filter((e) => e.id !== scope.value));
+const comparableOptions = computed<PickerOption[]>(() => comparable.value.map((e) => ({ code: e.id, name: e.name })));
+const compareId = computed(() => comparable.value.find((e) => e.name === compareName.value)?.id ?? '');
+watch(scope, () => { compareName.value = ''; });
 function eventStats(eventId: string) {
   const txs = recentTransactions.value.filter((t) => t.eventId === eventId && !t.revertedAt);
   const revenue = txs.reduce((s, t) => s + amountOf(t), 0);
@@ -310,9 +315,11 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <button type="button" :class="{ on: revenueMode === 'base' }" @click="revenueMode = 'base'">{{ baseCurrency }}</button>
       </div>
       <span class="spacer"></span>
-      <button type="button" :disabled="!scoped.length" @click="exportCsv"><Icon name="download" :size="14" /> Export CSV</button>
-      <button v-if="!allMode" type="button" :disabled="!scoped.length" @click="exportPdf"><Icon name="file-text" :size="14" /> PDF report</button>
-      <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
+      <div class="tools">
+        <button type="button" :disabled="!scoped.length" @click="exportCsv"><Icon name="download" :size="14" /> Export CSV</button>
+        <button v-if="!allMode" type="button" :disabled="!scoped.length" @click="exportPdf"><Icon name="file-text" :size="14" /> PDF report</button>
+        <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
+      </div>
     </header>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -327,10 +334,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     <article v-if="!allMode" class="card">
       <div class="cardhead">
         <h2>Compare to</h2>
-        <select v-model="compareId" aria-label="Compare with">
-          <option value="">Pick an event…</option>
-          <option v-for="e in comparable" :key="e.id" :value="e.id">{{ e.name }}</option>
-        </select>
+        <TypeaheadPicker v-model="compareName" :options="comparableOptions" store="name" placeholder="Pick an event…" />
       </div>
       <div v-if="comparison" class="table-scroll">
         <table class="compare">
@@ -463,6 +467,12 @@ header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
 header select { max-width: 16rem; }
 .spacer { flex: 1; }
+/* Grouped so the three wrap together onto their own line instead of each
+   splitting off independently once the header runs out of room - three
+   buttons landing on three different lines, one per line, is the actual
+   "don't line up" bug: no line after the first has a spacer of its own to
+   push it anywhere, so it just sits flush left. */
+.tools { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .back { display: inline-flex; align-items: center; gap: .3rem; color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; text-decoration: none; font-size: .9rem; }
 .btn { min-height: 2.4rem; padding: .3rem .9rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; font-size: .875rem; text-decoration: none; }
@@ -478,7 +488,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
 .cardhead { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .cardhead h2 { margin: 0; font-size: .95rem; flex: 1; }
-.cardhead select { max-width: 14rem; }
+.cardhead :deep(.picker) { max-width: 14rem; }
 .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: .75rem; }
 .toggle { min-height: 2.2rem; padding: .1rem .6rem; font-size: .74rem; }
 .toggle.on { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }

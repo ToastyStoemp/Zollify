@@ -570,6 +570,9 @@ async function remove(product: Product): Promise<void> {
             <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
             <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
             <span class="vbtns">
+              <label class="vunlisted" :title="`Unlisted (left off customs documents) - ${v.name || 'this variant'}`">
+                <input v-model="v.unlisted" type="checkbox" :aria-label="`Unlisted (left off customs documents) - ${v.name || 'this variant'}`" />
+              </label>
               <button v-if="!isArtwork(form.type) && v.material === undefined" type="button" class="quiet" title="Override material for this variant" :aria-label="`Override material for ${v.name || 'this variant'}`" @click="v.material = ''"><Icon name="plus" :size="12" /></button>
               <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="removeVariant(i)"><Icon name="x" :size="14" /></button>
             </span>
@@ -648,6 +651,8 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .gen { min-height: 2.2rem; padding: .2rem .4rem; color: var(--zfy-muted, #5a6472); }
 .vbtns { display: flex; align-items: center; gap: .1rem; }
 .vbtns button { min-height: 2.2rem; min-width: 2.2rem; padding: .2rem; color: var(--zfy-muted, #5a6472); }
+.vunlisted { display: grid; place-items: center; min-height: 2.2rem; min-width: 2.2rem; cursor: pointer; }
+.vunlisted input { margin: 0; cursor: pointer; }
 /* grid-column: 1/-1 wraps this onto its own full-width row below the rest
    of that variant's fields, instead of adding a permanent 7th column every
    variant carries whether it needs an override or not. */

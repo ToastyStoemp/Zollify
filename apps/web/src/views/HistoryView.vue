@@ -22,10 +22,12 @@ import {
  * tiles, a comparison with another edition, best sellers, revenue per day
  * and per hour, then the sales themselves.
  *
- * Revenue figures are always in the base currency, because two events may
- * charge in different local currencies and base is the only comparable
- * basis. What was physically collected (cash, card) stays in the currency
- * it was collected in.
+ * Revenue figures default to the local/charged currency (matching Home),
+ * with a toggle to switch to the base/tracking currency - the only basis
+ * comparable across events charging in different local currencies. What
+ * was physically collected (cash, card) always stays in the currency it
+ * was collected in, regardless of the toggle - you can't convert cash
+ * sitting in a drawer.
  */
 
 const account = currentAccount;
@@ -44,6 +46,16 @@ const baseCurrency = computed(() => scopeEvent.value?.currency ?? account.value?
 /** What was physically collected. */
 const currency = computed(() => scopeEvent.value?.localCurrency || scopeEvent.value?.currency || baseCurrency.value);
 
+/**
+ * Revenue figures (everything but Cash/Card) follow this - local by default
+ * to match Home, switchable to base for comparing across events that charge
+ * in different local currencies. Only worth showing when the two actually
+ * differ; "All events" has no single local currency to speak of.
+ */
+const revenueMode = ref<'local' | 'base'>('local');
+const showCurrencyToggle = computed(() => !allMode.value && currency.value !== baseCurrency.value);
+const displayCurrency = computed(() => (revenueMode.value === 'local' ? currency.value : baseCurrency.value));
+
 const scoped = computed(() => {
   const list = allMode.value ? recentTransactions.value : recentTransactions.value.filter((t) => t.eventId === scope.value);
   return [...list].sort((a, b) => b.timestamp - a.timestamp);
@@ -51,10 +63,11 @@ const scoped = computed(() => {
 const live = computed(() => scoped.value.filter((t) => !t.revertedAt));
 
 const eventName = (id: string): string => (id ? (getSalesEvent(id)?.name ?? 'Removed event') : 'No event');
-const amountOf = (tx: Transaction): number => tx.baseTotal ?? tx.total;
-const currencyOf = (tx: Transaction): string => tx.baseCurrency ?? tx.currency;
-const itemAmountOf = (item: TxItem): number => item.baseLineTotal ?? item.lineTotal;
-const discountAmountOf = (d: TxDiscount, tx: Transaction): number => (tx.exchangeRate ? round2(d.amount / tx.exchangeRate) : d.amount);
+const amountOf = (tx: Transaction): number => (revenueMode.value === 'local' ? tx.total : (tx.baseTotal ?? tx.total));
+const currencyOf = (tx: Transaction): string => (revenueMode.value === 'local' ? tx.currency : (tx.baseCurrency ?? tx.currency));
+const itemAmountOf = (item: TxItem): number => (revenueMode.value === 'local' ? item.lineTotal : (item.baseLineTotal ?? item.lineTotal));
+const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
+  revenueMode.value === 'base' && tx.exchangeRate ? round2(d.amount / tx.exchangeRate) : d.amount;
 
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
@@ -292,6 +305,10 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <option value="all">All events</option>
         <option v-for="e in visibleEvents" :key="e.id" :value="e.id">{{ e.name }}{{ e.id === activeEventId ? ' (active)' : '' }}</option>
       </select>
+      <div v-if="showCurrencyToggle" class="seg" role="group" aria-label="Revenue currency">
+        <button type="button" :class="{ on: revenueMode === 'local' }" @click="revenueMode = 'local'">{{ currency }}</button>
+        <button type="button" :class="{ on: revenueMode === 'base' }" @click="revenueMode = 'base'">{{ baseCurrency }}</button>
+      </div>
       <span class="spacer"></span>
       <button type="button" :disabled="!scoped.length" @click="exportCsv"><Icon name="download" :size="14" /> Export CSV</button>
       <button v-if="!allMode" type="button" :disabled="!scoped.length" @click="exportPdf"><Icon name="file-text" :size="14" /> PDF report</button>
@@ -301,7 +318,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <div class="tiles">
-      <div class="tile"><span>Revenue</span><strong>{{ money(stats.revenue, baseCurrency) }}</strong></div>
+      <div class="tile"><span>Revenue</span><strong>{{ money(stats.revenue, displayCurrency) }}</strong></div>
       <div class="tile"><span>Sales / items</span><strong>{{ stats.count }} / {{ stats.items }}</strong></div>
       <div class="tile"><span>Cash</span><strong>{{ money(stats.cash, currency) }}</strong></div>
       <div class="tile"><span>Card</span><strong>{{ money(stats.card, currency) }}</strong></div>
@@ -323,8 +340,8 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <tbody>
             <tr v-for="m in comparison.metrics" :key="m.label">
               <td class="muted">{{ m.label }}</td>
-              <td>{{ m.money ? money(m.cur, baseCurrency) : m.cur }}</td>
-              <td class="muted">{{ m.money ? money(m.other, baseCurrency) : m.other }}</td>
+              <td>{{ m.money ? money(m.cur, displayCurrency) : m.cur }}</td>
+              <td class="muted">{{ m.money ? money(m.other, displayCurrency) : m.other }}</td>
               <td :class="m.delta == null ? 'muted' : m.delta > 0 ? 'good' : m.delta < 0 ? 'bad' : 'muted'">{{ m.delta == null ? '-' : (m.delta > 0 ? '+' : '') + m.delta + '%' }}</td>
             </tr>
           </tbody>
@@ -346,7 +363,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <span class="rank">{{ i + 1 }}.</span>
             <span class="name" :style="b.type ? { color: typeColor(b.type) } : undefined">{{ b.label }}</span>
             <span class="muted">{{ b.qty }}×</span>
-            <strong>{{ money(b.value, baseCurrency) }}</strong>
+            <strong>{{ money(b.value, displayCurrency) }}</strong>
           </li>
         </ol>
         <button v-if="bestAll.length > 8" type="button" class="quiet more" :aria-expanded="bestExpanded" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
@@ -362,7 +379,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <span class="muted">{{ w.label }}</span>
             <div class="bar"><div :style="{ width: w.pct + '%' }"></div></div>
             <span class="muted small">{{ w.days }}d{{ w.dropped ? ` -${w.dropped}` : '' }}</span>
-            <strong>{{ w.days ? money(w.avg, baseCurrency) : '-' }}</strong>
+            <strong>{{ w.days ? money(w.avg, displayCurrency) : '-' }}</strong>
           </div>
         </div>
         <p class="hint">Each day with sales counts once for its weekday; days far outside that weekday's usual range are left out of the average.</p>
@@ -379,7 +396,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <span class="muted">{{ d.day.slice(5) }}</span>
             <div class="bar"><div :style="{ width: d.pct + '%' }"></div></div>
             <span v-if="compareDaily && d.delta != null" :class="['delta', d.delta > 0 ? 'good' : d.delta < 0 ? 'bad' : 'muted']">{{ d.delta > 0 ? '+' : '' }}{{ d.deltaPct }}%</span>
-            <strong>{{ money(d.value, baseCurrency) }}</strong>
+            <strong>{{ money(d.value, displayCurrency) }}</strong>
           </div>
         </div>
       </article>
@@ -395,8 +412,8 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       <div v-else class="hours">
         <div v-for="b in hourly" :key="b.h" class="hour">
           <div class="col">
-            <div class="fill" :style="{ height: b.pct + '%' }" :title="`${b.h}:00 - ${money(b.v, baseCurrency)}`"></div>
-            <div v-if="compareHourly && b.prevPct != null" class="prev" :style="{ bottom: b.prevPct + '%' }" :title="`${b.h}:00 day before - ${money(b.prevV ?? 0, baseCurrency)}`"></div>
+            <div class="fill" :style="{ height: b.pct + '%' }" :title="`${b.h}:00 - ${money(b.v, displayCurrency)}`"></div>
+            <div v-if="compareHourly && b.prevPct != null" class="prev" :style="{ bottom: b.prevPct + '%' }" :title="`${b.h}:00 day before - ${money(b.prevV ?? 0, displayCurrency)}`"></div>
           </div>
           <span :class="{ hide: !b.showLabel }">{{ b.h }}</span>
         </div>

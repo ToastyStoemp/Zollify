@@ -155,58 +155,65 @@ const syncLabel = computed(() => {
        column - otherwise the login card is squeezed into a 15rem track. -->
   <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp, 'shell--full': route.name === 'pos:index' }]">
-    <!-- Hidden entirely on the till, same reasoning as the bottom bar below:
-         it already has its own back arrow, so the nav column is space the
-         product grid and cart get back instead. -->
-    <aside v-if="account && !settingUp && route.name !== 'pos:index'" :class="['sidebar', { 'menu-open': menuOpen, 'collapsed-top': hideTopBar }]">
-      <div class="brand"><img src="/favicon.svg" alt="Zollify" class="mark" /><span class="word">Zollify<span>.</span></span></div>
+    <!-- The till hides this element's nav (brand/menu/links) - it already has
+         its own back arrow, so that's space the product grid and cart get
+         back. The <aside> box itself still mounts though: on phone/narrow
+         widths it is also the only thing padding the page down past the
+         status bar (padding-top: safe-area-inset-top, in the media query
+         below) - PosView's own header has no safe-area padding of its own
+         and assumes this element already provided it. Removing the element
+         entirely here left the till's header drawn under the status bar. -->
+    <aside v-if="account && !settingUp" :class="['sidebar', { 'menu-open': menuOpen, 'collapsed-top': hideTopBar, 'pos-hidden': route.name === 'pos:index' }]">
+      <template v-if="route.name !== 'pos:index'">
+        <div class="brand"><img src="/favicon.svg" alt="Zollify" class="mark" /><span class="word">Zollify<span>.</span></span></div>
 
-      <nav id="main-nav" aria-label="Main">
-        <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
+        <nav id="main-nav" aria-label="Main">
+          <router-link :to="{ name: 'home' }" class="item top"><Icon name="home" /><span>Home</span></router-link>
 
-        <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
-          <router-link :to="{ name: sec.head.routeName }" class="item top" :class="{ 'router-link-active': inSection(sec) && sec.head.routeName !== route.name }">
-            <Icon :name="sec.icon" /><span>{{ sec.head.label }}</span>
-          </router-link>
-          <div v-if="sec.children.length && inSection(sec)" class="children">
-            <router-link v-for="item in sec.children" :key="item.routeName" :to="{ name: item.routeName }" class="item sub">
-              {{ item.label }}
+          <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
+            <router-link :to="{ name: sec.head.routeName }" class="item top" :class="{ 'router-link-active': inSection(sec) && sec.head.routeName !== route.name }">
+              <Icon :name="sec.icon" /><span>{{ sec.head.label }}</span>
             </router-link>
+            <div v-if="sec.children.length && inSection(sec)" class="children">
+              <router-link v-for="item in sec.children" :key="item.routeName" :to="{ name: item.routeName }" class="item sub">
+                {{ item.label }}
+              </router-link>
+            </div>
           </div>
-        </div>
 
-        <template v-if="accountNav.length">
-          <hr class="rule" />
-          <router-link v-for="item in accountNav" :key="item.routeName" :to="{ name: item.routeName }" class="item top"><Icon :name="item.icon || 'puzzle'" /><span>{{ item.label }}</span></router-link>
-        </template>
+          <template v-if="accountNav.length">
+            <hr class="rule" />
+            <router-link v-for="item in accountNav" :key="item.routeName" :to="{ name: item.routeName }" class="item top"><Icon :name="item.icon || 'puzzle'" /><span>{{ item.label }}</span></router-link>
+          </template>
 
-        <footer class="tail">
-          <div class="row">
-            <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span></router-link>
-            <button
-              type="button"
-              class="quiet sync"
-              :class="syncState"
-              :disabled="syncState === 'syncing'"
-              :title="syncLabel"
-              :aria-label="`Sync now. ${syncLabel}`"
-              @click="syncNow()"
-            >
-              <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
-            </button>
-          </div>
-          <div class="who">
-            <div class="name">{{ account.accountName }}</div>
-            <div class="role">{{ account.email }} · {{ account.role }}</div>
-            <div class="build">build {{ build }}</div>
-          </div>
-        </footer>
-      </nav>
+          <footer class="tail">
+            <div class="row">
+              <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span></router-link>
+              <button
+                type="button"
+                class="quiet sync"
+                :class="syncState"
+                :disabled="syncState === 'syncing'"
+                :title="syncLabel"
+                :aria-label="`Sync now. ${syncLabel}`"
+                @click="syncNow()"
+              >
+                <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="who">
+              <div class="name">{{ account.accountName }}</div>
+              <div class="role">{{ account.email }} · {{ account.role }}</div>
+              <div class="build">build {{ build }}</div>
+            </div>
+          </footer>
+        </nav>
 
-      <!-- Only shown when the bottom tab bar has no "More" tab of its own
-           (few enough sections that they all fit as tabs) - otherwise this
-           and the bottom tab would be two buttons opening the same drawer. -->
-      <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
+        <!-- Only shown when the bottom tab bar has no "More" tab of its own
+             (few enough sections that they all fit as tabs) - otherwise this
+             and the bottom tab would be two buttons opening the same drawer. -->
+        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
+      </template>
     </aside>
 
     <main class="content">
@@ -262,6 +269,12 @@ const syncLabel = computed(() => {
   display: flex; flex-direction: column; gap: 1rem; padding: 1rem;
   background: var(--zfy-surface); border-right: 1px solid var(--zfy-line);
   position: sticky; top: 0; height: 100vh;
+}
+/* Wide layout only: here the sidebar is a pure side rail with no safe-area
+   job (that only exists in the narrow media query below), so the till can
+   drop it completely instead of leaving an empty column. */
+@media (min-width: 901px) {
+  .sidebar.pos-hidden { display: none; }
 }
 .brand { font-weight: 800; font-size: 1.25rem; letter-spacing: -.02em; display: inline-flex; align-items: center; gap: .45rem; }
 .brand span { color: var(--zfy-accent); }
@@ -384,7 +397,7 @@ nav { flex: 1; }
      signal icons). The bar still visually vanishes - .brand is hidden below,
      the burger is already gone via v-if - it just keeps reserving the one
      bit of height that was never about the logo or burger in the first place. */
-  .sidebar.collapsed-top:not(.menu-open) { padding: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) 0 0; min-height: 0; border-bottom: 0; overflow: hidden; }
+  .sidebar.collapsed-top:not(.menu-open), .sidebar.pos-hidden { padding: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) 0 0; min-height: 0; border-bottom: 0; overflow: hidden; }
   .sidebar.collapsed-top:not(.menu-open) .brand { display: none; }
   .sidebar nav {
     display: none; position: fixed; top: calc(3.1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); left: 0; bottom: 0; width: min(18rem, 85vw);

@@ -263,9 +263,20 @@ async function save(): Promise<void> {
             <router-link v-if="hasRoute('customs-ch:documents')" :to="{ name: 'customs-ch:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (CH)</router-link>
             <router-link v-if="hasRoute('customs-de:documents')" :to="{ name: 'customs-de:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (DE)</router-link>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
-            <button v-if="canEdit && e.status !== 'closed'" type="button" class="quiet" @click="close(e)">Close</button>
-            <!-- Deleting is two steps on purpose: close first, then delete. -->
-            <button v-if="canEdit && e.status === 'closed'" type="button" class="quiet danger" @click="remove(e)">Delete</button>
+            <!-- Only meaningful for an active event - close() on a planned one
+                 just re-confirms 'planned' (it parks a not-yet-started event
+                 back there instead of closing it), so showing it there was
+                 a dead-end button doing nothing. -->
+            <button v-if="canEdit && e.status === 'active'" type="button" class="quiet" @click="close(e)">Close</button>
+            <!-- Deleting an active event is two steps on purpose: close first,
+                 then delete - it may have real sales/claims to protect. A
+                 planned event can't have any of that yet (it was never
+                 opened), so it deletes directly; forcing "close" on it first
+                 was also a dead end anyway - close() parks a not-yet-started
+                 event straight back to 'planned' (see close() above) instead
+                 of ever reaching 'closed', so the button below would never
+                 have appeared for it. -->
+            <button v-if="canEdit && (e.status === 'closed' || e.status === 'planned')" type="button" class="quiet danger" @click="remove(e)">Delete</button>
           </div>
         </li>
       </ul>

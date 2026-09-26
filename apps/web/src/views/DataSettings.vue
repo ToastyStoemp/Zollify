@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   RestoreError,
   backupFilename,
@@ -11,10 +11,32 @@ import {
   syncNow,
   wipeAccountData,
   currentAccount,
+  visibleEvents,
   type BackupSummary,
 } from '@zollify/platform';
 
 const busy = ref<'export' | 'restore' | 'wipe' | null>(null);
+
+/** What to pull into the next export - all on by default, same as before this existed. */
+const include = ref({
+  products: true,
+  events: true,
+  inventory: true,
+  eventStock: true,
+  transactions: true,
+  images: true,
+});
+
+/** "all" is the same export this page always produced; "selected" narrows to a few events. */
+const eventScope = ref<'all' | 'selected'>('all');
+const selectedEventIds = ref(new Set<string>());
+function toggleEvent(id: string): void {
+  if (selectedEventIds.value.has(id)) selectedEventIds.value.delete(id);
+  else selectedEventIds.value.add(id);
+}
+const eventIdsForExport = computed<string[] | undefined>(() =>
+  eventScope.value === 'selected' ? [...selectedEventIds.value] : undefined,
+);
 
 /** Owner only: server-side erase plus a local reset; the page reloads into an empty booth. */
 async function wipe(): Promise<void> {
@@ -47,7 +69,7 @@ async function exportBackup(): Promise<void> {
   error.value = null;
   status.value = null;
   try {
-    const backup = await createBackup();
+    const backup = await createBackup({ ...include.value, eventIds: eventIdsForExport.value });
     await saveFile(backupFilename(backup), JSON.stringify(backup, null, 2), 'application/json');
 
     status.value =
@@ -127,6 +149,36 @@ async function confirmRestore(): Promise<void> {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="status" class="ok" role="status">{{ status }}</p>
 
+    <fieldset class="scope">
+      <legend>Events to export</legend>
+      <div class="seg">
+        <button type="button" :class="{ active: eventScope === 'all' }" @click="eventScope = 'all'">All events</button>
+        <button type="button" :class="{ active: eventScope === 'selected' }" @click="eventScope = 'selected'">Choose events</button>
+      </div>
+      <p v-if="eventScope === 'selected'" class="hint">
+        Only the picked events' own event info, stock claims and sales come along - not the rest of the booth.
+      </p>
+      <div v-if="eventScope === 'selected'" class="toggles">
+        <label v-for="ev in visibleEvents" :key="ev.id" class="inline">
+          <input type="checkbox" :checked="selectedEventIds.has(ev.id)" @change="toggleEvent(ev.id)" />
+          <span>{{ ev.name }}</span>
+        </label>
+        <p v-if="!visibleEvents.length" class="hint">No events yet.</p>
+      </div>
+    </fieldset>
+
+    <fieldset class="include">
+      <legend>Include in export</legend>
+      <div class="toggles">
+        <label class="inline"><input v-model="include.products" type="checkbox" /> <span>Products</span></label>
+        <label class="inline"><input v-model="include.events" type="checkbox" /> <span>Events</span></label>
+        <label class="inline"><input v-model="include.inventory" type="checkbox" /> <span>Stock counts</span></label>
+        <label class="inline"><input v-model="include.eventStock" type="checkbox" /> <span>Event claims</span></label>
+        <label class="inline"><input v-model="include.transactions" type="checkbox" /> <span>Sales</span></label>
+        <label class="inline"><input v-model="include.images" type="checkbox" /> <span>Photos</span></label>
+      </div>
+    </fieldset>
+
     <div class="actions">
       <button type="button" class="primary" :disabled="busy !== null" @click="exportBackup">
         {{ busy === 'export' ? 'Exporting…' : 'Export a backup' }}
@@ -186,6 +238,10 @@ h3 { margin: 0; font-size: .95rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; }
 .warn { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
+.include, .scope { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: .75rem 1rem 1rem; margin: 0; display: flex; flex-direction: column; gap: .6rem; }
+.include legend, .scope legend { padding: 0 .3rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.toggles { display: flex; gap: .75rem 1.25rem; flex-wrap: wrap; }
+label.inline { display: inline-flex; flex-direction: row; align-items: center; gap: .4rem; font-size: .9rem; }
 .actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .picker { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; }
 .preview { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .6rem; }

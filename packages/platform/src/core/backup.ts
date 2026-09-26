@@ -55,6 +55,34 @@ export interface ZollifyBackup {
 
 export class RestoreError extends Error {}
 
+/** Which categories to pull into an export - unset means "all of them", same as before this existed. */
+export interface BackupOptions {
+  products?: boolean;
+  events?: boolean;
+  inventory?: boolean;
+  eventStock?: boolean;
+  transactions?: boolean;
+  images?: boolean;
+  /**
+   * Restrict to one or more events instead of the whole booth - undefined or
+   * empty means every event, same as before this existed. Events, event
+   * stock and transactions filter directly (they carry an id/eventId);
+   * inventory has no eventId of its own (it's the one booth-wide "what we
+   * own" list, not per event), so it's narrowed to just the product/variant
+   * rows that were actually claimed for the selected events instead.
+   */
+  eventIds?: string[];
+}
+
+const ALL_INCLUDED: Required<Omit<BackupOptions, 'eventIds'>> = {
+  products: true,
+  events: true,
+  inventory: true,
+  eventStock: true,
+  transactions: true,
+  images: true,
+};
+
 function requireAccount() {
   const account = getAccount();
   if (!account) throw new Error('Backup was used while signed out.');
@@ -66,20 +94,35 @@ function requireAccount() {
  *
  * Tombstones are kept deliberately: dropping them would make a restore
  * resurrect every product ever deleted, because last-write-wins sync has no
- * other way to know they are gone.
+ * other way to know they are gone. A category left out of `options` is left
+ * out of the file entirely, not written as an empty array vs. omitted - a
+ * restore already treats a missing field as "nothing to restore here"
+ * (`file.products ?? []` etc.), so an old, pre-options backup restores the
+ * same way it always did.
  */
-export async function createBackup(): Promise<ZollifyBackup> {
+export async function createBackup(options?: BackupOptions): Promise<ZollifyBackup> {
+  const include = { ...ALL_INCLUDED, ...options };
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
-  const [products, events, inventory, eventStock, transactions, imageRecs] = await Promise.all([
-    db.products.toArray(),
-    db.events.toArray(),
-    db.inventory.toArray(),
-    db.eventStock.toArray(),
-    db.transactions.toArray(),
-    db.images.toArray(),
+  let [products, events, inventory, eventStock, transactions, imageRecs] = await Promise.all([
+    include.products ? db.products.toArray() : Promise.resolve([]),
+    include.events ? db.events.toArray() : Promise.resolve([]),
+    include.inventory ? db.inventory.toArray() : Promise.resolve([]),
+    include.eventStock ? db.eventStock.toArray() : Promise.resolve([]),
+    include.transactions ? db.transactions.toArray() : Promise.resolve([]),
+    include.images ? db.images.toArray() : Promise.resolve([]),
   ]);
+
+  if (include.eventIds && include.eventIds.length) {
+    const wanted = new Set(include.eventIds);
+    events = events.filter((e) => wanted.has(e.id));
+    eventStock = eventStock.filter((s) => wanted.has(s.eventId));
+    transactions = transactions.filter((t) => wanted.has(t.eventId));
+    // Only the stock actually claimed for these events, not the whole booth.
+    const claimed = new Set(eventStock.map((s) => `${s.productId}\x00${s.variantId}`));
+    inventory = inventory.filter((i) => claimed.has(`${i.productId}\x00${i.variantId}`));
+  }
 
   const images: BackupImage[] = await Promise.all(
     imageRecs.map(async (rec) => ({

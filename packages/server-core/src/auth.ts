@@ -203,6 +203,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   const REFRESH_RATE_LIMIT = {
     config: { rateLimit: { max: Number(process.env.REFRESH_RATE_LIMIT_MAX || 60), timeWindow: '1 minute' } },
   };
+  // How long an already-rotated refresh token is still honoured once more -
+  // covers an Android WebView process restart racing its own in-flight
+  // refresh, not meant to tolerate a genuinely stolen token being replayed.
+  const REFRESH_REUSE_GRACE_MS = 20_000;
 
   // Public proof-of-work CAPTCHA challenge (the client solves it before register).
   app.get('/api/captcha/challenge', async () => issueChallenge());
@@ -361,17 +365,36 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const parsed = RefreshRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid request' });
 
+    // Opportunistic sweep of rows past their reuse grace window - cheap on a
+    // table this small (bounded by currently-checked-out sessions, not
+    // overall traffic), and keeps it from growing with every rotation now
+    // that they're soft-deleted instead of removed immediately below.
+    db.prepare('DELETE FROM refresh_tokens WHERE rotatedAt IS NOT NULL AND rotatedAt < ?').run(Date.now() - REFRESH_REUSE_GRACE_MS);
+
     const hash = sha256(parsed.data.refreshToken);
     const row = db
-      .prepare('SELECT id, userId, deviceId, deviceName, flavor, ip, device, geo FROM refresh_tokens WHERE tokenHash = ? AND expiresAt > ?')
+      .prepare('SELECT id, userId, deviceId, deviceName, flavor, ip, device, geo, rotatedAt FROM refresh_tokens WHERE tokenHash = ? AND expiresAt > ?')
       .get(hash, Date.now()) as
-      | { id: string; userId: string; deviceId: string | null; deviceName: string | null; flavor: string | null; ip: string | null; device: string | null; geo: string | null }
+      | { id: string; userId: string; deviceId: string | null; deviceName: string | null; flavor: string | null; ip: string | null; device: string | null; geo: string | null; rotatedAt: number | null }
       | undefined;
     if (!row) return reply.code(401).send({ error: 'Invalid refresh token' });
 
-    // Rotate: the old token is single-use. The new one carries the session's
-    // device/geo forward and slides its expiry by the flavor's TTL.
-    db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(row.id);
+    if (row.rotatedAt != null) {
+      // Already rotated once. Android can kill and restart the WebView process
+      // mid-request; a straggler request from the just-killed process then
+      // presents this same, already-rotated token - not a stolen token being
+      // replayed, just this device's own prior attempt arriving late. Within
+      // a short grace window, treat it like a fresh request (confirmed live:
+      // this exact race was logging a device out for no reason a user could
+      // see or predict). Past the window, reject - a genuine stolen-token
+      // replay looks identical, just much later.
+      if (Date.now() - row.rotatedAt > REFRESH_REUSE_GRACE_MS) return reply.code(401).send({ error: 'Invalid refresh token' });
+    } else {
+      // Soft-rotate: mark single-use, but keep the row around for the grace
+      // window above instead of deleting it outright.
+      db.prepare('UPDATE refresh_tokens SET rotatedAt = ? WHERE id = ?').run(Date.now(), row.id);
+    }
+
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(row.userId) as UserRow | undefined;
     if (!user) return reply.code(401).send({ error: 'User no longer exists' });
     return issueTokens(app, db, user, {
@@ -440,8 +463,11 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const claims = req.user as JwtClaims;
     const sessions = db
       .prepare(
+        // rotatedAt IS NULL: a just-rotated row lingers briefly for the reuse
+        // grace window (see /api/auth/refresh) and would otherwise show up
+        // here as a short-lived phantom duplicate of the session it rotated into.
         `SELECT id, deviceId, deviceName, device, ip, geo, flavor, createdAt, lastUsedAt
-         FROM refresh_tokens WHERE userId = ? AND expiresAt > ? ORDER BY lastUsedAt DESC`,
+         FROM refresh_tokens WHERE userId = ? AND expiresAt > ? AND rotatedAt IS NULL ORDER BY lastUsedAt DESC`,
       )
       .all(claims.sub, Date.now());
     return { geo: geoEnabled(), sessions };

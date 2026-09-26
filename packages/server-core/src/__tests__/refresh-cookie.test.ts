@@ -2,9 +2,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { buildGateway } from '../app';
 import { REFRESH_COOKIE } from '../refresh-cookie';
+
+/** Mirrors auth.ts's own (unexported) REFRESH_REUSE_GRACE_MS - keep in sync. */
+const REFRESH_REUSE_GRACE_MS = 20_000;
 
 /**
  * Exercises the real gateway rather than the hook in isolation: the thing worth
@@ -37,6 +40,10 @@ beforeAll(async () => {
     logLevel: 'silent',
   });
   await app.ready();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 afterAll(async () => {
@@ -134,17 +141,34 @@ describe('refresh token transport', () => {
     expect(rotated?.value).not.toBe(first?.value);
   });
 
-  it('refuses to reuse a rotated token', async () => {
-    // Single-use rotation is the ported behaviour; moving the token to a cookie
-    // must not have quietly disabled it.
+  it('still honours a just-rotated token once more (reuse grace window)', async () => {
+    // Rotation is soft now, not hard-deleted: an Android WebView process
+    // restart can race its own in-flight refresh, and a straggler request
+    // presenting the just-rotated token is that device's own prior attempt
+    // arriving late, not a stolen token being replayed. Moving the token to a
+    // cookie must not change this - it's the same DB-level behaviour either way.
     const first = cookieFrom(await login());
     const cookies = { [REFRESH_COOKIE]: String(first?.value) };
 
     const ok = await app.inject({ method: 'POST', url: '/api/auth/refresh', cookies, payload: {} });
     expect(ok.statusCode).toBe(200);
 
-    const replay = await app.inject({ method: 'POST', url: '/api/auth/refresh', cookies, payload: {} });
-    expect(replay.statusCode).toBe(401);
+    const straggler = await app.inject({ method: 'POST', url: '/api/auth/refresh', cookies, payload: {} });
+    expect(straggler.statusCode).toBe(200);
+  });
+
+  it('refuses to reuse a rotated token once the grace window has passed', async () => {
+    const first = cookieFrom(await login());
+    const cookies = { [REFRESH_COOKIE]: String(first?.value) };
+
+    const ok = await app.inject({ method: 'POST', url: '/api/auth/refresh', cookies, payload: {} });
+    expect(ok.statusCode).toBe(200);
+
+    // toFake: ['Date'] only - faking timers wholesale breaks Fastify's own
+    // use of real setTimeout/microtasks and app.inject() never resolves.
+    vi.useFakeTimers({ now: Date.now() + REFRESH_REUSE_GRACE_MS + 1_000, toFake: ['Date'] });
+    const stale = await app.inject({ method: 'POST', url: '/api/auth/refresh', cookies, payload: {} });
+    expect(stale.statusCode).toBe(401);
   });
 
   it('rejects a refresh with neither cookie nor body token', async () => {

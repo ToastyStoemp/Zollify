@@ -150,6 +150,13 @@ const MIGRATIONS: string[] = [
   // v8 - account profile (JSON AccountProfile): artist details and whether
   // first-run setup has been completed. Server-side so every device agrees.
   `ALTER TABLE accounts ADD COLUMN profile TEXT;`,
+  // v9 - refresh tokens are rotated (soft-deleted with rotatedAt set) instead
+  // of hard-deleted, for a short reuse grace window - see routes/auth.ts's
+  // refresh handler. Android can kill and restart the WebView process mid-
+  // request; a straggler request from the just-killed process would otherwise
+  // present an already-rotated token and get rejected outright, logging the
+  // device out for no reason a user could see or predict.
+  `ALTER TABLE refresh_tokens ADD COLUMN rotatedAt INTEGER;`,
 ];
 
 export function openDb(dataDir: string): Database.Database {

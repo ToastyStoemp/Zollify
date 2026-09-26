@@ -65,6 +65,20 @@ describe('buildCustomsState - Swiss documents declare in the event\'s local curr
     expect(state.products[0]!.price).toBe(18);
   });
 
+  it('an override on a variant with no price of its own still applies (not the product-level rate)', () => {
+    // Real bug: a variant that inherits the product's price (no v.price of its
+    // own) has its override checked against undefined instead of the price it
+    // actually resolves to, so the override was silently never found.
+    const chfEvent: SalesEvent = {
+      ...euroEvent, localCurrency: 'CHF', exchangeRate: 0.9, roundingIncrement: 5,
+      localPriceOverrides: { 'p1:v1': 12 },
+    };
+    const state = buildCustomsState(chfEvent, [product({ price: 12, variants: [{ id: 'v1', name: 'A' }] })], [], []);
+    // Auto-converted would be 12*0.9=10.8, rounded to the nearest 5 -> 10.
+    // The override (12) must win instead.
+    expect(state.products[0]!.variants![0]!.price).toBe(12);
+  });
+
   it('sold value is the amount actually charged (local currency), not the base-currency figure', () => {
     const chfEvent: SalesEvent = { ...euroEvent, localCurrency: 'CHF', exchangeRate: 0.95, roundingIncrement: 0 };
     const tx: Transaction = {

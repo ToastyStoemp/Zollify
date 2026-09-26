@@ -114,7 +114,15 @@ export function buildCustomsState(
             name: v.name,
             sku: v.sku,
             material: v.material,
-            price: v.price != null ? localize(v.price, `${p.id}:${v.id}`) : null,
+            // v.price ?? p.price, not "only localize when the variant has its
+            // own price": a variant with no price of its own still needs its
+            // own override checked (Prices lets you override any variant
+            // individually regardless of whether it has its own base price),
+            // and skipping straight to null here meant calcProduct's own
+            // fallback-to-p.price never got a chance to see that override at
+            // all - confirmed live: a variant-keyed override silently never
+            // applied whenever the variant relied on the product's price.
+            price: localize(v.price ?? p.price, `${p.id}:${v.id}`),
             weightG: v.weightG ?? null,
             unlisted: v.unlisted,
             amount: broughtByKey.get(`${p.id}:${v.id}`) ?? 0,

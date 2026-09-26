@@ -92,7 +92,13 @@ button .zfy-icon { margin-right: .1rem; }
   /* Title and its buttons share the first row; a search or a segmented
      switch takes the full width of its own row underneath. */
   .page > header .tools { flex: 1; justify-content: flex-end; }
-  .page > header .tools:has(input[type='search'], .seg) { flex-basis: 100%; }
+  /* Pushed after every other direct header child (the primary "New X"
+     button included, wherever it sits in the markup) so that button stays
+     on the title's own row instead of being dragged onto this row just
+     because it happens to come after .tools in the markup - a header can
+     have tools AND its own primary button as separate children now, and
+     only .tools should have to give up the row to the search input. */
+  .page > header .tools:has(input[type='search'], .seg) { flex-basis: 100%; order: 1; }
   .page > header .tools input[type='search'] { flex: 1 1 8rem; min-width: 0; }
   .page > header .tools .seg { display: flex; flex-basis: 100%; }
   .seg button { flex: 1; }

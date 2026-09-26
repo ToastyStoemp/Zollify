@@ -403,6 +403,12 @@ async function remove(product: Product): Promise<void> {
 
 <template>
   <section class="page catalog">
+    <!-- .tools holds the search/filter/secondary-action row; the primary
+         "New X" button is its own sibling here, same as every other list
+         page (Events, ...) - so it stays put beside the title instead of
+         being dragged onto .tools's own wrapped row on a phone (that row is
+         forced full-width by the search input inside it; a button along for
+         that ride would move every time the row's other contents change). -->
     <header>
       <h1>Products</h1>
       <div class="tools">
@@ -416,8 +422,8 @@ async function remove(product: Product): Promise<void> {
         </select>
         <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
         <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
-        <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
       </div>
+      <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
     </header>
 
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>

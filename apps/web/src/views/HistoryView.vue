@@ -98,12 +98,26 @@ const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
 const showReverted = ref(false);
+const txSearch = ref('');
 const methodOptions = computed(() => {
   const extras = new Set<string>();
   for (const tx of scoped.value) if (!['cash', 'card', 'split'].includes(tx.method)) extras.add(tx.method);
   return ['all', 'cash', 'card', 'split', ...extras];
 });
-const visible = computed(() => scoped.value.filter((tx) => (showReverted.value || !tx.revertedAt) && (methodFilter.value === 'all' || tx.method === methodFilter.value)));
+/** A sale's own line items and discounts, not just its total - the thing worth searching for is usually "which sale had that item/discount in it", not the sale's id or amount. */
+function matchesSearch(tx: Transaction, q: string): boolean {
+  if (tx.items.some((i) => i.title.toLowerCase().includes(q) || i.variantLabel?.toLowerCase().includes(q))) return true;
+  return tx.discounts.some((d) => d.name.toLowerCase().includes(q));
+}
+const visible = computed(() => {
+  const q = txSearch.value.trim().toLowerCase();
+  return scoped.value.filter(
+    (tx) =>
+      (showReverted.value || !tx.revertedAt) &&
+      (methodFilter.value === 'all' || tx.method === methodFilter.value) &&
+      (!q || matchesSearch(tx, q)),
+  );
+});
 
 // ── Stats ───────────────────────────────────────────────────────────────────
 const stats = computed(() => {
@@ -478,13 +492,14 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     </article>
 
     <div class="filters">
+      <input v-model="txSearch" type="search" placeholder="Find an item or discount…" aria-label="Find a sale" class="txsearch" />
       <div class="seg">
         <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ m }}</button>
       </div>
       <label class="inline"><input v-model="showReverted" type="checkbox" /> <span>Show reverted</span></label>
     </div>
 
-    <p v-if="!visible.length" class="empty">No sales{{ allMode ? '' : ' for this event' }}.</p>
+    <p v-if="!visible.length" class="empty">{{ txSearch.trim() ? 'No sales match that search.' : `No sales${allMode ? '' : ' for this event'}.` }}</p>
     <ul v-else class="txs">
       <li v-for="tx in visible" :key="tx.id" :class="{ reverted: tx.revertedAt }">
         <div class="txhead">
@@ -571,6 +586,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .hour span.hide { visibility: hidden; }
 .legend i { display: inline-block; width: .8rem; height: 2px; background: var(--zfy-warning, #d9942b); vertical-align: middle; margin-right: .3rem; }
 .filters { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.txsearch { min-width: 12rem; flex: 1 1 12rem; }
 label.inline { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .txs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }

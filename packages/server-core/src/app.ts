@@ -21,6 +21,7 @@ import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
 import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
+import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
 
 export interface GatewayOptions {
@@ -199,6 +200,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerSyncRoutes(app, db, rooms);
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
+  registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);

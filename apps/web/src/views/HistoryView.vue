@@ -9,6 +9,7 @@ import {
   allProducts,
   csvFilename,
   currentAccount,
+  fetchHistoricalRates,
   getSalesEvent,
   recentTransactions,
   revertTransaction,
@@ -63,11 +64,36 @@ const scoped = computed(() => {
 const live = computed(() => scoped.value.filter((t) => !t.revertedAt));
 
 const eventName = (id: string): string => (id ? (getSalesEvent(id)?.name ?? 'Removed event') : 'No event');
-const amountOf = (tx: Transaction): number => (revenueMode.value === 'local' ? tx.total : (tx.baseTotal ?? tx.total));
-const currencyOf = (tx: Transaction): string => (revenueMode.value === 'local' ? tx.currency : (tx.baseCurrency ?? tx.currency));
-const itemAmountOf = (item: TxItem): number => (revenueMode.value === 'local' ? item.lineTotal : (item.baseLineTotal ?? item.lineTotal));
+
+/**
+ * `tx.baseTotal`/`item.baseLineTotal` are the sum of catalog base-currency
+ * prices, not a conversion of what was actually charged - at a deliberately
+ * round pricing rate (e.g. 1:1) they equal the local total by construction,
+ * regardless of the real exchange rate that day. For bookkeeping, "base
+ * currency" figures instead convert the real charged amount using the real
+ * market rate for the transaction's own date, fetched per date below; those
+ * fields remain only as the fallback while a rate is loading or unavailable.
+ */
+const txDate = (tx: Transaction): string => new Date(tx.timestamp).toISOString().slice(0, 10);
+const fxKey = (date: string, fromCurrency: string): string => `${date}:${fromCurrency}`;
+
+/**
+ * Keyed by each transaction's own charge currency, not the page's current
+ * scope - the "compare to another event" table can pull in a second event
+ * with a different local currency, and each needs its own rate lookups.
+ */
+const fxRates = ref<Map<string, number>>(new Map());
+const realBase = (localAmount: number, tx: Transaction, fallback: number): number => {
+  const rate = fxRates.value.get(fxKey(txDate(tx), tx.currency));
+  return rate != null ? round2(localAmount * rate) : fallback;
+};
+
+const amountOf = (tx: Transaction): number => (revenueMode.value === 'local' ? tx.total : realBase(tx.total, tx, tx.baseTotal ?? tx.total));
+const currencyOf = (tx: Transaction): string => (revenueMode.value === 'local' ? tx.currency : baseCurrency.value);
+const itemAmountOf = (item: TxItem, tx: Transaction): number =>
+  revenueMode.value === 'local' ? item.lineTotal : realBase(item.lineTotal, tx, item.baseLineTotal ?? item.lineTotal);
 const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
-  revenueMode.value === 'base' && tx.exchangeRate ? round2(d.amount / tx.exchangeRate) : d.amount;
+  revenueMode.value === 'local' ? d.amount : realBase(d.amount, tx, tx.exchangeRate ? round2(d.amount / tx.exchangeRate) : d.amount);
 
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
@@ -106,6 +132,32 @@ const comparable = computed(() => visibleEvents.value.filter((e) => e.id !== sco
 const comparableOptions = computed<PickerOption[]>(() => comparable.value.map((e) => ({ code: e.id, name: e.name })));
 const compareId = computed(() => comparable.value.find((e) => e.name === compareName.value)?.id ?? '');
 watch(scope, () => { compareName.value = ''; });
+
+/**
+ * Keyed by each transaction's own charge currency, not the page's current
+ * scope - comparing to another event can pull in a second event with a
+ * different local currency, and each needs its own rate lookups.
+ */
+async function refreshFxRates(): Promise<void> {
+  if (revenueMode.value !== 'base') return;
+  const byCurrency = new Map<string, Set<string>>();
+  const collect = (t: Transaction): void => {
+    if (t.currency === baseCurrency.value) return;
+    const dates = byCurrency.get(t.currency) ?? new Set<string>();
+    dates.add(txDate(t));
+    byCurrency.set(t.currency, dates);
+  };
+  for (const t of scoped.value) collect(t);
+  if (compareId.value && !allMode.value) {
+    for (const t of recentTransactions.value) if (t.eventId === compareId.value && !t.revertedAt) collect(t);
+  }
+  const perCurrency = await Promise.all([...byCurrency.entries()].map(async ([cur, dates]) => [cur, await fetchHistoricalRates(cur, baseCurrency.value, [...dates])] as const));
+  const merged = new Map<string, number>();
+  for (const [cur, rates] of perCurrency) for (const [date, rate] of rates) merged.set(fxKey(date, cur), rate);
+  fxRates.value = merged;
+}
+watch([scoped, revenueMode, baseCurrency, compareId, allMode], refreshFxRates, { immediate: true });
+
 function eventStats(eventId: string) {
   const txs = recentTransactions.value.filter((t) => t.eventId === eventId && !t.revertedAt);
   const revenue = txs.reduce((s, t) => s + amountOf(t), 0);
@@ -155,7 +207,7 @@ const bestAll = computed(() => {
       const label = byType ? key : item.variantLabel ? `${item.title} · ${item.variantLabel}` : item.title;
       const cur = map.get(key) ?? { label, type: byType ? key : type, qty: 0, value: 0 };
       cur.qty += item.qty;
-      cur.value += itemAmountOf(item);
+      cur.value += itemAmountOf(item, tx);
       map.set(key, cur);
     }
   }
@@ -446,7 +498,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <button v-if="canRevert && !tx.revertedAt" type="button" class="quiet danger" @click="revertId = tx.id">Revert</button>
         </div>
         <ul class="lines">
-          <li v-for="(item, i) in tx.items" :key="i"><span>{{ item.qty }}× {{ item.title }}<template v-if="item.variantLabel"> · {{ item.variantLabel }}</template></span><span>{{ money(itemAmountOf(item), currencyOf(tx)) }}</span></li>
+          <li v-for="(item, i) in tx.items" :key="i"><span>{{ item.qty }}× {{ item.title }}<template v-if="item.variantLabel"> · {{ item.variantLabel }}</template></span><span>{{ money(itemAmountOf(item, tx), currencyOf(tx)) }}</span></li>
           <li v-for="(d, i) in tx.discounts" :key="'d' + i" class="good"><span>{{ d.name }}</span><span>− {{ money(discountAmountOf(d, tx), currencyOf(tx)) }}</span></li>
         </ul>
       </li>

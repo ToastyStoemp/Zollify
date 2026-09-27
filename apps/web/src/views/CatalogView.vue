@@ -413,15 +413,23 @@ async function remove(product: Product): Promise<void> {
       <h1>Products</h1>
       <div class="tools">
         <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
-        <select v-model="filter" aria-label="Show">
-          <option value="all">All products</option>
-          <option value="low" :disabled="!activeEventId">Low stock at the event</option>
-          <option value="customs">Customs issues</option>
-          <option value="notForSale">Not for sale</option>
-          <option value="unlisted">Unlisted</option>
-        </select>
-        <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" @click="openMerge"><Icon name="layers" :size="14" /> Merge</button>
-        <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" @click="reordering = true"><Icon name="list-ordered" :size="14" /> Reorder</button>
+        <!-- The select itself stays the real control at every width (native
+             popups read better than anything we'd build) - on a phone its
+             own text just goes transparent behind an icon glyph and a dot
+             for "something other than All products is picked", since there's
+             no room here to spell that out. -->
+        <div class="filterwrap" :class="{ active: filter !== 'all' }">
+          <Icon name="filter" :size="16" />
+          <select v-model="filter" aria-label="Show">
+            <option value="all">All products</option>
+            <option value="low" :disabled="!activeEventId">Low stock at the event</option>
+            <option value="customs">Customs issues</option>
+            <option value="notForSale">Not for sale</option>
+            <option value="unlisted">Unlisted</option>
+          </select>
+        </div>
+        <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" aria-label="Merge products" @click="openMerge"><Icon name="layers" :size="14" /> <span class="label">Merge</span></button>
+        <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" aria-label="Reorder products" @click="reordering = true"><Icon name="list-ordered" :size="14" /> <span class="label">Reorder</span></button>
       </div>
       <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New product</button>
     </header>
@@ -671,8 +679,30 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .rm { position: absolute; top: -.35rem; right: -.35rem; width: 1.1rem; height: 1.1rem; min-height: 0; padding: 0; border-radius: 999px; display: grid; place-items: center; background: var(--zfy-danger, #c6512f); color: #fff; border: 0; }
 .actions { display: flex; gap: .5rem; align-items: center; }
 .spacer { flex: 1; }
+.filterwrap { position: relative; display: inline-flex; align-items: center; }
+.filterwrap .zfy-icon { position: absolute; left: .55rem; pointer-events: none; color: var(--zfy-muted, #5a6472); }
+@media (min-width: 721px) {
+  .filterwrap .zfy-icon { display: none; }
+}
 @media (max-width: 640px) {
   .variant { grid-template-columns: 2.5rem 1fr auto; }
   .variant input:nth-of-type(n + 2) { grid-column: 2 / span 1; }
+}
+@media (max-width: 720px) {
+  /* Merge/Reorder/filter go icon-only here - the same width the search
+     input already claims the whole next row for (see styles.css), so
+     there's no room left to also spell these three out in words. */
+  .tools button .label { display: none; }
+  .filterwrap .zfy-icon { left: 50%; transform: translateX(-50%); }
+  .filterwrap select {
+    appearance: none; -webkit-appearance: none;
+    width: 2.4rem; min-height: 2.4rem; padding: 0; color: transparent;
+  }
+  /* Dot instead of the option text a phone has no room for - same "there's
+     a filter/choice active" marker as the sync button's own .dot (App.vue). */
+  .filterwrap.active::after {
+    content: ''; position: absolute; top: .1rem; right: .1rem; width: .4rem; height: .4rem;
+    border-radius: 50%; background: var(--zfy-accent); border: 1.5px solid var(--zfy-surface, #fff);
+  }
 }
 </style>

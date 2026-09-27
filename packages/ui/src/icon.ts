@@ -53,6 +53,7 @@ export const ICON_PATHS: Record<string, string> = {
   printer: 'M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v8H6z',
   scan: 'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10',
   'trending-up': 'm22 7-8.5 8.5-5-5L2 17M16 7h6v6',
+  filter: 'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
 };
 
 /**

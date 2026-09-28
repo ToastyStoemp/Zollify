@@ -49,24 +49,27 @@ describe('calcDeProduct', () => {
     expect(c.reimportQty).toBe(5);
   });
 
-  it('sold quantity/weight/value are what was actually sold - the definitive-export figure', () => {
-    const c = calcDeProduct(product({ amount: 10, soldQty: 4, price: 20, weightG: 100 }));
+  it('sold value is what was actually charged, not qty × catalog price', () => {
+    // Real bug: soldValue was re-derived from price × soldQty (80) instead of
+    // reading the adapter's own soldValue (70, already net of a discount) -
+    // deliberately different numbers here so a regression can't pass by luck.
+    const c = calcDeProduct(product({ amount: 10, soldQty: 4, soldValue: 70, price: 20, weightG: 100 }));
     expect(c.soldQty).toBe(4);
     expect(c.soldWeightKg).toBe(0.4);
-    expect(c.soldValue).toBe(80);
+    expect(c.soldValue).toBe(70);
   });
 
-  it('sums sold quantity across variants, same as the re-import figure', () => {
+  it('sums sold value across variants from their own soldValue, not price × qty', () => {
     const c = calcDeProduct(
       product({
         amount: 0,
         variants: [
-          { name: 'A', price: 20, weightG: 100, amount: 10, soldQty: 4, soldValue: 80 },
+          { name: 'A', price: 20, weightG: 100, amount: 10, soldQty: 4, soldValue: 70 },
           { name: 'B', price: 20, weightG: 100, amount: 10, soldQty: 4, soldValue: 80, unlisted: true },
         ],
       }),
     );
     expect(c.soldQty).toBe(4);
-    expect(c.soldValue).toBe(80);
+    expect(c.soldValue).toBe(70);
   });
 });

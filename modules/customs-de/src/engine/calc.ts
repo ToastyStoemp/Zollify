@@ -29,7 +29,8 @@ export interface ProductCalc {
   /** Actually sold at the event - the definitive-export quantity, never coming back. */
   soldQty: number;
   soldWeightKg: number;
-  soldValue: number | null;
+  /** What was actually charged (already net of any discount) - never re-derived from catalog price × qty, unlike totalValue/reimportValue. */
+  soldValue: number;
 }
 
 /** One line's own quantity, weight and value - a plain product's own fields, or a single variant's. */
@@ -52,8 +53,7 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
       hasReimportValue = false;
     let soldQty = 0,
       soldWeightKg = 0,
-      soldValue = 0,
-      hasSoldValue = false;
+      soldValue = 0;
     for (const v of p.variants!) {
       if (v.unlisted) continue;
       const vAmount = v.amount || 0;
@@ -74,14 +74,14 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
         reimportValue += reimportLine.totalValue;
         hasReimportValue = true;
       }
+      // v.soldValue directly, not calcLine(vSoldQty, wg, price) - the adapter
+      // already computed this as what was actually charged (net of any
+      // discount); re-deriving it from catalog price × qty here silently
+      // threw that away and declared the undiscounted list price instead.
       const vSoldQty = v.soldQty || 0;
-      const soldLine = calcLine(vSoldQty, wg, price);
       soldQty += vSoldQty;
-      soldWeightKg += soldLine.totalWeightKg;
-      if (soldLine.totalValue != null) {
-        soldValue += soldLine.totalValue;
-        hasSoldValue = true;
-      }
+      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
+      soldValue += v.soldValue || 0;
     }
     const listedVariants = p.variants!.filter((v) => !v.unlisted);
     const prices = listedVariants.map((v) => variantPrice(p, v)).filter((x): x is number => x != null);
@@ -99,7 +99,7 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
       reimportValue: hasReimportValue ? reimportValue : null,
       soldQty,
       soldWeightKg: Math.round(soldWeightKg * 1000) / 1000,
-      soldValue: hasSoldValue ? soldValue : null,
+      soldValue,
     };
   }
 
@@ -110,8 +110,11 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
   const reimportQty = Math.max(0, p.amount - p.soldQty);
   const { totalWeightKg: reimportWeightKg, totalValue: reimportValue } = calcLine(reimportQty, weightG, price);
 
+  // p.soldValue directly, not calcLine(soldQty, weightG, price) - see the
+  // matching comment in the variant branch above.
   const soldQty = p.soldQty || 0;
-  const { totalWeightKg: soldWeightKg, totalValue: soldValue } = calcLine(soldQty, weightG, price);
+  const soldWeightKg = Math.round(soldQty * weightG) / 1000;
+  const soldValue = p.soldValue || 0;
 
   return { totalWeightKg, totalValue, effectiveUnitPrice: price, effectiveUnitWeightG: weightG, amount: p.amount, reimportQty, reimportWeightKg, reimportValue, soldQty, soldWeightKg, soldValue };
 }
@@ -126,7 +129,7 @@ export interface DeMaterialGroupCalc {
   reimportValue: number | null;
   soldQty: number;
   soldWeightKg: number;
-  soldValue: number | null;
+  soldValue: number;
 }
 
 /**
@@ -170,8 +173,7 @@ export function calcDeProductByMaterial(p: CustomsDeProduct): DeMaterialGroupCal
       hasReimportValue = false;
     let soldQty = 0,
       soldWeightKg = 0,
-      soldValue = 0,
-      hasSoldValue = false;
+      soldValue = 0;
     for (const v of variants) {
       const vAmount = v.amount || 0;
       const wg = variantWeight(p, v);
@@ -191,14 +193,11 @@ export function calcDeProductByMaterial(p: CustomsDeProduct): DeMaterialGroupCal
         reimportValue += reimportLine.totalValue;
         hasReimportValue = true;
       }
+      // v.soldValue directly - see calcDeProduct's matching comment.
       const vSoldQty = v.soldQty || 0;
-      const soldLine = calcLine(vSoldQty, wg, price);
       soldQty += vSoldQty;
-      soldWeightKg += soldLine.totalWeightKg;
-      if (soldLine.totalValue != null) {
-        soldValue += soldLine.totalValue;
-        hasSoldValue = true;
-      }
+      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
+      soldValue += v.soldValue || 0;
     }
     return {
       material,
@@ -210,7 +209,7 @@ export function calcDeProductByMaterial(p: CustomsDeProduct): DeMaterialGroupCal
       reimportValue: hasReimportValue ? reimportValue : null,
       soldQty,
       soldWeightKg: Math.round(soldWeightKg * 1000) / 1000,
-      soldValue: hasSoldValue ? soldValue : null,
+      soldValue,
     };
   });
 }

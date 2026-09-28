@@ -6,8 +6,14 @@
  * (fixed in 531dd83), then customs-de's proforma/e-dec/IAA-Plus filtered
  * eligibility on the raw, non-variant-aware amount field (fixed in a256bda).
  *
- * Scope is deliberately just this: amount/weight/value aggregation and the
- * basic eligibility primitive. The actual documents (CH's 11.74/11.87 HTML,
+ * Scope is deliberately just this: amount/weight/value aggregation (both
+ * brought-stock and actually-sold), and the basic eligibility primitive. Sold
+ * value drifted a third time even after the fix above - customs-de kept its
+ * own copy of the sold-figure aggregation loop and re-derived it from catalog
+ * price x qty instead of reading soldValue, in two different places
+ * (calcDeProduct and a packing-list.ts detailed-row loop) - so it's here now,
+ * computed once, instead of once per country module. The actual documents
+ * (CH's 11.74/11.87 HTML,
  * e-dec XML; DE's DEXPDF XML, IAA-Plus sheet, proforma HTML) stay separate
  * per-country templates - they're legally-fixed forms with genuinely
  * different fields, not duplicated logic.
@@ -89,14 +95,20 @@ export interface VariantLike {
   weightG?: NumLike;
   unlisted?: boolean;
   amount?: number;
+  soldQty?: number;
+  soldValue?: number;
+  material?: string;
 }
 
 export interface ProductLike<V extends VariantLike = VariantLike> {
+  material?: string;
   price?: NumLike;
   weightG?: NumLike;
   amount?: number;
   unlisted?: boolean;
   variants?: V[];
+  soldQty?: number;
+  soldValue?: number;
 }
 
 export function hasVariants(p: ProductLike): boolean {
@@ -121,6 +133,15 @@ export interface CoreProductCalc {
   totalValue: number | null;
   effectiveUnitPrice: number | null;
   effectiveUnitWeightG: NumLike;
+  /** Actually sold - both country modules previously kept their own copy of
+   *  this exact aggregation, and it drifted (customs-de/calc.ts recomputed
+   *  catalog price × qty instead of reading soldValue, three separate times
+   *  in three separate places, twice after the first fix). One place now. */
+  soldQty: number;
+  soldWeightKg: number;
+  /** What was actually charged (already net of any discount) - always
+   *  p.soldValue/v.soldValue directly, never re-derived from price × qty. */
+  soldValue: number;
 }
 
 export interface CalcCoreOptions {
@@ -154,6 +175,9 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
     let amount = 0,
       totalWeightKg = 0,
       totalValue = 0;
+    let soldQty = 0,
+      soldWeightKg = 0,
+      soldValue = 0;
     for (const v of p.variants!) {
       if (v.unlisted) continue;
       const amt = v.amount || 0;
@@ -162,7 +186,13 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
       amount += amt;
       totalWeightKg += Math.round(amt * wg) / 1000;
       if (price != null) totalValue += price * amt;
+
+      const vSoldQty = v.soldQty || 0;
+      soldQty += vSoldQty;
+      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
+      soldValue += v.soldValue || 0;
     }
+    soldWeightKg = Math.round(soldWeightKg * 1000) / 1000;
     totalWeightKg = Math.round(totalWeightKg * 1000) / 1000;
     const activeVariants = p.variants!.filter((v) => !v.unlisted);
     const prices = activeVariants.map((v) => variantPrice(p, v)).filter((x): x is number => x != null);
@@ -185,6 +215,9 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
       totalValue: totalValue > 0 ? Math.round(totalValue) : null,
       effectiveUnitPrice,
       effectiveUnitWeightG,
+      soldQty,
+      soldWeightKg,
+      soldValue,
     };
   }
 
@@ -197,7 +230,74 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
   }
   const effectiveUnitPrice = totalValue != null && amount > 0 ? totalValue / amount : null;
   const effectiveUnitWeightG = amount > 0 ? (totalWeightKg * 1000) / amount : p.weightG || 0;
-  return { amount, totalWeightKg, totalValue, effectiveUnitPrice, effectiveUnitWeightG };
+
+  const soldQty = p.soldQty || 0;
+  const soldWeightKg = Math.round(soldQty * weightG) / 1000;
+  const soldValue = p.soldValue || 0;
+
+  return { amount, totalWeightKg, totalValue, effectiveUnitPrice, effectiveUnitWeightG, soldQty, soldWeightKg, soldValue };
+}
+
+export interface CoreMaterialGroupCalc {
+  material: string;
+  amount: number;
+  totalWeightKg: number;
+  totalValue: number | null;
+  soldQty: number;
+  soldWeightKg: number;
+  soldValue: number;
+}
+
+/**
+ * calcCoreProduct(p), split by each variant's own resolved material - a
+ * by-type document groups by material and can't tell two differently-
+ * overridden variants of the same product apart otherwise. A product with no
+ * variants, or whose variants all resolve to the same material, returns a
+ * single entry with numbers identical to calcCoreProduct(p). Also previously
+ * duplicated per country module (customs-ch's calcProductByMaterial,
+ * customs-de's calcDeProductByMaterial) - same aggregation, one place now.
+ */
+export function calcCoreProductByMaterial(p: ProductLike, opts: CalcCoreOptions = {}): CoreMaterialGroupCalc[] {
+  if (!hasVariants(p)) {
+    const c = calcCoreProduct(p, opts);
+    return [{ material: p.material || '', amount: c.amount, totalWeightKg: c.totalWeightKg, totalValue: c.totalValue, soldQty: c.soldQty, soldWeightKg: c.soldWeightKg, soldValue: c.soldValue }];
+  }
+  const byMaterial = new Map<string, VariantLike[]>();
+  for (const v of p.variants!) {
+    if (v.unlisted) continue;
+    const material = (v.material ?? p.material) || '';
+    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
+  }
+  return [...byMaterial.entries()].map(([material, variants]) => {
+    let amount = 0,
+      totalWeightKg = 0,
+      totalValue = 0,
+      soldQty = 0,
+      soldWeightKg = 0,
+      soldValue = 0;
+    for (const v of variants) {
+      const amt = v.amount || 0;
+      const wg = variantWeight(p, v);
+      const price = variantPrice(p, v);
+      amount += amt;
+      totalWeightKg += Math.round(amt * wg) / 1000;
+      if (price != null) totalValue += price * amt;
+
+      const vSoldQty = v.soldQty || 0;
+      soldQty += vSoldQty;
+      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
+      soldValue += v.soldValue || 0;
+    }
+    return {
+      material,
+      amount,
+      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
+      totalValue: totalValue > 0 ? Math.round(totalValue) : null,
+      soldQty,
+      soldWeightKg: Math.round(soldWeightKg * 1000) / 1000,
+      soldValue,
+    };
+  });
 }
 
 /**

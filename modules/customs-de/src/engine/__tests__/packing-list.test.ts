@@ -97,6 +97,27 @@ describe('buildPackingListHtml', () => {
     expect(html).toMatch(/Art Print[\s\S]*?<td class="r">3<\/td>/);
   });
 
+  it("detailed format's per-variant sold row uses the variant's own soldValue, not price × qty", () => {
+    // Real bug: the detailed format's per-variant loop computed value inline
+    // as price * qty (undiscounted) instead of routing through
+    // calcDeProduct/calcDeProductByMaterial like every other row - deliberately
+    // different numbers here (25 * 2 = 50, but actually charged 44) so a
+    // regression can't pass by the fixture's own coincidence.
+    const discounted: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), companyName: 'Studio' },
+      products: [
+        {
+          id: 'p1', title: 'Art Print', type: 'Print', forSale: true, tariffNo: '4911910000', amount: 0, soldQty: 0, soldValue: 0,
+          variants: [{ name: 'A1', sku: 'AP-A1', price: 25, weightG: 100, amount: 6, soldQty: 2, soldValue: 44 }],
+        },
+      ],
+    };
+    const html = buildPackingListHtml(discounted, 'sold', 'detailed');
+    expect(html).toMatch(/Art Print - A1[\s\S]*?<td class="r">44<\/td>/);
+    expect(html).not.toContain('<td class="r">50</td>');
+  });
+
   it('shows SKU and omits Swiss-only tariff/VAT rate columns', () => {
     const html = buildPackingListHtml(state(), 'export', 'compressed');
     expect(html).toContain('<th>SKU</th>');

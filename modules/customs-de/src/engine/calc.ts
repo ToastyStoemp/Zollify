@@ -1,5 +1,16 @@
-import { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, hasVariants, variantPrice, variantWeight } from '@zollify/customs-core';
-import type { CustomsDeProduct, CustomsDeVariant } from './model';
+import {
+  calcCoreProduct,
+  calcCoreProductByMaterial,
+  esc,
+  escapeXml,
+  parsePostCodeCity,
+  countryToCode,
+  fmtEventDates,
+  hasVariants,
+  variantPrice,
+  variantWeight,
+} from '@zollify/customs-core';
+import type { CustomsDeProduct } from './model';
 
 export { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, hasVariants };
 
@@ -41,31 +52,38 @@ function calcLine(amount: number, weightG: number, price: number | null): { tota
   };
 }
 
+/**
+ * amount/totalWeightKg/totalValue/effectiveUnitPrice/effectiveUnitWeightG and
+ * the sold figures all come from calcCoreProduct() - this used to keep its
+ * own copy of that whole aggregation (twice: here, and again in
+ * calcDeProductByMaterial below), which is exactly how the sold-value figure
+ * drifted (re-derived from catalog price × qty instead of reading soldValue).
+ * reimportQty/reimportWeightKg/reimportValue are a DE-only concept (nothing
+ * "comes back" for customs-ch), so that part is still computed here.
+ */
 export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
+  const core = calcCoreProduct(p);
+  const shared = {
+    totalWeightKg: core.totalWeightKg,
+    totalValue: core.totalValue,
+    effectiveUnitPrice: core.effectiveUnitPrice,
+    effectiveUnitWeightG: Number(core.effectiveUnitWeightG) || 0,
+    amount: core.amount,
+    soldQty: core.soldQty,
+    soldWeightKg: core.soldWeightKg,
+    soldValue: core.soldValue,
+  };
+
   if (hasVariants(p)) {
-    let amount = 0,
-      totalWeightKg = 0,
-      totalValue = 0,
-      hasValue = false;
     let reimportQty = 0,
       reimportWeightKg = 0,
       reimportValue = 0,
       hasReimportValue = false;
-    let soldQty = 0,
-      soldWeightKg = 0,
-      soldValue = 0;
     for (const v of p.variants!) {
       if (v.unlisted) continue;
       const vAmount = v.amount || 0;
       const wg = variantWeight(p, v);
       const price = variantPrice(p, v);
-      const line = calcLine(vAmount, wg, price);
-      amount += vAmount;
-      totalWeightKg += line.totalWeightKg;
-      if (line.totalValue != null) {
-        totalValue += line.totalValue;
-        hasValue = true;
-      }
       const vReimportQty = Math.max(0, vAmount - (v.soldQty || 0));
       const reimportLine = calcLine(vReimportQty, wg, price);
       reimportQty += vReimportQty;
@@ -74,49 +92,16 @@ export function calcDeProduct(p: CustomsDeProduct): ProductCalc {
         reimportValue += reimportLine.totalValue;
         hasReimportValue = true;
       }
-      // v.soldValue directly, not calcLine(vSoldQty, wg, price) - the adapter
-      // already computed this as what was actually charged (net of any
-      // discount); re-deriving it from catalog price × qty here silently
-      // threw that away and declared the undiscounted list price instead.
-      const vSoldQty = v.soldQty || 0;
-      soldQty += vSoldQty;
-      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
-      soldValue += v.soldValue || 0;
     }
-    const listedVariants = p.variants!.filter((v) => !v.unlisted);
-    const prices = listedVariants.map((v) => variantPrice(p, v)).filter((x): x is number => x != null);
-    const weights = listedVariants.map((v) => variantWeight(p, v));
-    const allSamePrice = prices.length > 0 && prices.every((x) => x === prices[0]);
-    const allSameWeight = weights.length > 0 && weights.every((x) => x === weights[0]);
-    return {
-      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
-      totalValue: hasValue ? totalValue : null,
-      effectiveUnitPrice: allSamePrice ? (prices[0] ?? null) : null,
-      effectiveUnitWeightG: allSameWeight ? (weights[0] ?? 0) : 0,
-      amount,
-      reimportQty,
-      reimportWeightKg: Math.round(reimportWeightKg * 1000) / 1000,
-      reimportValue: hasReimportValue ? reimportValue : null,
-      soldQty,
-      soldWeightKg: Math.round(soldWeightKg * 1000) / 1000,
-      soldValue,
-    };
+    return { ...shared, reimportQty, reimportWeightKg: Math.round(reimportWeightKg * 1000) / 1000, reimportValue: hasReimportValue ? reimportValue : null };
   }
 
   const weightG = parseFloat(String(p.weightG ?? '')) || 0;
   const price = p.price != null && p.price !== '' ? parseFloat(String(p.price)) : null;
-  const { totalWeightKg, totalValue } = calcLine(p.amount, weightG, price);
-
   const reimportQty = Math.max(0, p.amount - p.soldQty);
   const { totalWeightKg: reimportWeightKg, totalValue: reimportValue } = calcLine(reimportQty, weightG, price);
 
-  // p.soldValue directly, not calcLine(soldQty, weightG, price) - see the
-  // matching comment in the variant branch above.
-  const soldQty = p.soldQty || 0;
-  const soldWeightKg = Math.round(soldQty * weightG) / 1000;
-  const soldValue = p.soldValue || 0;
-
-  return { totalWeightKg, totalValue, effectiveUnitPrice: price, effectiveUnitWeightG: weightG, amount: p.amount, reimportQty, reimportWeightKg, reimportValue, soldQty, soldWeightKg, soldValue };
+  return { ...shared, reimportQty, reimportWeightKg, reimportValue };
 }
 
 export interface DeMaterialGroupCalc {
@@ -133,83 +118,48 @@ export interface DeMaterialGroupCalc {
 }
 
 /**
- * calcDeProduct(p), split by each variant's own resolved material (mirrors
- * customs-ch/engine/calc.ts's calcProductByMaterial() - same formulas, same
- * rounding). The by-type packing list groups by material and can't tell two
- * differently-overridden variants of the same product apart otherwise.
+ * calcCoreProductByMaterial(p) for material/amount/totalWeightKg/totalValue/
+ * sold figures - same duplication-avoidance reasoning as calcDeProduct()
+ * above. reimportQty/reimportWeightKg/reimportValue are DE-only, so they're
+ * grouped by material separately here and merged in by the same material key
+ * calcCoreProductByMaterial() itself derives, which is guaranteed to line up
+ * since both use the identical `(v.material ?? p.material) || ''` + unlisted
+ * filter.
  */
 export function calcDeProductByMaterial(p: CustomsDeProduct): DeMaterialGroupCalc[] {
+  const core = calcCoreProductByMaterial(p);
+
   if (!hasVariants(p)) {
-    const c = calcDeProduct(p);
-    return [
-      {
-        material: p.material || '',
-        amount: c.amount,
-        totalWeightKg: c.totalWeightKg,
-        totalValue: c.totalValue,
-        reimportQty: c.reimportQty,
-        reimportWeightKg: c.reimportWeightKg,
-        reimportValue: c.reimportValue,
-        soldQty: c.soldQty,
-        soldWeightKg: c.soldWeightKg,
-        soldValue: c.soldValue,
-      },
-    ];
+    const { reimportQty, reimportWeightKg, reimportValue } = calcDeProduct(p);
+    return [{ ...core[0]!, reimportQty, reimportWeightKg, reimportValue }];
   }
-  const byMaterial = new Map<string, CustomsDeVariant[]>();
+
+  const reimportByMaterial = new Map<string, { reimportQty: number; reimportWeightKg: number; reimportValue: number; hasReimportValue: boolean }>();
   for (const v of p.variants!) {
     if (v.unlisted) continue;
     const material = (v.material ?? p.material) || '';
-    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
-  }
-  return [...byMaterial.entries()].map(([material, variants]) => {
-    let amount = 0,
-      totalWeightKg = 0,
-      totalValue = 0,
-      hasValue = false,
-      reimportQty = 0,
-      reimportWeightKg = 0,
-      reimportValue = 0,
-      hasReimportValue = false;
-    let soldQty = 0,
-      soldWeightKg = 0,
-      soldValue = 0;
-    for (const v of variants) {
-      const vAmount = v.amount || 0;
-      const wg = variantWeight(p, v);
-      const price = variantPrice(p, v);
-      const line = calcLine(vAmount, wg, price);
-      amount += vAmount;
-      totalWeightKg += line.totalWeightKg;
-      if (line.totalValue != null) {
-        totalValue += line.totalValue;
-        hasValue = true;
-      }
-      const vReimportQty = Math.max(0, vAmount - (v.soldQty || 0));
-      const reimportLine = calcLine(vReimportQty, wg, price);
-      reimportQty += vReimportQty;
-      reimportWeightKg += reimportLine.totalWeightKg;
-      if (reimportLine.totalValue != null) {
-        reimportValue += reimportLine.totalValue;
-        hasReimportValue = true;
-      }
-      // v.soldValue directly - see calcDeProduct's matching comment.
-      const vSoldQty = v.soldQty || 0;
-      soldQty += vSoldQty;
-      soldWeightKg += Math.round(vSoldQty * wg) / 1000;
-      soldValue += v.soldValue || 0;
+    const vAmount = v.amount || 0;
+    const wg = variantWeight(p, v);
+    const price = variantPrice(p, v);
+    const vReimportQty = Math.max(0, vAmount - (v.soldQty || 0));
+    const reimportLine = calcLine(vReimportQty, wg, price);
+    const r = reimportByMaterial.get(material) ?? { reimportQty: 0, reimportWeightKg: 0, reimportValue: 0, hasReimportValue: false };
+    r.reimportQty += vReimportQty;
+    r.reimportWeightKg += reimportLine.totalWeightKg;
+    if (reimportLine.totalValue != null) {
+      r.reimportValue += reimportLine.totalValue;
+      r.hasReimportValue = true;
     }
+    reimportByMaterial.set(material, r);
+  }
+
+  return core.map((group) => {
+    const r = reimportByMaterial.get(group.material) ?? { reimportQty: 0, reimportWeightKg: 0, reimportValue: 0, hasReimportValue: false };
     return {
-      material,
-      amount,
-      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
-      totalValue: hasValue ? totalValue : null,
-      reimportQty,
-      reimportWeightKg: Math.round(reimportWeightKg * 1000) / 1000,
-      reimportValue: hasReimportValue ? reimportValue : null,
-      soldQty,
-      soldWeightKg: Math.round(soldWeightKg * 1000) / 1000,
-      soldValue,
+      ...group,
+      reimportQty: r.reimportQty,
+      reimportWeightKg: Math.round(r.reimportWeightKg * 1000) / 1000,
+      reimportValue: r.hasReimportValue ? r.reimportValue : null,
     };
   });
 }

@@ -11,6 +11,7 @@
  */
 import {
   calcCoreProduct,
+  calcCoreProductByMaterial,
   esc,
   escapeXml,
   countryToCode,
@@ -103,27 +104,14 @@ export interface ProductCalc {
 export function calcProduct(p: CustomsProduct): ProductCalc {
   // totalValueCHF is CH-specific (a whole-product value override) - not a
   // customs-core concept, so it's resolved here and handed in as an option
-  // rather than pushed into the shared aggregation.
-  const core = calcCoreProduct(p, {
+  // rather than pushed into the shared aggregation. soldQty/soldWeightKg/
+  // soldValue come from calcCoreProduct() itself now - this used to keep its
+  // own copy of that aggregation loop, which is exactly how customs-de's own
+  // copy drifted (re-derived value from catalog price x qty instead of
+  // reading soldValue) - one aggregation, not one per country module.
+  return calcCoreProduct(p, {
     totalValueOverride: p.totalValueCHF != null ? parseFloat(p.totalValueCHF as string) : null,
   });
-
-  if (hasVariants(p)) {
-    let soldQty = 0,
-      soldValue = 0,
-      soldWeightKg = 0;
-    for (const v of p.variants!) {
-      if (v.unlisted) continue;
-      const wg = variantWeight(p, v);
-      soldQty += v.soldQty || 0;
-      soldValue += v.soldValue || 0;
-      soldWeightKg += ((v.soldQty || 0) * wg) / 1000;
-    }
-    return { ...core, soldQty, soldValue, soldWeightKg };
-  }
-
-  const soldWeightKg = ((p.soldQty || 0) * ((p.weightG as number) || 0)) / 1000;
-  return { ...core, soldWeightKg, soldQty: p.soldQty || 0, soldValue: p.soldValue || 0 };
 }
 
 export interface MaterialGroupCalc {
@@ -145,43 +133,8 @@ export interface MaterialGroupCalc {
  * same unlisted-variant exclusion).
  */
 export function calcProductByMaterial(p: CustomsProduct): MaterialGroupCalc[] {
-  if (!hasVariants(p)) {
-    const c = calcProduct(p);
-    return [{ material: p.material || '', amount: c.amount, totalWeightKg: c.totalWeightKg, totalValue: c.totalValue, soldQty: c.soldQty, soldValue: c.soldValue, soldWeightKg: c.soldWeightKg }];
-  }
-  const byMaterial = new Map<string, CustomsVariant[]>();
-  for (const v of p.variants!) {
-    if (v.unlisted) continue;
-    const material = (v.material ?? p.material) || '';
-    (byMaterial.get(material) ?? byMaterial.set(material, []).get(material)!).push(v);
-  }
-  return [...byMaterial.entries()].map(([material, variants]) => {
-    let amount = 0,
-      totalWeightKg = 0,
-      totalValue = 0,
-      soldQty = 0,
-      soldValue = 0,
-      soldWeightKg = 0;
-    for (const v of variants) {
-      const amt = v.amount || 0;
-      const wg = variantWeight(p, v);
-      const price = variantPrice(p, v);
-      amount += amt;
-      totalWeightKg += Math.round(amt * wg) / 1000;
-      if (price != null) totalValue += price * amt;
-      soldQty += v.soldQty || 0;
-      soldValue += v.soldValue || 0;
-      soldWeightKg += ((v.soldQty || 0) * wg) / 1000;
-    }
-    return {
-      material,
-      amount,
-      totalWeightKg: Math.round(totalWeightKg * 1000) / 1000,
-      totalValue: totalValue > 0 ? Math.round(totalValue) : null,
-      soldQty,
-      soldValue,
-      soldWeightKg,
-    };
+  return calcCoreProductByMaterial(p, {
+    totalValueOverride: p.totalValueCHF != null ? parseFloat(p.totalValueCHF as string) : null,
   });
 }
 

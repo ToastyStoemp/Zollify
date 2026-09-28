@@ -170,7 +170,12 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
           const priceRaw = v.price != null && v.price !== '' ? v.price : p.price;
           const price = priceRaw != null && priceRaw !== '' ? parseFloat(String(priceRaw)) : null;
           const weightKg = Math.round(qty * wg) / 1000;
-          const value = price != null ? Math.round(price * qty) : null;
+          // For 'sold', the variant's own soldValue (already net of any
+          // discount) - not price * qty, which is the undiscounted catalog
+          // price and was silently showing the wrong total for every variant
+          // row (calcDeProduct/calcDeProductByMaterial get this right further
+          // down; this per-variant "detailed" row never routed through them).
+          const value = kind === 'sold' ? v.soldValue || 0 : price != null ? Math.round(price * qty) : null;
           totQty += qty;
           totWkg += weightKg;
           if (value != null) {

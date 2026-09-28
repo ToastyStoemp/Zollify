@@ -23,7 +23,7 @@ import { calcDeProduct, calcDeProductByMaterial, esc, fmtEventDates, fmtWeightKg
 import type { CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { isArtwork } from '../lib/artwork';
 
-export type PackingListKind = 'export' | 'reimport';
+export type PackingListKind = 'export' | 'sold' | 'reimport';
 export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
 
 /**
@@ -67,7 +67,8 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   const d = state.declarant;
   const cur = m.currency || 'EUR';
   const products = state.products.filter((p) => !p.unlisted);
-  const title = kind === 'export' ? 'Export packing list' : 'Re-import packing list (unsold goods)';
+  const title =
+    kind === 'export' ? 'Export packing list' : kind === 'sold' ? 'Sold goods list (definitive export)' : 'Re-import packing list (unsold goods)';
 
   const CSS = `
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -110,10 +111,10 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const groups = new Map<string, { type: string; tariffNo: string; material: string; qty: number; wkg: number; val: number; hasVal: boolean; products: Set<CustomsDeProduct> }>();
     for (const p of products) {
       for (const mc of calcDeProductByMaterial(p)) {
-        const qty = kind === 'export' ? mc.amount : mc.reimportQty;
+        const qty = kind === 'export' ? mc.amount : kind === 'sold' ? mc.soldQty : mc.reimportQty;
         if (qty <= 0) continue;
-        const wkg = kind === 'export' ? mc.totalWeightKg : mc.reimportWeightKg;
-        const val = kind === 'export' ? mc.totalValue : mc.reimportValue;
+        const wkg = kind === 'export' ? mc.totalWeightKg : kind === 'sold' ? mc.soldWeightKg : mc.reimportWeightKg;
+        const val = kind === 'export' ? mc.totalValue : kind === 'sold' ? mc.soldValue : mc.reimportValue;
         const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
         const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, qty: 0, wkg: 0, val: 0, hasVal: false, products: new Set() };
         g.qty += qty;
@@ -162,7 +163,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         for (const v of p.variants!) {
           if (v.unlisted) continue;
           const vAmount = v.amount || 0;
-          const qty = kind === 'export' ? vAmount : Math.max(0, vAmount - (v.soldQty || 0));
+          const qty = kind === 'export' ? vAmount : kind === 'sold' ? v.soldQty || 0 : Math.max(0, vAmount - (v.soldQty || 0));
           if (qty <= 0) continue;
           const wgRaw = v.weightG != null && v.weightG !== '' ? v.weightG : p.weightG;
           const wg = parseFloat(String(wgRaw ?? '')) || 0;
@@ -184,10 +185,10 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         }
       } else {
         const c = calcDeProduct(p);
-        const qty = kind === 'export' ? c.amount : c.reimportQty;
+        const qty = kind === 'export' ? c.amount : kind === 'sold' ? c.soldQty : c.reimportQty;
         if (qty <= 0) continue;
-        const weightKg = kind === 'export' ? c.totalWeightKg : c.reimportWeightKg;
-        const value = kind === 'export' ? c.totalValue : c.reimportValue;
+        const weightKg = kind === 'export' ? c.totalWeightKg : kind === 'sold' ? c.soldWeightKg : c.reimportWeightKg;
+        const value = kind === 'export' ? c.totalValue : kind === 'sold' ? c.soldValue : c.reimportValue;
         totQty += qty;
         totWkg += weightKg;
         if (value != null) {
@@ -261,7 +262,9 @@ ${tableHtml}
   ${
     kind === 'export'
       ? 'These are the goods taken to the event for temporary export, pending sale. Unsold quantities are expected back into Germany afterwards - see the re-import list.'
-      : `Quantities not sold at ${esc(m.event || 'the event')}, returning to Germany. ${m.exportMrn ? `References export MRN ${esc(m.exportMrn)}.` : 'Record the export MRN under Customs (Germany) → Declaration details once known, so it can be referenced here.'}`
+      : kind === 'sold'
+        ? `Quantities actually sold at ${esc(m.event || 'the event')} - the definitive-export goods, not coming back to Germany. ${m.exportMrn ? `References export MRN ${esc(m.exportMrn)}.` : 'Record the export MRN under Customs (Germany) → Declaration details once known, so it can be referenced here.'}`
+        : `Quantities not sold at ${esc(m.event || 'the event')}, returning to Germany. ${m.exportMrn ? `References export MRN ${esc(m.exportMrn)}.` : 'Record the export MRN under Customs (Germany) → Declaration details once known, so it can be referenced here.'}`
   }
 </div>
 

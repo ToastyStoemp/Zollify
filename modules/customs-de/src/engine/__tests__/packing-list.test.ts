@@ -88,6 +88,15 @@ describe('buildPackingListHtml', () => {
     expect(html).toMatch(/Art Print[\s\S]*?<td class="r">7<\/td>/);
   });
 
+  it('sold goods list uses what was actually sold, not brought or remaining', () => {
+    const html = buildPackingListHtml(state(), 'sold', 'compressed');
+    expect(html).toContain('Sold goods list');
+    // Sticker: sold 20 of 20 brought - stays in, unlike the re-import list.
+    expect(html).toMatch(/Sticker[\s\S]*?<td class="r">20<\/td>/);
+    // Art Print: 2 + 1 = 3 sold across its variants.
+    expect(html).toMatch(/Art Print[\s\S]*?<td class="r">3<\/td>/);
+  });
+
   it('shows SKU and omits Swiss-only tariff/VAT rate columns', () => {
     const html = buildPackingListHtml(state(), 'export', 'compressed');
     expect(html).toContain('<th>SKU</th>');

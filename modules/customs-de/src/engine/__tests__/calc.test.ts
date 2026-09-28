@@ -48,4 +48,25 @@ describe('calcDeProduct', () => {
     expect(c.totalValue).toBe(100);
     expect(c.reimportQty).toBe(5);
   });
+
+  it('sold quantity/weight/value are what was actually sold - the definitive-export figure', () => {
+    const c = calcDeProduct(product({ amount: 10, soldQty: 4, price: 20, weightG: 100 }));
+    expect(c.soldQty).toBe(4);
+    expect(c.soldWeightKg).toBe(0.4);
+    expect(c.soldValue).toBe(80);
+  });
+
+  it('sums sold quantity across variants, same as the re-import figure', () => {
+    const c = calcDeProduct(
+      product({
+        amount: 0,
+        variants: [
+          { name: 'A', price: 20, weightG: 100, amount: 10, soldQty: 4, soldValue: 80 },
+          { name: 'B', price: 20, weightG: 100, amount: 10, soldQty: 4, soldValue: 80, unlisted: true },
+        ],
+      }),
+    );
+    expect(c.soldQty).toBe(4);
+    expect(c.soldValue).toBe(80);
+  });
 });

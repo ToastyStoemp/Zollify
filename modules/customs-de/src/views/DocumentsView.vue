@@ -230,6 +230,7 @@ watch(hasVariantProducts, (has) => {
 });
 
 const openExportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'export', packingFormat.value), safeName('de_export'));
+const openSoldList = () => state.value && openHtml(buildPackingListHtml(state.value, 'sold', packingFormat.value), safeName('de_sold'));
 const openReimportList = () => state.value && openHtml(buildPackingListHtml(state.value, 'reimport', packingFormat.value), safeName('de_reimport'));
 const openProforma = () => state.value && openHtml(buildProformaHtml(state.value), safeName('de_proforma'));
 const printIaaPlusSheet = () => state.value && openHtml(buildIaaPlusSheetHtml(state.value), safeName('iaa_plus'));
@@ -433,6 +434,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
         <p v-if="pdfBusy" class="hint">Generating PDF…</p>
         <div class="docs">
           <button type="button" :disabled="pdfBusy" @click="openExportList">Export packing list</button>
+          <button type="button" :disabled="pdfBusy" @click="openSoldList">Sold goods list</button>
           <button type="button" :disabled="pdfBusy" @click="openReimportList">Re-import packing list</button>
           <button type="button" class="primary" :disabled="pdfBusy" @click="openProforma">Proforma invoice</button>
         </div>

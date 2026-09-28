@@ -46,7 +46,12 @@ function toast(text: string): void {
 }
 
 // ── Editable customs settings (persisted into event.customs) ────────────────
-const artist = ref<CustomsArtist>(defaultCustomsArtist());
+/** This event's own override only - blank means "inherit the account default", not "was blank when I last opened this page". */
+const artistOverride = ref<CustomsArtist>(defaultCustomsArtist());
+/** Booth profile layered under the declarant, for display only - shown as a placeholder so an untouched field keeps tracking it. */
+const artistDefault = ref<CustomsArtist>(defaultCustomsArtist());
+/** What the generators actually use: the override wherever it's filled in, the account default everywhere else. */
+const artist = computed<CustomsArtist>(() => ({ ...artistDefault.value, ...stripEmpty<CustomsArtist>(artistOverride.value) }));
 const edec = ref<CustomsEdec>(defaultCustomsEdec());
 const form1174 = ref<CustomsForm1174>(defaultCustomsForm1174());
 const companyCode = ref('');
@@ -70,9 +75,13 @@ async function load(ev: SalesEvent): Promise<void> {
   loading = true;
   loadedEventId = ev.id;
   const blob = readCustomsBlob(ev);
-  // Layered, most specific last: booth profile, the module's declarant, this event's own record.
+  // Layered, most specific last: booth profile, then the module's declarant.
   const declarant = await sdk().config.get<Partial<CustomsArtist>>(DECLARANT_KEY);
-  artist.value = { ...defaultCustomsArtist(), ...stripEmpty<CustomsArtist>(sdk().account()?.profile.artist), ...stripEmpty<CustomsArtist>(declarant ?? undefined), ...stripEmpty<CustomsArtist>(blob.artist) };
+  artistDefault.value = { ...defaultCustomsArtist(), ...stripEmpty<CustomsArtist>(sdk().account()?.profile.artist), ...stripEmpty<CustomsArtist>(declarant ?? undefined) };
+  // This event's own record only - left blank wherever it never had its own value,
+  // so an unedited field keeps following the account default instead of freezing
+  // whatever that default happened to be the moment this page was first opened.
+  artistOverride.value = { ...defaultCustomsArtist(), ...(blob.artist ?? {}) };
   edec.value = { ...defaultCustomsEdec(), ...(blob.edec ?? {}) };
   const f = { ...defaultCustomsForm1174(), ...(blob.form1174 ?? {}) };
   if (!Array.isArray(f.assignments)) f.assignments = [];
@@ -120,7 +129,7 @@ async function save(): Promise<void> {
       ...ev,
       customs: {
         ...ev.customs,
-        artist: { ...artist.value },
+        artist: { ...artistOverride.value },
         edec: { ...edec.value },
         form1174: JSON.parse(JSON.stringify(form1174.value)),
         meta: {
@@ -139,7 +148,7 @@ async function save(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Could not save the customs details.';
   }
 }
-watch([artist, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN, incoterms], scheduleSave, { deep: true });
+watch([artistOverride, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN, incoterms], scheduleSave, { deep: true });
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
 const autoCompanyCode = computed(() => {
@@ -356,16 +365,16 @@ const TRANSPORT_MODES = [
       <article class="card">
         <h2>Artist / sender</h2>
         <div class="grid">
-          <label><span>Company name</span><input v-model="artist.companyName" type="text" /></label>
-          <label><span>Full name</span><input v-model="artist.fullName" type="text" /></label>
-          <label><span>Street &amp; house number</span><input v-model="artist.street" type="text" /></label>
-          <label><span>Postcode &amp; city</span><input v-model="artist.postCodeCity" type="text" placeholder="9000 Gent" /></label>
-          <label><span>Country of origin</span><CountryPicker v-model="artist.countryOfOrigin" store="name" placeholder="Belgium" /></label>
-          <label><span>Phone</span><input v-model="artist.phone" type="tel" /></label>
-          <label><span>Email</span><input v-model="artist.email" type="email" /></label>
-          <label><span>VAT / tax ID</span><input v-model="artist.vatId" type="text" class="mono" placeholder="DE123456789" /></label>
+          <label><span>Company name</span><input v-model="artistOverride.companyName" type="text" :placeholder="artistDefault.companyName" /></label>
+          <label><span>Full name</span><input v-model="artistOverride.fullName" type="text" :placeholder="artistDefault.fullName" /></label>
+          <label><span>Street &amp; house number</span><input v-model="artistOverride.street" type="text" :placeholder="artistDefault.street" /></label>
+          <label><span>Postcode &amp; city</span><input v-model="artistOverride.postCodeCity" type="text" :placeholder="artistDefault.postCodeCity || '9000 Gent'" /></label>
+          <label><span>Country of origin</span><CountryPicker v-model="artistOverride.countryOfOrigin" store="name" :placeholder="artistDefault.countryOfOrigin || 'Belgium'" /></label>
+          <label><span>Phone</span><input v-model="artistOverride.phone" type="tel" :placeholder="artistDefault.phone" /></label>
+          <label><span>Email</span><input v-model="artistOverride.email" type="email" :placeholder="artistDefault.email" /></label>
+          <label><span>VAT / tax ID</span><input v-model="artistOverride.vatId" type="text" class="mono" :placeholder="artistDefault.vatId || 'DE123456789'" /></label>
         </div>
-        <p class="hint">Prefilled from the booth profile and the declarant under Settings; what you change here applies to this event only.</p>
+        <p class="hint">Linked to the booth profile and the declarant under Settings - shown here as the greyed-out default. Type over a field to override it for this event only; leave it blank to keep following whatever the account default is.</p>
         <p class="hint">VAT/tax ID is only shown on the EU proforma invoice - required by German export brokers as a seller identifier.</p>
       </article>
 

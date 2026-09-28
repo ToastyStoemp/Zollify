@@ -1,5 +1,6 @@
 /** e-dec import XML - exact port of legacy generateEdecXML() (golden-tested). */
 import {
+  calcProductByMaterial,
   countryToCode,
   escapeXml,
   getPermitObligation,
@@ -7,7 +8,7 @@ import {
   parsePostCodeCity,
   toEdecHsCode,
 } from './calc';
-import type { CustomsState } from './model';
+import type { CustomsProduct, CustomsState } from './model';
 
 export interface EdecResult {
   xml: string;
@@ -101,38 +102,86 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
   lines.push(`    <goodsItem>`);
 
-  soldProducts.forEach((p, idx) => {
-    // For variant products, aggregate only non-unlisted variants
-    const listedVariants = p.variants && p.variants.length > 0 ? p.variants.filter((v) => !v.unlisted) : null;
-    const soldQty = listedVariants ? listedVariants.reduce((s, v) => s + (v.soldQty || 0), 0) : p.soldQty || 0;
-    const soldVal = listedVariants ? listedVariants.reduce((s, v) => s + (v.soldValue || 0), 0) : p.soldValue || 0;
+  /**
+   * One Positionsdaten entry per (HS code, material) instead of per product -
+   * a booth easily sells a dozen designs of the same zinc-alloy pin or the
+   * same-material print, each its own product but identical for customs
+   * purposes, and e-dec has no interest in telling them apart. Splits back
+   * out by material within a single product too (calcProductByMaterial), so
+   * a product whose own variants use different materials still gets one
+   * position per material rather than folding them together.
+   *
+   * permit/vatCode/origin/packaging are taken from whichever product reaches
+   * a given (HS code, material) key first - real catalogs practically always
+   * agree on these for the same code and material (permit/vatCode already
+   * both derive from the HS code by default), so this is a rounding
+   * simplification, not a real ambiguity, and the same shortcut goods-list.ts's
+   * own by-type grouping already takes.
+   */
+  interface EdecGroup {
+    tariffNo: string;
+    material: string;
+    soldQty: number;
+    statValue: number;
+    weightKg: number;
+    titles: string[];
+    permit: number;
+    vatCode: number;
+    originCc: string;
+    packagingType: string;
+  }
 
-    // Round to nearest 100 g (0.1 kg), minimum 0.1 kg
-    const weightKg = Math.max(0.1, Math.round((soldQty * ((p.weightG as number) || 0)) / 100) / 10);
-    const permit = p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo);
-    const vatCode = getVatCode(p.vatRate);
-    const hsCode = toEdecHsCode(p.tariffNo);
-    const originCc =
-      p.originCountry && p.originCountry.trim() ? p.originCountry.trim().toUpperCase() : dispatchCountry;
+  /** Same soldValue/price/totalValueCHF fallback as before, scoped to one (product, material) line. */
+  function statValueFor(p: CustomsProduct, soldQty: number, soldVal: number): number {
+    if (soldVal > 0) return soldVal;
+    if (p.price != null && p.price !== '') return soldQty * parseFloat(p.price as string);
+    if (p.totalValueCHF != null && p.amount) return (soldQty / p.amount) * parseFloat(p.totalValueCHF as string);
+    return 0;
+  }
 
-    // Statistical value: prefer soldValue if entered, else qty × unit price, else proportional from totalValue
-    let statValue = 0;
-    if (soldVal > 0) {
-      statValue = Math.floor(soldVal);
-    } else if (p.price != null && p.price !== '') {
-      statValue = Math.floor(soldQty * parseFloat(p.price as string));
-    } else if (p.totalValueCHF != null && p.amount) {
-      statValue = Math.floor((soldQty / p.amount) * parseFloat(p.totalValueCHF as string));
+  const groups = new Map<string, EdecGroup>();
+  for (const p of soldProducts) {
+    for (const mc of calcProductByMaterial(p)) {
+      if (!(mc.soldQty > 0)) continue;
+      const key = `${p.tariffNo || ''}\x00${mc.material}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          tariffNo: p.tariffNo || '',
+          material: mc.material,
+          soldQty: 0,
+          statValue: 0,
+          weightKg: 0,
+          titles: [],
+          permit: p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo),
+          vatCode: getVatCode(p.vatRate),
+          originCc: p.originCountry && p.originCountry.trim() ? p.originCountry.trim().toUpperCase() : dispatchCountry,
+          packagingType: p.packagingType || 'CT',
+        };
+        groups.set(key, g);
+      }
+      g.soldQty += mc.soldQty;
+      g.statValue += statValueFor(p, mc.soldQty, mc.soldValue);
+      g.weightKg += mc.soldWeightKg;
+      const title = p.title || '';
+      if (!g.titles.includes(title)) g.titles.push(title);
     }
+  }
+
+  [...groups.values()].forEach((g, idx) => {
+    const hsCode = toEdecHsCode(g.tariffNo);
+    // Round to nearest 100 g (0.1 kg), minimum 0.1 kg.
+    const weightKg = Math.max(0.1, Math.round(g.weightKg * 10) / 10);
+    const statValue = Math.floor(g.statValue);
 
     lines.push(`      <GoodsItemType>`);
     lines.push(`        <traderItemID>${idx}</traderItemID>`);
-    lines.push(`        <description>${escapeXml(soldQty + ' ' + (p.title || ''))}</description>`);
+    lines.push(`        <description>${escapeXml(g.soldQty + ' ' + g.titles.join(', '))}</description>`);
     lines.push(`        <commodityCode>${escapeXml(hsCode)}</commodityCode>`);
     lines.push(`        <grossMass>${weightKg}</grossMass>`);
     lines.push(`        <netMass>${weightKg}</netMass>`);
-    lines.push(`        <permitObligation>${permit}</permitObligation>`);
-    lines.push(`        <nonCustomsLawObligation>${permit}</nonCustomsLawObligation>`);
+    lines.push(`        <permitObligation>${g.permit}</permitObligation>`);
+    lines.push(`        <nonCustomsLawObligation>${g.permit}</nonCustomsLawObligation>`);
     lines.push(`        <statistic>`);
     lines.push(`          <customsClearanceType>1</customsClearanceType>`);
     lines.push(`          <commercialGood>1</commercialGood>`);
@@ -140,11 +189,10 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     lines.push(`          <repair>0</repair>`);
     lines.push(`        </statistic>`);
     lines.push(`        <origin>`);
-    lines.push(`          <originCountry>${escapeXml(originCc)}</originCountry>`);
+    lines.push(`          <originCountry>${escapeXml(g.originCc)}</originCountry>`);
     lines.push(`          <preference>0</preference>`);
     lines.push(`        </origin>`);
-    const pkgType = p.packagingType || 'CT';
-    if (pkgType === 'NE') {
+    if (g.packagingType === 'NE') {
       lines.push(`        <packaging>`);
       lines.push(`          <PackagingType>`);
       lines.push(`            <packagingType>NE</packagingType>`);
@@ -154,7 +202,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     } else {
       lines.push(`        <packaging>`);
       lines.push(`          <PackagingType>`);
-      lines.push(`            <packagingType>${escapeXml(pkgType)}</packagingType>`);
+      lines.push(`            <packagingType>${escapeXml(g.packagingType)}</packagingType>`);
       lines.push(`            <quantity>1</quantity>`);
       lines.push(`            <packagingReferenceNumber>1</packagingReferenceNumber>`);
       lines.push(`          </PackagingType>`);
@@ -163,7 +211,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     lines.push(`        <valuation>`);
     lines.push(`          <netDuty>0</netDuty>`);
     lines.push(`          <vatValue>${statValue}</vatValue>`);
-    lines.push(`          <vatCode>${vatCode}</vatCode>`);
+    lines.push(`          <vatCode>${g.vatCode}</vatCode>`);
     lines.push(`        </valuation>`);
     lines.push(`      </GoodsItemType>`);
   });

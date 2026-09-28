@@ -17,6 +17,8 @@ import {
   countryToCode,
   parsePostCodeCity,
   fmtEventDates,
+  floorN,
+  formatNum,
   hasVariants,
   variantPrice,
   variantWeight,
@@ -24,17 +26,7 @@ import {
 import { HS_CODES } from './data';
 import type { CustomsProduct, CustomsState, CustomsVariant, NumLike } from './model';
 
-export { esc, escapeXml, countryToCode, parsePostCodeCity, fmtEventDates, hasVariants, variantPrice, variantWeight };
-
-export function formatNum(n: NumLike, decimals: number): string {
-  return parseFloat(n as string).toFixed(decimals);
-}
-
-export function floorN(value: NumLike, decimals: number): number {
-  if (value == null || isNaN(value as number)) return 0;
-  const factor = Math.pow(10, decimals);
-  return Math.floor(parseFloat(value as string) * factor) / factor;
-}
+export { esc, escapeXml, countryToCode, parsePostCodeCity, fmtEventDates, floorN, formatNum, hasVariants, variantPrice, variantWeight };
 
 export function fmtWeightKg(kg: NumLike): string {
   if (kg == null || isNaN(kg as number) || kg === 0) return '0 kg';

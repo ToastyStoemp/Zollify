@@ -19,7 +19,7 @@
  *   - The info-table's declarant fields are this module's own (EORI,
  *     precheck office) instead of customs-ch's LRP/artist fields.
  */
-import { calcDeProduct, calcDeProductByMaterial, esc, fmtEventDates, fmtWeightKg, hasVariants } from './calc';
+import { calcDeProduct, calcDeProductByMaterial, esc, fmtEventDates, floorN, formatNum, fmtWeightKg, hasVariants } from './calc';
 import type { CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { isArtwork } from '../lib/artwork';
 
@@ -114,7 +114,12 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const qty = kind === 'export' ? mc.amount : kind === 'sold' ? mc.soldQty : mc.reimportQty;
         if (qty <= 0) continue;
         const wkg = kind === 'export' ? mc.totalWeightKg : kind === 'sold' ? mc.soldWeightKg : mc.reimportWeightKg;
-        const val = kind === 'export' ? mc.totalValue : kind === 'sold' ? mc.soldValue : mc.reimportValue;
+        // floorN before summing, not just at render time - a discount-adjusted
+        // soldValue can land on something like 464.90999999999997, and that
+        // needs settling before it's added into a running total too, not just
+        // where it's printed.
+        const valRaw = kind === 'export' ? mc.totalValue : kind === 'sold' ? mc.soldValue : mc.reimportValue;
+        const val = valRaw != null ? floorN(valRaw, 2) : null;
         const key = `${p.type || 'Other'}\x00${p.tariffNo || ''}\x00${mc.material}`;
         const g = groups.get(key) ?? { type: p.type || 'Other', tariffNo: p.tariffNo || '', material: mc.material, qty: 0, wkg: 0, val: 0, hasVal: false, products: new Set() };
         g.qty += qty;
@@ -137,7 +142,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
     const rows = groupList
       .map(
         (g, i) =>
-          `<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, d.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo || '-')}</td><td class="r">${g.qty}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? g.val : '-'}</td></tr>`,
+          `<tr><td class="c">${i + 1}</td><td>${byTypeGroupName(g, d.fullName)}</td>${materialCell(g.material)}<td class="r">${esc(g.tariffNo || '-')}</td><td class="r">${g.qty}</td><td class="r">${fmtWeightKg(g.wkg)}</td><td class="r">${g.hasVal ? formatNum(floorN(g.val, 2), 2) : '-'}</td></tr>`,
       )
       .join('');
     tableHtml = `<div class="section-title">List of goods (By type)</div>
@@ -149,7 +154,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
   <td class="r">${totQty}</td>
   <td class="r">${fmtWeightKg(totWkg)}</td>
-  <td class="r">${hasVal ? Math.floor(totVal) : '-'}</td>
+  <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
 </tr></tfoot></table>`;
   } else {
     const rowsArr: string[] = [];
@@ -175,7 +180,11 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
           // price and was silently showing the wrong total for every variant
           // row (calcDeProduct/calcDeProductByMaterial get this right further
           // down; this per-variant "detailed" row never routed through them).
-          const value = kind === 'sold' ? v.soldValue || 0 : price != null ? Math.round(price * qty) : null;
+          // floorN either way - a discount-adjusted soldValue can land on
+          // something like 464.90999999999997, and that needs settling before
+          // it's summed into the running total too, not just where it's printed.
+          const valueRaw = kind === 'sold' ? v.soldValue || 0 : price != null ? Math.round(price * qty) : null;
+          const value = valueRaw != null ? floorN(valueRaw, 2) : null;
           totQty += qty;
           totWkg += weightKg;
           if (value != null) {
@@ -185,7 +194,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
           rowNum++;
           rowsArr.push(
             `<tr><td class="c">${rowNum}</td><td>${esc(v.sku || p.sku || '-')}</td><td>${titleForCustoms(p, d.fullName)} - ${esc(v.name || '')}</td><td>${forSaleLabel}</td><td>${esc(p.type || '')}</td>${materialCell(resolveMaterial(p, v))}` +
-              `<td class="r">${qty}</td><td class="r">${wg ? Math.round(wg) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${price != null ? price : '-'}</td><td class="r">${value != null ? value : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
+              `<td class="r">${qty}</td><td class="r">${wg ? Math.round(wg) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${price != null ? price : '-'}</td><td class="r">${value != null ? formatNum(value, 2) : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
           );
         }
       } else {
@@ -193,7 +202,8 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const qty = kind === 'export' ? c.amount : kind === 'sold' ? c.soldQty : c.reimportQty;
         if (qty <= 0) continue;
         const weightKg = kind === 'export' ? c.totalWeightKg : kind === 'sold' ? c.soldWeightKg : c.reimportWeightKg;
-        const value = kind === 'export' ? c.totalValue : kind === 'sold' ? c.soldValue : c.reimportValue;
+        const valueRaw = kind === 'export' ? c.totalValue : kind === 'sold' ? c.soldValue : c.reimportValue;
+        const value = valueRaw != null ? floorN(valueRaw, 2) : null;
         totQty += qty;
         totWkg += weightKg;
         if (value != null) {
@@ -205,7 +215,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
         const titleDisplay = listedVariants ? `${titleForCustoms(p, d.fullName)} (${listedVariants} variant${listedVariants === 1 ? '' : 's'})` : titleForCustoms(p, d.fullName);
         rowsArr.push(
           `<tr><td class="c">${rowNum}</td><td>${esc(p.sku || '-')}</td><td>${titleDisplay}</td><td>${forSaleLabel}</td><td>${esc(p.type || '')}</td>${materialCell(p.material)}` +
-            `<td class="r">${qty}</td><td class="r">${c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-'}</td><td class="r">${value != null ? value : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
+            `<td class="r">${qty}</td><td class="r">${c.effectiveUnitWeightG ? Math.round(c.effectiveUnitWeightG) + ' g' : '-'}</td><td class="r">${fmtWeightKg(weightKg)}</td><td class="r">${c.effectiveUnitPrice != null ? c.effectiveUnitPrice : '-'}</td><td class="r">${value != null ? formatNum(value, 2) : '-'}</td><td class="r">${esc(p.tariffNo || '-')}</td><td class="c">${origin}</td></tr>`,
         );
       }
     }
@@ -222,7 +232,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totQty}</td><td></td>
   <td class="r">${fmtWeightKg(totWkg)}</td><td></td>
-  <td class="r">${hasVal ? Math.floor(totVal) : '-'}</td>
+  <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
   <td colspan="2"></td>
 </tr></tfoot></table>`;
   }

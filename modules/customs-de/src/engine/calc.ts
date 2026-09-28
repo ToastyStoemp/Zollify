@@ -6,13 +6,15 @@ import {
   parsePostCodeCity,
   countryToCode,
   fmtEventDates,
+  floorN,
+  formatNum,
   hasVariants,
   variantPrice,
   variantWeight,
 } from '@zollify/customs-core';
 import type { CustomsDeProduct } from './model';
 
-export { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, hasVariants };
+export { esc, escapeXml, parsePostCodeCity, countryToCode, fmtEventDates, floorN, formatNum, hasVariants };
 
 // calcDeProduct's own eligibility (`!p.unlisted && calcDeProduct(p).amount > 0`,
 // used by proforma.ts/iaa-plus-sheet.ts/dexpdf-xml.ts) is NOT customs-core's

@@ -30,6 +30,26 @@ export type NumLike = number | string | null | undefined;
 
 // ── Formatting / escaping ────────────────────────────────────────────────────
 
+export function formatNum(n: NumLike, decimals: number): string {
+  return parseFloat(n as string).toFixed(decimals);
+}
+
+/**
+ * Floors (never rounds up) to N decimals - a declared customs value should
+ * never come out higher than what was actually rounded down to, and this
+ * also absorbs floating-point noise (e.g. a discount-adjusted sum landing on
+ * 464.90999999999997 instead of 464.91) before it ever reaches a document.
+ * Previously customs-ch's own calc.ts only, applied inconsistently: customs-de's
+ * packing-list.ts had no equivalent at all, so a 'sold' row's value went
+ * straight from the adapter to the page with no rounding step - the exact
+ * value CH's own goods-list.ts already floors before display.
+ */
+export function floorN(value: NumLike, decimals: number): number {
+  if (value == null || isNaN(value as number)) return 0;
+  const factor = Math.pow(10, decimals);
+  return Math.floor(parseFloat(value as string) * factor) / factor;
+}
+
 export function esc(str: unknown): string {
   return String(str == null ? '' : str)
     .replace(/&/g, '&amp;')

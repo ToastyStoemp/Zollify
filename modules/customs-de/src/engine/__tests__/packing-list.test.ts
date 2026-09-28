@@ -114,8 +114,31 @@ describe('buildPackingListHtml', () => {
       ],
     };
     const html = buildPackingListHtml(discounted, 'sold', 'detailed');
-    expect(html).toMatch(/Art Print - A1[\s\S]*?<td class="r">44<\/td>/);
-    expect(html).not.toContain('<td class="r">50</td>');
+    expect(html).toMatch(/Art Print - A1[\s\S]*?<td class="r">44\.00<\/td>/);
+    expect(html).not.toContain('<td class="r">50.00</td>');
+  });
+
+  it('rounds a floating-point-noisy soldValue instead of leaking it raw, and the table total keeps 2 decimals too', () => {
+    // A discount-adjusted soldValue can land on something like
+    // 464.90999999999997 instead of 464.91 - that must never reach the
+    // rendered document unrounded, in either the row or the table's own
+    // TOTALS footer (which used to floor to a bare integer with no decimals
+    // at all, e.g. showing 5146 instead of 5146.88 - the "couple cents off"
+    // symptom).
+    const noisy: CustomsDeState = {
+      meta: { ...defaultCustomsDeMeta(), event: 'Con', currency: 'EUR' },
+      declarant: { ...defaultCustomsDeDeclarant(), companyName: 'Studio' },
+      products: [
+        {
+          id: 'p1', title: 'Sushi Bar', type: 'Print', forSale: true, tariffNo: '4911910000',
+          weightG: 100, price: 40, amount: 12, soldQty: 12, soldValue: 464.90999999999997,
+        },
+      ],
+    };
+    const html = buildPackingListHtml(noisy, 'sold', 'compressed');
+    expect(html).not.toContain('464.90999999999997');
+    expect(html).toMatch(/Sushi Bar[\s\S]*?<td class="r">464\.91<\/td>/);
+    expect(html).toMatch(/<tfoot>[\s\S]*?<td class="r">464\.91<\/td>/);
   });
 
   it('shows SKU and omits Swiss-only tariff/VAT rate columns', () => {

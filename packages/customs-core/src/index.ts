@@ -17,7 +17,7 @@
  * CustomsProduct/CustomsDeProduct type, so neither module's model.ts,
  * adapter, or any call site outside its own calc.ts needs to change.
  */
-import { COUNTRY_CODES } from '@zollify/shared';
+import { COUNTRY_CODES, type Transaction } from '@zollify/shared';
 
 /** Numeric-ish: state sometimes stores a number as a string. */
 export type NumLike = number | string | null | undefined;
@@ -209,4 +209,24 @@ export function calcCoreProduct(p: ProductLike, opts: CalcCoreOptions = {}): Cor
  */
 export function hasStock(p: ProductLike): boolean {
   return !p.unlisted && calcCoreProduct(p).amount > 0;
+}
+
+/**
+ * A transaction-level discount (a bundle price, a custom reduction) is
+ * attached to the whole sale, not to any one line item, so it can't be
+ * subtracted from a single product's declared value directly. Spreads it
+ * across every line proportionally to that line's own share of the
+ * pre-discount subtotal - the natural way to split a whole-sale reduction.
+ *
+ * Returns a fraction (0-1), not a currency amount, so it's safe to apply to
+ * a line value in either the charge currency or the base currency - both
+ * customs-ch (declares in the event's local/charge currency) and customs-de
+ * (declares in the account's base currency) can multiply their own line
+ * value by `1 - discountFraction(tx)` without any currency conversion.
+ */
+export function discountFraction(tx: Transaction): number {
+  const subtotal = tx.items.reduce((s, i) => s + i.lineTotal, 0);
+  if (subtotal <= 0) return 0;
+  const totalDiscount = tx.discounts.reduce((s, d) => s + d.amount, 0);
+  return Math.min(1, Math.max(0, totalDiscount / subtotal));
 }

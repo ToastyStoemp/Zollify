@@ -90,3 +90,22 @@ describe('buildCustomsState - Swiss documents declare in the event\'s local curr
     expect(state.products[0]!.soldValue).toBe(19);
   });
 });
+
+describe('buildCustomsState - discounted sales', () => {
+  it('spreads a transaction-level discount across its lines instead of declaring the full list price', () => {
+    // Two items at 10 each, a 5 bundle discount off the 20 subtotal -> 25%
+    // off every line, so each item's declared value is 7.5, not 10.
+    const tx: Transaction = {
+      id: 't1', eventId: 'ev1', deviceId: 'd1', timestamp: 1, method: 'cash', payments: [],
+      discounts: [{ name: 'Bundle', amount: 5 }],
+      total: 15, currency: 'CHF',
+      items: [
+        { pid: 'p1', vid: null, title: 'A', qty: 1, unitPrice: 10, lineTotal: 10 },
+        { pid: 'p2', vid: null, title: 'B', qty: 1, unitPrice: 10, lineTotal: 10 },
+      ],
+    };
+    const state = buildCustomsState(event, [product({ id: 'p1', price: 10 }), product({ id: 'p2', price: 10 })], [], [tx]);
+    expect(state.products.find((p) => p.id === 'p1')!.soldValue).toBe(7.5);
+    expect(state.products.find((p) => p.id === 'p2')!.soldValue).toBe(7.5);
+  });
+});

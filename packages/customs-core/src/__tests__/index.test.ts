@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { calcCoreProduct, countryToCode, hasStock } from '../index';
+import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
+import { calcCoreProduct, countryToCode, discountFraction, hasStock } from '../index';
+
+function txItem(over: Partial<TxItem>): TxItem {
+  return { pid: 'p', vid: null, title: 'Item', qty: 1, unitPrice: 10, lineTotal: 10, ...over };
+}
+
+function tx(items: TxItem[], discounts: TxDiscount[] = []): Transaction {
+  return {
+    id: 't', eventId: 'e', deviceId: 'd', timestamp: 0, method: 'cash',
+    payments: [], items, discounts, total: items.reduce((s, i) => s + i.lineTotal, 0), currency: 'CHF',
+  };
+}
 
 describe('countryToCode', () => {
   it('resolves a full country name via the shared COUNTRY_CODES table, not a hand-rolled subset', () => {
@@ -52,5 +64,26 @@ describe('calcCoreProduct / hasStock', () => {
     expect(c.amount).toBe(5);
     expect(c.totalValue).toBe(50);
     expect(c.totalWeightKg).toBe(0.5);
+  });
+});
+
+describe('discountFraction', () => {
+  it('is zero for a sale with no discount', () => {
+    expect(discountFraction(tx([txItem({ lineTotal: 100 })]))).toBe(0);
+  });
+
+  it('is the discount as a share of the pre-discount subtotal', () => {
+    // 100 subtotal, 25 off -> every line keeps 75% of its own value.
+    const t = tx([txItem({ lineTotal: 60 }), txItem({ lineTotal: 40 })], [{ name: 'Bundle', amount: 25 }]);
+    expect(discountFraction(t)).toBeCloseTo(0.25);
+  });
+
+  it('never goes negative or above 1, even with a discount larger than the subtotal', () => {
+    const t = tx([txItem({ lineTotal: 10 })], [{ name: 'Oops', amount: 50 }]);
+    expect(discountFraction(t)).toBe(1);
+  });
+
+  it('is zero for an empty sale rather than dividing by zero', () => {
+    expect(discountFraction(tx([]))).toBe(0);
   });
 });

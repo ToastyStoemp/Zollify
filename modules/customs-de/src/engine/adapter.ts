@@ -5,6 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
+import { discountFraction } from '@zollify/customs-core';
 import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
@@ -34,11 +35,15 @@ export function buildCustomsDeState(
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
     if (tx.eventId !== event.id || tx.revertedBy) continue;
+    // A bundle price or custom discount reduces the whole sale, not one line
+    // item - spread proportionally across this transaction's own lines so a
+    // discounted item's declared value isn't its full, undiscounted price.
+    const keep = 1 - discountFraction(tx);
     for (const item of tx.items) {
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
       cur.qty += item.qty;
-      cur.value += item.baseLineTotal ?? item.lineTotal;
+      cur.value += (item.baseLineTotal ?? item.lineTotal) * keep;
       soldByKey.set(key, cur);
     }
   }

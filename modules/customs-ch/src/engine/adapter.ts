@@ -6,6 +6,7 @@
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { toLocalPrice } from '@zollify/shared';
+import { discountFraction } from '@zollify/customs-core';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';
@@ -58,6 +59,10 @@ export function buildCustomsState(
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
     if (tx.eventId !== event.id || tx.revertedBy) continue;
+    // A bundle price or custom discount reduces the whole sale, not one line
+    // item - spread proportionally across this transaction's own lines so a
+    // discounted item's declared value isn't its full, undiscounted price.
+    const keep = 1 - discountFraction(tx);
     for (const item of tx.items) {
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
@@ -65,7 +70,7 @@ export function buildCustomsState(
       // The amount actually charged - already in the event's local currency
       // when one is configured (equal to the base amount otherwise), so this
       // stays consistent with the localized brought-stock prices below.
-      cur.value += item.lineTotal;
+      cur.value += item.lineTotal * keep;
       soldByKey.set(key, cur);
     }
   }

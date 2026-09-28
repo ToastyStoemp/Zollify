@@ -284,6 +284,22 @@ describe('a past event', () => {
     // A claim whose event was deleted reserves nothing either.
     expect(inv.eventIsOver(undefined)).toBe(true);
   });
+
+  it('still shows the claim to edit, even though it no longer reserves anything', async () => {
+    await events.upsertSalesEvent({ ...base, id: 'ev-old', name: 'Old', dateStart: '2020-01-01', dateEnd: '2020-01-02' });
+    await inv.setOnHand(PRINT, '', 10);
+    await inv.setClaim('ev-old', PRINT, '', 4);
+
+    const row = availability('ev-old');
+    // Soft-released: it no longer reserves stock, so it reads from the pool
+    // (the whole 10, since a soft-released claim also drops out of what other
+    // events' pool math sees as spoken for)...
+    expect(row.source).toBe('pool');
+    expect(row.available).toBe(10);
+    // ...but the number the seller typed in is still there to look at and edit,
+    // e.g. after reopening a finished event to correct what it took.
+    expect(row.claimed).toBe(4);
+  });
 });
 
 describe('a fresh count', () => {

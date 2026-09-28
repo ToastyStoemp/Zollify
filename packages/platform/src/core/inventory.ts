@@ -318,6 +318,10 @@ export function availabilityFor(eventId: string): Availability[] {
   const rows: Availability[] = [];
 
   const poolSold = poolSoldByKey.value;
+  // Once over, whatever the event had is soft-released back to the shared
+  // pool for selling purposes - but the claim itself is still there to look
+  // at and edit (e.g. reopening a finished event to correct what it took).
+  const reserving = !eventIsOver(getSalesEvent(eventId));
 
   for (const product of allProducts.value) {
     const variants = product.variants ?? [];
@@ -328,14 +332,15 @@ export function availabilityFor(eventId: string): Availability[] {
     for (const entry of entries) {
       const key = stockKey(product.id, entry.id);
       const onHand = onHandFor(product.id, entry.id);
-      const claimed = reservingClaimFor(eventId, product.id, entry.id);
+      const claimed = claimFor(eventId, product.id, entry.id);
+      const reservingClaim = reserving ? claimed : null;
       const soldHere = soldAt(eventId, product.id, entry.id);
       const totalClaimed = claimedTotal(product.id, entry.id);
 
-      const reservedElsewhere = totalClaimed - (claimed ?? 0);
+      const reservedElsewhere = totalClaimed - (reservingClaim ?? 0);
       const available =
-        claimed !== null
-          ? claimed - soldHere
+        reservingClaim !== null
+          ? reservingClaim - soldHere
           : onHand - totalClaimed - (poolSold.get(key) ?? 0);
 
       rows.push({
@@ -347,7 +352,7 @@ export function availabilityFor(eventId: string): Availability[] {
         soldHere,
         reservedElsewhere,
         available,
-        source: claimed !== null ? 'claim' : 'pool',
+        source: reservingClaim !== null ? 'claim' : 'pool',
       });
     }
   }

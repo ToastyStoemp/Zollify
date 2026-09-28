@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import type { Product, Variant } from '@zollify/shared';
+import type { Product } from '@zollify/shared';
 import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
@@ -374,7 +374,7 @@ const variantPicker = ref<Product | null>(null);
 function add(pid: string, vid: string | null): void {
   const p = products.value.find((x) => x.id === pid);
   if (!p) return;
-  const variants = (p.variants ?? []).filter((v) => !v.unlisted);
+  const variants = p.variants ?? [];
   if (variants.length && !vid) {
     variantPicker.value = p;
     return;
@@ -816,7 +816,7 @@ async function cancelPayment(): Promise<void> {
     <!-- ── Variant picker (stays open for several sizes in a row) ────────── -->
     <ModalShell v-if="variantPicker" :title="variantPicker.title || 'Choose a variant'" @close="variantPicker = null">
       <div class="grid inmodal">
-        <button v-for="v in (variantPicker.variants ?? []).filter((x: Variant) => !x.unlisted)" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
+        <button v-for="v in variantPicker.variants ?? []" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
           <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
           <span class="head">
             <!-- Only the variant's own photo - the product's would misrepresent the variant. -->

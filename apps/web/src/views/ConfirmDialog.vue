@@ -41,7 +41,12 @@ function onKey(event: KeyboardEvent): void {
 </template>
 
 <style scoped>
-.backdrop { position: fixed; inset: 0; z-index: 20; background: var(--zfy-scrim); display: grid; place-items: center; padding: 1rem; }
+/* Above ModalShell's own backdrop (30) - shellConfirm() is how a product's
+   "Remove"/a merge's confirmation is asked from inside an already-open
+   ModalShell, and this is one global instance shared by every caller, so it
+   has to outrank any modal that might be open under it, not just sit at some
+   fixed layer of its own. Also above TypeaheadPicker's dropdown (40). */
+.backdrop { position: fixed; inset: 0; z-index: 50; background: var(--zfy-scrim); display: grid; place-items: center; padding: 1rem; }
 .dialog { background: var(--zfy-surface); border-radius: 12px; padding: 1.25rem; max-width: 26rem; width: 100%; display: flex; flex-direction: column; gap: .75rem; box-shadow: 0 24px 48px -24px var(--zfy-shadow); }
 h2 { margin: 0; font-size: 1.05rem; }
 p { margin: 0; color: var(--zfy-muted); }

@@ -10,7 +10,7 @@ import {
   toasts,
   type Toast,
 } from '@zollify/platform';
-import { booted, contributions } from './boot';
+import { booted, contributions, signOutAndReload } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import { Icon } from '@zollify/ui';
 
@@ -204,6 +204,7 @@ const syncLabel = computed(() => {
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
+              <button type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
               <div class="build">build {{ build }}</div>
             </div>
           </footer>
@@ -312,6 +313,7 @@ nav { flex: 1; }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
+.who .switch { align-self: flex-start; padding: 0; min-height: 0; border: 0; color: var(--zfy-accent-ink); font-size: .78rem; font-weight: 600; margin-top: .15rem; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
 /* Capped and centered so a page with no width opinion of its own doesn't
    stretch full-bleed on an ultrawide monitor - most pages set no max-width,

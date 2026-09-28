@@ -33,7 +33,8 @@ const route = useRoute();
 const mode = ref<'login' | 'register'>('login');
 /** Android app only: which Zollify server this device talks to. */
 const native = isNative();
-const server = ref(getServerUrl());
+/** Pre-filled with the hosted server; still editable for anyone self-hosting. */
+const server = ref(getServerUrl() || 'https://zollify.app');
 function pointAtServer(): boolean {
   if (!native) return true;
   const url = server.value.trim().replace(/\/+$/, '');

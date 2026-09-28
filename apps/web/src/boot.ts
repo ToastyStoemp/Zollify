@@ -12,6 +12,9 @@ import {
   getServerUrl,
   isNative,
   recordSale,
+  signOut,
+  stopAutoSync,
+  stopRealtime,
   type LoadOutcome,
   type ModuleDescriptor,
   type ModuleResolver,
@@ -115,6 +118,21 @@ export const loader = new ModuleLoader({
   // via createModuleHost, so this one is only a fallback for host-level calls.
   ui: createShellUi('shell'),
 });
+
+/**
+ * Leaves the current account cleanly and lands back on the login screen -
+ * the one path both "sign out" and "switch account" take, since a user
+ * belongs to exactly one account and there is nothing to switch to without
+ * signing out of this one first.
+ */
+export async function signOutAndReload(): Promise<void> {
+  stopAutoSync();
+  stopRealtime();
+  await loader.unloadAll();
+  await signOut();
+  window.location.hash = '#/login';
+  window.location.reload();
+}
 
 interface ManifestResponse {
   sdk: string;

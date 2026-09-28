@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, deviceId, shellConfirm, signOut, stopAutoSync, stopRealtime } from '@zollify/platform';
-import { loader } from '../boot';
+import { authFetch, currentAccount, deviceId, shellConfirm, signOut } from '@zollify/platform';
+import { signOutAndReload } from '../boot';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -154,19 +154,8 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
-/**
- * Everything in memory belongs to the account that just left, so the cleanest
- * teardown is a fresh boot. Modules are unloaded first so their teardown hooks
- * run while the SDK they were given is still valid.
- */
-async function leave(): Promise<void> {
-  stopAutoSync();
-  stopRealtime();
-  await loader.unloadAll();
-  await signOut();
-  window.location.hash = '#/login';
-  window.location.reload();
-}
+/** Everything in memory belongs to the account that just left, so the cleanest teardown is a fresh boot. */
+const leave = signOutAndReload;
 
 onMounted(async () => {
   myDevice.value = await deviceId();

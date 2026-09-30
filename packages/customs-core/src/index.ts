@@ -22,8 +22,17 @@
  * fields actually used) rather than against either module's own
  * CustomsProduct/CustomsDeProduct type, so neither module's model.ts,
  * adapter, or any call site outside its own calc.ts needs to change.
+ *
+ * `./goods-doc` and `./proforma-doc` extend the same idea to the HTML-
+ * generation layer for the two document families where the shared parts
+ * carry no real legal divergence (packing/sold/return lists, and the
+ * proforma invoice) - column sets, aggregation, and legally-fixed forms with
+ * genuinely different fields (CH's 11.74/11.87, e-dec XML; DE's DEXPDF XML,
+ * IAA-Plus sheet) still stay separate per-country.
  */
 import { COUNTRY_CODES, type Transaction } from '@zollify/shared';
+export * from './goods-doc';
+export * from './proforma-doc';
 
 /** Numeric-ish: state sometimes stores a number as a string. */
 export type NumLike = number | string | null | undefined;

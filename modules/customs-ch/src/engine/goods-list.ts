@@ -8,7 +8,26 @@
  * dedicated, simpler document without Tariff Rate/VAT Rate columns, mirroring
  * customs-de's own packing list. Sold/Return keep their tariffRate/vatRate
  * columns; those weren't part of this change.
+ *
+ * CSS, the declarant header block, and the table skeleton (thead/tbody/tfoot
+ * + empty-state row) now come from @zollify/customs-core's goods-doc.ts,
+ * shared with customs-ch's own packing-list.ts and customs-de's
+ * packing-list.ts - each a straight relocation of this file's own exact
+ * text, so the golden test below is unaffected (it only checks the final
+ * string, never where the code producing it lives). Column sets and row
+ * aggregation stay here - the golden-locked, genuinely CH-specific part.
  */
+import {
+  buildDocHeaderHtml,
+  buildGoodsTableHtml,
+  buildPrintableDocumentHtml,
+  buildSignatureSectionHtml,
+  byTypeGroupName as coreByTypeGroupName,
+  goodsDocCss,
+  materialCell as coreMaterialCell,
+  resolveMaterial as coreResolveMaterial,
+  titleForCustoms as coreTitleForCustoms,
+} from '@zollify/customs-core';
 import {
   calcProduct,
   calcProductByMaterial,
@@ -35,18 +54,12 @@ export type GoodsDocNum = 2 | 3;
  * column now (materialCell() below), not folded in here.
  */
 function titleForCustoms(p: { title?: string; type?: string; year?: number }, artistName?: string): string {
-  const t = esc(p.title || '');
-  if (isArtwork(p.type)) {
-    const base = p.year ? `${t} (${p.year})` : t;
-    const artist = (artistName ?? '').trim();
-    return artist ? `${base} - ${esc(artist)}` : base;
-  }
-  return t;
+  return coreTitleForCustoms(esc, isArtwork, p, artistName);
 }
 
 /** A variant's own material overrides the product's when set. */
 export function resolveMaterial(p: { material?: string }, v?: { material?: string }): string | undefined {
-  return v?.material ?? p.material;
+  return coreResolveMaterial(p, v);
 }
 
 /**
@@ -56,7 +69,7 @@ export function resolveMaterial(p: { material?: string }, v?: { material?: strin
  * to compare against; every OTHER cell still has to match byte-for-byte).
  */
 export function materialCell(material: string | undefined): string {
-  return `<td class="mat">${esc(material || '')}</td>`;
+  return coreMaterialCell(esc, material);
 }
 
 /** Name for the Sold / Return lists: art prints gain the year + artist, matching the Import list. */
@@ -72,9 +85,7 @@ function soldReturnName(p: { title?: string; type?: string; year?: number }, art
  * type it stood in for (see golden-legacy.test.ts's normalizeByTypeGroupName).
  */
 export function byTypeGroupName(g: { type: string; products: Set<CustomsProduct> }, artistName?: string): string {
-  const typeEsc = esc(g.type);
-  if (g.products.size === 1) return `<strong data-type="${typeEsc}">${titleForCustoms([...g.products][0]!, artistName)}</strong>`;
-  return `<strong>${typeEsc}</strong>`;
+  return coreByTypeGroupName(esc, titleForCustoms, g, artistName, { dataTypeAttr: true });
 }
 export type GoodsFormat = 'detailed' | 'compressed' | 'bytype';
 
@@ -95,51 +106,20 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
 
   const docTitles = DOC_TITLES;
 
-  const CSS = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; color: #000; padding: 12mm; }
-  .doc-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm; }
-  .doc-top-left .doc-title { font-size: 10pt; font-weight: bold; text-transform: uppercase; }
-  .doc-top-left .doc-subtitle { font-size: 8pt; color: #444; margin-top: 2px; }
-  .doc-top-right { text-align: right; }
-  .doc-top-right .event-name { font-size: 11pt; font-weight: bold; }
-  .doc-top-right .lrp { font-size: 8pt; margin-top: 3px; }
-  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
-  .info-table td { padding: 2px 6px; font-size: 8pt; border: 1px solid #ccc; }
-  .info-table td.lbl { font-weight: bold; background: #f4f4f4; width: 130px; font-size: 7.5pt; }
-  .section-title { font-weight: bold; font-size: 9pt; margin: 4mm 0 2mm 0; border-bottom: 1.5px solid #000; padding-bottom: 1mm; }
-  table.goods { width: 100%; border-collapse: collapse; font-size: 7pt; }
-  table.goods th { background: #e8e8e8; border: 1px solid #aaa; padding: 3px 4px; text-align: left; font-size: 6.5pt; font-weight: bold; white-space: nowrap; }
-  table.goods td { border: 1px solid #ccc; padding: 2px 4px; vertical-align: middle; }
-  table.goods tr:nth-child(even) td { background: #fafafa; }
-  table.goods tfoot td { background: #e8e8e8; font-weight: bold; border: 1px solid #aaa; padding: 3px 4px; }
-  .r { text-align: right; } .c { text-align: center; }
-  .mono { font-family: 'Courier New', monospace; font-size: 6.5pt; }
-  .sold-head { border-left: 2px solid #666 !important; }
-  td.sold-first { border-left: 2px solid #888; }
-  .signature-section { margin-top: 8mm; }
-  .signature-box { border: 1px solid #000; width: 80mm; height: 22mm; margin-top: 2mm; }
-  @media print { body { padding: 0; } @page { size: A4 landscape; margin: 12mm; } }`;
+  const CSS = goodsDocCss({ mono: true, soldHead: true });
 
-  const header = `<div class="doc-top">
-  <div class="doc-top-left">
-    <div class="doc-title">${esc(docTitles[docNum])}</div>
-    <div class="doc-subtitle">${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}</div>
-  </div>
-  <div class="doc-top-right">
-    <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">LRP: ${esc(lrp || '-')}</div>
-  </div>
-</div>
-<table class="info-table">
-  <tr><td class="lbl">Artist / Company Name</td><td>${esc(a.companyName || '')}</td>
-      <td class="lbl">Name &amp; Surname</td><td>${esc(a.fullName || '')}</td></tr>
-  <tr><td class="lbl">Street &amp; House Number</td><td>${esc(a.street || '')}</td>
-      <td class="lbl">Postcode &amp; City</td><td>${esc(a.postCodeCity || '')}</td></tr>
-  <tr><td class="lbl">Country of Origin</td><td>${esc(a.countryOfOrigin || '')}</td>
-      <td class="lbl">Phone / Mobile</td><td>${esc(a.phone || '')}</td></tr>
-  <tr><td class="lbl">Email</td><td colspan="3">${esc(a.email || '')}</td></tr>
-</table>`;
+  const header = buildDocHeaderHtml({
+    docTitleHtml: esc(docTitles[docNum]),
+    subtitleHtml: `${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}`,
+    eventNameHtml: esc(m.event || ''),
+    cornerLinesHtml: [`LRP: ${esc(lrp || '-')}`],
+    infoRows: [
+      { label1: 'Artist / Company Name', value1: esc(a.companyName || ''), label2: 'Name &amp; Surname', value2: esc(a.fullName || '') },
+      { label1: 'Street &amp; House Number', value1: esc(a.street || ''), label2: 'Postcode &amp; City', value2: esc(a.postCodeCity || '') },
+      { label1: 'Country of Origin', value1: esc(a.countryOfOrigin || ''), label2: 'Phone / Mobile', value2: esc(a.phone || '') },
+      { label: 'Email', value: esc(a.email || ''), colspan: 3 },
+    ],
+  });
 
   let tableHtml = '';
 
@@ -208,22 +188,20 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           <td class="r">${formatNum(floorN(g.soldVal, 2), 2)}</td>
           <td class="r">${fmtWeightKg(g.soldWkg)}</td></tr>`);
       });
-      const rows = detailedRows.join('');
-      const emptyRow = rows
-        ? ''
-        : `<tr><td colspan="9" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>`;
-      tableHtml = `<div class="section-title">List of goods sold (By Type)</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th>
+      tableHtml = buildGoodsTableHtml({
+        sectionTitle: 'List of goods sold (By Type)',
+        theadRowHtml: `  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th>
   <th class="r">Tariff Rate</th><th class="r">VAT Rate</th>
   <th class="r">Qty Sold</th><th class="r">Value Sold (${getCurrency(state)})</th>
-  <th class="r">Sold Weight</th>
-</tr></thead><tbody>${rows}${emptyRow}</tbody><tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">Sold Weight</th>`,
+        bodyRowsHtml: detailedRows.join(''),
+        emptyColspan: 9,
+        emptyMessage: 'No sold quantities entered',
+        tfootRowHtml: `  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totSQ}</td>
   <td class="r">${formatNum(floorN(totSV, 2), 2)}</td>
-  <td class="r">${fmtWeightKg(totSWkg)}</td>
-</tr></tfoot></table>`;
+  <td class="r">${fmtWeightKg(totSWkg)}</td>`,
+      });
     } else {
       state.products.forEach((p) => {
         if (!hasCustomsInfo(p)) return;
@@ -268,23 +246,21 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
         }
       });
 
-      const rows = detailedRows.join('');
-      const emptyRow = rows
-        ? ''
-        : `<tr><td colspan="8" style="text-align:center;color:#888;padding:8px">No sold quantities entered</td></tr>`;
       const formatLabel = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
-      tableHtml = `<div class="section-title">List of goods sold${formatLabel}</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
+      tableHtml = buildGoodsTableHtml({
+        sectionTitle: `List of goods sold${formatLabel}`,
+        theadRowHtml: `  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
   <th class="r">Tariff no.</th>
   <th class="r">Qty Sold</th><th class="r">Value Sold (${getCurrency(state)})</th>
-  <th class="r">Sold Weight</th>
-</tr></thead><tbody>${rows}${emptyRow}</tbody><tfoot><tr>
-  <td colspan="4" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">Sold Weight</th>`,
+        bodyRowsHtml: detailedRows.join(''),
+        emptyColspan: 8,
+        emptyMessage: 'No sold quantities entered',
+        tfootRowHtml: `  <td colspan="4" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totSQ}</td>
   <td class="r">${formatNum(floorN(totSV, 2), 2)}</td>
-  <td class="r">${fmtWeightKg(totSWkg)}</td>
-</tr></tfoot></table>`;
+  <td class="r">${fmtWeightKg(totSWkg)}</td>`,
+      });
     }
   } else {
     // ── EXPORT/RETURN: unsold items going back (original qty − sold qty) ──
@@ -355,22 +331,20 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
           <td class="r">${fmtWeightKg(g.retWkg)}</td>
           <td class="r">${g.hasVal ? g.retVal : '-'}</td></tr>`);
       });
-      const rows = detailedRows.join('');
-      const emptyRow = rows
-        ? ''
-        : `<tr><td colspan="9" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>`;
-      tableHtml = `<div class="section-title">Return goods list (re-export) (By Type)</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th>
+      tableHtml = buildGoodsTableHtml({
+        sectionTitle: 'Return goods list (re-export) (By Type)',
+        theadRowHtml: `  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS Code</th>
   <th class="r">Tariff Rate</th><th class="r">VAT Rate</th>
   <th class="r">Return Qty</th><th class="r">Return Weight</th>
-  <th class="r">Return Value (${getCurrency(state)})</th>
-</tr></thead><tbody>${rows}${emptyRow}</tbody><tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">Return Value (${getCurrency(state)})</th>`,
+        bodyRowsHtml: detailedRows.join(''),
+        emptyColspan: 9,
+        emptyMessage: 'All items sold - no return goods',
+        tfootRowHtml: `  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r"><strong>${totRetQty}</strong></td>
   <td class="r">${fmtWeightKg(totRetWkg)}</td>
-  <td class="r" style="color:#c00">${Math.floor(totRetVal)}</td>
-</tr></tfoot></table>`;
+  <td class="r" style="color:#c00">${Math.floor(totRetVal)}</td>`,
+      });
     } else {
       state.products.forEach((p) => {
         if (!hasCustomsInfo(p)) return;
@@ -437,34 +411,30 @@ export function buildGoodsListHtml(state: CustomsState, docNum: GoodsDocNum, for
         }
       });
 
-      const rows = detailedRows.join('');
-      const emptyRow = rows
-        ? ''
-        : `<tr><td colspan="15" style="text-align:center;color:#888;padding:8px">All items sold - no return goods</td></tr>`;
       const formatLabel = format === 'detailed' ? ' (Detailed)' : ' (Compressed)';
-      tableHtml = `<div class="section-title">Return goods list (re-export)${formatLabel}</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
+      tableHtml = buildGoodsTableHtml({
+        sectionTitle: `Return goods list (re-export)${formatLabel}`,
+        theadRowHtml: `  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
   <th class="r">Original Qty</th><th class="r">Sold Qty</th><th class="r">Return Qty</th>
   <th class="r">Unit Weight</th><th class="r">Return Weight</th>
   <th class="r">Unit Price (${getCurrency(state)})</th><th class="r">Return Value (${getCurrency(state)})</th>
-  <th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th>
-</tr></thead><tbody>${rows}${emptyRow}</tbody><tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">Tariff no.</th><th class="r">Tariff Rate</th><th class="r">VAT Rate</th><th class="c">Origin</th>`,
+        bodyRowsHtml: detailedRows.join(''),
+        emptyColspan: 15,
+        emptyMessage: 'All items sold - no return goods',
+        tfootRowHtml: `  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r"><strong>${totRetQty}</strong></td><td></td>
   <td class="r">${fmtWeightKg(totRetWkg)}</td><td></td>
-  <td class="r" style="color:#c00">${Math.floor(totRetVal)}</td><td colspan="4"></td>
-</tr></tfoot></table>`;
+  <td class="r" style="color:#c00">${Math.floor(totRetVal)}</td><td colspan="4"></td>`,
+      });
     }
   }
 
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>${esc(docTitles[docNum])} -${esc(m.event || 'ZollTool')}</title>
-<style>${CSS}</style></head><body>
-${header}
-${tableHtml}
-<div class="signature-section"><strong>Date and Signature</strong><div class="signature-box"></div></div>
-</body></html>`;
+  const html = buildPrintableDocumentHtml({
+    titleHtml: `${esc(docTitles[docNum])} -${esc(m.event || 'ZollTool')}`,
+    css: CSS,
+    bodyHtml: `${header}\n${tableHtml}\n${buildSignatureSectionHtml()}`,
+  });
 
   return html;
 }

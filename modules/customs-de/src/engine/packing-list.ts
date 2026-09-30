@@ -19,6 +19,17 @@
  *   - The info-table's declarant fields are this module's own (EORI,
  *     precheck office) instead of customs-ch's LRP/artist fields.
  */
+import {
+  buildDocHeaderHtml,
+  buildGoodsTableHtml,
+  buildPrintableDocumentHtml,
+  buildSignatureSectionHtml,
+  byTypeGroupName as coreByTypeGroupName,
+  goodsDocCss,
+  materialCell as coreMaterialCell,
+  resolveMaterial as coreResolveMaterial,
+  titleForCustoms as coreTitleForCustoms,
+} from '@zollify/customs-core';
 import { calcDeProduct, calcDeProductByMaterial, esc, fmtEventDates, floorN, formatNum, fmtWeightKg, hasVariants } from './calc';
 import type { CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { isArtwork } from '../lib/artwork';
@@ -33,8 +44,7 @@ export type PackingListFormat = 'detailed' | 'compressed' | 'bytype';
  * customs-ch/engine/goods-list.ts's byTypeGroupName().
  */
 function byTypeGroupName(g: { type: string; products: Set<CustomsDeProduct> }, artistName?: string): string {
-  if (g.products.size === 1) return `<strong>${titleForCustoms([...g.products][0]!, artistName)}</strong>`;
-  return `<strong>${esc(g.type)}</strong>`;
+  return coreByTypeGroupName(esc, titleForCustoms, g, artistName);
 }
 
 /**
@@ -44,22 +54,16 @@ function byTypeGroupName(g: { type: string; products: Set<CustomsDeProduct> }, a
  * titleForCustoms().
  */
 function titleForCustoms(p: CustomsDeProduct, artistName?: string): string {
-  const t = esc(p.title || '');
-  if (isArtwork(p.type)) {
-    const base = p.year ? `${t} (${p.year})` : t;
-    const artist = (artistName ?? '').trim();
-    return artist ? `${base} - ${esc(artist)}` : base;
-  }
-  return t;
+  return coreTitleForCustoms(esc, isArtwork, p, artistName);
 }
 
 /** A variant's own material override, falling back to the product's. Mirrors customs-ch/engine/goods-list.ts's resolveMaterial(). */
 function resolveMaterial(p: CustomsDeProduct, v: CustomsDeVariant): string {
-  return (v.material ?? p.material) || '';
+  return coreResolveMaterial(p, v) || '';
 }
 
 function materialCell(material?: string): string {
-  return `<td class="mat">${esc(material || '')}</td>`;
+  return coreMaterialCell(esc, material);
 }
 
 export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKind, format: PackingListFormat = 'detailed', now: Date = new Date()): string {
@@ -70,32 +74,7 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
   const title =
     kind === 'export' ? 'Export packing list' : kind === 'sold' ? 'Sold goods list (definitive export)' : 'Re-import packing list (unsold goods)';
 
-  const CSS = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 8pt; color: #000; padding: 12mm; }
-  .doc-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6mm; }
-  .doc-top-left .doc-title { font-size: 10pt; font-weight: bold; text-transform: uppercase; }
-  .doc-top-left .doc-subtitle { font-size: 8pt; color: #444; margin-top: 2px; }
-  .doc-top-right { text-align: right; }
-  .doc-top-right .event-name { font-size: 11pt; font-weight: bold; }
-  .doc-top-right .lrp { font-size: 8pt; margin-top: 3px; }
-  .info-table { width: 100%; border-collapse: collapse; margin-bottom: 5mm; }
-  .info-table td { padding: 2px 6px; font-size: 8pt; border: 1px solid #ccc; }
-  .info-table td.lbl { font-weight: bold; background: #f4f4f4; width: 130px; font-size: 7.5pt; }
-  .section-title { font-weight: bold; font-size: 9pt; margin: 4mm 0 2mm 0; border-bottom: 1.5px solid #000; padding-bottom: 1mm; }
-  table.goods { width: 100%; border-collapse: collapse; font-size: 7pt; }
-  table.goods th { background: #e8e8e8; border: 1px solid #aaa; padding: 3px 4px; text-align: left; font-size: 6.5pt; font-weight: bold; white-space: nowrap; }
-  table.goods td { border: 1px solid #ccc; padding: 2px 4px; vertical-align: middle; }
-  table.goods tr:nth-child(even) td { background: #fafafa; }
-  table.goods tfoot td { background: #e8e8e8; font-weight: bold; border: 1px solid #aaa; padding: 3px 4px; }
-  .r { text-align: right; } .c { text-align: center; }
-  .total-box { border: 2px solid #000; display: inline-block; padding: 4mm 8mm; margin: 4mm 0; }
-  .total-box .total-label { font-size: 8pt; text-transform: uppercase; color: #555; }
-  .total-box .total-value { font-size: 14pt; font-weight: bold; }
-  .notice { font-size: 7.5pt; color: #333; border-top: 1px solid #ccc; padding-top: 4mm; margin-top: 4mm; line-height: 1.6; }
-  .signature-section { margin-top: 8mm; }
-  .signature-box { border: 1px solid #000; width: 80mm; height: 22mm; margin-top: 2mm; }
-  @media print { body { padding: 0; } @page { size: A4 landscape; margin: 12mm; } }`;
+  const CSS = goodsDocCss({ totalBox: true, notice: true });
 
   // 'sold' is the definitive-export declaration - the one document customs-ch
   // has a direct counterpart for (goods-list.ts docNum 2). Its columns mirror
@@ -156,28 +135,30 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
       )
       .join('');
     tableHtml = isSold
-      ? `<div class="section-title">List of goods (By type)</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">Tariff no.</th>
-  <th class="r">Qty Sold</th><th class="r">Value Sold (${esc(cur)})</th><th class="r">Sold Weight</th>
-</tr></thead><tbody>${rows || `<tr><td colspan="7" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
-<tfoot><tr>
-  <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
+      ? buildGoodsTableHtml({
+          sectionTitle: 'List of goods (By type)',
+          theadRowHtml: `  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">Tariff no.</th>
+  <th class="r">Qty Sold</th><th class="r">Value Sold (${esc(cur)})</th><th class="r">Sold Weight</th>`,
+          bodyRowsHtml: rows,
+          emptyColspan: 7,
+          emptyMessage: 'Nothing to list',
+          tfootRowHtml: `  <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
   <td class="r">${totQty}</td>
   <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
-  <td class="r">${fmtWeightKg(totWkg)}</td>
-</tr></tfoot></table>`
-      : `<div class="section-title">List of goods (By type)</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS / tariff code</th>
-  <th class="r">Qty</th><th class="r">Weight</th><th class="r">Value (${esc(cur)})</th>
-</tr></thead><tbody>${rows || `<tr><td colspan="7" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
-<tfoot><tr>
-  <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
+  <td class="r">${fmtWeightKg(totWkg)}</td>`,
+        })
+      : buildGoodsTableHtml({
+          sectionTitle: 'List of goods (By type)',
+          theadRowHtml: `  <th>#</th><th>Type</th><th class="mat">Material</th><th class="r">HS / tariff code</th>
+  <th class="r">Qty</th><th class="r">Weight</th><th class="r">Value (${esc(cur)})</th>`,
+          bodyRowsHtml: rows,
+          emptyColspan: 7,
+          emptyMessage: 'Nothing to list',
+          tfootRowHtml: `  <td colspan="2" style="text-align:right">TOTALS</td><td class="mat"></td><td></td>
   <td class="r">${totQty}</td>
   <td class="r">${fmtWeightKg(totWkg)}</td>
-  <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
-</tr></tfoot></table>`;
+  <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>`,
+        });
   } else {
     const rowsArr: string[] = [];
     let rowNum = 0;
@@ -250,61 +231,53 @@ export function buildPackingListHtml(state: CustomsDeState, kind: PackingListKin
 
     const formatLabel = format === 'detailed' ? 'Detailed' : 'Compressed';
     tableHtml = isSold
-      ? `<div class="section-title">List of goods sold${format === 'detailed' ? ' (Detailed)' : ' (Compressed)'}</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
+      ? buildGoodsTableHtml({
+          sectionTitle: `List of goods sold${format === 'detailed' ? ' (Detailed)' : ' (Compressed)'}`,
+          theadRowHtml: `  <th>#</th><th>Title</th><th>Type</th><th class="mat">Material</th>
   <th class="r">Tariff no.</th>
-  <th class="r">Qty Sold</th><th class="r">Value Sold (${esc(cur)})</th><th class="r">Sold Weight</th>
-</tr></thead><tbody>${rowsArr.join('') || `<tr><td colspan="8" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
-<tfoot><tr>
-  <td colspan="4" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">Qty Sold</th><th class="r">Value Sold (${esc(cur)})</th><th class="r">Sold Weight</th>`,
+          bodyRowsHtml: rowsArr.join(''),
+          emptyColspan: 8,
+          emptyMessage: 'Nothing to list',
+          tfootRowHtml: `  <td colspan="4" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totQty}</td>
   <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
-  <td class="r">${fmtWeightKg(totWkg)}</td>
-</tr></tfoot></table>`
-      : `<div class="section-title">List of goods (${formatLabel})</div>
-<table class="goods"><thead><tr>
-  <th>#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th><th class="mat">Material</th>
+  <td class="r">${fmtWeightKg(totWkg)}</td>`,
+        })
+      : buildGoodsTableHtml({
+          sectionTitle: `List of goods (${formatLabel})`,
+          theadRowHtml: `  <th>#</th><th>SKU</th><th>Title</th><th>For sale</th><th>Type</th><th class="mat">Material</th>
   <th class="r">Qty</th><th class="r">Unit weight</th><th class="r">Total weight</th>
   <th class="r">Unit value (${esc(cur)})</th><th class="r">Total value (${esc(cur)})</th>
-  <th class="r">HS / tariff code</th><th class="c">Origin</th>
-</tr></thead><tbody>${rowsArr.join('') || `<tr><td colspan="13" style="text-align:center;padding:8px;color:#888">Nothing to list</td></tr>`}</tbody>
-<tfoot><tr>
-  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
+  <th class="r">HS / tariff code</th><th class="c">Origin</th>`,
+          bodyRowsHtml: rowsArr.join(''),
+          emptyColspan: 13,
+          emptyMessage: 'Nothing to list',
+          tfootRowHtml: `  <td colspan="5" style="text-align:right">TOTALS</td><td class="mat"></td>
   <td class="r">${totQty}</td><td></td>
   <td class="r">${fmtWeightKg(totWkg)}</td><td></td>
   <td class="r">${hasVal ? formatNum(floorN(totVal, 2), 2) : '-'}</td>
-  <td colspan="2"></td>
-</tr></tfoot></table>`;
+  <td colspan="2"></td>`,
+        });
   }
 
-  const header = `<div class="doc-top">
-  <div class="doc-top-left">
-    <div class="doc-title">${esc(title)}</div>
-    <div class="doc-subtitle">${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}</div>
-  </div>
-  <div class="doc-top-right">
-    <div class="event-name">${esc(m.event || '')}</div>
-    <div class="lrp">EORI: ${esc(m.eori || '-')}</div>
-    ${m.lrn ? `<div class="lrp">LRN: ${esc(m.lrn)}</div>` : ''}
-    ${m.exportMrn ? `<div class="lrp">MRN: ${esc(m.exportMrn)}</div>` : ''}
-  </div>
-</div>
-<table class="info-table">
-  <tr><td class="lbl">Company Name</td><td>${esc(d.companyName || '')}</td>
-      <td class="lbl">Name &amp; Surname</td><td>${esc(d.fullName || '')}</td></tr>
-  <tr><td class="lbl">Street &amp; House Number</td><td>${esc(d.street || '')}</td>
-      <td class="lbl">Postcode &amp; City</td><td>${esc(d.postCodeCity || '')}</td></tr>
-  <tr><td class="lbl">Country of Origin</td><td>${esc(d.countryOfOrigin || '')}</td>
-      <td class="lbl">Phone / Mobile</td><td>${esc(d.phone || '')}</td></tr>
-  <tr><td class="lbl">Email</td><td>${esc(d.email || '')}</td>
-      <td class="lbl">Precheck Office</td><td>${esc(m.precheckOffice || '-')}</td></tr>
-</table>`;
+  const header = buildDocHeaderHtml({
+    docTitleHtml: esc(title),
+    subtitleHtml: `${esc(fmtEventDates(m.eventDateStart, m.eventDateEnd))}${m.eventLocation ? ', ' + esc(m.eventLocation) : ''}`,
+    eventNameHtml: esc(m.event || ''),
+    cornerLinesHtml: [`EORI: ${esc(m.eori || '-')}`, ...(m.lrn ? [`LRN: ${esc(m.lrn)}`] : []), ...(m.exportMrn ? [`MRN: ${esc(m.exportMrn)}`] : [])],
+    infoRows: [
+      { label1: 'Company Name', value1: esc(d.companyName || ''), label2: 'Name &amp; Surname', value2: esc(d.fullName || '') },
+      { label1: 'Street &amp; House Number', value1: esc(d.street || ''), label2: 'Postcode &amp; City', value2: esc(d.postCodeCity || '') },
+      { label1: 'Country of Origin', value1: esc(d.countryOfOrigin || ''), label2: 'Phone / Mobile', value2: esc(d.phone || '') },
+      { label1: 'Email', value1: esc(d.email || ''), label2: 'Precheck Office', value2: esc(m.precheckOffice || '-') },
+    ],
+  });
 
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>${esc(title)} - ${esc(m.event || '')}</title>
-<style>${CSS}</style></head><body>
-${header}
+  const html = buildPrintableDocumentHtml({
+    titleHtml: `${esc(title)} - ${esc(m.event || '')}`,
+    css: CSS,
+    bodyHtml: `${header}
 ${tableHtml}
 
 <div class="total-box">
@@ -324,8 +297,8 @@ ${tableHtml}
   }
 </div>
 
-<div class="signature-section"><strong>Date and Signature</strong><div class="signature-box"></div></div>
-</body></html>`;
+${buildSignatureSectionHtml()}`,
+  });
 
   return html;
 }

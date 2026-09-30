@@ -13,6 +13,7 @@
   "dependencies": {
     "@zollify/customs-ch": "*",
     "@zollify/customs-de": "*",
+    "@zollify/customs-hub": "*",
     "@zollify/migration": "*",
     "@zollify/platform": "*",
     "@zollify/pos": "*",

@@ -15,7 +15,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-de',
-  version: '0.1.9',
+  version: '0.1.10',
   sdk: '^0.1.0',
   title: 'Customs (Germany)',
   description: 'ATLAS export/re-import preparation: packing lists and a filing checklist.',
@@ -38,8 +38,6 @@ export default defineModule({
         component: () => import('./views/DocumentsView.vue'),
       },
     ]);
-
-    sdk.nav.add({ routeName: 'index', group: 'events', label: 'Customs (Germany)', icon: 'file-text', order: 121 });
 
     sdk.settings.panel({
       id: 'declarant',

@@ -32,6 +32,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   pos: () => import('@zollify/pos'),
   'customs-ch': () => import('@zollify/customs-ch'),
   'customs-de': () => import('@zollify/customs-de'),
+  'customs-hub': () => import('@zollify/customs-hub'),
   'price-cards': () => import('@zollify/price-cards'),
   'label-printer': () => import('@zollify/label-printer'),
   'convention-checklist': () => import('@zollify/convention-checklist'),

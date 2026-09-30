@@ -10,7 +10,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-ch',
-  version: '0.1.12',
+  version: '0.1.13',
   sdk: '^0.1.0',
   title: 'Customs (Switzerland)',
   description: 'EDEC XML, Forms 1174 and 1187, proforma invoices and goods lists.',
@@ -35,11 +35,9 @@ export default defineModule({
       },
     ]);
 
-    sdk.nav.add({ routeName: 'index', group: 'events', label: 'Customs (Switzerland)', icon: 'file-text', order: 120 });
-
     sdk.settings.panel({
       id: 'declarant',
-      label: 'Customs declarant',
+      label: 'Customs declarant (Switzerland)',
       component: () => import('./views/DeclarantSettings.vue'),
       order: 120,
     });

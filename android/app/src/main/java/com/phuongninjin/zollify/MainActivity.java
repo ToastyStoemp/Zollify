@@ -8,18 +8,15 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // Diagnostic aid while tracking down why content updates
-        // (@capgo/capacitor-updater) aren't applying on a real device -
-        // release builds otherwise leave this off, which is exactly why we
-        // can't see what checkAndQueueShellUpdate()'s try/catch is
-        // swallowing. Lets `chrome://inspect` (Chrome on a PC, phone over
-        // USB with USB debugging on) attach to this WebView and read its
-        // console/network directly. Not a real security exposure - it only
-        // works over a physical USB connection - but this was left
-        // unconditional on purpose for this debugging pass; consider
-        // gating it behind BuildConfig.DEBUG again once the update path is
-        // confirmed working.
-        WebView.setWebContentsDebuggingEnabled(true);
+        // Was left unconditionally on for a debugging pass tracking down why
+        // content updates (@capgo/capacitor-updater) weren't applying on a
+        // real device (root cause found: the native plugin was never wired
+        // into android/capacitor.settings.gradle - fixed separately). Gated
+        // back to debug builds only - the carbon flavor goes through myPOS's
+        // app validation, which a debuggable release WebView would fail.
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
         registerPlugin(MyPosPlugin.class);
         registerPlugin(FileSharePlugin.class);
         registerPlugin(ThermalPrinterPlugin.class);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { buildCustomsDeState } from '../adapter';
 
 const event: SalesEvent = {
@@ -39,5 +39,50 @@ describe('buildCustomsDeState - discounted sales', () => {
     };
     const state = buildCustomsDeState(event, [product({ price: 20 })], [], [tx]);
     expect(state.products[0]!.soldValue).toBe(20);
+  });
+});
+
+describe('buildCustomsDeState - combining sales from other events (same trip, two shows)', () => {
+  const event2: SalesEvent = { ...event, id: 'ev2', name: 'Con 2' };
+
+  const stock: EventStock[] = [
+    { eventId: 'ev1', productId: 'p1', variantId: '', broughtQty: 10, updatedAt: 1 },
+    // Same physical stock re-claimed at the second event after event 1 sold
+    // some of it - NOT additional stock. Summing this with ev1's 10 would
+    // double-count units that only crossed the border once.
+    { eventId: 'ev2', productId: 'p1', variantId: '', broughtQty: 4, updatedAt: 1 },
+  ];
+
+  const tx1: Transaction = {
+    id: 't1', eventId: 'ev1', deviceId: 'd1', timestamp: 1, method: 'cash', payments: [], discounts: [],
+    total: 10, currency: 'EUR', items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 1, unitPrice: 10, lineTotal: 10 }],
+  };
+  const tx2: Transaction = {
+    id: 't2', eventId: 'ev2', deviceId: 'd1', timestamp: 2, method: 'cash', payments: [], discounts: [],
+    total: 10, currency: 'EUR', items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 2, unitPrice: 10, lineTotal: 20 }],
+  };
+
+  it('without combinedEventIds, only this event\'s own sales and stock count', () => {
+    const state = buildCustomsDeState(event, [product({ price: 10 })], stock, [tx1, tx2]);
+    const p = state.products[0]!;
+    expect(p.amount).toBe(10);
+    expect(p.soldQty).toBe(1);
+    expect(p.soldValue).toBe(10);
+  });
+
+  it('with the other event combined, sold qty/value sum across both, but brought stays this event\'s own', () => {
+    const state = buildCustomsDeState(event, [product({ price: 10 })], stock, [tx1, tx2], ['ev2']);
+    const p = state.products[0]!;
+    expect(p.amount).toBe(10); // event 2's own claim (4) never gets added in
+    expect(p.soldQty).toBe(3); // 1 (ev1) + 2 (ev2)
+    expect(p.soldValue).toBe(30); // 10 (ev1) + 20 (ev2)
+  });
+
+  it('combining from the other direction (viewing event 2) still only uses event 2\'s own brought stock', () => {
+    const state = buildCustomsDeState(event2, [product({ price: 10 })], stock, [tx1, tx2], ['ev1']);
+    const p = state.products[0]!;
+    expect(p.amount).toBe(4);
+    expect(p.soldQty).toBe(3);
+    expect(p.soldValue).toBe(30);
   });
 });

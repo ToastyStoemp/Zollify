@@ -37,6 +37,14 @@ const transportNationality = ref('DE');
 const exitOffice = ref('');
 const placeOfDeclaration = ref('');
 const incoterms = ref('');
+/**
+ * Other events whose sales fold into this same declaration - the same
+ * claimed stock taken across the border once, sold at consecutive shows,
+ * returned once at the end. Stock/pricing/meta stay this event's own; see
+ * adapter.ts's buildCustomsDeState for why brought quantity is never summed.
+ * Mirrors customs-ch's own combinedEventIds.
+ */
+const combinedEventIds = ref<string[]>([]);
 const stock = ref<EventStock[]>([]);
 let loadedEventId: string | null = null;
 let loading = false;
@@ -74,6 +82,7 @@ async function load(ev: SalesEvent): Promise<void> {
   exitOffice.value = blob.meta?.exitOffice ?? '';
   placeOfDeclaration.value = blob.meta?.placeOfDeclaration ?? '';
   incoterms.value = blob.meta?.incoterms ?? '';
+  combinedEventIds.value = Array.isArray(blob.combinedEventIds) ? blob.combinedEventIds : [];
   stock.value = await sdk().data.events.stock(ev.id);
   setTimeout(() => (loading = false));
 }
@@ -103,6 +112,7 @@ async function save(): Promise<void> {
       customsDe: {
         ...ev.customsDe,
         declarant: { ...declarant.value },
+        combinedEventIds: [...combinedEventIds.value],
         meta: {
           ...blob.meta,
           precheckOffice: precheckOffice.value,
@@ -126,9 +136,21 @@ async function save(): Promise<void> {
   }
 }
 watch(
-  [declarant, precheckOffice, eori, exportMrn, destinationCountry, transportMode, vehicleReg, totalPackages, referenceNumber, transportNationality, exitOffice, placeOfDeclaration, incoterms],
+  [declarant, precheckOffice, eori, exportMrn, destinationCountry, transportMode, vehicleReg, totalPackages, referenceNumber, transportNationality, exitOffice, placeOfDeclaration, incoterms, combinedEventIds],
   scheduleSave,
   { deep: true },
+);
+
+/** Other German events this declaration can be combined with - everything but the one being viewed. */
+const otherEvents = computed(() => sdk().data.events.list().filter((e) => e.id !== eventId.value));
+function toggleCombined(id: string): void {
+  combinedEventIds.value = combinedEventIds.value.includes(id) ? combinedEventIds.value.filter((x) => x !== id) : [...combinedEventIds.value, id];
+}
+const combinedEventsSummary = computed(() =>
+  otherEvents.value
+    .filter((e) => combinedEventIds.value.includes(e.id))
+    .map((e) => `${e.name}${e.dateStart ? ` (${e.dateStart}${e.dateEnd ? ` → ${e.dateEnd}` : ''})` : ''}`)
+    .join(', '),
 );
 
 const state = computed(() => {
@@ -155,7 +177,7 @@ const state = computed(() => {
     },
   };
   const api = sdk().data;
-  return buildCustomsDeState(withEdits, api.products.list(), stock.value, api.transactions.recent());
+  return buildCustomsDeState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value);
 });
 
 const broughtUnits = computed(() => state.value?.products.reduce((n, p) => n + p.amount, 0) ?? 0);
@@ -253,6 +275,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
     <p v-if="!event" class="empty">Event not found - open this from an event card under Events.</p>
 
     <template v-else>
+      <p v-if="combinedEventIds.length" class="combined-banner" role="status">Also declaring sales from: <strong>{{ combinedEventsSummary }}</strong>.</p>
       <article class="card notice">
         <p>
           This module prepares paperwork for your declarant or customs broker to file with ATLAS - it does not
@@ -278,6 +301,26 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
           <label><span>Delivery term (Incoterms)</span><input v-model="incoterms" type="text" placeholder="EXW Berlin" /></label>
         </div>
         <p class="hint">Delivery term is only shown on the proforma invoice - your broker's mail asks for it stated on the invoice.</p>
+      </article>
+
+      <article class="card">
+        <h2>Combine sales from other events</h2>
+        <p class="hint">
+          For the same stock taken across the border once and sold at several consecutive shows before returning -
+          check an event below to fold its sales into this declaration. Brought/claimed quantity stays this event's
+          own; only sold quantities and values add up across the events you check, so the re-import figure correctly
+          reflects everything sold on the whole trip.
+        </p>
+        <p v-if="otherEvents.length === 0" class="hint">No other events yet.</p>
+        <ul v-else class="combine">
+          <li v-for="e in otherEvents" :key="e.id">
+            <label>
+              <input type="checkbox" :checked="combinedEventIds.includes(e.id)" @change="toggleCombined(e.id)" />
+              <span class="name">{{ e.name }}</span>
+              <span class="hint" v-if="e.dateStart">{{ e.dateStart }}<template v-if="e.dateEnd"> → {{ e.dateEnd }}</template></span>
+            </label>
+          </li>
+        </ul>
       </article>
 
       <article class="card">
@@ -463,6 +506,11 @@ h3 { margin: .2rem 0 0; font-size: .85rem; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; }
 .warnings { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: .3rem; font-size: .78rem; color: var(--zfy-warning, #a06a10); }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.combined-banner { margin: 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
+.combine { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.combine li { padding: .3rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .875rem; }
+.combine label { flex-direction: row; align-items: center; gap: .6rem; }
+.combine .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .7rem; }
 .card.notice { background: var(--zfy-warning-soft, #fdf3e3); border-color: var(--zfy-warning, #e0a83a); font-size: .85rem; }

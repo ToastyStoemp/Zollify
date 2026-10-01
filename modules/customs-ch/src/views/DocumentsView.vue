@@ -60,6 +60,13 @@ const venueName = ref('');
 const eventLocation = ref('');
 const venueTIN = ref('');
 const incoterms = ref('');
+/**
+ * Other events whose sales fold into this same declaration - the same
+ * claimed stock taken across the border once, sold at consecutive shows,
+ * returned once at the end. Stock/pricing/meta stay this event's own; see
+ * adapter.ts's buildCustomsState for why brought quantity is never summed.
+ */
+const combinedEventIds = ref<string[]>([]);
 const stock = ref<EventStock[]>([]);
 let loadedEventId: string | null = null;
 let loading = false;
@@ -92,6 +99,7 @@ async function load(ev: SalesEvent): Promise<void> {
   eventLocation.value = blob.meta?.eventLocation ?? '';
   venueTIN.value = blob.meta?.venueTIN ?? ev.venue?.tin ?? '';
   incoterms.value = blob.meta?.incoterms ?? '';
+  combinedEventIds.value = Array.isArray(blob.combinedEventIds) ? blob.combinedEventIds : [];
   stock.value = await sdk().data.events.stock(ev.id);
   setTimeout(() => (loading = false));
 }
@@ -132,6 +140,7 @@ async function save(): Promise<void> {
         artist: { ...artistOverride.value },
         edec: { ...edec.value },
         form1174: JSON.parse(JSON.stringify(form1174.value)),
+        combinedEventIds: [...combinedEventIds.value],
         meta: {
           ...blob.meta,
           companyCode: companyCode.value,
@@ -148,7 +157,19 @@ async function save(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Could not save the customs details.';
   }
 }
-watch([artistOverride, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN, incoterms], scheduleSave, { deep: true });
+watch([artistOverride, edec, form1174, companyCode, documentNumber, venueName, eventLocation, venueTIN, incoterms, combinedEventIds], scheduleSave, { deep: true });
+
+/** Other Swiss events this declaration can be combined with - everything but the one being viewed. */
+const otherEvents = computed(() => sdk().data.events.list().filter((e) => e.id !== eventId.value));
+function toggleCombined(id: string): void {
+  combinedEventIds.value = combinedEventIds.value.includes(id) ? combinedEventIds.value.filter((x) => x !== id) : [...combinedEventIds.value, id];
+}
+const combinedEventsSummary = computed(() =>
+  otherEvents.value
+    .filter((e) => combinedEventIds.value.includes(e.id))
+    .map((e) => `${e.name}${e.dateStart ? ` (${e.dateStart}${e.dateEnd ? ` → ${e.dateEnd}` : ''})` : ''}`)
+    .join(', '),
+);
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
 const autoCompanyCode = computed(() => {
@@ -184,7 +205,7 @@ const state = computed(() => {
     },
   };
   const api = sdk().data;
-  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent());
+  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value);
 });
 const lrp = computed(() => (state.value ? computeLRP(state.value, documentNumber.value) : ''));
 /** Claimed for this event but without a tariff no. or VAT rate - the goods lists leave these out. */
@@ -325,6 +346,7 @@ const TRANSPORT_MODES = [
     <p v-if="!event" class="empty">Event not found - open Customs from an event card under Events. Customs details are stored per event.</p>
 
     <template v-else>
+      <p v-if="combinedEventIds.length" class="notice" role="status">Also declaring sales from: <strong>{{ combinedEventsSummary }}</strong>.</p>
       <p v-if="claimedUnits === 0" class="warn" role="status">This event has no stock claimed, so the goods lists are empty. Claim what you're taking under Inventory → Claimed for an event.</p>
       <p v-if="missingInfo.length" class="warn" role="status">
         Claimed but left off every document - no tariff no. (HS code) or VAT rate set under Products → Customs details:
@@ -393,6 +415,25 @@ const TRANSPORT_MODES = [
         </div>
         <p class="hint">Venue address and event dates come from the event itself - edit them under Events.</p>
         <p class="hint">Delivery term is only shown on the EU proforma invoice - your broker's mail asks for it stated on the invoice.</p>
+      </article>
+
+      <article class="card">
+        <h2>Combine sales from other events</h2>
+        <p class="hint">
+          For the same stock taken across the border once and sold at several consecutive Swiss shows before
+          returning - check an event below to fold its sales into this declaration. Brought/claimed quantity stays
+          this event's own; only sold quantities and values add up across the events you check.
+        </p>
+        <p v-if="otherEvents.length === 0" class="hint">No other Swiss events yet.</p>
+        <ul v-else class="combine">
+          <li v-for="e in otherEvents" :key="e.id">
+            <label>
+              <input type="checkbox" :checked="combinedEventIds.includes(e.id)" @change="toggleCombined(e.id)" />
+              <span class="name">{{ e.name }}</span>
+              <span class="muted" v-if="e.dateStart">{{ e.dateStart }}<template v-if="e.dateEnd"> → {{ e.dateEnd }}</template></span>
+            </label>
+          </li>
+        </ul>
       </article>
 
       <article class="card">
@@ -486,6 +527,10 @@ label.wide { grid-column: 1 / -1; }
 .assign { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .assign li { display: flex; align-items: center; gap: .6rem; padding: .3rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .875rem; }
 .assign .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.combine { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.combine li { padding: .3rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .875rem; }
+.combine label { flex-direction: row; align-items: center; gap: .6rem; }
+.combine .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .preview .fmt button { display: inline-flex; align-items: center; gap: .3rem; }
 .output { min-height: 60vh; width: 100%; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: #fff; }
 </style>

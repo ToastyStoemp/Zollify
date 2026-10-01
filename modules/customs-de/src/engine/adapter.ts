@@ -12,6 +12,17 @@ import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 export interface CustomsDeBlob {
   meta?: Partial<CustomsDeMeta>;
   declarant?: Partial<CustomsDeDeclarant>;
+  /**
+   * Other events whose sales count toward this same declaration - same
+   * stock taken across the border once, sold at several consecutive shows,
+   * returned once at the end. Brought/claimed quantity deliberately stays
+   * this event's own (see buildCustomsDeState) - only sold qty/value is
+   * additive across events, so the reimport/return figure (brought minus
+   * sold) correctly reflects everything actually sold on the whole trip,
+   * not just what sold while this one event was open. Mirrors customs-ch's
+   * own combinedEventIds (adapter.ts).
+   */
+  combinedEventIds?: string[];
 }
 
 export function readCustomsDeBlob(event: SalesEvent): CustomsDeBlob {
@@ -23,8 +34,10 @@ export function buildCustomsDeState(
   products: Product[],
   stock: EventStock[],
   transactions: Transaction[],
+  combinedEventIds: string[] = [],
 ): CustomsDeState {
   const blob = readCustomsDeBlob(event);
+  const eventIds = new Set([event.id, ...combinedEventIds]);
 
   const broughtByKey = new Map<string, number>();
   for (const row of stock) {
@@ -34,7 +47,7 @@ export function buildCustomsDeState(
 
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
-    if (tx.eventId !== event.id || tx.revertedBy) continue;
+    if (!eventIds.has(tx.eventId) || tx.revertedBy) continue;
     // A bundle price or custom discount reduces the whole sale, not one line
     // item - spread proportionally across this transaction's own lines so a
     // discounted item's declared value isn't its full, undiscounted price.

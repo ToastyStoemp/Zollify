@@ -19,6 +19,16 @@ export interface CustomsBlob {
   artist?: Partial<CustomsArtist>;
   edec?: Partial<CustomsEdec>;
   form1174?: Partial<CustomsForm1174>;
+  /**
+   * Other events whose sales count toward this same declaration - the same
+   * claimed stock taken across the border once, sold at several consecutive
+   * shows, returned once at the end. Brought/claimed quantity deliberately
+   * stays this event's own (see buildCustomsState) - only sold qty/value is
+   * additive across events, since each sale is a distinct unit actually
+   * leaving commerce, while a later event's own claim is just a re-allocation
+   * of the same physical stock already counted here, not more of it.
+   */
+  combinedEventIds?: string[];
 }
 
 export function readCustomsBlob(event: SalesEvent): CustomsBlob {
@@ -30,8 +40,10 @@ export function buildCustomsState(
   products: Product[],
   stock: EventStock[],
   transactions: Transaction[],
+  combinedEventIds: string[] = [],
 ): CustomsState {
   const blob = readCustomsBlob(event);
+  const eventIds = new Set([event.id, ...combinedEventIds]);
 
   // Swiss customs declares in CHF, not the account's own base/tracking
   // currency - an event's local price (set under Prices, e.g. CHF for a
@@ -55,10 +67,12 @@ export function buildCustomsState(
     broughtByKey.set(`${row.productId}:${row.variantId}`, row.broughtQty);
   }
 
-  // Sold qty/value derived from non-reverted transactions of this event
+  // Sold qty/value derived from non-reverted transactions of this event, plus
+  // any other events this declaration is combined with - see CustomsBlob's
+  // combinedEventIds. Brought/claimed stock below stays this event's alone.
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
-    if (tx.eventId !== event.id || tx.revertedBy) continue;
+    if (!eventIds.has(tx.eventId) || tx.revertedBy) continue;
     // A bundle price or custom discount reduces the whole sale, not one line
     // item - spread proportionally across this transaction's own lines so a
     // discounted item's declared value isn't its full, undiscounted price.

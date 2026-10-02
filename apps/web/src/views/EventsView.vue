@@ -6,9 +6,12 @@ import { fmtPrice, toLocalPrice } from '@zollify/shared';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
+  claimUnsoldFrom,
   claimsForEvent,
   currentAccount,
   deleteSalesEvent,
+  eventIsOver,
+  eventPricing,
   fetchExchangeRate,
   recentTransactions,
   setActiveEvent,
@@ -130,6 +133,10 @@ const form = reactive({
   exchangeRate: '',
   roundingIncrement: '0',
   copyStockFrom: '',
+  /** 'claims' copies the claims as they were; 'unsold' claims only what that event did not sell. */
+  stockMode: 'unsold' as 'claims' | 'unsold',
+  /** Event whose price overrides come along - only while the local currency still matches it. */
+  pricesFrom: '',
 });
 
 function openNew(): void {
@@ -147,10 +154,35 @@ function openNew(): void {
     exchangeRate: '',
     roundingIncrement: '0',
     copyStockFrom: '',
+    stockMode: 'unsold',
+    pricesFrom: '',
   });
   rateError.value = '';
   error.value = null;
   editing.value = true;
+}
+/**
+ * A new event prefilled from an existing one - venue, currency, rate,
+ * rounding and price overrides - for back-to-back shows in the same country.
+ * Dates start blank. Stock defaults to what the source did not sell once it
+ * is over, since that is what is physically carried on to the next show.
+ */
+function openDuplicate(e: SalesEvent): void {
+  openNew();
+  Object.assign(form, {
+    name: `${e.name} (copy)`,
+    street: e.venue?.street ?? '',
+    postcode: e.venue?.postcode ?? '',
+    city: e.venue?.city ?? '',
+    country: e.venue?.country ?? '',
+    tin: e.venue?.tin ?? '',
+    localCurrency: e.localCurrency ?? '',
+    exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
+    roundingIncrement: String(e.roundingIncrement ?? 0),
+    copyStockFrom: claimsForEvent(e.id).length ? e.id : '',
+    stockMode: eventIsOver(e) ? 'unsold' : 'claims',
+    pricesFrom: e.id,
+  });
 }
 function openEdit(e: SalesEvent): void {
   editId.value = e.id;
@@ -167,11 +199,34 @@ function openEdit(e: SalesEvent): void {
     exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
     roundingIncrement: String(e.roundingIncrement ?? 0),
     copyStockFrom: '',
+    stockMode: 'unsold',
+    pricesFrom: '',
   });
   rateError.value = '';
   error.value = null;
   editing.value = true;
 }
+
+const pricesSource = computed(() => (form.pricesFrom ? visibleEvents.value.find((e) => e.id === form.pricesFrom) : undefined));
+const overrideCount = (e: SalesEvent | undefined): number =>
+  Object.keys(e?.localPriceOverrides ?? {}).length + Object.keys(e?.localTierOverrides ?? {}).length;
+/** Overrides are prices in one currency - they only carry over while the currency still matches. */
+const pricesCarry = computed(() => {
+  const src = pricesSource.value;
+  return Boolean(src?.localCurrency) && src!.localCurrency === form.localCurrency.trim().toUpperCase();
+});
+/** Picking an event to copy prices from fills the currency fields to match it. */
+function pickPricesFrom(): void {
+  const src = pricesSource.value;
+  if (!src) return;
+  form.localCurrency = src.localCurrency ?? '';
+  form.exchangeRate = src.exchangeRate != null ? String(src.exchangeRate) : '';
+  form.roundingIncrement = String(src.roundingIncrement ?? 0);
+}
+
+const stockSource = computed(() => (form.copyStockFrom ? visibleEvents.value.find((e) => e.id === form.copyStockFrom) : undefined));
+/** The source still reserves its own claims until it is over, so copying them as-is would hold the same stock twice. */
+const stockSourceRunning = computed(() => Boolean(stockSource.value) && !eventIsOver(stockSource.value));
 
 async function fetchRate(): Promise<void> {
   if (!form.localCurrency.trim()) return;
@@ -201,8 +256,11 @@ async function save(): Promise<void> {
   const local = form.localCurrency.trim().toUpperCase();
   const rate = parseFloat(form.exchangeRate);
   const converting = Boolean(local) && Number.isFinite(rate) && rate > 0;
+  const pricing = !existing && pricesCarry.value && pricesSource.value ? eventPricing(pricesSource.value) : {};
   const event: SalesEvent = {
     ...existing,
+    // Overrides only; currency, rate and rounding come from the form below.
+    ...pricing,
     id: editId.value ?? crypto.randomUUID(),
     name: form.name.trim(),
     dateStart: form.dateStart || undefined,
@@ -224,7 +282,8 @@ async function save(): Promise<void> {
   await guard(async () => {
     await upsertSalesEvent(event);
     if (!existing && form.copyStockFrom) {
-      for (const row of claimsForEvent(form.copyStockFrom)) await setClaim(event.id, row.productId, row.variantId, row.broughtQty);
+      if (form.stockMode === 'unsold') await claimUnsoldFrom(form.copyStockFrom, event.id);
+      else for (const row of claimsForEvent(form.copyStockFrom)) await setClaim(event.id, row.productId, row.variantId, row.broughtQty);
     }
     editing.value = false;
     if (!existing && !activeEventId.value) await activate(event);
@@ -263,6 +322,7 @@ async function save(): Promise<void> {
             <router-link v-if="hasRoute('customs-ch:documents')" :to="{ name: 'customs-ch:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (CH)</router-link>
             <router-link v-if="hasRoute('customs-de:documents')" :to="{ name: 'customs-de:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (DE)</router-link>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
+            <button v-if="canEdit" type="button" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
             <!-- Only meaningful for an active event - close() on a planned one
                  just re-confirms 'planned' (it parks a not-yet-started event
                  back there instead of closing it), so showing it there was
@@ -297,6 +357,17 @@ async function save(): Promise<void> {
 
         <fieldset>
           <legend>Currency</legend>
+          <label v-if="!editId">
+            <span>Match prices from</span>
+            <select v-model="form.pricesFrom" @change="pickPricesFrom">
+              <option value="">- don't copy -</option>
+              <option v-for="e in visibleEvents.filter((v) => v.localCurrency)" :key="e.id" :value="e.id">{{ e.name }} ({{ e.localCurrency }})</option>
+            </select>
+          </label>
+          <p v-if="pricesSource && overrideCount(pricesSource)" :class="pricesCarry ? 'hint' : 'warn'">
+            <template v-if="pricesCarry">{{ overrideCount(pricesSource) }} price override{{ overrideCount(pricesSource) === 1 ? '' : 's' }} from {{ pricesSource.name }} come along.</template>
+            <template v-else>The local currency no longer matches {{ pricesSource.name }}, so its price overrides are not copied.</template>
+          </p>
           <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Booth profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
           <div class="three">
             <label><span>Local currency</span><CurrencyPicker v-model="form.localCurrency" placeholder="SEK" /></label>
@@ -322,6 +393,11 @@ async function save(): Promise<void> {
             <option v-for="e in visibleEvents" :key="e.id" :value="e.id">{{ e.name }}</option>
           </select>
         </label>
+        <div v-if="!editId && form.copyStockFrom" class="choice">
+          <label class="radio"><input v-model="form.stockMode" type="radio" value="unsold" /> Claim what it didn't sell</label>
+          <label class="radio"><input v-model="form.stockMode" type="radio" value="claims" /> Same claims as it had</label>
+        </div>
+        <p v-if="!editId && stockSourceRunning" class="warn">{{ stockSource!.name }} is still running - its claims keep reserving stock until it's closed, so the same items are held twice until then.</p>
       </div>
       <template #footer>
         <div class="footer">
@@ -365,5 +441,7 @@ fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padd
 legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .rate { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
 .rate button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
+.choice { display: flex; gap: 1rem; flex-wrap: wrap; }
+.radio { flex-direction: row; align-items: center; gap: .4rem; }
 .footer { display: flex; justify-content: flex-end; gap: .5rem; }
 </style>

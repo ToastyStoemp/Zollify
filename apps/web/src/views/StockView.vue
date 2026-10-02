@@ -3,7 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue';
 import {
   activeEventId,
   availabilityFor,
+  claimUnsoldFrom,
   clearClaim,
+  copyEventPricing,
   currentAccount,
   getProduct,
   inventoryLoaded,
@@ -12,6 +14,7 @@ import {
   setClaim,
   setOnHand,
   shellConfirm,
+  unsoldFrom,
   visibleEvents,
   eventIsOver,
 } from '@zollify/platform';
@@ -145,6 +148,53 @@ async function unclaimAll(): Promise<void> {
     unclaiming.value = false;
   }
 }
+
+// ── Carry unsold stock over from another event ──────────────────────────────
+// Back-to-back shows: whatever one event claimed and did not sell is exactly
+// what goes on to the next, so it is claimed here in one step - optionally
+// with the same currency, rate and price overrides.
+const carryFrom = ref('');
+const carryPrices = ref(true);
+const carrying = ref(false);
+const carryNote = ref('');
+const carrySources = computed(() => [...pastEvents.value, ...upcomingEvents.value].filter((e) => e.id !== eventId.value));
+const carrySource = computed(() => visibleEvents.value.find((e) => e.id === carryFrom.value));
+const carryPreview = computed(() => {
+  if (!carryFrom.value) return null;
+  const rows = unsoldFrom(carryFrom.value);
+  return { items: rows.length, units: rows.reduce((n, r) => n + r.qty, 0) };
+});
+const carryHasPrices = computed(() => Boolean(carrySource.value?.localCurrency));
+watch(eventId, () => {
+  carryFrom.value = '';
+  carryNote.value = '';
+});
+
+async function carryOver(): Promise<void> {
+  const source = carrySource.value;
+  const preview = carryPreview.value;
+  if (!eventId.value || !source || !preview) return;
+  const what = `${preview.units} unsold unit${preview.units === 1 ? '' : 's'} across ${preview.items} item${preview.items === 1 ? '' : 's'}`;
+  const prices = carryPrices.value && carryHasPrices.value ? ` and its ${source.localCurrency} prices` : '';
+  const ok = await shellConfirm(
+    `Claim ${what} from ${source.name}${prices} for this event? Existing claims on those items are replaced.`,
+    'Claim unsold stock',
+  );
+  if (!ok) return;
+  carrying.value = true;
+  error.value = null;
+  carryNote.value = '';
+  try {
+    await claimUnsoldFrom(source.id, eventId.value);
+    if (carryPrices.value && carryHasPrices.value) await copyEventPricing(source.id, eventId.value);
+    carryNote.value = `Claimed ${what} from ${source.name}${prices ? ', prices matched' : ''}.`;
+    carryFrom.value = '';
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not claim that stock.';
+  } finally {
+    carrying.value = false;
+  }
+}
 </script>
 
 <template>
@@ -245,6 +295,31 @@ async function unclaimAll(): Promise<void> {
         </button>
       </label>
 
+      <div v-if="canEdit && eventId" class="carry">
+        <label>
+          <span>Claim unsold stock from</span>
+          <select v-model="carryFrom">
+            <option value="">Pick an event</option>
+            <option v-for="event in carrySources" :key="event.id" :value="event.id">{{ event.name }}</option>
+          </select>
+        </label>
+        <label v-if="carryHasPrices" class="check">
+          <input v-model="carryPrices" type="checkbox" />
+          Also match its prices ({{ carrySource?.localCurrency }}, rate and overrides)
+        </label>
+        <button type="button" :disabled="!carryPreview?.items || carrying" @click="carryOver">
+          {{ carrying ? 'Claiming…' : 'Claim unsold' }}
+        </button>
+        <span v-if="carryPreview" class="sub">
+          <template v-if="carryPreview.items">{{ carryPreview.units }} unsold across {{ carryPreview.items }} claimed item{{ carryPreview.items === 1 ? '' : 's' }}</template>
+          <template v-else>That event claimed nothing - it sold from the shared pool.</template>
+        </span>
+        <span v-if="carrySource && !eventIsOver(carrySource)" class="sub warn-text">
+          {{ carrySource.name }} is still running - close it so its own claim stops reserving the same stock.
+        </span>
+      </div>
+      <p v-if="carryNote" class="ok">{{ carryNote }}</p>
+
       <p class="lede">
         Claiming reserves stock for this event - no other event can sell it. Leave a claim blank and
         the event sells from whatever is unclaimed. Selling past a claim takes the extra from the
@@ -320,6 +395,12 @@ tbody tr.short { background: var(--zfy-signal-soft, #f6e5df); }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .num input { width: 5.5rem; text-align: right; }
 .source { color: var(--zfy-muted, #5a6472); font-size: .82rem; }
+.carry { display: flex; align-items: flex-end; gap: .6rem; flex-wrap: wrap; font-size: .875rem; padding: .6rem .8rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
+.carry label { display: flex; flex-direction: column; gap: .25rem; }
+.carry .check { flex-direction: row; align-items: center; gap: .4rem; }
+.carry .sub { font-size: .78rem; color: var(--zfy-muted, #5a6472); }
+.carry .warn-text { color: var(--zfy-warning-ink, #8a5a1e); }
+.ok { color: var(--zfy-accent-ink, #0a5a4a); margin: 0; font-size: .875rem; }
 .bad { color: var(--zfy-danger, #c6512f); font-weight: 600; }
 tr.group th { padding: .35rem .75rem; font-size: .75rem; font-weight: 600; background: var(--zfy-bg, #f1f4f6); }
 .swatch { display: inline-block; width: .35rem; height: .8rem; border-radius: 999px; margin-right: .5rem; vertical-align: middle; }

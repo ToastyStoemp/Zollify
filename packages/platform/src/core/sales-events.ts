@@ -134,6 +134,33 @@ export async function replaceSalesEvents(rows: SalesEvent[]): Promise<void> {
   }
 }
 
+/**
+ * The fields that make up an event's local-currency pricing: currency, rate,
+ * rounding and every hand-set price override. They only make sense together -
+ * an override is a price in that local currency at that rate - so they are
+ * always copied as one block.
+ */
+export type EventPricing = Pick<SalesEvent, 'localCurrency' | 'exchangeRate' | 'roundingIncrement' | 'localPriceOverrides' | 'localTierOverrides'>;
+
+export function eventPricing(event: SalesEvent): EventPricing {
+  return {
+    localCurrency: event.localCurrency,
+    exchangeRate: event.exchangeRate,
+    roundingIncrement: event.roundingIncrement,
+    // Copies, so editing one event's overrides never reaches into the other.
+    localPriceOverrides: event.localPriceOverrides ? { ...event.localPriceOverrides } : undefined,
+    localTierOverrides: event.localTierOverrides ? { ...event.localTierOverrides } : undefined,
+  };
+}
+
+/** Gives `targetId` the same local currency, rate, rounding and price overrides as `sourceId`. */
+export async function copyEventPricing(sourceId: string, targetId: string): Promise<void> {
+  const source = events.get(sourceId);
+  const target = events.get(targetId);
+  if (!source || !target) throw new Error('That event no longer exists.');
+  await upsertSalesEvent({ ...target, ...eventPricing(source) });
+}
+
 // ── Per-event stock ─────────────────────────────────────────────────────────
 
 export async function stockForEvent(eventId: string): Promise<EventStock[]> {

@@ -288,6 +288,40 @@ export function freeFor(productId: string, variantId: string | null = ''): numbe
   return onHandFor(productId, variantId) - claimedTotal(productId, variantId) - (poolSoldByKey.value.get(key) ?? 0);
 }
 
+export interface UnsoldRow {
+  productId: string;
+  variantId: string;
+  /** What the event claimed and did not sell. */
+  qty: number;
+}
+
+/**
+ * What an event took and brought back: its claim minus what it sold, per
+ * claimed item. Only claimed items appear - an event that sold from the
+ * shared pool never set anything aside, so there is nothing of its own left.
+ * Selling past a claim leaves zero, never a negative.
+ */
+export function unsoldFrom(eventId: string): UnsoldRow[] {
+  return claimsForEvent(eventId).map((c) => ({
+    productId: c.productId,
+    variantId: c.variantId,
+    qty: Math.max(0, c.broughtQty - soldAt(eventId, c.productId, c.variantId)),
+  }));
+}
+
+/**
+ * Claims for `targetId` exactly what `sourceId` claimed and did not sell - the
+ * stock carried straight on from one show to the next. Replaces the target's
+ * claims on those items; items the source never claimed are left alone.
+ * Returns how many items were claimed.
+ */
+export async function claimUnsoldFrom(sourceId: string, targetId: string): Promise<number> {
+  if (sourceId === targetId) throw new Error('Pick a different event to claim from.');
+  const rows = unsoldFrom(sourceId);
+  for (const row of rows) await setClaim(targetId, row.productId, row.variantId, row.qty);
+  return rows.length;
+}
+
 export interface Availability {
   productId: string;
   variantId: string;

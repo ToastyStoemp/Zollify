@@ -320,3 +320,52 @@ describe('a fresh count', () => {
     expect(inv.inventoryRows().find((r) => r.productId === PRINT)?.counted).toBe(true);
   });
 });
+
+describe('carrying unsold stock to the next event', () => {
+  it('claims what the source claimed and did not sell', async () => {
+    await inv.setOnHand(PRINT, null, 100);
+    await inv.setClaim('ev-a', PRINT, null, 30);
+    await sell('ev-a', 12);
+    await events.upsertSalesEvent({ ...events.getSalesEvent('ev-a')!, status: 'closed' });
+
+    expect(await inv.claimUnsoldFrom('ev-a', 'ev-b')).toBe(1);
+
+    expect(inv.claimFor('ev-b', PRINT)).toBe(18);
+    // The finished event no longer reserves, so the 18 are held once, not twice.
+    expect(inventoryRow().claimed).toBe(18);
+  });
+
+  it('carries nothing over for an oversold claim, rather than going negative', async () => {
+    await inv.setClaim('ev-a', PRINT, null, 5);
+    await sell('ev-a', 7);
+
+    expect(inv.unsoldFrom('ev-a')).toEqual([{ productId: PRINT, variantId: '', qty: 0 }]);
+  });
+
+  it('leaves the target alone when the source sold from the shared pool', async () => {
+    await inv.setClaim('ev-b', PRINT, null, 9);
+    await sell('ev-a', 3);
+
+    expect(await inv.claimUnsoldFrom('ev-a', 'ev-b')).toBe(0);
+    expect(inv.claimFor('ev-b', PRINT)).toBe(9);
+  });
+
+  it('copies currency, rate, rounding and price overrides together', async () => {
+    await events.upsertSalesEvent({
+      ...events.getSalesEvent('ev-a')!,
+      localCurrency: 'EUR',
+      exchangeRate: 1.05,
+      roundingIncrement: 1,
+      localPriceOverrides: { [`${PRINT}`]: 39 },
+      localTierOverrides: { 'rule:0': 70 },
+    });
+
+    await events.copyEventPricing('ev-a', 'ev-b');
+
+    const b = events.getSalesEvent('ev-b')!;
+    expect(b).toMatchObject({ localCurrency: 'EUR', exchangeRate: 1.05, roundingIncrement: 1, localPriceOverrides: { [PRINT]: 39 }, localTierOverrides: { 'rule:0': 70 } });
+    expect(b.name).toBe('B');
+    // A copy, not a shared object - editing one event's overrides must not touch the other.
+    expect(b.localPriceOverrides).not.toBe(events.getSalesEvent('ev-a')!.localPriceOverrides);
+  });
+});

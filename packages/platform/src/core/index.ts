@@ -25,6 +25,9 @@ export {
   stockForEvent,
   setStock,
   resetSalesEventCache,
+  eventPricing,
+  copyEventPricing,
+  type EventPricing,
 } from './sales-events';
 export {
   queueOp,
@@ -100,6 +103,9 @@ export {
   onHandFor,
   claimFor,
   claimsForEvent,
+  unsoldFrom,
+  claimUnsoldFrom,
+  type UnsoldRow,
   setOnHand,
   setClaim,
   clearClaim,

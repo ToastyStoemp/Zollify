@@ -26,7 +26,7 @@ vi.mock('../session', () => ({
   authFetch: async () => ({}),
 }));
 
-const { deleteCoreDb } = await import('../core/db');
+const { deleteCoreDb, openCoreDb } = await import('../core/db');
 const txs = await import('../core/transactions');
 const events = await import('../core/sales-events');
 const device = await import('../core/device');
@@ -89,30 +89,68 @@ describe('a device without a TSE of its own', () => {
     expect((await txs.recordSale(sale())).tse).toBeUndefined();
   });
 
-  it('signs through the first main TSE device that answers, under its own till number', async () => {
+  it('signs nothing until the till is assigned to a main TSE device, and is assigned once', async () => {
     tse.applyMainTseDevices(['host-a', 'host-b']);
+    expect(tse.tseMode()).toBe('remote');
+    expect((await txs.recordSale(sale())).tse).toMatchObject({ failed: { reason: expect.stringContaining('No main TSE device assigned') } });
+    await expect(tse.assignTseHost('nobody')).rejects.toThrow('not one of the main TSE devices');
+    await tse.assignTseHost('host-a');
+    await expect(tse.assignTseHost('host-b')).rejects.toThrow('already has its main TSE device');
+    expect(tse.assignedTseHost()).toBe('host-a');
+    // A new till serial number is a new till: it gets its own assignment.
+    await tse.setTseSettings({ clientId: 'PHONE-2' });
+    expect(tse.assignedTseHost()).toBeNull();
+  });
+
+  it('signs on its assigned main TSE device, under its own till number', async () => {
+    tse.applyMainTseDevices(['host-a', 'host-b']);
+    await tse.assignTseHost('host-b');
     answer = (req) => {
-      if (req.to === 'host-a') return { ok: false, error: 'TSE unplugged' };
       if (req.op === 'start') return { ok: true, number: 7, time: Date.now() };
       if (req.op === 'finish') return { ok: true, signatureCounter: 15, time: Date.now(), signature: 'SIG-B', info: HOST_INFO };
       return undefined;
     };
-    expect(tse.tseMode()).toBe('remote');
     const tx = await txs.recordSale(sale());
     const sig = (tx.tse as { signed: TseSignature }).signed;
     const till = tse.defaultTillId(await device.deviceId());
     expect(sig).toMatchObject({ clientId: till, transactionNumber: 7, signatureCounter: 15, signature: 'SIG-B', serial: 'serial-b', publicKey: 'pk-b', processData: 'Beleg^21.00_0.00_0.00_0.00_0.00^21.00:Unbar' });
     expect(sig.test).toBeUndefined();
-    // The transaction is finished on the TSE that started it.
-    const finish = sent.find((m) => m.type === 'tse.request' && m.op === 'finish') as TseRequestMessage;
-    expect(finish.to).toBe('host-b');
+    expect(sig.substitute).toBeUndefined();
+    // Only the assigned device was asked.
+    expect(sent.filter((m) => m.type === 'tse.request').every((m) => m.to === 'host-b')).toBe(true);
     expect(sent.filter((m) => m.type === 'tse.request').every((m) => !('clientId' in m) || m.clientId === till)).toBe(true);
-    // Same till, so the receipt number counts on the same till.
     expect(tx.receipt?.till).toBe(till);
+    expect(tse.tseState.outages).toEqual([]);
+  });
+
+  it('while its own is out, signs on another as a stand-in, logs the outage, and goes back when it returns', async () => {
+    tse.applyMainTseDevices(['host-a', 'host-b']);
+    await tse.assignTseHost('host-a');
+    let aDown = true;
+    answer = (req) => {
+      if (req.to === 'host-a' && aDown) return { ok: false, error: 'TSE unplugged' };
+      if (req.op === 'start') return { ok: true, number: 7, time: Date.now() };
+      if (req.op === 'finish') return { ok: true, signatureCounter: 15, time: Date.now(), signature: `SIG-${req.to}`, info: HOST_INFO };
+      return undefined;
+    };
+    const during = ((await txs.recordSale(sale())).tse as { signed: TseSignature }).signed;
+    expect(during).toMatchObject({ signature: 'SIG-host-b', substitute: true });
+    expect(tse.tseState.outages).toEqual([{ from: expect.any(Number), reason: 'Assigned main TSE device: TSE unplugged' }]);
+
+    aDown = false;
+    const after = ((await txs.recordSale(sale())).tse as { signed: TseSignature }).signed;
+    expect(after.signature).toBe('SIG-host-a');
+    expect(after.substitute).toBeUndefined();
+    expect(tse.tseState.outages).toEqual([{ from: expect.any(Number), to: expect.any(Number), reason: 'Assigned main TSE device: TSE unplugged' }]);
+    // The log is synced, per till.
+    const till = tse.defaultTillId(await device.deviceId());
+    const ops = await openCoreDb(account.accountId).ops.toArray();
+    expect(ops.some((o) => o.type === 'setting.upsert' && (o.payload as { key: string }).key === `core.tseOutages.${till}`)).toBe(true);
   });
 
   it('records the sale as not signed, saying why, when no main TSE device can be reached', async () => {
     tse.applyMainTseDevices(['host-a']);
+    await tse.assignTseHost('host-a');
     online = false;
     const tx = await txs.recordSale(sale());
     expect(tx.tse).toMatchObject({ failed: { reason: expect.stringContaining('Offline') } });

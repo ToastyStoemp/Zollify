@@ -341,7 +341,7 @@ export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
           TSE_TA_VORGANGSART: sig.processType,
           TSE_TA_SIGZ: sig.signatureCounter,
           TSE_TA_SIG: sig.signature,
-          TSE_TA_FEHLER: sig.test ? 'Test-TSE, nicht zertifiziert' : '',
+          TSE_TA_FEHLER: [sig.test ? 'Test-TSE, nicht zertifiziert' : '', sig.substitute ? 'Ersatz-TSE: zugeordnete TSE ausgefallen' : ''].filter(Boolean).join('; '),
           TSE_VORGANGSDATEN: sig.processData,
         });
       } else if (bon.tse && 'failed' in bon.tse) {

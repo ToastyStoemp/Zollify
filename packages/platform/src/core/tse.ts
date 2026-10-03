@@ -16,6 +16,7 @@ import {
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { deviceId } from './device';
+import { toPlain } from './plain';
 import { getSyncedSetting, setSyncedSetting } from './synced-settings';
 
 /**
@@ -47,6 +48,21 @@ export interface TseSettings {
   clientId: string;
   /** Sign only sales at events in Germany (default), or every sale. */
   scope: 'germany' | 'always';
+  /**
+   * The main TSE device this till signs through, without a TSE of its own.
+   * Fixed once set: a till belongs to exactly one TSE in normal operation
+   * (AEAO zu § 146a), and the tax office is told which. Kept per till serial
+   * number - a device that must move to another TSE becomes a new till.
+   */
+  assigned?: { till: string; host: string };
+}
+
+/** A time the till's assigned main TSE device could not sign, and another signed instead (or none did). */
+export interface TseOutage {
+  from: number;
+  /** Absent while it lasts. */
+  to?: number;
+  reason: string;
 }
 
 export interface TseInfo {
@@ -82,13 +98,18 @@ const DEFAULTS: TseSettings = { driver: 'none', clientId: '', scope: 'germany' }
 /** Synced, account-wide: the device ids of the main TSE devices, in the order they are tried. */
 export const TSE_MAIN_KEY = 'core.tseMainDevices';
 
-export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null; mainDevices: string[]; deviceId: string }>({
+export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null; mainDevices: string[]; deviceId: string; outages: TseOutage[] }>({
   settings: { ...DEFAULTS },
   info: null,
   error: null,
   mainDevices: [],
   deviceId: '',
+  /** This till's outage log, newest last. */
+  outages: [],
 });
+
+/** Synced per till, so the log outlives the device: outages must be documented (AEAO zu § 146a). */
+const outageKey = (till: string): string => `core.tseOutages.${till}`;
 
 function requireAccountId(): string {
   const account = getAccount();
@@ -101,7 +122,30 @@ export async function loadTseSettings(): Promise<TseSettings> {
   tseState.settings = { ...DEFAULTS, ...((row?.value as Partial<TseSettings>) ?? {}) };
   tseState.deviceId = await deviceId();
   applyMainTseDevices(await getSyncedSetting<string[]>(TSE_MAIN_KEY));
+  tseState.outages = (await getSyncedSetting<TseOutage[]>(outageKey(await tillId()))) ?? [];
   return tseState.settings;
+}
+
+/** The till serial number, once the device id is known (after loadTseSettings). */
+function currentTill(): string {
+  return tseState.settings.clientId.trim() || (tseState.deviceId ? defaultTillId(tseState.deviceId) : '');
+}
+
+/** The main TSE device assigned to this till, if any. */
+export function assignedTseHost(): string | null {
+  const a = tseState.settings.assigned;
+  return a && a.till === currentTill() ? a.host : null;
+}
+
+/**
+ * Assigns this till to a main TSE device - once. Afterwards it signs there,
+ * and only while that device is out does another main TSE device sign.
+ */
+export async function assignTseHost(host: string): Promise<void> {
+  tseState.deviceId ||= await deviceId();
+  if (assignedTseHost()) throw new Error('This till already has its main TSE device. A till stays with one TSE - use a new till serial number to move.');
+  if (!tseState.mainDevices.includes(host) || host === tseState.deviceId) throw new Error('That device is not one of the main TSE devices.');
+  await setTseSettings({ assigned: { till: await tillId(), host } });
 }
 
 /** Takes in the list of main TSE devices - at load, and whenever sync brings a new one. */
@@ -139,7 +183,8 @@ export function defaultTillId(device: string): string {
 export async function setTseSettings(patch: Partial<TseSettings>): Promise<void> {
   tseState.settings = { ...tseState.settings, ...patch };
   tseState.info = null;
-  await openCoreDb(requireAccountId()).settings.put({ key: KEY, value: { ...tseState.settings } });
+  // A plain copy: IndexedDB cannot store the reactive one (its `assigned` is a proxy).
+  await openCoreDb(requireAccountId()).settings.put({ key: KEY, value: toPlain({ ...tseState.settings }) });
 }
 
 // ── Drivers ─────────────────────────────────────────────────────────────────
@@ -165,13 +210,16 @@ function ownDriver(): TseDriver | null {
   return null;
 }
 
-/** The main TSE device that last signed for this one: tried first next time. */
-let lastHost: string | null = null;
-
-/** The main TSE devices this device would sign through: all of them but itself, the last one that worked first. */
+/** The main TSE devices besides this one. */
 function remoteHosts(): string[] {
-  const hosts = tseState.mainDevices.filter((id) => id !== tseState.deviceId);
-  return lastHost && hosts.includes(lastHost) ? [lastHost, ...hosts.filter((h) => h !== lastHost)] : hosts;
+  return tseState.mainDevices.filter((id) => id !== tseState.deviceId);
+}
+
+/** The order to try: the assigned device, then - only as a stand-in while it is out - the others. */
+function signingHosts(): string[] {
+  const assigned = assignedTseHost();
+  if (!assigned) return [];
+  return [assigned, ...remoteHosts().filter((h) => h !== assigned)];
 }
 
 /**
@@ -234,7 +282,10 @@ async function finishWith(d: TseDriver, handle: { number: number; start: number;
   // A main TSE device says which TSE signed; this device's own is read once.
   const info = done.info ?? tseState.info ?? (await d.info());
   if (!done.info) tseState.info = info;
+  // Signed by another main TSE device while the till's own was out.
+  const substitute = !!handle.via && handle.via !== assignedTseHost();
   return {
+    ...(substitute ? { substitute: true } : {}),
     clientId,
     serial: info.serial,
     transactionNumber: handle.number,
@@ -370,19 +421,49 @@ function call(host: string, c: TseCall): Promise<TseResultMessage> {
   });
 }
 
-/** Tries each main TSE device in turn; the first that answers does it. */
+/**
+ * Runs a TSE call on the till's assigned main TSE device - or, while that
+ * one is out, on the first other main TSE device that answers, logging the
+ * outage. The outage ends the next time the assigned device answers.
+ */
 async function onFirstHost<T>(work: (host: string) => Promise<T>): Promise<T> {
+  const hosts = signingHosts();
+  if (!hosts.length) throw new Error('No main TSE device assigned to this till - assign one in Settings → This device → TSE.');
   const errors: string[] = [];
-  for (const host of remoteHosts()) {
+  for (const host of hosts) {
     try {
       const done = await work(host);
-      lastHost = host;
+      if (host === hosts[0]) await endOutage();
+      else await startOutage(errors[0]!);
       return done;
     } catch (err) {
       errors.push(reasonOf(err));
     }
   }
-  throw new Error(errors.length ? errors[errors.length - 1]! : 'No main TSE device on this account.');
+  await startOutage(errors[0]!);
+  throw new Error(errors[errors.length - 1]!);
+}
+
+async function startOutage(reason: string): Promise<void> {
+  const open = tseState.outages[tseState.outages.length - 1];
+  if (open && open.to === undefined) return;
+  tseState.outages = [...tseState.outages, { from: Date.now(), reason: `Assigned main TSE device: ${reason}` }];
+  await saveOutages();
+}
+
+async function endOutage(): Promise<void> {
+  const open = tseState.outages[tseState.outages.length - 1];
+  if (!open || open.to !== undefined) return;
+  tseState.outages = [...tseState.outages.slice(0, -1), { ...open, to: Date.now() }];
+  await saveOutages();
+}
+
+async function saveOutages(): Promise<void> {
+  try {
+    await setSyncedSetting(outageKey(await tillId()), tseState.outages);
+  } catch {
+    /* the sale matters more than the log; the next change saves it */
+  }
 }
 
 function remoteDriver(): TseDriver {
@@ -391,7 +472,7 @@ function remoteDriver(): TseDriver {
     return r.info;
   };
   return {
-    available: async () => remoteHosts().length > 0,
+    available: async () => signingHosts().length > 0,
     info: () => onFirstHost(async (host) => infoOf(await call(host, { op: 'info' }))),
     start: (clientId) =>
       onFirstHost(async (host) => {
@@ -535,5 +616,5 @@ export function resetTseCache(): void {
   tseState.mainDevices = [];
   tseState.deviceId = '';
   waiting.clear();
-  lastHost = null;
+  tseState.outages = [];
 }

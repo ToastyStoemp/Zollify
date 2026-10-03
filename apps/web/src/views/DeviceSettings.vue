@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
@@ -26,6 +26,9 @@ import {
   tseMode,
   setMainTseDevice,
   removeMainTseDevice,
+  assignTseHost,
+  assignedTseHost,
+  shellConfirm,
   tseState,
   type TseDriverId,
   deviceFlavor,
@@ -86,6 +89,40 @@ const isMainTse = computed(() => !!id.value && tseState.mainDevices.includes(id.
 const deviceLabel = (d: string): string => devices.value.find((x) => x.id === d)?.name || `Device ${d.slice(0, 8)}`;
 const mainTseNames = computed(() => tseState.mainDevices.filter((d) => d !== id.value).map(deviceLabel));
 const tseError = ref<string | null>(null);
+/** Main TSE devices this till could be assigned to. */
+const hostChoices = computed(() => tseState.mainDevices.filter((d) => d !== id.value));
+const hostPick = ref('');
+const assigned = computed(() => assignedTseHost());
+watch(hostChoices, (list) => {
+  if (!list.includes(hostPick.value)) hostPick.value = list[0] ?? '';
+}, { immediate: true });
+async function assignHost(): Promise<void> {
+  tseError.value = null;
+  const host = hostPick.value || hostChoices.value[0];
+  if (!host) return;
+  const till = tseState.settings.clientId.trim() || defaultTillId(id.value);
+  const ok = await shellConfirm(
+    `This till (${till}) will sign through ${deviceLabel(host)} from now on. This can't be changed afterwards: German rules tie a till to one TSE, and the tax office is told which. ` +
+      `If that device is ever replaced, this device needs a new till serial number - a new till, registered again.`,
+    'Assign main TSE device?',
+  );
+  if (!ok) return;
+  try {
+    await assignTseHost(host);
+    await checkTse();
+  } catch (err) {
+    tseError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+async function removeMain(d: string): Promise<void> {
+  const ok = await shellConfirm(
+    `Tills assigned to ${deviceLabel(d)} can't move to another TSE: until they get a new till serial number, their sales count as signed during an outage, by another main TSE device.`,
+    'Remove main TSE device?',
+  );
+  if (ok) await removeMainTseDevice(d);
+}
+const fmtWhen = (ms: number): string => new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+
 async function toggleMainTse(on: boolean): Promise<void> {
   tseError.value = null;
   try {
@@ -257,13 +294,37 @@ function when(ts: number): string {
         <input type="checkbox" :checked="isMainTse" @change="toggleMainTse(($event.target as HTMLInputElement).checked)" />
         <span>Main TSE device - devices without a TSE of their own sign through this one. Keep it on and connected while they sell.</span>
       </label>
-      <p v-else-if="tseMode() === 'remote'" class="hint">Signs through the account's main TSE devices, below - the first that answers. Needs a connection while selling.</p>
+      <template v-else-if="tseMode() === 'remote'">
+        <div v-if="assigned" class="hint">
+          Signs through <strong>{{ deviceLabel(assigned) }}</strong> - assigned to this till, can't be changed. Needs a connection while selling.
+          While it is out, another main TSE device signs and the outage is logged.
+        </div>
+        <div v-else class="assign">
+          <p class="error" role="alert">No main TSE device assigned to this till - its sales at events in Germany are not signed.</p>
+          <label>
+            <span>Main TSE device for this till</span>
+            <select v-model="hostPick">
+              <option v-for="d in hostChoices" :key="d" :value="d">{{ deviceLabel(d) }}</option>
+            </select>
+          </label>
+          <small>Once assigned this can't be changed: a till belongs to one TSE.</small>
+          <div class="row"><button type="button" @click="assignHost">Assign</button></div>
+        </div>
+        <details v-if="tseState.outages.length" class="outages">
+          <summary>TSE outages ({{ tseState.outages.length }})</summary>
+          <ul>
+            <li v-for="(o, i) in [...tseState.outages].reverse().slice(0, 20)" :key="i">
+              {{ fmtWhen(o.from) }} - {{ o.to ? fmtWhen(o.to) : 'ongoing' }}: {{ o.reason }}
+            </li>
+          </ul>
+        </details>
+      </template>
       <p v-else-if="tseState.settings.driver === 'none'" class="hint">No main TSE device on this account yet - this device signs nothing.</p>
       <p v-if="tseState.mainDevices.length" class="hint">Main TSE devices:</p>
       <ul v-if="tseState.mainDevices.length" class="main-tse">
         <li v-for="d in tseState.mainDevices" :key="d">
           <span>{{ d === id ? 'This device' : deviceLabel(d) }}</span>
-          <button v-if="d !== id" type="button" class="quiet" @click="removeMainTseDevice(d)">Remove</button>
+          <button v-if="d !== id" type="button" class="quiet" @click="removeMain(d)">Remove</button>
         </li>
       </ul>
       <p v-if="tseError" class="error" role="alert">{{ tseError }}</p>
@@ -440,6 +501,10 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .tse-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .tse-form small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .tse-form label.check { flex-direction: row; align-items: flex-start; gap: .5rem; }
+.assign { display: flex; flex-direction: column; gap: .4rem; }
+.assign label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.outages { font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.outages ul { margin: .3rem 0 0; padding-left: 1.1rem; }
 .main-tse { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .main-tse li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }

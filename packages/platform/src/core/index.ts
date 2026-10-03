@@ -145,12 +145,15 @@ export {
   tseMode,
   setMainTseDevice,
   removeMainTseDevice,
+  assignTseHost,
+  assignedTseHost,
   applyMainTseDevices,
   TSE_MAIN_KEY,
   type TseDriver,
   type TseDriverId,
   type TseInfo,
   type TseSettings,
+  type TseOutage,
 } from './tse';
 export { nextReceiptNumber } from './receipt-numbers';
 export { loadClosings, allClosings, closeStaleDay, closeTillNow, openReceipts, resetClosingCache, localDay } from './closings';

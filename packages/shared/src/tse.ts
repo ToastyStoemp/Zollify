@@ -36,6 +36,8 @@ export interface TseSignature {
   processData: string;
   /** A development TSE that is not certified - receipts say so. */
   test?: boolean;
+  /** Signed by a stand-in main TSE device while the till's assigned one was out. */
+  substitute?: boolean;
 }
 
 /**

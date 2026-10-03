@@ -12,3 +12,4 @@ export * from './public-events';
 export * from './price-rows';
 export * from './short-barcode';
 export * from './receipt-link';
+export * from './charged-lines';

@@ -130,6 +130,12 @@ export interface SaleEvent {
   lines: SaleLine[];
   /** Secret for the customer's online receipt; see @zollify/shared receipt-link. */
   receiptToken?: string;
+  /**
+   * The sale as the till showed it, for receipts: each line's list amount
+   * (paired with `lines` by index) and each named discount, in `currency`.
+   * The line totals above already include the discounts.
+   */
+  asCharged?: { listTotals: number[]; discounts: { name: string; amount: number }[] };
   payment: {
     provider: string;
     approved: boolean;

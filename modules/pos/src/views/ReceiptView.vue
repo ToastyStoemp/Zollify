@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { fmtPrice, type Transaction } from '@zollify/shared';
-import { printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { receiptAmounts, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import { QrCode, receiptUrl as receiptUrlFor } from '../lib/after-sale';
 
@@ -32,6 +32,9 @@ onMounted(async () => {
 });
 
 const lines = computed(() => tx.value?.items ?? []);
+/** Lines at the till's price and each discount, in what the customer paid - matches the printed copy. */
+const breakdown = computed(() => (tx.value ? receiptAmounts(tx.value) : { lines: [], discounts: [] }));
+const subtotal = computed(() => breakdown.value.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100);
 /** The customer's online receipt, for one who asks after the fact. */
 const receiptUrl = computed(() => (QrCode && receiptUrlFor(tx.value?.receiptToken)) || '');
 
@@ -94,11 +97,12 @@ async function print(): Promise<void> {
             {{ item.title }}
             <template v-if="item.variantLabel"> · {{ item.variantLabel }}</template>
           </span>
-          <span class="amount">{{ fmtPrice(item.lineTotal, tx.currency) }}</span>
+          <span class="amount">{{ fmtPrice(breakdown.lines[i] ?? item.lineTotal, tx.currency) }}</span>
         </li>
       </ul>
 
-      <p v-for="(discount, i) in tx.discounts" :key="i" class="row discount">
+      <p v-if="breakdown.discounts.length" class="row subtotal"><span>Subtotal</span><span>{{ fmtPrice(subtotal, tx.currency) }}</span></p>
+      <p v-for="(discount, i) in breakdown.discounts" :key="i" class="row discount">
         <span>{{ discount.name }}</span>
         <span>−{{ fmtPrice(discount.amount, tx.currency) }}</span>
       </p>
@@ -144,6 +148,7 @@ h1 { font-size: 1.25rem; margin: 0; }
 .row { display: flex; justify-content: space-between; margin: 0; }
 .row.total { border-top: 1px dashed #999; padding-top: .35rem; font-size: .95rem; }
 .row.discount { color: #0a5a4a; }
+.row.subtotal { border-top: 1px dashed #999; padding-top: .35rem; }
 .reverted { margin: 0; color: #c6512f; }
 
 .online { display: flex; align-items: center; gap: 1rem; max-width: 22rem; }

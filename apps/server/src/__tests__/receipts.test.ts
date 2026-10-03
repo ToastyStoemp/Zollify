@@ -23,6 +23,7 @@ const OWNER_PASSWORD = 'correct horse battery staple';
 const TOKEN = 'AbCdEfGhIjKlMnOpQrStUv';
 const VOID_TOKEN = 'VoidVoidVoidVoidVoid00';
 const FX_TOKEN = 'FxFxFxFxFxFxFxFxFxFx01';
+const DISC_TOKEN = 'DiscDiscDiscDiscDisc02';
 
 let app: FastifyInstance;
 let dataDir: string;
@@ -120,6 +121,13 @@ beforeAll(async () => {
         op(4, 'tx.revert', { id: 'tx-void', revertedAt: Date.now() }),
         // Lines in CHF, charged in EUR at a rounded local total.
         op(5, 'tx.create', sale('tx-fx', FX_TOKEN, { total: 47, currency: 'EUR', baseCurrency: 'CHF', baseTotal: 45, exchangeRate: 1.04, payments: [{ kind: 'cash', amount: 47 }], method: 'cash' })),
+        op(6, 'tx.create', sale('tx-disc', DISC_TOKEN, {
+          items: [{ pid: 'p-1', vid: null, title: 'Harbour print', qty: 2, unitPrice: 20, lineTotal: 36 }],
+          total: 36,
+          payments: [{ kind: 'cash', amount: 36 }],
+          method: 'cash',
+          asCharged: { listTotals: [40], discounts: [{ name: 'Bundle deal', amount: 4 }] },
+        })),
       ],
     },
   });
@@ -181,6 +189,13 @@ describe('online receipts', () => {
     expect(body.currency).toBe('EUR');
     expect(body.lines.reduce((s: number, l: { amount: number }) => s + l.amount * 100, 0)).toBe(4700);
     expect(body.payments).toEqual([{ label: 'Cash', amount: 47 }]);
+  });
+
+  it('lists a discounted sale at list price with the discount named, adding up to the total', async () => {
+    const body = (await lookup(DISC_TOKEN)).json();
+    expect(body.lines).toEqual([{ title: 'Harbour print', qty: 2, amount: 40 }]);
+    expect(body.discounts).toEqual([{ name: 'Bundle deal', amount: 4 }]);
+    expect(body.total).toBe(36);
   });
 
   it('refuses a lookup without a solved challenge', async () => {

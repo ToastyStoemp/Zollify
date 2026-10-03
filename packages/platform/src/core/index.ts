@@ -145,4 +145,5 @@ export {
   type TseInfo,
   type TseSettings,
 } from './tse';
+export { tillId, defaultTillId, nextReceiptNumber } from './receipt-numbers';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

@@ -164,7 +164,12 @@ export interface PublicReceipt {
   seller: { name: string; address: string[]; vatId?: string };
   event: string;
   at: number;
+  /** The till's receipt number, or - on a sale from before numbering - a short reference. */
   number: string;
+  /** The till that numbered it; absent with a short reference. */
+  till?: string;
+  /** The cancelling receipt's number, when the sale was cancelled. */
+  cancelledBy?: { number: string; till: string };
   currency: string;
   lines: { title: string; variant?: string; qty: number; amount: number; /** VAT rate letter, when a sale has more than one. */ vat?: string }[];
   discounts: { name: string; amount: number }[];
@@ -235,7 +240,11 @@ export function publicReceipt(
     seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
-    number: tx.id.slice(-8).toUpperCase(),
+    number: tx.receipt ? String(Number(tx.receipt.number) || 0) : tx.id.slice(-8).toUpperCase(),
+    ...(tx.receipt ? { till: String(tx.receipt.till).slice(0, 60) } : {}),
+    ...(tx.revertedAt && tx.revertReceipt
+      ? { cancelledBy: { number: String(Number(tx.revertReceipt.number) || 0), till: String(tx.revertReceipt.till).slice(0, 60) } }
+      : {}),
     currency: tx.currency,
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
@@ -413,6 +422,7 @@ const SCRIPT = String.raw`(function () {
     receiptEl.appendChild(el('hr'));
     if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
+    if (r.till) receiptEl.appendChild(el('p', 'muted', 'Receipt no. ' + r.number + ' · Till ' + r.till));
     receiptEl.appendChild(el('hr'));
     r.lines.forEach(function (l) {
       receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency) + (l.vat ? ' ' + l.vat : '')));
@@ -432,7 +442,8 @@ const SCRIPT = String.raw`(function () {
     });
     if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
     if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
-    [['TSE', r.tse], ['TSE - Storno', r.revertTse]].forEach(function (pair) {
+    var c = r.cancelledBy;
+    [['TSE', r.tse, r.till], ['TSE - Storno' + (c ? ' - receipt no. ' + c.number : ''), r.revertTse, c && c.till]].forEach(function (pair) {
       var t = pair[1];
       if (!t) return;
       receiptEl.appendChild(el('hr'));
@@ -443,14 +454,15 @@ const SCRIPT = String.raw`(function () {
       receiptEl.appendChild(row('Signaturzähler', String(t.signatureCounter), 'muted'));
       receiptEl.appendChild(row('Start', new Date(t.start).toLocaleString(), 'muted'));
       receiptEl.appendChild(row('Ende', new Date(t.finish).toLocaleString(), 'muted'));
-      receiptEl.appendChild(row('Kasse', t.clientId, 'muted'));
+      if (t.clientId !== pair[2]) receiptEl.appendChild(row('Kasse', t.clientId, 'muted'));
       receiptEl.appendChild(el('p', 'muted mono', 'TSE ' + t.serial));
       receiptEl.appendChild(el('p', 'muted mono', 'Signatur ' + t.signature));
     });
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
     receiptEl.appendChild(el('hr'));
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
-    receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    if (c) receiptEl.appendChild(el('p', 'muted c', 'Cancelled by receipt no. ' + c.number + (c.till !== r.till ? ' (till ' + c.till + ')' : '')));
+    if (!r.till) receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
     statusEl.hidden = true;
     receiptEl.hidden = false;
     printBtn.hidden = false;

@@ -178,9 +178,44 @@ describe('printed receipt amounts', () => {
     expect(lines).toContain('TSE not responding');
   });
 
-  it('prints the cancellation’s own TSE block on a reverted sale', () => {
-    const lines = text(sale({ currency: 'EUR', tse: signed, revertTse: { signed: { ...signed.signed, transactionNumber: 14 } } })).map((l) => l.trim());
-    expect(lines).toContain('STORNO - cancelled');
-    expect(lines.filter((l) => l.startsWith('TSE-Transaktion'))).toHaveLength(2);
+  it('prints the receipt number and till, once', () => {
+    const lines = text(sale({ currency: 'EUR', tse: signed, receipt: { till: 'ZOLLIFY-TEST1', number: 42 } }));
+    expect(amountOn(lines, 'Receipt no.')).toBe('42');
+    expect(amountOn(lines, 'Till')).toBe('ZOLLIFY-TEST1');
+    // Named at the top already, so the TSE block leaves the till out.
+    expect(lines.some((l) => l.startsWith('Kasse'))).toBe(false);
+    // The old short reference is only for sales from before numbering.
+    expect(lines.some((l) => l.trim().startsWith('Receipt tx-'))).toBe(false);
+  });
+
+  const reverted = sale({
+    currency: 'EUR',
+    tse: signed,
+    receipt: { till: 'ZOLLIFY-TEST1', number: 42 },
+    revertedAt: Date.UTC(2026, 9, 3, 11, 0),
+    revertReceipt: { till: 'ZOLLIFY-TEST1', number: 43 },
+    revertTse: { signed: { ...signed.signed, transactionNumber: 14, processData: 'Beleg^-45.00_0.00_0.00_0.00_0.00^-45.00:Bar' } },
+    asCharged: { listTotals: [44, 5], discounts: [{ name: 'Bundle', amount: 4 }] },
+  });
+
+  it('points a cancelled sale’s receipt to its cancellation', () => {
+    const lines = text(reverted).map((l) => l.trim());
+    expect(lines).toContain('CANCELLED - receipt no. 43');
+    expect(lines.filter((l) => l.startsWith('TSE-Transaktion'))).toEqual(['TSE-Transaktion               13']);
+  });
+
+  it('prints a cancellation as a receipt of its own: own number and signature, every amount negative', () => {
+    const lines = buildReceiptLines(reverted, 'Con', { artist: {}, logoB64: '', footerText: '' }, undefined, true)
+      .filter((l) => l.kind === 'text')
+      .map((l) => l.text ?? '');
+    expect(lines.map((l) => l.trim())).toContain('STORNO / CANCELLATION');
+    expect(lines.map((l) => l.trim())).toContain('of receipt no. 42');
+    expect(amountOn(lines, 'Receipt no.')).toBe('43');
+    expect(amountOn(lines, '-2 x Print')).toBe('EUR -44.00');
+    expect(amountOn(lines, 'Bundle')).toBe('+EUR 4.00');
+    expect(amountOn(lines, 'TOTAL')).toBe('EUR -45.00');
+    expect(amountOn(lines, 'Cash refunded')).toBe('EUR -45.00');
+    expect(amountOn(lines, 'TSE-Transaktion')).toBe('14');
+    expect(amountOn(lines, 'Start')).toBe('2026-10-03 12:00:01');
   });
 });

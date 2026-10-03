@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
@@ -22,6 +22,7 @@ import {
   currentAccount,
   refreshTseInfo,
   setTseSettings,
+  defaultTillId,
   tseState,
   type TseDriverId,
   deviceFlavor,
@@ -70,10 +71,15 @@ onMounted(async () => {
 const checkingTse = ref(false);
 async function chooseTse(driver: TseDriverId): Promise<void> {
   // A till needs a serial number for the TSE; suggest one from the device id.
-  const clientId = tseState.settings.clientId || (driver !== 'none' && id.value ? `ZOLLIFY-${id.value.slice(0, 8).toUpperCase()}` : '');
+  const clientId = tseState.settings.clientId || (driver !== 'none' && id.value ? defaultTillId(id.value) : '');
   await setTseSettings({ driver, clientId });
   if (driver !== 'none') await checkTse();
 }
+/** A German receipt must name the seller and their address (§ 6 KassenSichV); the receipt takes them from the profile. */
+const sellerMissing = computed(() => {
+  const a = account.value?.profile.artist;
+  return !(a?.companyName?.trim() || a?.fullName?.trim()) || !a?.street?.trim() || !a?.postCodeCity?.trim();
+});
 async function checkTse(): Promise<void> {
   checkingTse.value = true;
   try {
@@ -231,7 +237,7 @@ function when(ts: number): string {
         <label>
           <span>Till serial number</span>
           <input :value="tseState.settings.clientId" type="text" maxlength="30" @change="setTseSettings({ clientId: ($event.target as HTMLInputElement).value.trim() })" />
-          <small>Printed on receipts and given when registering the till with the tax office.</small>
+          <small>Printed on receipts and given when registering the till with the tax office. Receipt numbers count up per till serial number, so changing it starts them again from 1.</small>
         </label>
         <label>
           <span>Sign</span>
@@ -243,6 +249,10 @@ function when(ts: number): string {
         <div class="row">
           <button type="button" :disabled="checkingTse" @click="checkTse">{{ checkingTse ? 'Checking…' : 'Check TSE' }}</button>
         </div>
+        <p v-if="sellerMissing" class="error" role="alert">
+          Receipts in Germany must show your business name and address. Add them under Settings → Profile, or set them in the till's
+          receipt settings.
+        </p>
         <p v-if="tseState.error" class="error" role="alert">{{ tseState.error }}</p>
         <dl v-else-if="tseState.info" class="facts">
           <dt>Status</dt>

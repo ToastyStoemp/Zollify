@@ -155,15 +155,16 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'tx.revert': {
-      const { id, revertedAt, revertedBy, revertTse } = op.payload as {
+      const { id, revertedAt, revertedBy, revertTse, revertReceipt } = op.payload as {
         id: string;
         revertedAt: number;
         revertedBy: string;
         revertTse?: Transaction['revertTse'];
+        revertReceipt?: Transaction['revertReceipt'];
       };
       const existing = await db.transactions.get(id);
       if (existing && !existing.revertedAt) {
-        await db.transactions.put({ ...existing, revertedAt, revertedBy, ...(revertTse ? { revertTse } : {}) });
+        await db.transactions.put({ ...existing, revertedAt, revertedBy, ...(revertReceipt ? { revertReceipt } : {}), ...(revertTse ? { revertTse } : {}) });
         return 1;
       }
       return 0;

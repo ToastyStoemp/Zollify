@@ -52,9 +52,13 @@ const breakdown = computed(() => (tx.value ? receiptAmounts(tx.value) : { lines:
 const subtotal = computed(() => breakdown.value.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100);
 /** KassenSichV: the sale's TSE outcome, and its cancellation's when reverted. */
 const tseBlocks = computed(() => {
-  const out: { title: string; tse: NonNullable<Transaction['tse']> }[] = [];
-  if (tx.value?.tse) out.push({ title: 'TSE', tse: tx.value.tse });
-  if (tx.value?.revertTse) out.push({ title: 'TSE - Storno', tse: tx.value.revertTse });
+  const out: { title: string; tse: NonNullable<Transaction['tse']>; till?: string }[] = [];
+  const t = tx.value;
+  if (t?.tse) out.push({ title: 'TSE', tse: t.tse, till: t.receipt?.till });
+  if (t?.revertTse) {
+    const no = t.revertReceipt ? ` - receipt no. ${t.revertReceipt.number}` : '';
+    out.push({ title: `TSE - Storno${no}`, tse: t.revertTse, till: t.revertReceipt?.till });
+  }
   return out;
 });
 /** VAT per rate, lettered when a sale has more than one - as on the printed copy. */
@@ -136,6 +140,7 @@ async function print(): Promise<void> {
     <article v-if="tx" class="paper">
       <p class="event">{{ eventName || 'No event' }}</p>
       <p class="when">{{ new Date(tx.timestamp).toLocaleString() }}</p>
+      <p v-if="tx.receipt" class="when">Receipt no. {{ tx.receipt.number }} · Till {{ tx.receipt.till }}</p>
 
       <ul class="items">
         <li v-for="(item, i) in lines" :key="i">
@@ -180,12 +185,15 @@ async function print(): Promise<void> {
             <p class="row"><span>Signaturzähler</span><span>{{ block.tse.signed.signatureCounter }}</span></p>
             <p class="row"><span>Start</span><span>{{ new Date(block.tse.signed.start).toLocaleString() }}</span></p>
             <p class="row"><span>Ende</span><span>{{ new Date(block.tse.signed.finish).toLocaleString() }}</span></p>
-            <p class="row"><span>Kasse</span><span>{{ block.tse.signed.clientId }}</span></p>
+            <p v-if="block.tse.signed.clientId !== block.till" class="row"><span>Kasse</span><span>{{ block.tse.signed.clientId }}</span></p>
             <p class="tse-serial">TSE {{ block.tse.signed.serial }}</p>
           </template>
         </div>
       </template>
-      <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
+      <p v-if="tx.revertedAt" class="reverted">
+        Reverted {{ new Date(tx.revertedAt).toLocaleString() }}<template v-if="tx.revertReceipt">
+          - cancellation receipt no. {{ tx.revertReceipt.number }}<template v-if="tx.revertReceipt.till !== tx.receipt?.till"> (till {{ tx.revertReceipt.till }})</template></template>
+      </p>
       <p class="ref">{{ tx.id }}</p>
     </article>
 

@@ -280,6 +280,20 @@ export interface Transaction {
   tse?: SaleTse;
   /** The TSE signature of the cancelling receipt, when a signed sale was reverted. */
   revertTse?: SaleTse;
+  /** The receipt number this sale was given by its till. Absent on sales from before receipts were numbered. */
+  receipt?: ReceiptNumber;
+  /** The cancelling receipt's own number, when reverted - a cancellation is a receipt of its own. */
+  revertReceipt?: ReceiptNumber;
+}
+
+/**
+ * A receipt's number: counted up per till, without gaps, as German (and
+ * Austrian) till rules expect. `till` names the till that counted it, so
+ * two devices on one account never print the same receipt number.
+ */
+export interface ReceiptNumber {
+  till: string;
+  number: number;
 }
 
 export interface AsCharged {

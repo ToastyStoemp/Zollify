@@ -232,7 +232,8 @@ export function buildReceiptLines(
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
   const [qrB64, logoB64, shared] = await Promise.all([
-    config.printQr ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
+    // A cancelled sale's link only says so; no point printing it.
+    config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
   ]);

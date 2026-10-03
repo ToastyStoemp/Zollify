@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { fmtPrice, type Transaction } from '@zollify/shared';
 import { receiptAmounts, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
-import { QrCode, receiptUrl as receiptUrlFor } from '../lib/after-sale';
+import { QrCode, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
+import { screenLogo } from '../lib/branding';
+import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 
 const props = defineProps<{ saleId?: string }>();
 
@@ -12,6 +15,17 @@ const eventName = ref('');
 const canPrintNatively = ref(false);
 const message = ref<string | null>(null);
 const failed = ref(false);
+const router = useRouter();
+
+/**
+ * Opened from History (or the till's last-sale bar), a past sale shows the
+ * same card as right after the sale: amount, QR to the online receipt and the
+ * print buttons. Closing it goes back where it came from; "Full receipt"
+ * stays here on the paper copy.
+ */
+const showCard = ref(true);
+const logo = ref<string | undefined>();
+const printState = ref<PrintState>('idle');
 
 /**
  * Rendered from the recorded transaction rather than the cart.
@@ -22,6 +36,7 @@ const failed = ref(false);
  */
 onMounted(async () => {
   canPrintNatively.value = await printingAvailable().catch(() => false);
+  logo.value = await screenLogo().catch(() => undefined);
 
   if (!props.saleId) return;
   const found = sdk().data.transactions.get(props.saleId) ?? null;
@@ -35,8 +50,19 @@ const lines = computed(() => tx.value?.items ?? []);
 /** Lines at the till's price and each discount, in what the customer paid - matches the printed copy. */
 const breakdown = computed(() => (tx.value ? receiptAmounts(tx.value) : { lines: [], discounts: [] }));
 const subtotal = computed(() => breakdown.value.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100);
-/** The customer's online receipt, for one who asks after the fact. */
-const receiptUrl = computed(() => (QrCode && receiptUrlFor(tx.value?.receiptToken)) || '');
+/** The customer's online receipt, for one who asks after the fact. A cancelled sale gets none. */
+const receiptUrl = computed(() => (QrCode && !tx.value?.revertedAt && receiptUrlFor(tx.value?.receiptToken)) || '');
+const caption = computed(() => {
+  if (!tx.value) return '';
+  const when = new Date(tx.value.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return [eventName.value, when].filter(Boolean).join(' · ');
+});
+
+function closeCard(): void {
+  // Came from somewhere in the app (History, the till): go back there.
+  if ((window.history.state as { back?: string | null } | null)?.back) router.back();
+  else showCard.value = false;
+}
 
 const paidWith = computed(() =>
   (tx.value?.payments ?? [])
@@ -58,14 +84,18 @@ async function print(): Promise<void> {
     window.print();
     return;
   }
+  if (printState.value === 'printing') return;
 
+  printState.value = 'printing';
   try {
     const receiptLines = await printableReceipt(tx.value, eventName.value, sdk().data.events.get(tx.value.eventId)?.venue?.country);
     const result = await printReceipt(receiptLines);
     failed.value = !result.printed;
+    printState.value = result.printed ? 'printed' : 'failed';
     message.value = result.printed ? 'Printed.' : (result.error ?? 'The printer did not respond.');
   } catch (err) {
     failed.value = true;
+    printState.value = 'failed';
     message.value = err instanceof Error ? err.message : 'Could not print that receipt.';
   }
 }
@@ -75,9 +105,12 @@ async function print(): Promise<void> {
   <section class="receipt">
     <header class="bar">
       <h1>Receipt</h1>
-      <button type="button" :disabled="!tx" @click="print">
-        {{ canPrintNatively ? 'Print' : 'Print (browser)' }}
-      </button>
+      <div class="bar-actions">
+        <button v-if="tx && !showCard" type="button" @click="showCard = true">Show QR</button>
+        <button type="button" :disabled="!tx || printState === 'printing'" @click="print">
+          {{ canPrintNatively ? 'Print' : 'Print (browser)' }}
+        </button>
+      </div>
     </header>
 
     <p v-if="!tx" class="empty">
@@ -121,12 +154,29 @@ async function print(): Promise<void> {
       <component :is="QrCode" :value="receiptUrl" :size="160" label="QR code for the online receipt" />
       <p>Online receipt - the customer scans this to keep a copy. It opens once this sale has synced.</p>
     </div>
+
+    <AfterSaleOverlay
+      v-if="tx && showCard"
+      :caption="caption"
+      :total="fmtPrice(tx.total, tx.currency)"
+      :receipt-url="receiptUrl || undefined"
+      :logo="logo"
+      :warning="tx.revertedAt ? 'This sale was cancelled' : undefined"
+      :can-print="true"
+      :print="printState"
+      :print-label="canPrintNatively ? 'Print receipt' : 'Print (browser)'"
+      secondary-label="Full receipt"
+      @print="print"
+      @close="closeCard"
+      @secondary="showCard = false"
+    />
   </section>
 </template>
 
 <style scoped>
 .receipt { display: flex; flex-direction: column; gap: 1rem; }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.bar-actions { display: flex; gap: .5rem; }
 h1 { font-size: 1.25rem; margin: 0; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .result { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); }

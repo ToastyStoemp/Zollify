@@ -17,6 +17,9 @@ import { sdk } from '../runtime';
 type Display = Partial<Sdk['display']>;
 const display = (): Display => sdk().display as Display;
 
+/** Where a receipt's print job stands, for the print button's label. */
+export type PrintState = 'idle' | 'printing' | 'printed' | 'failed';
+
 export const AfterSalePanel = (ui as Record<string, unknown>).AfterSalePanel as Component | undefined;
 export const QrCode = (ui as Record<string, unknown>).QrCode as Component | undefined;
 

@@ -5,6 +5,8 @@ import { CountryPicker } from '@zollify/ui';
 import { LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, type ArtistInfo, type ReceiptLine } from '../receipt';
 import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
+import { pushBranding } from '../lib/branding';
+import { receiptQrPng } from '../lib/after-sale';
 import ReceiptPreview from '../components/ReceiptPreview.vue';
 
 /**
@@ -27,6 +29,9 @@ const artist = reactive<Required<Pick<ArtistInfo, 'companyName' | 'fullName' | '
 });
 const footerText = ref('');
 const autoPrint = ref(false);
+const printQr = ref(true);
+/** A sample QR for the preview; same size and placement as a real one. */
+const sampleQrB64 = ref('');
 const logoB64 = ref('');
 const printLogoB64 = ref('');
 const saved = ref(false);
@@ -42,6 +47,8 @@ onMounted(async () => {
     artist.vatNumbers = (stored.vatNumbers ?? []).map((v) => ({ country: v.country ?? '', vatNumber: v.vatNumber ?? '' }));
     footerText.value = (await getSetting<string>(RECEIPT_KEYS.footerText)) ?? '';
     autoPrint.value = (await getSetting<boolean>(RECEIPT_KEYS.autoPrint)) ?? false;
+    printQr.value = (await getSetting<boolean>(RECEIPT_KEYS.printQr)) ?? true;
+    sampleQrB64.value = (await receiptQrPng('SAMPLEsampleSAMPLE0000')) ?? '';
     logoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '';
     printLogoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoB64)) ?? '';
   } catch (err) {
@@ -65,6 +72,7 @@ async function chooseLogo(event: Event): Promise<void> {
     await setSetting(RECEIPT_KEYS.logoScreenB64, screen);
     logoB64.value = screen;
     printLogoB64.value = print;
+    await shareBranding({ logo: screen });
     sdk().ui.toast('Logo updated.', { kind: 'success' });
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not read that image.';
@@ -75,6 +83,19 @@ async function clearLogo(): Promise<void> {
   await setSetting(RECEIPT_KEYS.logoScreenB64, '');
   logoB64.value = '';
   printLogoB64.value = '';
+  await shareBranding({ logo: null });
+}
+
+/**
+ * The online receipt and customer displays use the same logo and footer;
+ * failing to share them never undoes the local save.
+ */
+async function shareBranding(patch: { logo?: string | null; footer?: string | null }): Promise<void> {
+  try {
+    await pushBranding(patch);
+  } catch {
+    sdk().ui.toast('Saved here, but the online receipt could not be updated - try again when online.', { kind: 'warning' });
+  }
 }
 
 async function save(): Promise<void> {
@@ -84,6 +105,8 @@ async function save(): Promise<void> {
     await setSetting(RECEIPT_KEYS.artist, JSON.parse(JSON.stringify(clean)));
     await setSetting(RECEIPT_KEYS.footerText, footerText.value);
     await setSetting(RECEIPT_KEYS.autoPrint, autoPrint.value);
+    await setSetting(RECEIPT_KEYS.printQr, printQr.value);
+    await shareBranding({ footer: footerText.value });
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
   } catch (err) {
@@ -110,7 +133,7 @@ const sampleTx = computed<Transaction>(() => ({
   payments: [{ kind: 'card', amount: 47, provider: 'card', cardBrand: 'VISA', authCode: '004215', txRef: '304512780093' }],
 }));
 const previewLines = computed<ReceiptLine[]>(() =>
-  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: { ...artist }, logoB64: printLogoB64.value, footerText: footerText.value }, previewCountry.value || undefined),
+  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: { ...artist }, logoB64: printLogoB64.value, footerText: footerText.value, qrB64: printQr.value ? sampleQrB64.value : undefined }, previewCountry.value || undefined),
 );
 </script>
 
@@ -146,6 +169,8 @@ const previewLines = computed<ReceiptLine[]>(() =>
 
         <label><span>Footer text</span><textarea v-model="footerText" rows="2" placeholder="Thanks for visiting! No returns on prints."></textarea></label>
         <label class="inline"><input v-model="autoPrint" type="checkbox" /><span>Print automatically after each sale</span></label>
+        <label class="inline"><input v-model="printQr" type="checkbox" /><span>Print a QR code for the customer's online receipt</span></label>
+        <p class="hint">The footer text and logo also appear on the online receipt and customer displays.</p>
         <button type="submit" class="primary">Save</button>
         <p v-if="saved" class="ok" role="status">Saved.</p>
 

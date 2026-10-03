@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
-import { afterSalePrefs, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected } from '@zollify/platform';
+import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected } from '@zollify/platform';
 import { AfterSalePanel, Icon } from '@zollify/ui';
 
 /**
@@ -21,6 +21,16 @@ let clock: ReturnType<typeof setInterval> | undefined;
 let wakeLock: { release(): Promise<void> } | null = null;
 
 const boothName = computed(() => account.value?.profile.artist.companyName || account.value?.accountName || '');
+/** The logo set under POS → Receipts, shared through the server; none if POS is off or nothing is set. */
+const logo = ref<string | undefined>();
+async function loadLogo(): Promise<void> {
+  try {
+    const branding = (await authFetch('/m/pos/branding')) as { logo?: string | null };
+    logo.value = branding.logo ? `data:image/png;base64,${branding.logo}` : undefined;
+  } catch {
+    /* no POS, or offline: the name alone still shows */
+  }
+}
 
 const sources = computed(() => Object.values(displayCarts).sort((a, b) => b.receivedAt - a.receivedAt));
 const selectedId = ref('');
@@ -71,6 +81,7 @@ watch(
 
 onMounted(() => {
   void loadAfterSalePrefs().catch(() => {});
+  void loadLogo();
   clock = setInterval(() => (now.value = Date.now()), 5000);
 });
 onUnmounted(() => {
@@ -94,13 +105,14 @@ const amount = (n: number): string => n.toFixed(2);
     <router-link :to="{ name: 'settings' }" class="exit" aria-label="Leave display mode"><Icon name="x" :size="18" /></router-link>
 
     <div v-if="screen === 'idle'" class="idle">
+      <img v-if="logo" class="logo" :src="logo" alt="" />
       <p v-if="boothName" class="brand">{{ boothName }}</p>
       <p v-if="!realtimeConnected" class="hint">Not connected - waiting for the server…</p>
       <p v-else class="hint pulse">Waiting for the next sale…</p>
     </div>
 
     <div v-else-if="screen === 'thanks' && current" class="thanks">
-      <AfterSalePanel :thank-you="afterSalePrefs.thankYou" :total="fmtPrice(current.paid!.total, current.currency)" :receipt-url="receiptUrl" :qr-size="260" />
+      <AfterSalePanel :thank-you="afterSalePrefs.thankYou" :total="fmtPrice(current.paid!.total, current.currency)" :receipt-url="receiptUrl" :logo="logo" :qr-size="260" />
     </div>
 
     <template v-else-if="current">
@@ -127,6 +139,7 @@ const amount = (n: number): string => n.toFixed(2);
 .exit { position: absolute; right: .75rem; top: .75rem; padding: .4rem; border-radius: 8px; color: var(--zfy-faint); }
 .exit:hover { color: var(--zfy-ink); background: var(--zfy-surface); }
 .idle, .thanks { margin: auto; text-align: center; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
+.logo { max-width: min(22rem, 70vw); max-height: 10rem; object-fit: contain; }
 .brand { margin: 0; font-size: 2rem; font-weight: 700; }
 .hint { margin: 0; color: var(--zfy-muted); }
 .pulse { animation: pulse 1.6s ease-in-out infinite; }

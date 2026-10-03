@@ -27,7 +27,8 @@ import {
 } from '../cart';
 import { getProvider } from '../payments/registry';
 import { findSearchMatch, typeColor } from '../search';
-import { buildReceiptLines, loadReceiptConfig, printReceipt, printingAvailable } from '../receipt';
+import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
 import { AfterSalePanel, afterSalePrefs, receiptUrl as receiptUrlFor } from '../lib/after-sale';
 import ProductThumb from '../components/ProductThumb.vue';
@@ -81,6 +82,7 @@ function tapTerminalState(): void {
 }
 
 onMounted(async () => {
+  void backfillBranding();
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
@@ -666,6 +668,7 @@ const afterSale = ref<{
   thankYou: boolean;
   total: string;
   receiptUrl?: string;
+  logo?: string;
   /** This device has a printer: the Carbon's built-in one, or a paired Bluetooth printer. */
   canPrint: boolean;
   print: PrintState;
@@ -676,12 +679,12 @@ function holdAfterSale(ms: number): void {
   afterSaleTimer = setTimeout(dismissAfterSale, ms);
 }
 async function showAfterSale(sale: SaleEvent, receiptUrl: string | undefined): Promise<void> {
-  const [prefs, canPrint] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false)]);
+  const [prefs, canPrint, logo] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false), screenLogo().catch(() => undefined)]);
   const url = prefs.receiptQr ? receiptUrl : undefined;
   if (!prefs.thankYou && !url) return;
   // An auto-print may already be under way by the time this resolves.
   const print = printing.get(sale.saleId) ?? 'idle';
-  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, canPrint, print };
+  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo, canPrint, print };
   // Offering to print means waiting for an answer, same as a QR to scan.
   holdAfterSale(url || canPrint ? 30_000 : 4000);
 }
@@ -719,7 +722,6 @@ async function printSale(saleId: string): Promise<void> {
   if (printing.get(saleId) === 'printing') return;
   setPrintState(saleId, 'printing');
   try {
-    const config = await loadReceiptConfig();
     // The row is written by core a tick after the event fires.
     let tx = sdk().data.transactions.get(saleId);
     for (let i = 0; !tx && i < 10; i++) {
@@ -727,7 +729,7 @@ async function printSale(saleId: string): Promise<void> {
       tx = sdk().data.transactions.get(saleId);
     }
     if (!tx) throw new Error('sale not recorded yet');
-    const result = await printReceipt(buildReceiptLines(tx, activeEvent.value?.name ?? '', config, activeEvent.value?.venue?.country));
+    const result = await printReceipt(await printableReceipt(tx, activeEvent.value?.name ?? '', activeEvent.value?.venue?.country));
     setPrintState(saleId, result.printed ? 'printed' : 'failed');
     if (!result.printed) toast(`Receipt: ${result.error ?? 'print failed'}`, 'bad');
   } catch (err) {
@@ -1010,7 +1012,7 @@ async function cancelPayment(): Promise<void> {
 
     <div v-if="afterSale" class="after-sale" role="dialog" aria-modal="true" aria-label="Sale complete" @click.self="dismissAfterSale">
       <div class="after-sale-card">
-        <component :is="AfterSalePanel" :thank-you="afterSale.thankYou" :total="afterSale.total" :receipt-url="afterSale.receiptUrl" :qr-size="240" />
+        <component :is="AfterSalePanel" :thank-you="afterSale.thankYou" :total="afterSale.total" :receipt-url="afterSale.receiptUrl" :logo="afterSale.logo" :qr-size="240" />
         <p v-if="afterSale.print === 'printed'" class="print-note" role="status"><Icon name="check" :size="14" /> Receipt printed</p>
         <div class="after-sale-actions">
           <button v-if="afterSale.canPrint" type="button" :disabled="afterSale.print === 'printing'" @click="printFromAfterSale">

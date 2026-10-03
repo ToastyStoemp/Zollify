@@ -2,6 +2,9 @@ import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import { fmtPrice } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
+import { receiptQrPng } from './lib/after-sale';
+import { serverBranding } from './lib/branding';
+import { sdk } from './runtime';
 
 /**
  * Receipt building for the myPOS Carbon's built-in thermal printer (carbon
@@ -60,6 +63,8 @@ export const RECEIPT_KEYS = {
   logoScreenB64: 'receipt.logoScreenB64',
   footerText: 'receipt.footerText',
   autoPrint: 'receipt.autoPrint',
+  /** Print a QR code linking to the customer's online receipt (default on). */
+  printQr: 'receipt.printQr',
   /** MAC address + display name of a paired Bluetooth ESC/POS printer. */
   printerAddress: 'receipt.printerAddress',
   printerName: 'receipt.printerName',
@@ -110,6 +115,7 @@ export async function loadReceiptConfig(): Promise<{
   logoScreenB64: string;
   footerText: string;
   autoPrint: boolean;
+  printQr: boolean;
 }> {
   return {
     artist: (await getSetting<ArtistInfo>(RECEIPT_KEYS.artist)) ?? {},
@@ -117,13 +123,14 @@ export async function loadReceiptConfig(): Promise<{
     logoScreenB64: (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '',
     footerText: (await getSetting<string>(RECEIPT_KEYS.footerText)) ?? '',
     autoPrint: (await getSetting<boolean>(RECEIPT_KEYS.autoPrint)) ?? false,
+    printQr: (await getSetting<boolean>(RECEIPT_KEYS.printQr)) ?? true,
   };
 }
 
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string },
+  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string },
   eventCountry?: string,
 ): ReceiptLine[] {
   const { artist, logoB64, footerText } = config;
@@ -184,11 +191,71 @@ export function buildReceiptLines(
   if (footerText) {
     for (const part of footerText.split('\n')) lines.push(center(part));
   }
+  if (config.qrB64) {
+    lines.push({ kind: 'image', imageB64: config.qrB64 });
+    lines.push(center('Scan for your receipt online'));
+    lines.push({ kind: 'space' });
+  }
   lines.push(center(`Receipt ${tx.id.slice(-8)}`));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 
   return lines;
+}
+
+/**
+ * The receipt as this device prints it: the saved receipt settings, plus the
+ * online-receipt QR when that is switched on and the sale has a link.
+ */
+export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
+  const config = await loadReceiptConfig();
+  const [qrB64, logoB64, shared] = await Promise.all([
+    config.printQr ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
+    config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
+    config.footerText ? Promise.resolve(null) : serverBranding(),
+  ]);
+  return buildReceiptLines(
+    tx,
+    eventName,
+    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64 },
+    eventCountry,
+  );
+}
+
+/**
+ * A device that was never set up under Receipts still prints a branded
+ * receipt: blank artist fields fall back to the booth profile (as the
+ * settings form already promises), and a missing logo or footer to the ones
+ * shared through the server.
+ */
+function withProfileFallback(artist: ArtistInfo): ArtistInfo {
+  const profile = sdk().account()?.profile.artist;
+  if (!profile) return artist;
+  const out: ArtistInfo = { ...artist };
+  for (const k of ['companyName', 'fullName', 'street', 'postCodeCity', 'countryOfOrigin', 'phone', 'email'] as const) out[k] = artist[k] || profile[k] || '';
+  out.vatNumber = artist.vatNumber || profile.vatId || '';
+  return out;
+}
+
+/** Decoded by hand: the page's CSP keeps fetch() off data: URLs. */
+function pngBlob(b64: string): Blob {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: 'image/png' });
+}
+
+let sharedLogo: Promise<string | undefined> | null = null;
+/** The account's logo, flattened onto white for the printer. Worked out once per session. */
+function sharedPrintLogo(): Promise<string | undefined> {
+  sharedLogo ??= serverBranding()
+    .then((b) => (b?.logo ? processLogoFile(pngBlob(b.logo)) : undefined))
+    .catch(() => undefined)
+    .then((logo) => {
+      if (!logo) sharedLogo = null; // try again next time, e.g. once back online
+      return logo;
+    });
+  return sharedLogo;
 }
 
 /**

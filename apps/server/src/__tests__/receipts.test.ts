@@ -14,6 +14,8 @@ import { buildGateway, setEnabled } from '@zollify/server-core';
  */
 
 process.env.RECEIPT_CAPTCHA_BITS = '10';
+// Every test here comes from one address; the per-minute cap is the rate-limit plugin's job.
+process.env.RECEIPT_LOOKUPS_PER_MIN = '1000';
 const { receiptsServerModule, resetReceiptAbuseState } = await import('../modules/receipts');
 
 const OWNER_EMAIL = 'owner@example.test';
@@ -223,6 +225,33 @@ describe('online receipts', () => {
     setEnabled(app.zollify.db, accountId, 'pos', false);
     expect((await lookup(TOKEN)).statusCode).toBe(404);
     setEnabled(app.zollify.db, accountId, 'pos', true);
+  });
+
+  it('carries the booth branding, once an admin has set it', async () => {
+    const before = await lookup(TOKEN);
+    expect(before.statusCode, before.body).toBe(200);
+    expect(before.json().brand).toEqual({ footer: [] });
+
+    // 1x1 transparent PNG.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    const put = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo: png, footer: 'Thanks for supporting indie art!\n@harbourprints' } });
+    expect(put.statusCode).toBe(200);
+
+    const brand = (await lookup(TOKEN)).json().brand;
+    expect(brand.logo).toBe(`data:image/png;base64,${png}`);
+    expect(brand.footer).toEqual(['Thanks for supporting indie art!', '@harbourprints']);
+
+    const read = await app.inject({ method: 'GET', url: '/api/m/pos/branding', headers: auth() });
+    expect(read.json()).toEqual({ logo: png, footer: 'Thanks for supporting indie art!\n@harbourprints' });
+  });
+
+  it('keeps anything but a modest PNG out of the branding', async () => {
+    const svg = Buffer.from('<svg onload="alert(1)"/>').toString('base64');
+    for (const logo of [svg, 'not base64!', Buffer.alloc(300 * 1024).toString('base64')]) {
+      const res = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo } });
+      expect(res.statusCode).toBe(400);
+    }
+    expect((await app.inject({ method: 'PUT', url: '/api/m/pos/branding', payload: { footer: 'x' } })).statusCode).toBe(401);
   });
 
   it('finds the sale through the token index, not a table scan', () => {

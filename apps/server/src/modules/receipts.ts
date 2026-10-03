@@ -4,6 +4,7 @@ import { isReceiptToken, type SalesEvent, type Transaction } from '@zollify/shar
 import {
   issueChallenge,
   parseProfile,
+  type ModuleContext,
   reduceTransactions,
   verifyChallenge,
   type PublicModuleContext,
@@ -37,6 +38,7 @@ import {
 
 const MODULE_ID = 'pos';
 const DIFFICULTY = Math.min(22, Math.max(10, Number(process.env.RECEIPT_CAPTCHA_BITS || 15)));
+const LOOKUPS_PER_MIN = Math.max(1, Number(process.env.RECEIPT_LOOKUPS_PER_MIN || 20));
 const TTL_DAYS = Math.max(1, Number(process.env.RECEIPT_TTL_DAYS || 400));
 const MISS_WINDOW_MS = 15 * 60_000;
 const MISS_LIMIT = 10;
@@ -49,7 +51,52 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_ops_receipt_token
       ON ops (json_extract(payload, '$.receiptToken'))
       WHERE type = 'tx.create';
+    CREATE TABLE IF NOT EXISTS pos_branding (
+      accountId TEXT PRIMARY KEY,
+      logo      TEXT,
+      footer    TEXT,
+      updatedAt INTEGER NOT NULL
+    );
   `);
+}
+
+// ── Branding ────────────────────────────────────────────────────────────────
+// The logo and footer line a booth sets under POS → Receipts live on each
+// device; a copy is kept here so the online receipt and every customer
+// display can carry them too.
+
+const LOGO_MAX_BYTES = 256 * 1024;
+const FOOTER_MAX = 500;
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+export interface Branding {
+  /** Base64 PNG, no data: prefix. */
+  logo: string | null;
+  footer: string | null;
+}
+
+function readBranding(db: Database.Database, accountId: string): Branding {
+  const row = db.prepare('SELECT logo, footer FROM pos_branding WHERE accountId = ?').get(accountId) as Branding | undefined;
+  return { logo: row?.logo ?? null, footer: row?.footer ?? null };
+}
+
+/** Only a real, modest PNG is kept - it is later handed to strangers' browsers. */
+function cleanLogo(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error('The logo must be a base64 PNG.');
+  const bytes = Buffer.from(value, 'base64');
+  if (bytes.length > LOGO_MAX_BYTES) throw new Error('The logo is too large.');
+  if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('The logo must be a PNG.');
+  return bytes.toString('base64');
+}
+
+function cleanFooter(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new Error('The footer must be text.');
+  const text = value.replace(/\r\n?/g, '\n').trim().slice(0, FOOTER_MAX);
+  return text || null;
 }
 
 // ── Lookup ──────────────────────────────────────────────────────────────────
@@ -124,6 +171,7 @@ export interface PublicReceipt {
   total: number;
   payments: { label: string; amount: number }[];
   status: 'paid' | 'voided';
+  brand: { logo?: string; footer: string[] };
 }
 
 const toMinor = (n: number): number => Math.round(n * 100);
@@ -163,7 +211,10 @@ function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string
 }
 
 /** The whitelist. Anything not copied here does not leave the server. */
-export function publicReceipt(tx: Transaction, extra: { seller: PublicReceipt['seller']; event: string }): PublicReceipt {
+export function publicReceipt(
+  tx: Transaction,
+  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding },
+): PublicReceipt {
   return {
     seller: extra.seller,
     event: extra.event,
@@ -177,6 +228,11 @@ export function publicReceipt(tx: Transaction, extra: { seller: PublicReceipt['s
     total: tx.total,
     payments: (tx.payments ?? []).map((p) => ({ label: paymentLabel(tx, p.kind, p.cardBrand), amount: Number(p.amount) || 0 })),
     status: tx.revertedAt ? 'voided' : 'paid',
+    brand: {
+      // Inline, so the logo needs no URL of its own that could name the account.
+      logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
+      footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
+    },
   };
 }
 
@@ -232,6 +288,9 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .row { display: flex; justify-content: space-between; gap: 1rem; margin: .3rem 0; }
 .row span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .total { font-size: 1.3rem; font-weight: 700; }
+.logo { display: block; margin: 0 auto .75rem; max-width: 70%; max-height: 7rem; object-fit: contain; }
+@media (prefers-color-scheme: dark) { .logo { background: #fff; padding: .5rem; border-radius: 10px; } }
+.foot { white-space: pre-wrap; margin: .15rem 0; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
@@ -317,6 +376,12 @@ const SCRIPT = String.raw`(function () {
   function render(r) {
     receiptEl.textContent = '';
     if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
+    if (r.brand && r.brand.logo && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(r.brand.logo)) {
+      var img = el('img', 'logo');
+      img.alt = '';
+      img.src = r.brand.logo;
+      receiptEl.appendChild(img);
+    }
     if (r.seller.name) receiptEl.appendChild(el('h1', '', r.seller.name));
     r.seller.address.forEach(function (line) { receiptEl.appendChild(el('p', 'muted c', line)); });
     if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', 'VAT ' + r.seller.vatId));
@@ -332,6 +397,7 @@ const SCRIPT = String.raw`(function () {
     receiptEl.appendChild(row('Total', money(r.total, r.currency), 'total'));
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
     receiptEl.appendChild(el('hr'));
+    ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
     statusEl.hidden = true;
     receiptEl.hidden = false;
@@ -376,8 +442,34 @@ export const receiptsServerModule: ServerModule = {
   id: MODULE_ID,
   migrate,
 
-  // Nothing for signed-in users yet: the till already has the sale locally.
-  routes: () => async () => {},
+  /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
+  routes: (ctx: ModuleContext) => async (app) => {
+    app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
+
+    app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
+      const who = ctx.identity(req);
+      if (who.role !== 'owner' && who.role !== 'admin') {
+        return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt branding.' });
+      }
+      let logo: string | null | undefined;
+      let footer: string | null | undefined;
+      try {
+        logo = cleanLogo(req.body?.logo);
+        footer = cleanFooter(req.body?.footer);
+      } catch (err) {
+        return reply.code(400).send({ error: 'invalid', message: (err as Error).message });
+      }
+      const current = readBranding(ctx.db, who.accountId);
+      const next: Branding = { logo: logo === undefined ? current.logo : logo, footer: footer === undefined ? current.footer : footer };
+      ctx.db
+        .prepare(
+          `INSERT INTO pos_branding (accountId, logo, footer, updatedAt) VALUES (?, ?, ?, ?)
+           ON CONFLICT(accountId) DO UPDATE SET logo = excluded.logo, footer = excluded.footer, updatedAt = excluded.updatedAt`,
+        )
+        .run(who.accountId, next.logo, next.footer, Date.now());
+      return next;
+    });
+  },
 
   publicRoutes: (ctx: PublicModuleContext) => async (app) => {
     // Undo the /p/ prefix's cross-origin allowances: a receipt is never meant
@@ -394,14 +486,14 @@ export const receiptsServerModule: ServerModule = {
     app.get('/r/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(PAGE));
     app.get('/r/receipt.js', async (_req, reply) => reply.type('text/javascript; charset=utf-8').send(SCRIPT));
 
-    app.get('/r/challenge', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    app.get('/r/challenge', { config: { rateLimit: { max: LOOKUPS_PER_MIN + 10, timeWindow: '1 minute' } } }, async (req, reply) => {
       if (blocked(ipOf(req))) return reply.code(429).send({ error: 'rate_limited' });
       return issueChallenge('receipt', DIFFICULTY);
     });
 
     app.post<{ Body: { token?: unknown; captchaToken?: unknown; captchaSolution?: unknown } }>(
       '/r/lookup',
-      { config: { rateLimit: { max: 20, timeWindow: '1 minute' } }, bodyLimit: 2048 },
+      { config: { rateLimit: { max: LOOKUPS_PER_MIN, timeWindow: '1 minute' } }, bodyLimit: 2048 },
       async (req, reply) => {
         const ip = ipOf(req);
         if (blocked(ip)) return reply.code(429).send({ error: 'rate_limited' });
@@ -421,6 +513,7 @@ export const receiptsServerModule: ServerModule = {
         return publicReceipt(found.tx, {
           seller: seller(ctx.db, found.accountId),
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
+          branding: readBranding(ctx.db, found.accountId),
         });
       },
     );

@@ -195,8 +195,12 @@ export interface DisplayCart {
   lines: Array<{ title: string; variantLabel?: string; qty: number; lineTotal: number }>;
   discounts: Array<{ name: string; amount: number }>;
   total: number;
-  /** Set right after a completed sale - displays show a thank-you state. */
-  paid?: { total: number };
+  /**
+   * Set right after a completed sale - displays show a thank-you state.
+   * `receiptUrl` is the customer's online receipt; each display decides for
+   * itself whether to show it as a QR code.
+   */
+  paid?: { total: number; receiptUrl?: string };
   ts: number;
 }
 

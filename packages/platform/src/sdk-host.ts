@@ -28,6 +28,7 @@ import { getTransaction, importTransactions, recentTransactions, revertTransacti
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
+import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import {
   availabilityFor,
@@ -271,7 +272,11 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       return off;
     },
 
-    display: { publish: (cart) => sendDisplayCart(cart) },
+    display: {
+      publish: (cart) => sendDisplayCart(cart),
+      afterSale: () => loadAfterSalePrefs(),
+      receiptUrl: (token) => receiptUrlFor(token),
+    },
     realtime: {
       connected: () => realtimeConnected.value,
       deviceId: () => deviceId(),

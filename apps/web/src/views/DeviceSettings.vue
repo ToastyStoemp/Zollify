@@ -17,8 +17,11 @@ import {
   updateDownload,
   type ShellUpdateCheck,
   type UpdateCheck,
+  afterSalePrefs,
   currentAccount,
   deviceFlavor,
+  loadAfterSalePrefs,
+  setAfterSalePrefs,
   deviceId,
   deviceName,
   lastSyncAt,
@@ -48,6 +51,7 @@ const devices = ref<DeviceSummary[]>([]);
 const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
 
 onMounted(async () => {
+  void loadAfterSalePrefs().catch(() => {});
   try {
     id.value = await deviceId();
     name.value = (await deviceName()) ?? '';
@@ -170,6 +174,19 @@ function when(ts: number): string {
     <h3>Customer display</h3>
     <p class="hint">Turn this device into a second screen that mirrors another register's cart live - a tablet facing the customer. Sales still happen on the register.</p>
     <router-link :to="{ name: 'display' }" class="btn">Open customer display</router-link>
+
+    <h3>After a sale</h3>
+    <p class="hint">What this screen shows once a payment goes through - on a register and on a customer display alike. Set on each device on its own, so the till and the screen facing the customer can differ.</p>
+    <div class="toggles">
+      <label>
+        <input type="checkbox" :checked="afterSalePrefs.thankYou" @change="setAfterSalePrefs({ thankYou: ($event.target as HTMLInputElement).checked })" />
+        <span class="body"><span class="label">Thank-you screen</span><span class="sub">"Thank you!" and the amount paid.</span></span>
+      </label>
+      <label>
+        <input type="checkbox" :checked="afterSalePrefs.receiptQr" @change="setAfterSalePrefs({ receiptQr: ($event.target as HTMLInputElement).checked })" />
+        <span class="body"><span class="label">Receipt QR code</span><span class="sub">The customer scans it for their receipt online. Shows the receipt only - never other sales or your stock.</span></span>
+      </label>
+    </div>
 
     <h3>Appearance</h3>
     <div class="themes" role="radiogroup" aria-label="Theme">
@@ -298,6 +315,12 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .themes .body { display: flex; flex-direction: column; }
 .themes .label { font-size: .875rem; font-weight: 600; }
 .themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.toggles { display: flex; flex-direction: column; gap: .5rem; width: 100%; }
+.toggles label { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .75rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); cursor: pointer; }
+.toggles input { margin-top: .2rem; }
+.toggles .body { display: flex; flex-direction: column; }
+.toggles .label { font-size: .875rem; font-weight: 600; }
+.toggles .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }

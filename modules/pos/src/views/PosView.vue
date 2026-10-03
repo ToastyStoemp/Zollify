@@ -27,8 +27,10 @@ import {
 } from '../cart';
 import { getProvider } from '../payments/registry';
 import { findSearchMatch, typeColor } from '../search';
-import { buildReceiptLines, loadReceiptConfig, printReceipt, printingAvailable } from '../receipt';
+import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
+import { AfterSalePanel, afterSalePrefs, receiptUrl as receiptUrlFor } from '../lib/after-sale';
 import ProductThumb from '../components/ProductThumb.vue';
 
 /**
@@ -80,6 +82,7 @@ function tapTerminalState(): void {
 }
 
 onMounted(async () => {
+  void backfillBranding();
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
@@ -466,7 +469,7 @@ function addMiscItem(): void {
 
 // ── Customer display: mirror the cart on the account's other screens ───────
 let publishTimer: ReturnType<typeof setTimeout> | undefined;
-function publish(paid?: { total: number }): void {
+function publish(paid?: { total: number; receiptUrl?: string }): void {
   sdk().display.publish({
     deviceName: '',
     eventName: activeEvent.value?.name ?? '',
@@ -646,26 +649,91 @@ function finish(sale: SaleEvent, message: string): void {
   lastSaleTimer = setTimeout(() => { lastSale.value = null; }, 8000);
   toast(message);
   clearTimeout(publishTimer);
-  thankYouUntil = Date.now() + 6000;
-  publish({ total: sale.total });
+  // Every display gets the link; each decides from its own settings whether
+  // to show it. It only travels the account's own live channel.
+  const receiptUrl = receiptUrlFor(sale.receiptToken);
+  // Hold the paid state long enough for a customer to scan the code.
+  thankYouUntil = Date.now() + (receiptUrl ? 30_000 : 6000);
+  publish({ total: sale.total, receiptUrl });
+  void showAfterSale(sale, receiptUrl);
   void autoPrint(sale.saleId);
 }
 
+// ── After the sale: thank-you and receipt QR on this screen ─────────────────
+// Device-local choices (Settings → This device), independent of what any
+// customer display on the account shows.
+type PrintState = 'idle' | 'printing' | 'printed' | 'failed';
+const afterSale = ref<{
+  saleId: string;
+  thankYou: boolean;
+  total: string;
+  receiptUrl?: string;
+  logo?: string;
+  /** This device has a printer: the Carbon's built-in one, or a paired Bluetooth printer. */
+  canPrint: boolean;
+  print: PrintState;
+} | null>(null);
+let afterSaleTimer: ReturnType<typeof setTimeout> | undefined;
+function holdAfterSale(ms: number): void {
+  clearTimeout(afterSaleTimer);
+  afterSaleTimer = setTimeout(dismissAfterSale, ms);
+}
+async function showAfterSale(sale: SaleEvent, receiptUrl: string | undefined): Promise<void> {
+  const [prefs, canPrint, logo] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false), screenLogo().catch(() => undefined)]);
+  const url = prefs.receiptQr ? receiptUrl : undefined;
+  if (!prefs.thankYou && !url) return;
+  // An auto-print may already be under way by the time this resolves.
+  const print = printing.get(sale.saleId) ?? 'idle';
+  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo, canPrint, print };
+  // Offering to print means waiting for an answer, same as a QR to scan.
+  holdAfterSale(url || canPrint ? 30_000 : 4000);
+}
+async function printFromAfterSale(): Promise<void> {
+  const shown = afterSale.value;
+  if (!shown || shown.print === 'printing') return;
+  // Don't vanish mid-print, and leave a moment to tear the paper off.
+  holdAfterSale(30_000);
+  await printSale(shown.saleId);
+}
+function dismissAfterSale(): void {
+  clearTimeout(afterSaleTimer);
+  afterSale.value = null;
+}
+// The next customer's first item is as good as a tap on "Next sale".
+watch(() => cart.lines.length, (n) => { if (n > 0) dismissAfterSale(); });
+onUnmounted(() => clearTimeout(afterSaleTimer));
+
 /** Prints the receipt on the paired printer when Settings asks for it; never blocks the till. */
 async function autoPrint(saleId: string): Promise<void> {
+  const config = await loadReceiptConfig().catch(() => null);
+  if (!config?.autoPrint || !(await printingAvailable().catch(() => false))) return;
+  await printSale(saleId);
+}
+
+/** Print state per sale, so the thank-you screen can show an auto-print's progress too. */
+const printing = new Map<string, PrintState>();
+function setPrintState(saleId: string, state: PrintState): void {
+  printing.set(saleId, state);
+  if (afterSale.value?.saleId === saleId) afterSale.value.print = state;
+}
+
+/** Prints one sale's receipt on this device's printer; reports trouble as a toast, never throws. */
+async function printSale(saleId: string): Promise<void> {
+  if (printing.get(saleId) === 'printing') return;
+  setPrintState(saleId, 'printing');
   try {
-    const config = await loadReceiptConfig();
-    if (!config.autoPrint || !(await printingAvailable())) return;
     // The row is written by core a tick after the event fires.
     let tx = sdk().data.transactions.get(saleId);
     for (let i = 0; !tx && i < 10; i++) {
       await new Promise((r) => setTimeout(r, 100));
       tx = sdk().data.transactions.get(saleId);
     }
-    if (!tx) return;
-    const result = await printReceipt(buildReceiptLines(tx, activeEvent.value?.name ?? '', config, activeEvent.value?.venue?.country));
+    if (!tx) throw new Error('sale not recorded yet');
+    const result = await printReceipt(await printableReceipt(tx, activeEvent.value?.name ?? '', activeEvent.value?.venue?.country));
+    setPrintState(saleId, result.printed ? 'printed' : 'failed');
     if (!result.printed) toast(`Receipt: ${result.error ?? 'print failed'}`, 'bad');
   } catch (err) {
+    setPrintState(saleId, 'failed');
     toast(`Receipt: ${err instanceof Error ? err.message : String(err)}`, 'bad');
   }
 }
@@ -941,6 +1009,20 @@ async function cancelPayment(): Promise<void> {
         </div>
       </template>
     </ModalShell>
+
+    <div v-if="afterSale" class="after-sale" role="dialog" aria-modal="true" aria-label="Sale complete" @click.self="dismissAfterSale">
+      <div class="after-sale-card">
+        <component :is="AfterSalePanel" :thank-you="afterSale.thankYou" :total="afterSale.total" :receipt-url="afterSale.receiptUrl" :logo="afterSale.logo" :qr-size="240" />
+        <p v-if="afterSale.print === 'printed'" class="print-note" role="status"><Icon name="check" :size="14" /> Receipt printed</p>
+        <div class="after-sale-actions">
+          <button v-if="afterSale.canPrint" type="button" :disabled="afterSale.print === 'printing'" @click="printFromAfterSale">
+            <Icon name="printer" :size="16" />
+            {{ afterSale.print === 'printing' ? 'Printing…' : afterSale.print === 'printed' ? 'Print again' : afterSale.print === 'failed' ? 'Retry print' : 'Print receipt' }}
+          </button>
+          <button type="button" class="primary" @click="dismissAfterSale">Next sale</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -971,6 +1053,13 @@ async function cancelPayment(): Promise<void> {
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .notice.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
+.after-sale { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 1rem; background: color-mix(in srgb, var(--zfy-ink, #1a2230) 45%, transparent); }
+.after-sale-card { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; padding: 2rem 2.5rem; border-radius: 18px; background: var(--zfy-surface, #fff); box-shadow: 0 20px 50px rgb(0 0 0 / .25); max-width: 100%; }
+.after-sale-card .primary { min-width: 10rem; }
+.after-sale-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
+.after-sale-actions button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.print-note { margin: -.5rem 0 0; display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); }
+@media (max-width: 420px) { .after-sale-card { padding: 1.5rem 1.25rem; } }
 .last { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .last .spacer, .actions .spacer { flex: 1; }
 .last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }

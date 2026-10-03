@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { fmtPrice, type Transaction } from '@zollify/shared';
-import { buildReceiptLines, loadReceiptConfig, printReceipt, printingAvailable } from '../receipt';
+import { printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
+import { QrCode, receiptUrl as receiptUrlFor } from '../lib/after-sale';
 
 const props = defineProps<{ saleId?: string }>();
 
@@ -31,6 +32,8 @@ onMounted(async () => {
 });
 
 const lines = computed(() => tx.value?.items ?? []);
+/** The customer's online receipt, for one who asks after the fact. */
+const receiptUrl = computed(() => (QrCode && receiptUrlFor(tx.value?.receiptToken)) || '');
 
 const paidWith = computed(() =>
   (tx.value?.payments ?? [])
@@ -54,8 +57,7 @@ async function print(): Promise<void> {
   }
 
   try {
-    const config = await loadReceiptConfig();
-    const receiptLines = buildReceiptLines(tx.value, eventName.value, config, sdk().data.events.get(tx.value.eventId)?.venue?.country);
+    const receiptLines = await printableReceipt(tx.value, eventName.value, sdk().data.events.get(tx.value.eventId)?.venue?.country);
     const result = await printReceipt(receiptLines);
     failed.value = !result.printed;
     message.value = result.printed ? 'Printed.' : (result.error ?? 'The printer did not respond.');
@@ -110,6 +112,11 @@ async function print(): Promise<void> {
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
       <p class="ref">{{ tx.id }}</p>
     </article>
+
+    <div v-if="receiptUrl" class="online">
+      <component :is="QrCode" :value="receiptUrl" :size="160" label="QR code for the online receipt" />
+      <p>Online receipt - the customer scans this to keep a copy. It opens once this sale has synced.</p>
+    </div>
   </section>
 </template>
 
@@ -139,8 +146,12 @@ h1 { font-size: 1.25rem; margin: 0; }
 .row.discount { color: #0a5a4a; }
 .reverted { margin: 0; color: #c6512f; }
 
+.online { display: flex; align-items: center; gap: 1rem; max-width: 22rem; }
+.online p { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+
 @media print {
   .bar, .empty, .result { display: none; }
+  .online p { display: none; }
   .paper { border: 0; max-width: none; }
 }
 </style>

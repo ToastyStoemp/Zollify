@@ -47,6 +47,7 @@ export {
   syncState,
   lastSyncAt,
   lastSyncError,
+  syncProgress,
   type SyncState,
   type SyncResult,
 } from './sync';
@@ -124,7 +125,7 @@ export {
 } from './inventory';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
-export { startRealtime, stopRealtime, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
+export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting } from './synced-settings';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

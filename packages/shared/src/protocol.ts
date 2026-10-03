@@ -70,6 +70,12 @@ export interface PullResponse {
    * data and re-pull from seq 0 - the payloads it cached are no longer current.
    */
   epoch?: number;
+  /**
+   * Nothing past this page: the client may move its cursor straight to
+   * `latestSeq`. Set when the pull skipped the caller's own ops (`device`),
+   * where the newest ops may all be its own and so never appear in a page.
+   */
+  caughtUp?: boolean;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -212,6 +218,26 @@ export interface DisplayCartMessage {
   type: 'display.cart';
   from?: string;
   cart: DisplayCart;
+}
+
+/**
+ * Device → server: whether this connection is showing a customer display.
+ * Only subscribed connections receive cart snapshots; a connection that never
+ * says either way (an older build) keeps receiving them all, as before.
+ */
+export interface DisplaySubscribeMessage {
+  type: 'display.subscribe';
+  on: boolean;
+}
+
+/**
+ * Server → every device of the account: how many customer displays are
+ * listening right now. A register with none to talk to stops broadcasting its
+ * cart; one appearing gets the current cart at once.
+ */
+export interface DisplayListenersMessage {
+  type: 'display.listeners';
+  count: number;
 }
 
 // ── Remote payment trigger (register → satellite Carbon terminal) ──────────

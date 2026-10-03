@@ -38,6 +38,14 @@ const EPOCH_KEY = 'core.syncEpoch';
 export type SyncState = 'idle' | 'syncing' | 'offline' | 'error';
 
 export const syncState = ref<SyncState>('idle');
+/**
+ * How far a pull with a real backlog has got - the first sync of a device,
+ * or one back from a long time offline. Null while there is nothing worth a
+ * progress bar (a routine pull is a page or less).
+ */
+export const syncProgress = ref<{ done: number; total: number } | null>(null);
+/** Ops behind before a pull counts as a backlog worth showing progress for. */
+const BACKLOG_OPS = 300;
 export const lastSyncAt = ref(0);
 export const lastSyncError = ref<string | null>(null);
 
@@ -293,29 +301,53 @@ async function push(): Promise<number> {
  * server's latestSeq, which would silently skip everything between the end
  * of one page and the tail of the log.
  */
-async function drain(first: PullResponse, since: number): Promise<{ applied: number; cursor: number }> {
+async function drain(first: PullResponse, since: number, query: string): Promise<{ applied: number; cursor: number }> {
   let page = first;
   let cursor = since;
   let applied = 0;
-  for (;;) {
-    if (!page.ops.length) {
-      // Caught up, or a restricted user whose page was filtered empty: the
-      // tail is where we stand either way.
-      cursor = Math.max(cursor, page.latestSeq);
-      break;
+  const total = first.latestSeq - since;
+  // A device's first sync always reports, however small: the screens are
+  // empty until it lands and the user should know why.
+  const track = since === 0 ? total > 0 : total >= BACKLOG_OPS;
+  if (track) syncProgress.value = { done: 0, total };
+  try {
+    for (;;) {
+      if (!page.ops.length || page.caughtUp) {
+        if (page.ops.length) applied += await applyOps(page.ops);
+        // Caught up, or a page filtered empty (a restricted user, or nothing
+        // but this device's own ops): the tail is where we stand either way.
+        cursor = Math.max(cursor, page.latestSeq);
+        break;
+      }
+      applied += await applyOps(page.ops);
+      cursor = page.ops[page.ops.length - 1]!.serverSeq;
+      if (track) syncProgress.value = { done: Math.min(total, cursor - since), total };
+      if (cursor >= page.latestSeq) break;
+      await writeCursor(cursor, page.epoch ?? 0);
+      page = (await authFetch(`/sync/pull?since=${cursor}${query}`)) as PullResponse;
     }
-    applied += await applyOps(page.ops);
-    cursor = page.ops[page.ops.length - 1]!.serverSeq;
-    if (cursor >= page.latestSeq) break;
-    await writeCursor(cursor, page.epoch ?? 0);
-    page = (await authFetch(`/sync/pull?since=${cursor}`)) as PullResponse;
+  } finally {
+    if (track) syncProgress.value = null;
   }
   return { applied, cursor };
 }
 
 async function pull(): Promise<number> {
   const { since, epoch } = await readCursor();
-  const res = (await authFetch(`/sync/pull?since=${since}`)) as PullResponse;
+  // Past the first pull, skip this device's own ops: it made them and has
+  // them already. A first pull (since 0) takes everything - a reinstall may
+  // be getting back what it sent from this very device id.
+  const query = since > 0 ? `&device=${encodeURIComponent(await deviceId())}` : '';
+  // First sync: say so before the first page arrives, which can take a while.
+  if (since === 0) syncProgress.value = { done: 0, total: 0 };
+  let res: PullResponse;
+  try {
+    res = (await authFetch(`/sync/pull?since=${since}${query}`)) as PullResponse;
+  } catch (err) {
+    syncProgress.value = null;
+    throw err;
+  }
+  if (since === 0 && res.latestSeq === 0) syncProgress.value = null;
 
   const serverEpoch = res.epoch ?? 0;
   if (epoch !== 0 && serverEpoch !== 0 && serverEpoch !== epoch) {
@@ -331,12 +363,12 @@ async function pull(): Promise<number> {
     });
     await writeCursor(0, serverEpoch);
     const fresh = (await authFetch('/sync/pull?since=0')) as PullResponse;
-    const result = await drain(fresh, 0);
+    const result = await drain(fresh, 0, '');
     await writeCursor(result.cursor, fresh.epoch ?? serverEpoch);
     return result.applied;
   }
 
-  const result = await drain(res, since);
+  const result = await drain(res, since, query);
   await writeCursor(result.cursor, serverEpoch);
   return result.applied;
 }
@@ -396,13 +428,36 @@ let stopWatchingOutbox: (() => void) | null = null;
 const PUSH_DEBOUNCE_MS = 1_500;
 
 /**
+ * Polling is only the fallback. While the live channel is up, every push by
+ * another device rings it and this one pulls at once (see realtime.ts), so a
+ * poll every minute only re-asked a question already answered - 1,440 times a
+ * day. With the channel down it is the only way to hear of changes, so it
+ * stays brisk then.
+ */
+const POLL_LIVE_MS = 5 * 60_000;
+const POLL_FALLBACK_MS = 60_000;
+let liveChannel: () => boolean = () => false;
+let lastPollAt = 0;
+
+/** Lets realtime.ts tell the poller whether nudges are arriving. */
+export function setLiveChannelProbe(probe: () => boolean): void {
+  liveChannel = probe;
+}
+
+/**
  * Starts periodic sync, plus an immediate attempt whenever the network
  * returns, plus a push shortly after anything is queued - a sale on one
  * register should be on the other within seconds, not at the next tick.
  */
-export function startAutoSync(intervalMs = 60_000): void {
+export function startAutoSync(): void {
   stopAutoSync();
-  timer = setInterval(() => void syncNow(), intervalMs);
+  lastPollAt = Date.now();
+  timer = setInterval(() => {
+    const due = liveChannel() ? POLL_LIVE_MS : POLL_FALLBACK_MS;
+    if (Date.now() - Math.max(lastPollAt, lastSyncAt.value) < due) return;
+    lastPollAt = Date.now();
+    void syncNow();
+  }, 15_000);
   stopWatchingOutbox = watch(pendingCount, (count) => {
     if (count === 0 || pushSoon) return;
     pushSoon = setTimeout(() => {

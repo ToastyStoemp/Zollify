@@ -1,4 +1,5 @@
-import type { FastifyInstance } from 'fastify';
+import { gzipSync } from 'node:zlib';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
 import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
@@ -107,14 +108,24 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     return result;
   });
 
-  app.get('/api/sync/pull', { preHandler: app.authenticate }, async (req) => {
+  app.get('/api/sync/pull', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    const since = Number((req.query as { since?: string }).since ?? 0) || 0;
-    const limit = Math.min(Number((req.query as { limit?: string }).limit ?? 500) || 500, 1000);
+    const query = req.query as { since?: string; limit?: string; device?: string };
+    const since = Number(query.since ?? 0) || 0;
+    const limit = Math.min(Number(query.limit ?? 500) || 500, 1000);
+    // The caller's own ops: it made them and already has them. Sending them
+    // back doubled the traffic of every sale (push it, then pull it again).
+    const skipDevice = typeof query.device === 'string' && query.device ? query.device : null;
 
-    const rows = db
-      .prepare('SELECT seq, opId, deviceId, ts, type, payload FROM ops WHERE accountId = ? AND seq > ? ORDER BY seq LIMIT ?')
-      .all(claims.accountId, since, limit) as {
+    const rows = (
+      skipDevice
+        ? db
+            .prepare('SELECT seq, opId, deviceId, ts, type, payload FROM ops WHERE accountId = ? AND seq > ? AND deviceId != ? ORDER BY seq LIMIT ?')
+            .all(claims.accountId, since, skipDevice, limit)
+        : db
+            .prepare('SELECT seq, opId, deviceId, ts, type, payload FROM ops WHERE accountId = ? AND seq > ? ORDER BY seq LIMIT ?')
+            .all(claims.accountId, since, limit)
+    ) as {
       seq: number;
       opId: string;
       deviceId: string;
@@ -139,7 +150,23 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
 
     const latestSeq = (maxSeq.get(claims.accountId) as { m: number }).m;
     const epoch = (getEpoch.get(claims.accountId) as { syncEpoch?: number } | undefined)?.syncEpoch ?? 0;
-    const response: PullResponse = { ops, latestSeq, epoch };
-    return response;
+    const response: PullResponse = { ops, latestSeq, epoch, ...(skipDevice && rows.length < limit ? { caughtUp: true } : {}) };
+    return sendJson(req.headers['accept-encoding'], reply, response);
   });
+}
+
+/**
+ * Gzipped when the client takes it and it is worth it. Op payloads are
+ * repetitive JSON and shrink several times over - the difference between a
+ * first sync on venue Wi-Fi taking seconds or minutes.
+ */
+function sendJson(acceptEncoding: string | string[] | undefined, reply: FastifyReply, body: unknown) {
+  const json = JSON.stringify(body);
+  const accepts = String(acceptEncoding ?? '').split(',').some((e) => e.trim().split(';')[0] === 'gzip');
+  if (!accepts || json.length < 1024) return reply.type('application/json; charset=utf-8').send(json);
+  return reply
+    .header('content-encoding', 'gzip')
+    .header('vary', 'accept-encoding')
+    .type('application/json; charset=utf-8')
+    .send(gzipSync(json));
 }

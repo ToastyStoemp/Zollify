@@ -14,7 +14,7 @@ import {
   type TseSignature,
 } from '@zollify/shared';
 import { openCoreDb } from './db';
-import { getAccount } from '../session';
+import { authFetch, getAccount } from '../session';
 import { deviceId } from './device';
 import { toPlain } from './plain';
 import { getSyncedSetting, setSyncedSetting } from './synced-settings';
@@ -40,7 +40,7 @@ import { getSyncedSetting, setSyncedSetting } from './synced-settings';
  * unsigned in Germany without it showing on the sale.
  */
 
-export type TseDriverId = 'none' | 'swissbit' | 'test';
+export type TseDriverId = 'none' | 'swissbit' | 'test' | 'fiskaly';
 
 export interface TseSettings {
   driver: TseDriverId;
@@ -75,6 +75,18 @@ export interface TseInfo {
   expires?: string;
 }
 
+/**
+ * What a TSE that composes its own signed record says it signed - fiskaly's
+ * receipt QR string, verbatim - so the receipt carries exactly that.
+ */
+export interface ExactSigned {
+  clientId: string;
+  processType: string;
+  processData: string;
+  start: string;
+  finish: string;
+}
+
 /** What a driver - real hardware or the test TSE - has to do. */
 export interface TseDriver {
   available(): Promise<boolean>;
@@ -88,7 +100,7 @@ export interface TseDriver {
     processType: string,
     processData: string,
     via?: string,
-  ): Promise<{ signatureCounter: number; time: number; signature: string; info?: TseInfo }>;
+  ): Promise<{ signatureCounter: number; time: number; signature: string; info?: TseInfo; exact?: ExactSigned }>;
 }
 
 
@@ -237,9 +249,9 @@ export function registerTseDriver(id: Exclude<TseDriverId, 'none'>, driver: TseD
 }
 
 /** This device's own TSE, if it has one. */
-function ownDriverId(): 'swissbit' | 'test' | null {
+function ownDriverId(): 'swissbit' | 'test' | 'fiskaly' | null {
   const id = tseState.settings.driver;
-  return id === 'swissbit' || id === 'test' ? id : null;
+  return id === 'swissbit' || id === 'test' || id === 'fiskaly' ? id : null;
 }
 
 function ownDriver(): TseDriver | null {
@@ -247,6 +259,7 @@ function ownDriver(): TseDriver | null {
   // One instance per driver: the test TSE's lock only works if every sale goes through the same one.
   if (id === 'swissbit') return (drivers.swissbit ??= swissbitDriver());
   if (id === 'test') return (drivers.test ??= testDriver());
+  if (id === 'fiskaly') return (drivers.fiskaly ??= fiskalyDriver());
   return null;
 }
 
@@ -324,20 +337,22 @@ async function finishWith(d: TseDriver, handle: { number: number; start: number;
   if (!done.info) tseState.info = info;
   // Signed by another main TSE device while the till's own was out.
   const substitute = !!handle.via && handle.via !== assignedTseHost();
+  // A cloud TSE says exactly what it signed; that is what the receipt carries.
+  const exact = done.exact;
   return {
     ...(substitute ? { substitute: true } : {}),
-    clientId,
+    clientId: exact?.clientId ?? clientId,
     serial: info.serial,
     transactionNumber: handle.number,
     signatureCounter: done.signatureCounter,
-    start: tseTime(handle.start),
-    finish: tseTime(done.time),
+    start: exact?.start ?? tseTime(handle.start),
+    finish: exact?.finish ?? tseTime(done.time),
     algorithm: info.algorithm,
     timeFormat: info.timeFormat,
     signature: done.signature,
     publicKey: info.publicKey,
-    processType: TSE_PROCESS_TYPE,
-    processData,
+    processType: exact?.processType ?? TSE_PROCESS_TYPE,
+    processData: exact?.processData ?? processData,
     ...(info.certified ? {} : { test: true }),
   };
 }
@@ -525,6 +540,41 @@ function remoteDriver(): TseDriver {
       const r = await call(via, { op: 'finish', clientId, number, processType, processData });
       return { signatureCounter: Number(r.signatureCounter), time: Number(r.time), signature: String(r.signature), info: infoOf(r) };
     },
+  };
+}
+
+// ── fiskaly cloud TSE, signed on the server ────────────────────────────────
+
+/**
+ * fiskaly's cloud TSE. The account's fiskaly key lives on the server, which
+ * signs (apps/server/src/modules/fiskaly) - this device only asks, under its
+ * own till serial number. Needs a connection while selling; without one the
+ * sale is recorded as not signed, like any TSE outage.
+ */
+interface FiskalyStatus {
+  configured: boolean;
+  env?: string;
+  tss?: { id: string; state: string; serial: string | null } | null;
+}
+
+function fiskalyDriver(): TseDriver {
+  const status = async (): Promise<FiskalyStatus> => (await authFetch('/m/pos/fiskaly')) as FiskalyStatus;
+  return {
+    available: async () => (await status()).tss?.state === 'INITIALIZED',
+    info: async () => {
+      const s = await status();
+      if (s.tss?.state !== 'INITIALIZED') throw new Error('The fiskaly TSE is not set up - Settings → TSE (fiskaly).');
+      return { serial: s.tss.serial ?? '', publicKey: '', algorithm: 'fiskaly cloud TSE', timeFormat: 'unixTime', certified: s.env === 'LIVE' };
+    },
+    start: async (clientId) => (await authFetch('/m/pos/fiskaly/start', { method: 'POST', body: JSON.stringify({ clientId }) })) as { number: number; time: number },
+    finish: async (clientId, number, processType, processData) =>
+      (await authFetch('/m/pos/fiskaly/finish', { method: 'POST', body: JSON.stringify({ clientId, number, processType, processData }) })) as {
+        signatureCounter: number;
+        time: number;
+        signature: string;
+        info: TseInfo;
+        exact: ExactSigned;
+      },
   };
 }
 

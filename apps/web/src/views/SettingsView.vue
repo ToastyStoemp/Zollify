@@ -46,6 +46,14 @@ const corePanels: Panel[] = [
     component: () => import('./DataSettings.vue'),
   },
   {
+    id: 'core.fiskaly',
+    label: 'TSE (fiskaly cloud)',
+    group: 'Core',
+    minRole: 'admin',
+    when: kassensichvVisible,
+    component: () => import('./FiskalySettings.vue'),
+  },
+  {
     id: 'core.taxexport',
     label: 'Tax export (Germany)',
     group: 'Core',

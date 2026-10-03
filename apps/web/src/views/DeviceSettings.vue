@@ -289,6 +289,7 @@ function when(ts: number): string {
         <select :value="tseState.settings.driver" @change="chooseTse(($event.target as HTMLSelectElement).value as TseDriverId)">
           <option value="none">{{ mainTseNames.length ? 'None - sign through a main TSE device' : 'None' }}</option>
           <option value="swissbit">Swissbit TSE (USB or microSD)</option>
+          <option value="fiskaly">fiskaly cloud TSE (set up under Settings → TSE (fiskaly cloud))</option>
           <option value="test">Test TSE - development only, not certified</option>
         </select>
       </label>
@@ -354,7 +355,7 @@ function when(ts: number): string {
         <dl v-else-if="tseState.info" class="facts">
           <dt>Status</dt>
           <dd :class="tseState.info.certified ? 'ok' : 'warn'">
-            {{ tseState.info.certified ? 'Ready' : 'Ready - test TSE, not for real sales' }}{{ tseMode() === 'remote' ? ' (through a main TSE device)' : '' }}
+            {{ tseState.info.certified ? 'Ready' : tseState.settings.driver === 'fiskaly' ? 'Ready - fiskaly TEST environment, not for real sales' : 'Ready - test TSE, not for real sales' }}{{ tseMode() === 'remote' ? ' (through a main TSE device)' : '' }}
           </dd>
           <dt>TSE serial</dt>
           <dd class="mono">{{ tseState.info.serial }}</dd>

@@ -17,7 +17,7 @@ import { buildGateway, setEnabled } from '@zollify/server-core';
 process.env.RECEIPT_CAPTCHA_BITS = '10';
 // Every test here comes from one address; the per-minute cap is the rate-limit plugin's job.
 process.env.RECEIPT_LOOKUPS_PER_MIN = '1000';
-const { receiptsServerModule, resetReceiptAbuseState } = await import('../modules/receipts');
+const { posServerModule, resetReceiptAbuseState } = await import('../modules/receipts');
 
 const OWNER_EMAIL = 'owner@example.test';
 const OWNER_PASSWORD = 'correct horse battery staple';
@@ -90,7 +90,7 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [receiptsServerModule],
+    serverModules: [posServerModule('test-secret-value-long-enough-for-signing')],
     defaultModules: ['pos'],
     allowedOrigins: [],
     requireHttps: false,

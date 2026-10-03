@@ -10,7 +10,10 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { makeSecretBox } from '@zollify/server-core';
 import { registerDsfinvk } from './dsfinvk/route';
+import { FISKALY_BASE, FiskalyApi } from './fiskaly/api';
+import { migrateFiskaly, registerFiskaly } from './fiskaly/route';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -503,7 +506,33 @@ function ipOf(req: FastifyRequest): string {
   return req.ip;
 }
 
-export const receiptsServerModule: ServerModule = {
+export interface PosServerOptions {
+  /** For tests: fiskaly's API stand-in. */
+  fiskaly?: FiskalyApi;
+}
+
+/**
+ * The till's server half. Built with the server secret: it keeps the
+ * account's fiskaly credentials encrypted (see fiskaly/route.ts).
+ */
+export function posServerModule(jwtSecret: string, options: PosServerOptions = {}): ServerModule {
+  const box = makeSecretBox(jwtSecret, 'zollify-module-credentials-v1');
+  const fiskaly = options.fiskaly ?? new FiskalyApi((url, init) => fetch(url, init), process.env.FISKALY_BASE_URL || FISKALY_BASE);
+  return {
+    ...receiptsServerModule,
+    migrate(db) {
+      migrate(db);
+      migrateFiskaly(db);
+    },
+    routes: (ctx: ModuleContext) => async (app) => {
+      await receiptsServerModule.routes!(ctx)(app, {});
+      // KassenSichV: the fiskaly cloud TSE, signed here.
+      registerFiskaly(app, ctx, box, fiskaly);
+    },
+  };
+}
+
+const receiptsServerModule: ServerModule = {
   id: MODULE_ID,
   migrate,
 

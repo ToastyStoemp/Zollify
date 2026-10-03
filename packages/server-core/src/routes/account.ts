@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import { ProfileUpdateSchema, type AccountProfile } from '@zollify/shared';
+import { ProfileUpdateSchema, VatProfileSchema, type AccountProfile } from '@zollify/shared';
 import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth';
 
 /**
@@ -60,6 +60,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
       setupCompletedAt: body.setupCompleted ? (current.setupCompletedAt ?? Date.now()) : current.setupCompletedAt,
       artist: { ...current.artist, ...(body.artist ?? {}) },
       defaultCurrency: body.defaultCurrency ?? current.defaultCurrency,
+      vat: VatProfileSchema.parse({ ...current.vat, ...(body.vat ?? {}) }),
     };
 
     db.transaction(() => {

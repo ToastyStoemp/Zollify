@@ -23,6 +23,24 @@ export type PrintState = 'idle' | 'printing' | 'printed' | 'failed';
 export const AfterSalePanel = (ui as Record<string, unknown>).AfterSalePanel as Component | undefined;
 export const QrCode = (ui as Record<string, unknown>).QrCode as Component | undefined;
 
+/**
+ * The VAT snapshot for a sale at `eventId`: the event's country and settings,
+ * the booth's exemptions and each line's product tax class. None on a shell
+ * whose @zollify/shared predates VAT, or with no event to say where the sale
+ * happened.
+ */
+export function saleTaxFor(eventId: string | null, productIds: string[]): shared.SaleTax | undefined {
+  const resolve = (shared as Record<string, unknown>).resolveEventVat as typeof shared.resolveEventVat | undefined;
+  const snapshot = (shared as Record<string, unknown>).saleTaxFor as typeof shared.saleTaxFor | undefined;
+  const event = eventId ? sdk().data.events.get(eventId) : undefined;
+  if (!resolve || !snapshot || !event) return undefined;
+  const resolved = resolve(event, sdk().account()?.profile);
+  // Charging with no rate known (a country missing from the table, and none
+  // set on the event) records nothing rather than a made-up 0%.
+  if (!resolved.exempt && resolved.standard == null) return undefined;
+  return snapshot(resolved, productIds.map((id) => sdk().data.products.get(id)?.taxClass));
+}
+
 /** A fresh receipt token, or none on a shell that predates online receipts. */
 export function mintReceiptToken(): string | undefined {
   const mint = (shared as Record<string, unknown>).newReceiptToken as (() => string) | undefined;

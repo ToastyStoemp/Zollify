@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -136,6 +136,8 @@ export interface SaleEvent {
    * The line totals above already include the discounts.
    */
   asCharged?: { listTotals: number[]; discounts: { name: string; amount: number }[] };
+  /** VAT as applied: rates per line (paired with `lines`) or the exemption. */
+  tax?: SaleTax;
   payment: {
     provider: string;
     approved: boolean;

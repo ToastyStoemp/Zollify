@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { fmtPrice, type Transaction } from '@zollify/shared';
-import { receiptAmounts, printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { receiptAmounts, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import { QrCode, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
 import { screenLogo } from '../lib/branding';
@@ -50,6 +50,13 @@ const lines = computed(() => tx.value?.items ?? []);
 /** Lines at the till's price and each discount, in what the customer paid - matches the printed copy. */
 const breakdown = computed(() => (tx.value ? receiptAmounts(tx.value) : { lines: [], discounts: [] }));
 const subtotal = computed(() => breakdown.value.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100);
+/** VAT per rate, lettered when a sale has more than one - as on the printed copy. */
+const vatRows = computed(() => (tx.value ? receiptVat(tx.value) : []));
+const letterFor = (i: number): string => {
+  if (vatRows.value.length < 2) return '';
+  const rate = tx.value?.tax?.rates[i];
+  return vatRows.value.find((r) => r.rate === rate)?.letter ?? '';
+};
 /** The customer's online receipt, for one who asks after the fact. A cancelled sale gets none. */
 const receiptUrl = computed(() => (QrCode && !tx.value?.revertedAt && receiptUrlFor(tx.value?.receiptToken)) || '');
 const caption = computed(() => {
@@ -130,7 +137,7 @@ async function print(): Promise<void> {
             {{ item.title }}
             <template v-if="item.variantLabel"> · {{ item.variantLabel }}</template>
           </span>
-          <span class="amount">{{ fmtPrice(breakdown.lines[i] ?? item.lineTotal, tx.currency) }}</span>
+          <span class="amount">{{ fmtPrice(breakdown.lines[i] ?? item.lineTotal, tx.currency) }}<template v-if="letterFor(i)"> {{ letterFor(i) }}</template></span>
         </li>
       </ul>
 
@@ -144,6 +151,13 @@ async function print(): Promise<void> {
         <span>Total</span>
         <strong>{{ fmtPrice(tx.total, tx.currency) }}</strong>
       </p>
+
+      <template v-for="r in vatRows" :key="r.rate">
+        <p class="row vat"><span>{{ vatRows.length > 1 ? `${r.letter} ` : '' }}incl. VAT {{ vatRateLabel(r.rate) }}</span><span>{{ fmtPrice(r.vat, tx.currency) }}</span></p>
+        <p class="row vat net"><span>net</span><span>{{ fmtPrice(r.net, tx.currency) }}</span></p>
+      </template>
+      <p v-if="tx.tax?.exempt && tx.tax.note" class="exempt">{{ tx.tax.note }}</p>
+      <p v-if="tx.tax?.exempt && tx.tax.exNumber" class="exempt">EX: {{ tx.tax.exNumber }}</p>
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
@@ -198,6 +212,9 @@ h1 { font-size: 1.25rem; margin: 0; }
 .row { display: flex; justify-content: space-between; margin: 0; }
 .row.total { border-top: 1px dashed #999; padding-top: .35rem; font-size: .95rem; }
 .row.discount { color: #0a5a4a; }
+.row.vat { color: #5a6472; font-size: .75rem; }
+.row.vat.net { padding-left: 1.2rem; }
+.exempt { margin: 0; text-align: center; font-size: .75rem; color: #5a6472; }
 .row.subtotal { border-top: 1px dashed #999; padding-top: .35rem; }
 .reverted { margin: 0; color: #c6512f; }
 

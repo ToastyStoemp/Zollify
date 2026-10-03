@@ -70,7 +70,9 @@ function zipDist(outPath) {
     output.on('close', resolvePromise);
     archive.on('error', reject);
     archive.pipe(output);
-    archive.directory(distDir, false);
+    // Source maps are for debugging on a desk, not for the terminal: they were
+    // over two thirds of the bundle every device downloads on each update.
+    archive.glob('**/*', { cwd: distDir, ignore: ['**/*.map'], dot: true });
     void archive.finalize();
   });
 }

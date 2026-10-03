@@ -2,7 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket } from 'ws';
 import type Database from 'better-sqlite3';
-import type { DisplayCartMessage, NudgeMessage, PaymentResultMessage, PaymentTriggerMessage, ShellUpdateMessage } from '@zollify/shared';
+import type {
+  DisplayCartMessage,
+  DisplayListenersMessage,
+  DisplaySubscribeMessage,
+  NudgeMessage,
+  PaymentResultMessage,
+  PaymentTriggerMessage,
+  ShellUpdateMessage,
+} from '@zollify/shared';
 import type { JwtClaims } from './auth';
 import { touchDevice } from './db';
 
@@ -13,15 +21,50 @@ type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
  * of the account gets a nudge and pulls over HTTP. Clients without WS poll -
  * same behavior, just slower.
  */
-export class Rooms {
-  private byAccount = new Map<string, Set<{ socket: WebSocket; deviceId: string }>>();
+interface Member {
+  socket: WebSocket;
+  deviceId: string;
+  /** Showing a customer display; undefined = an older client that never said, which gets carts as before. */
+  display?: boolean;
+}
 
-  add(accountId: string, deviceId: string, socket: WebSocket): void {
+export class Rooms {
+  private byAccount = new Map<string, Set<Member>>();
+
+  add(accountId: string, deviceId: string, socket: WebSocket): Member {
     let room = this.byAccount.get(accountId);
     if (!room) this.byAccount.set(accountId, (room = new Set()));
-    const entry = { socket, deviceId };
+    const entry: Member = { socket, deviceId };
     room.add(entry);
-    socket.on('close', () => room!.delete(entry));
+    socket.on('close', () => {
+      room!.delete(entry);
+      if (entry.display) this.announceListeners(accountId);
+    });
+    // Tell the newcomer whether anyone is watching, so a register knows
+    // whether to bother broadcasting its cart.
+    this.send(socket, this.listenersMessage(accountId));
+    return entry;
+  }
+
+  setDisplay(accountId: string, entry: Member, on: boolean): void {
+    const was = entry.display === true;
+    entry.display = on;
+    if (was !== on) this.announceListeners(accountId);
+  }
+
+  private listenersMessage(accountId: string): DisplayListenersMessage {
+    let count = 0;
+    for (const m of this.byAccount.get(accountId) ?? []) if (m.display) count++;
+    return { type: 'display.listeners', count };
+  }
+
+  private announceListeners(accountId: string): void {
+    const json = JSON.stringify(this.listenersMessage(accountId));
+    for (const { socket } of this.byAccount.get(accountId) ?? []) this.send(socket, json);
+  }
+
+  private send(socket: WebSocket, msg: unknown): void {
+    if (socket.readyState === socket.OPEN) socket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
 
   nudge(accountId: string, latestSeq: number, exceptDeviceId?: string): void {
@@ -44,8 +87,10 @@ export class Rooms {
     if (!room) return;
     const msg: DisplayCartMessage = { type: 'display.cart', from: fromDeviceId, cart };
     const json = JSON.stringify(msg);
-    for (const { socket, deviceId } of room) {
-      if (deviceId === fromDeviceId) continue;
+    for (const { socket, deviceId, display } of room) {
+      // Only screens showing a customer display; tills and terminals have no
+      // use for another register's cart every 15 seconds.
+      if (deviceId === fromDeviceId || display === false) continue;
       if (socket.readyState === socket.OPEN) socket.send(json);
     }
   }
@@ -66,8 +111,37 @@ export class Rooms {
   }
 }
 
+/**
+ * Keepalive. A reverse proxy closes a socket it sees no traffic on (nginx's
+ * default is 60s), and every reconnect costs a TLS handshake, an upgrade and
+ * a round of catch-up requests - far more than a ping frame of a few bytes.
+ * A socket that misses a pong is dead and is dropped, so the device notices
+ * and reconnects instead of waiting on a silent connection.
+ */
+const PING_MS = 25_000;
+
 export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Database.Database): Promise<void> {
   await app.register(websocket);
+
+  const alive = new WeakMap<WebSocket, boolean>();
+  const live = new Set<WebSocket>();
+  const pinger = setInterval(() => {
+    for (const socket of live) {
+      if (alive.get(socket) === false) {
+        socket.terminate();
+        live.delete(socket);
+        continue;
+      }
+      alive.set(socket, false);
+      try {
+        socket.ping();
+      } catch {
+        /* closing anyway */
+      }
+    }
+  }, PING_MS);
+  pinger.unref?.();
+  app.addHook('onClose', async () => clearInterval(pinger));
 
   app.get('/api/sync/ws', { websocket: true }, (socket, req) => {
     const { token, deviceId, flavor } = req.query as { token?: string; deviceId?: string; flavor?: string };
@@ -78,7 +152,11 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       socket.close(4001, 'invalid token');
       return;
     }
-    rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
+    const member = rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
+    live.add(socket);
+    alive.set(socket, true);
+    socket.on('pong', () => alive.set(socket, true));
+    socket.on('close', () => live.delete(socket));
     // The shell store only ever changes by redeploying the whole server, so a
     // fresh connection - the first one after boot, or any reconnect a deploy
     // itself just caused - is exactly the moment to check, rather than
@@ -100,8 +178,10 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       // remote-payment trigger/result handshake; everything else is ignored
       // (sync data always travels over HTTP).
       try {
-        const msg = JSON.parse(String(raw)) as DisplayCartMessage | PaymentMessage;
-        if (msg?.type === 'display.cart' && msg.cart && typeof msg.cart === 'object') {
+        const msg = JSON.parse(String(raw)) as DisplayCartMessage | PaymentMessage | DisplaySubscribeMessage;
+        if (msg?.type === 'display.subscribe') {
+          rooms.setDisplay(claims.accountId, member, msg.on === true);
+        } else if (msg?.type === 'display.cart' && msg.cart && typeof msg.cart === 'object') {
           rooms.relayDisplayCart(claims.accountId, deviceId ?? 'unknown', msg.cart);
         } else if (
           (msg?.type === 'payment.trigger' || msg?.type === 'payment.result') &&

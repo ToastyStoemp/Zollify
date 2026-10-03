@@ -160,7 +160,27 @@ describe('sync', () => {
     calls.length = 0;
     await sync.syncNow();
 
-    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe('/sync/pull?since=42');
+    // Past the first pull, this device's own ops are left out - it has them.
+    const id = await device.deviceId();
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe(`/sync/pull?since=42&device=${id}`);
+  });
+
+  it('jumps to the tail when the server says the rest is all its own ops', async () => {
+    const op = (seq: number, id: string) => ({ opId: id.repeat(16), deviceId: 'other', ts: 1, serverSeq: seq, type: 'product.upsert', payload: product(id, `P${seq}`, 1000 + seq) });
+    pullResponses = [
+      { ops: [], latestSeq: 10 },
+      // Ops 6-10 were this device's own sales: skipped, and no need to ask again.
+      { ops: [op(15, 'j')], latestSeq: 20, caughtUp: true },
+      { ops: [], latestSeq: 20 },
+    ];
+    await sync.syncNow();
+    calls.length = 0;
+    await sync.syncNow();
+    expect(calls.filter((c) => c.path.startsWith('/sync/pull'))).toHaveLength(1);
+    expect(catalog.getProduct('j')?.title).toBe('P15');
+    calls.length = 0;
+    await sync.syncNow();
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toMatch(/^\/sync\/pull\?since=20&device=/);
   });
 
   it('keeps pulling pages until the server tail, and the cursor follows the last op applied', async () => {
@@ -179,7 +199,7 @@ describe('sync', () => {
     expect(catalog.getProduct('h')?.title).toBe('P4');
     calls.length = 0;
     await sync.syncNow();
-    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe('/sync/pull?since=4');
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe(`/sync/pull?since=4&device=${await device.deviceId()}`);
   });
 
   it('discards local data and re-pulls when the server epoch changes', async () => {

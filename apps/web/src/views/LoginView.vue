@@ -93,12 +93,20 @@ async function afterLogin(body: unknown): Promise<void> {
       /* no storage */
     }
   }
-  // Same order as a cold boot: core data first, then modules, which read it through the SDK as they mount.
+  // Whatever this device already has locally - instant, no network.
   await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts(), loadInventory()]);
-  await loadEnabledModules(router);
-  startAutoSync();
-  startRealtime();
   const next = typeof route.query.next === 'string' ? route.query.next : '/home';
+  // Signed in now: go in straight away. Modules download and data syncs in
+  // the background, with a progress card while a first sync runs - rather
+  // than holding the user on "Signing in…" for all of it.
+  const setup = (async () => {
+    // Same order as a cold boot: modules mount before the first pull reloads the stores they read.
+    await loadEnabledModules(router).catch((err) => console.error('[zollify] module boot failed', err));
+    startAutoSync();
+    startRealtime();
+  })();
+  // A module screen (e.g. the till) only exists once its module is loaded.
+  if (next.startsWith('/m/')) await setup;
   await router.replace(next);
 }
 

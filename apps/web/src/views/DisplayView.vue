@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
-import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected } from '@zollify/platform';
+import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected, setDisplaySubscribed } from '@zollify/platform';
 import { AfterSalePanel, Icon } from '@zollify/ui';
 
 /**
@@ -80,11 +80,14 @@ watch(
 );
 
 onMounted(() => {
+  // Only screens in display mode receive carts; registers stop sending when none are.
+  setDisplaySubscribed(true);
   void loadAfterSalePrefs().catch(() => {});
   void loadLogo();
   clock = setInterval(() => (now.value = Date.now()), 5000);
 });
 onUnmounted(() => {
+  setDisplaySubscribed(false);
   clearInterval(clock);
   clearTimeout(thanksTimer);
   clearTimeout(sleepTimer);

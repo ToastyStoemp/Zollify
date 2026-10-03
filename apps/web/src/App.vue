@@ -6,6 +6,7 @@ import {
   currentAccount,
   pendingCount,
   syncNow,
+  syncProgress,
   syncState,
   toasts,
   type Toast,
@@ -137,6 +138,10 @@ watch(() => route.fullPath, () => { menuOpen.value = false; });
 const inSection = (sec: Section): boolean =>
   sec.head.routeName === route.name || sec.children.some((c) => c.routeName === route.name);
 
+const syncPct = computed(() => {
+  const p = syncProgress.value;
+  return p && p.total ? Math.min(100, Math.round((p.done / p.total) * 100)) : 0;
+});
 /**
  * One label that cannot contradict itself: queued work is named as such, and
  * "Synced" is only claimed when nothing is waiting.
@@ -220,6 +225,13 @@ const syncLabel = computed(() => {
     <main class="content">
       <router-view />
     </main>
+
+    <!-- A first sync (or one back from long offline) can take a while; the
+         screens fill in when it lands, so say what is happening. -->
+    <div v-if="account && syncProgress" class="sync-progress" role="status" aria-live="polite">
+      <span>{{ syncProgress.total ? `Syncing your data… ${syncPct}%` : 'Syncing your data…' }}</span>
+      <span class="track"><i :class="{ indeterminate: !syncProgress.total }" :style="syncProgress.total ? { width: `${syncPct}%` } : undefined"></i></span>
+    </div>
 
     <!-- Phone: tapping outside the open drawer closes it. -->
     <div v-if="menuOpen" class="scrim" @click="menuOpen = false"></div>
@@ -332,6 +344,12 @@ nav { flex: 1; }
    767px instead of the intended 1920px cap. width: 100% forces the stretch;
    max-width then still clamps that 100% down once the track exceeds it, and
    *that* is the leftover space the auto margins center within. */
+.sync-progress { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 80; display: flex; flex-direction: column; gap: .4rem; min-width: min(20rem, calc(100vw - 2rem)); padding: .65rem .9rem; border-radius: 12px; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); box-shadow: 0 8px 24px rgb(0 0 0 / .15); font-size: .85rem; }
+.sync-progress .track { display: block; height: .35rem; border-radius: 999px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }
+.sync-progress .track i { display: block; height: 100%; border-radius: 999px; background: var(--zfy-accent, #0e7c66); transition: width .3s ease; }
+.sync-progress .track i.indeterminate { width: 35%; animation: sync-slide 1.2s ease-in-out infinite; }
+@keyframes sync-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+@media (prefers-reduced-motion: reduce) { .sync-progress .track i.indeterminate { animation: none; width: 100%; opacity: .5; } }
 .content { padding: 1.5rem; min-width: 0; width: 100%; max-width: min(96%, 120rem); margin: 0 auto; }
 /* POS is the one page built to actually use extra width well: the cart
    column stays a fixed 20rem and the product grid is auto-fill/minmax, so

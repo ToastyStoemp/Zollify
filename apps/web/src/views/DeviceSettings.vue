@@ -12,6 +12,7 @@ import {
   downloadUpdate,
   installDownloadedUpdate,
   queueShellUpdate,
+  shellUpdateQueued,
   reloadShellNow,
   selfUpdates,
   updateDownload,
@@ -107,8 +108,11 @@ async function checkUpdate(): Promise<void> {
     shellCheck.value = await checkShellUpdate();
     shellChecked.value = true;
     if (shellCheck.value?.available) {
-      shellQueuing.value = true;
-      await queueShellUpdate(shellCheck.value);
+      // Already downloaded and waiting for a restart: say so, don't fetch it again.
+      if (!shellUpdateQueued(shellCheck.value.latestVersion)) {
+        shellQueuing.value = true;
+        await queueShellUpdate(shellCheck.value);
+      }
       shellQueued.value = true;
     }
   } catch (err) {

@@ -74,6 +74,30 @@ export interface ShellUpdateCheck {
  * background check below. Null when there's nothing to report at all: not
  * native, offline, or the server has never published a bundle.
  */
+/**
+ * The version downloaded and queued with next(), until a restart activates it.
+ * current() keeps reporting the old bundle until then, so without this every
+ * later check saw "update available" and downloaded the whole bundle again -
+ * on every reconnect, all shift long, on a terminal nobody restarts.
+ * Persisted so a reload of the page (not of the bundle) remembers too.
+ */
+const QUEUED_KEY = 'zollify.shellQueued';
+function queuedVersion(): string | null {
+  try {
+    return localStorage.getItem(QUEUED_KEY);
+  } catch {
+    return null;
+  }
+}
+function rememberQueued(version: string | null): void {
+  try {
+    if (version) localStorage.setItem(QUEUED_KEY, version);
+    else localStorage.removeItem(QUEUED_KEY);
+  } catch {
+    /* no storage - the in-memory throttle still limits checks */
+  }
+}
+
 export async function checkShellUpdate(): Promise<ShellUpdateCheck | null> {
   const plugin = updater();
   const server = getServerUrl();
@@ -83,6 +107,8 @@ export async function checkShellUpdate(): Promise<ShellUpdateCheck | null> {
   if (!res.ok) return null;
   const latest = (await res.json()) as ShellManifest;
   if (!latest.version) return null;
+  // Running what was queued: the restart happened, nothing is pending any more.
+  if (queuedVersion() === current.bundle.version) rememberQueued(null);
   return { currentVersion: current.bundle.version, latestVersion: latest.version, available: latest.version !== current.bundle.version, url: latest.url, integrity: latest.integrity };
 }
 
@@ -106,6 +132,12 @@ export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
   if (!plugin || !server) return;
   const downloaded = await plugin.download({ url: `${server}${check.url}`, version: check.latestVersion, checksum: check.integrity });
   await plugin.next({ id: downloaded.id });
+  rememberQueued(check.latestVersion);
+}
+
+/** True when this exact version is already downloaded and waiting for a restart. */
+export function shellUpdateQueued(version: string): boolean {
+  return queuedVersion() === version;
 }
 
 /**
@@ -130,10 +162,16 @@ export async function reloadShellNow(): Promise<void> {
  * there was nothing to queue (already current, offline, not native, or the
  * check/download itself failed).
  */
+/** Background checks at most this often; the server only changes on a redeploy. */
+const CHECK_EVERY_MS = 30 * 60_000;
+let lastBackgroundCheck = 0;
+
 export async function checkAndQueueShellUpdate(): Promise<string | null> {
+  if (Date.now() - lastBackgroundCheck < CHECK_EVERY_MS) return null;
+  lastBackgroundCheck = Date.now();
   try {
     const check = await checkShellUpdate();
-    if (!check?.available) return null;
+    if (!check?.available || shellUpdateQueued(check.latestVersion)) return null;
     await queueShellUpdate(check);
     return check.latestVersion;
   } catch {

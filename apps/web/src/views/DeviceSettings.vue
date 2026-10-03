@@ -23,6 +23,9 @@ import {
   refreshTseInfo,
   setTseSettings,
   defaultTillId,
+  tseMode,
+  setMainTseDevice,
+  removeMainTseDevice,
   tseState,
   type TseDriverId,
   deviceFlavor,
@@ -72,8 +75,24 @@ const checkingTse = ref(false);
 async function chooseTse(driver: TseDriverId): Promise<void> {
   // A till needs a serial number for the TSE; suggest one from the device id.
   const clientId = tseState.settings.clientId || (driver !== 'none' && id.value ? defaultTillId(id.value) : '');
+  // Without its own TSE a device can't sign for others any more.
+  if (driver === 'none' && isMainTse.value) await setMainTseDevice(false);
   await setTseSettings({ driver, clientId });
-  if (driver !== 'none') await checkTse();
+  if (tseMode() !== 'none') await checkTse();
+}
+
+/** The account's main TSE devices: other devices without a TSE sign through them. */
+const isMainTse = computed(() => !!id.value && tseState.mainDevices.includes(id.value));
+const deviceLabel = (d: string): string => devices.value.find((x) => x.id === d)?.name || `Device ${d.slice(0, 8)}`;
+const mainTseNames = computed(() => tseState.mainDevices.filter((d) => d !== id.value).map(deviceLabel));
+const tseError = ref<string | null>(null);
+async function toggleMainTse(on: boolean): Promise<void> {
+  tseError.value = null;
+  try {
+    await setMainTseDevice(on);
+  } catch (err) {
+    tseError.value = err instanceof Error ? err.message : String(err);
+  }
 }
 /** A German receipt must name the seller and their address (§ 6 KassenSichV); the receipt takes them from the profile. */
 const sellerMissing = computed(() => {
@@ -221,19 +240,34 @@ function when(ts: number): string {
 
     <h3>TSE (Germany)</h3>
     <p class="hint">
-      German law (KassenSichV) wants every sale on an electronic till signed by a certified security device (TSE) in it.
-      This device's TSE signs its sales; a TSE that fails doesn't stop the till - the receipt says the sale was not signed.
+      German law (KassenSichV) wants every sale on an electronic till signed by a certified security device (TSE).
+      A device with a TSE signs its own sales, and - as a main TSE device - those of devices without one, such as a backup
+      phone, over the live connection. A TSE that fails doesn't stop the till - the receipt says the sale was not signed.
     </p>
     <div class="tse-form">
       <label>
         <span>TSE</span>
         <select :value="tseState.settings.driver" @change="chooseTse(($event.target as HTMLSelectElement).value as TseDriverId)">
-          <option value="none">None</option>
+          <option value="none">{{ mainTseNames.length ? 'None - sign through a main TSE device' : 'None' }}</option>
           <option value="swissbit">Swissbit TSE (USB or microSD)</option>
           <option value="test">Test TSE - development only, not certified</option>
         </select>
       </label>
-      <template v-if="tseState.settings.driver !== 'none'">
+      <label v-if="tseMode() === 'own'" class="check">
+        <input type="checkbox" :checked="isMainTse" @change="toggleMainTse(($event.target as HTMLInputElement).checked)" />
+        <span>Main TSE device - devices without a TSE of their own sign through this one. Keep it on and connected while they sell.</span>
+      </label>
+      <p v-else-if="tseMode() === 'remote'" class="hint">Signs through the account's main TSE devices, below - the first that answers. Needs a connection while selling.</p>
+      <p v-else-if="tseState.settings.driver === 'none'" class="hint">No main TSE device on this account yet - this device signs nothing.</p>
+      <p v-if="tseState.mainDevices.length" class="hint">Main TSE devices:</p>
+      <ul v-if="tseState.mainDevices.length" class="main-tse">
+        <li v-for="d in tseState.mainDevices" :key="d">
+          <span>{{ d === id ? 'This device' : deviceLabel(d) }}</span>
+          <button v-if="d !== id" type="button" class="quiet" @click="removeMainTseDevice(d)">Remove</button>
+        </li>
+      </ul>
+      <p v-if="tseError" class="error" role="alert">{{ tseError }}</p>
+      <template v-if="tseMode() !== 'none'">
         <label>
           <span>Till serial number</span>
           <input :value="tseState.settings.clientId" type="text" maxlength="30" @change="setTseSettings({ clientId: ($event.target as HTMLInputElement).value.trim() })" />
@@ -256,7 +290,9 @@ function when(ts: number): string {
         <p v-if="tseState.error" class="error" role="alert">{{ tseState.error }}</p>
         <dl v-else-if="tseState.info" class="facts">
           <dt>Status</dt>
-          <dd :class="tseState.info.certified ? 'ok' : 'warn'">{{ tseState.info.certified ? 'Ready' : 'Ready - test TSE, not for real sales' }}</dd>
+          <dd :class="tseState.info.certified ? 'ok' : 'warn'">
+            {{ tseState.info.certified ? 'Ready' : 'Ready - test TSE, not for real sales' }}{{ tseMode() === 'remote' ? ' (through a main TSE device)' : '' }}
+          </dd>
           <dt>TSE serial</dt>
           <dd class="mono">{{ tseState.info.serial }}</dd>
           <dt>Signature</dt>
@@ -403,6 +439,9 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .tse-form { display: flex; flex-direction: column; gap: .6rem; width: 100%; }
 .tse-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .tse-form small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
+.tse-form label.check { flex-direction: row; align-items: flex-start; gap: .5rem; }
+.main-tse { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.main-tse li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }

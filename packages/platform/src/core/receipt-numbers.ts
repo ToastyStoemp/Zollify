@@ -1,18 +1,17 @@
 import type { ReceiptNumber, Transaction } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { deviceId } from './device';
-import { tseState } from './tse';
+import { tillId } from './tse';
 
 /**
  * Receipt numbers: counted up per till, one at a time and never reused, so a
  * missing number stands out - what German and Austrian till rules expect of
  * a receipt.
  *
- * The till is this device. Its name is the TSE's till serial number when one
- * is set (so the receipt, the TSE and a tax export agree), otherwise one made
- * from the device id. Every sale gets the next number, and so does every
- * cancellation: with a TSE a cancellation is a receipt of its own.
+ * The till is this device, under its till serial number (see tillId): the
+ * TSE's when one is set, so the receipt, the TSE and a tax export agree.
+ * Every sale gets the next number, and so does every cancellation: with a
+ * TSE a cancellation is a receipt of its own.
  */
 
 const KEY = 'core.receiptCounters';
@@ -21,16 +20,6 @@ function requireAccountId(): string {
   const account = getAccount();
   if (!account) throw new Error('Receipt numbers were used while signed out.');
   return account.accountId;
-}
-
-/** The till serial a device gets unless one is set: stable, short enough to print. */
-export function defaultTillId(device: string): string {
-  return `ZOLLIFY-${device.slice(0, 8).toUpperCase()}`;
-}
-
-/** This device's till name, as printed on its receipts. */
-export async function tillId(): Promise<string> {
-  return tseState.settings.clientId.trim() || defaultTillId(await deviceId());
 }
 
 /** The highest number a till already used here - so a lost counter carries on rather than starting again. */

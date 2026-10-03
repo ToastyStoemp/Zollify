@@ -284,6 +284,43 @@ export interface PaymentResultMessage {
   error?: string;
 }
 
+// ── Signing through a main TSE device (any device → device with the TSE) ──
+// Point-to-point like the payment messages: a device without a TSE of its
+// own asks one of the account's main TSE devices to run a TSE call for it,
+// under its own till serial number. Never persisted.
+
+export type TseRequestMessage = {
+  type: 'tse.request';
+  /** Stamped by the server from the sender's own deviceId. */
+  from?: string;
+  /** The main TSE device's deviceId. */
+  to: string;
+  requestId: string;
+} & (
+  | { op: 'info' }
+  | { op: 'start'; clientId: string }
+  | { op: 'finish'; clientId: string; number: number; processType: string; processData: string }
+);
+
+export interface TseResultMessage {
+  type: 'tse.result';
+  /** Stamped by the server from the sender's own deviceId. */
+  from?: string;
+  /** The asking device's deviceId. */
+  to: string;
+  requestId: string;
+  ok: boolean;
+  error?: string;
+  /** The TSE's identity: on info and finish, so a signature always names the TSE that made it. */
+  info?: { serial: string; publicKey: string; algorithm: string; timeFormat: string; certified: boolean; expires?: string };
+  /** start: the transaction number; start and finish: the TSE's log time (ms). */
+  number?: number;
+  time?: number;
+  /** finish */
+  signatureCounter?: number;
+  signature?: string;
+}
+
 // ── Admin (owner-only) ───────────────────────────────────────────────────────
 
 export interface AdminOverview {

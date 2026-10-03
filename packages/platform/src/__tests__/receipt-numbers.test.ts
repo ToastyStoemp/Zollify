@@ -51,7 +51,7 @@ beforeEach(async () => {
 
 describe('receipt numbers', () => {
   it('counts up per till, from 1, named after the device', async () => {
-    const till = numbers.defaultTillId(await device.deviceId());
+    const till = tse.defaultTillId(await device.deviceId());
     expect(till).toMatch(/^ZOLLIFY-[0-9A-F]{8}$/);
     const a = await txs.recordSale(sale());
     const b = await txs.recordSale(sale());

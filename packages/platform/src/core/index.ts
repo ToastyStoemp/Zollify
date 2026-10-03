@@ -140,10 +140,17 @@ export {
   abortTse,
   signCancellation,
   resetTseCache,
+  tillId,
+  defaultTillId,
+  tseMode,
+  setMainTseDevice,
+  removeMainTseDevice,
+  applyMainTseDevices,
+  TSE_MAIN_KEY,
   type TseDriver,
   type TseDriverId,
   type TseInfo,
   type TseSettings,
 } from './tse';
-export { tillId, defaultTillId, nextReceiptNumber } from './receipt-numbers';
+export { nextReceiptNumber } from './receipt-numbers';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

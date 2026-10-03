@@ -45,8 +45,12 @@ export interface TseSignature {
  */
 export type SaleTse = { signed: TseSignature } | { failed: { reason: string; at: number } };
 
-/** A TSE transaction started at a sale's first item, to be finished when it is paid - or why it could not start. */
-export type TseHandle = { number: number; start: number } | { failed: string };
+/**
+ * A TSE transaction started at a sale's first item, to be finished when it is
+ * paid - or why it could not start. `via`: the main TSE device it was started
+ * on, when the till signs through one.
+ */
+export type TseHandle = { number: number; start: number; via?: string } | { failed: string };
 
 /** DSFinV-K transaction types used here. A cancellation with a TSE is a new "Beleg" with negative amounts. */
 export type Vorgangstyp = 'Beleg' | 'AVBelegabbruch' | 'AVTraining';

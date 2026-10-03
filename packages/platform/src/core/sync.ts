@@ -23,6 +23,7 @@ import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
 import { base64ToBlob } from './images';
+import { TSE_MAIN_KEY, applyMainTseDevices } from './tse';
 
 /**
  * Offline-first sync.
@@ -247,6 +248,7 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       const existing = await db.settings.get(incoming.key);
       if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
         await db.settings.put(incoming);
+        if (incoming.key === TSE_MAIN_KEY) applyMainTseDevices(incoming.value);
         return 1;
       }
       return 0;

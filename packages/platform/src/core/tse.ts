@@ -9,10 +9,14 @@ import {
   type SalesEvent,
   type Transaction,
   type TseHandle,
+  type TseRequestMessage,
+  type TseResultMessage,
   type TseSignature,
 } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
+import { deviceId } from './device';
+import { getSyncedSetting, setSyncedSetting } from './synced-settings';
 
 /**
  * KassenSichV on this device: the technical security device (TSE) that signs
@@ -26,6 +30,13 @@ import { getAccount } from '../session';
  * A TSE that fails must not stop the till: the sale goes through, marked as
  * not signed with the reason, and the receipt says so - which is what the
  * rules ask for when a TSE is out of order.
+ *
+ * Devices with a TSE can be made the account's main TSE devices. Every
+ * device without a TSE of its own then signs through one of them, over the
+ * live channel, under its own till serial number - a phone kept as a backup
+ * till, or one used to mark a sale paid on another terminal, still gets its
+ * sales signed. Once an account has a main TSE device, no device sells
+ * unsigned in Germany without it showing on the sale.
  */
 
 export type TseDriverId = 'none' | 'swissbit' | 'test';
@@ -52,18 +63,31 @@ export interface TseInfo {
 export interface TseDriver {
   available(): Promise<boolean>;
   info(): Promise<TseInfo>;
-  start(clientId: string): Promise<{ number: number; time: number }>;
-  finish(clientId: string, number: number, processType: string, processData: string): Promise<{ signatureCounter: number; time: number; signature: string }>;
+  /** `via`: the main TSE device that started it, when signing through one - the finish must go to the same TSE. */
+  start(clientId: string): Promise<{ number: number; time: number; via?: string }>;
+  /** `info`: the identity of the TSE that signed, when it is not this device's. */
+  finish(
+    clientId: string,
+    number: number,
+    processType: string,
+    processData: string,
+    via?: string,
+  ): Promise<{ signatureCounter: number; time: number; signature: string; info?: TseInfo }>;
 }
 
 
 const KEY = 'core.tse';
 const DEFAULTS: TseSettings = { driver: 'none', clientId: '', scope: 'germany' };
 
-export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null }>({
+/** Synced, account-wide: the device ids of the main TSE devices, in the order they are tried. */
+export const TSE_MAIN_KEY = 'core.tseMainDevices';
+
+export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null; mainDevices: string[]; deviceId: string }>({
   settings: { ...DEFAULTS },
   info: null,
   error: null,
+  mainDevices: [],
+  deviceId: '',
 });
 
 function requireAccountId(): string {
@@ -75,7 +99,41 @@ function requireAccountId(): string {
 export async function loadTseSettings(): Promise<TseSettings> {
   const row = await openCoreDb(requireAccountId()).settings.get(KEY);
   tseState.settings = { ...DEFAULTS, ...((row?.value as Partial<TseSettings>) ?? {}) };
+  tseState.deviceId = await deviceId();
+  applyMainTseDevices(await getSyncedSetting<string[]>(TSE_MAIN_KEY));
   return tseState.settings;
+}
+
+/** Takes in the list of main TSE devices - at load, and whenever sync brings a new one. */
+export function applyMainTseDevices(list: unknown): void {
+  tseState.mainDevices = Array.isArray(list) ? list.filter((id): id is string => typeof id === 'string') : [];
+}
+
+/** Takes a device off the account's main TSE devices - one replaced or gone, say. */
+export async function removeMainTseDevice(id: string): Promise<void> {
+  const list = tseState.mainDevices.filter((d) => d !== id);
+  applyMainTseDevices(list);
+  await setSyncedSetting(TSE_MAIN_KEY, list);
+}
+
+/** Makes this device one of the account's main TSE devices, or stops it being one. Only a device with a TSE of its own can be. */
+export async function setMainTseDevice(on: boolean): Promise<void> {
+  const me = await deviceId();
+  if (on && !ownDriverId()) throw new Error('Only a device with a TSE of its own can sign for others.');
+  const list = tseState.mainDevices.filter((id) => id !== me);
+  if (on) list.push(me);
+  applyMainTseDevices(list);
+  await setSyncedSetting(TSE_MAIN_KEY, list);
+}
+
+/** The till serial number this device signs and numbers receipts under. */
+export async function tillId(): Promise<string> {
+  return tseState.settings.clientId.trim() || defaultTillId(await deviceId());
+}
+
+/** The till serial a device gets unless one is set: stable, short enough to print. */
+export function defaultTillId(device: string): string {
+  return `ZOLLIFY-${device.slice(0, 8).toUpperCase()}`;
 }
 
 export async function setTseSettings(patch: Partial<TseSettings>): Promise<void> {
@@ -93,10 +151,40 @@ export function registerTseDriver(id: Exclude<TseDriverId, 'none'>, driver: TseD
   drivers[id] = driver;
 }
 
-function driver(): TseDriver | null {
+/** This device's own TSE, if it has one. */
+function ownDriverId(): 'swissbit' | 'test' | null {
   const id = tseState.settings.driver;
-  if (id === 'none') return null;
-  return drivers[id] ?? (id === 'swissbit' ? swissbitDriver() : id === 'test' ? testDriver() : null);
+  return id === 'swissbit' || id === 'test' ? id : null;
+}
+
+function ownDriver(): TseDriver | null {
+  const id = ownDriverId();
+  // One instance per driver: the test TSE's lock only works if every sale goes through the same one.
+  if (id === 'swissbit') return (drivers.swissbit ??= swissbitDriver());
+  if (id === 'test') return (drivers.test ??= testDriver());
+  return null;
+}
+
+/** The main TSE device that last signed for this one: tried first next time. */
+let lastHost: string | null = null;
+
+/** The main TSE devices this device would sign through: all of them but itself, the last one that worked first. */
+function remoteHosts(): string[] {
+  const hosts = tseState.mainDevices.filter((id) => id !== tseState.deviceId);
+  return lastHost && hosts.includes(lastHost) ? [lastHost, ...hosts.filter((h) => h !== lastHost)] : hosts;
+}
+
+/**
+ * The TSE this device signs with: its own, or - without one - the account's
+ * main TSE devices, when there are any.
+ */
+function driver(): TseDriver | null {
+  return ownDriver() ?? (remoteHosts().length ? remoteDriver() : null);
+}
+
+/** How this device signs, for Settings. */
+export function tseMode(): 'own' | 'remote' | 'none' {
+  return ownDriverId() ? 'own' : remoteHosts().length ? 'remote' : 'none';
 }
 
 /** Checks the TSE answers and reads its identity, for Settings and the receipt. */
@@ -118,14 +206,13 @@ export async function refreshTseInfo(): Promise<TseInfo | null> {
 
 /** Whether sales at this event must be signed on this device. */
 export function tseRequiredFor(event: Pick<SalesEvent, 'venue'> | null | undefined): boolean {
-  const s = tseState.settings;
-  if (s.driver === 'none') return false;
-  return s.scope === 'always' || countryCodeOf(event?.venue?.country) === 'DE';
+  if (tseMode() === 'none') return false;
+  return tseState.settings.scope === 'always' || countryCodeOf(event?.venue?.country) === 'DE';
 }
 
-async function startOn(d: TseDriver): Promise<{ number: number; start: number }> {
-  const r = await d.start(tseState.settings.clientId);
-  return { number: r.number, start: r.time };
+async function startOn(d: TseDriver): Promise<{ number: number; start: number; via?: string }> {
+  const r = await d.start(await tillId());
+  return { number: r.number, start: r.time, ...(r.via ? { via: r.via } : {}) };
 }
 
 const reasonOf = (err: unknown): string => (err instanceof Error ? err.message : String(err)).slice(0, 200);
@@ -141,12 +228,14 @@ export async function beginTse(): Promise<TseHandle> {
   }
 }
 
-async function finishWith(d: TseDriver, handle: { number: number; start: number }, processData: string): Promise<TseSignature> {
-  const info = tseState.info ?? (await d.info());
-  tseState.info = info;
-  const done = await d.finish(tseState.settings.clientId, handle.number, TSE_PROCESS_TYPE, processData);
+async function finishWith(d: TseDriver, handle: { number: number; start: number; via?: string }, processData: string): Promise<TseSignature> {
+  const clientId = await tillId();
+  const done = await d.finish(clientId, handle.number, TSE_PROCESS_TYPE, processData, handle.via);
+  // A main TSE device says which TSE signed; this device's own is read once.
+  const info = done.info ?? tseState.info ?? (await d.info());
+  if (!done.info) tseState.info = info;
   return {
-    clientId: tseState.settings.clientId,
+    clientId,
     serial: info.serial,
     transactionNumber: handle.number,
     signatureCounter: done.signatureCounter,
@@ -186,7 +275,7 @@ export async function abortTse(handle: TseHandle | null | undefined): Promise<vo
   const d = driver();
   if (!d || !handle || 'failed' in handle) return;
   try {
-    await d.finish(tseState.settings.clientId, handle.number, TSE_PROCESS_TYPE, 'AVBelegabbruch^0.00_0.00_0.00_0.00_0.00^');
+    await d.finish(await tillId(), handle.number, TSE_PROCESS_TYPE, 'AVBelegabbruch^0.00_0.00_0.00_0.00_0.00^', handle.via);
   } catch {
     /* an open transaction on the TSE is visible in its own export */
   }
@@ -203,6 +292,119 @@ export async function signCancellation(tx: Transaction): Promise<SaleTse> {
   } catch (err) {
     return { failed: { reason: reasonOf(err), at: Date.now() } };
   }
+}
+
+// ── Signing through a main TSE device ───────────────────────────────────────
+
+type TseMessage = TseRequestMessage | TseResultMessage;
+type TseCall = { op: 'info' } | { op: 'start'; clientId: string } | { op: 'finish'; clientId: string; number: number; processType: string; processData: string };
+
+interface TseTransport {
+  /** False when not connected. */
+  send(msg: TseMessage): boolean;
+  on(handler: (msg: TseMessage) => void): () => void;
+}
+
+let transport: TseTransport | null = null;
+const waiting = new Map<string, (msg: TseResultMessage) => void>();
+/** Long enough for a phone on a busy hall network; short enough not to hold the queue. */
+const CALL_TIMEOUT_MS = 8_000;
+
+/**
+ * Wired by the live channel (realtime.ts) when it loads. Also where this
+ * device starts answering other devices, should it be a main TSE device.
+ */
+export function setTseTransport(t: TseTransport): void {
+  transport = t;
+  t.on((msg) => {
+    if (msg.type === 'tse.result') waiting.get(msg.requestId)?.(msg);
+    else void serve(msg);
+  });
+}
+
+/** Runs another device's TSE call on this device's TSE - if this is a main TSE device. */
+async function serve(msg: TseRequestMessage): Promise<void> {
+  const me = await deviceId();
+  if (msg.to !== me || !msg.from || !transport) return;
+  const reply = (r: Omit<TseResultMessage, 'type' | 'to' | 'requestId'>): void => {
+    transport?.send({ type: 'tse.result', to: msg.from!, requestId: msg.requestId, ...r });
+  };
+  const d = ownDriver();
+  if (!d || !tseState.mainDevices.includes(me)) return reply({ ok: false, error: 'That device is no longer a main TSE device.' });
+  try {
+    if (msg.op === 'info') return reply({ ok: true, info: await d.info() });
+    if (msg.op === 'start') {
+      const r = await d.start(String(msg.clientId));
+      return reply({ ok: true, number: r.number, time: r.time });
+    }
+    if (msg.op === 'finish') {
+      const r = await d.finish(String(msg.clientId), Number(msg.number), String(msg.processType), String(msg.processData));
+      return reply({ ok: true, signatureCounter: r.signatureCounter, time: r.time, signature: r.signature, info: tseState.info ?? (tseState.info = await d.info()) });
+    }
+    reply({ ok: false, error: 'Unknown TSE call.' });
+  } catch (err) {
+    reply({ ok: false, error: reasonOf(err) });
+  }
+}
+
+/** One TSE call on a main TSE device; throws its error, or when it does not answer. */
+function call(host: string, c: TseCall): Promise<TseResultMessage> {
+  if (!transport) return Promise.reject(new Error('No live connection to reach the main TSE device.'));
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      waiting.delete(requestId);
+      reject(new Error('The main TSE device did not answer.'));
+    }, CALL_TIMEOUT_MS);
+    waiting.set(requestId, (msg) => {
+      clearTimeout(timer);
+      waiting.delete(requestId);
+      if (msg.ok) resolve(msg);
+      else reject(new Error(msg.error || 'The main TSE device could not sign.'));
+    });
+    if (!transport!.send({ type: 'tse.request', to: host, requestId, ...c } as TseRequestMessage)) {
+      clearTimeout(timer);
+      waiting.delete(requestId);
+      reject(new Error('Offline - the main TSE device cannot be reached.'));
+    }
+  });
+}
+
+/** Tries each main TSE device in turn; the first that answers does it. */
+async function onFirstHost<T>(work: (host: string) => Promise<T>): Promise<T> {
+  const errors: string[] = [];
+  for (const host of remoteHosts()) {
+    try {
+      const done = await work(host);
+      lastHost = host;
+      return done;
+    } catch (err) {
+      errors.push(reasonOf(err));
+    }
+  }
+  throw new Error(errors.length ? errors[errors.length - 1]! : 'No main TSE device on this account.');
+}
+
+function remoteDriver(): TseDriver {
+  const infoOf = (r: TseResultMessage): TseInfo => {
+    if (!r.info) throw new Error('The main TSE device did not say which TSE it is.');
+    return r.info;
+  };
+  return {
+    available: async () => remoteHosts().length > 0,
+    info: () => onFirstHost(async (host) => infoOf(await call(host, { op: 'info' }))),
+    start: (clientId) =>
+      onFirstHost(async (host) => {
+        const r = await call(host, { op: 'start', clientId });
+        return { number: Number(r.number), time: Number(r.time), via: host };
+      }),
+    finish: async (clientId, number, processType, processData, via) => {
+      // A transaction lives on the TSE that started it.
+      if (!via) throw new Error('This transaction was not started on a main TSE device.');
+      const r = await call(via, { op: 'finish', clientId, number, processType, processData });
+      return { signatureCounter: Number(r.signatureCounter), time: Number(r.time), signature: String(r.signature), info: infoOf(r) };
+    },
+  };
 }
 
 // ── Swissbit hardware, through the native bridge ────────────────────────────
@@ -330,4 +532,8 @@ export function resetTseCache(): void {
   tseState.settings = { ...DEFAULTS };
   tseState.info = null;
   tseState.error = null;
+  tseState.mainDevices = [];
+  tseState.deviceId = '';
+  waiting.clear();
+  lastHost = null;
 }

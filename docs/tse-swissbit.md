@@ -39,6 +39,11 @@ Also needed once, at setup and on the TSE's own schedule:
 - **Export**: the TSE's TAR export (`worm_export_tar`) for a tax inspection - add an "Export TSE data" button
   next to "Check TSE" that saves the TAR file.
 
+**Several tills on one TSE.** A main TSE device also signs for the account's devices without a TSE (a backup
+phone, say), each under its own till serial number (`clientId`). The plugin must therefore accept any `clientId`:
+when `startTransaction` gets one the TSE does not know yet, register it as a client first
+(`worm_tse_registerClient`) and carry on. Each of those tills is registered with the tax office too.
+
 Errors should reject the call with a readable message; Zollify records it as a TSE outage on the sale
 ("TSE ausgefallen") and keeps selling, as the rules require.
 

@@ -29,6 +29,7 @@ import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
+import { abortTse, beginTse, tseRequiredFor } from './core/tse';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import {
   availabilityFor,
@@ -270,6 +271,12 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       const off = onAccountChange(handler);
       subscriptions.push(off);
       return off;
+    },
+
+    tse: {
+      required: (eventId) => tseRequiredFor(eventId ? getSalesEvent(eventId) : undefined),
+      begin: () => beginTse(),
+      abort: (handle) => abortTse(handle),
     },
 
     display: {

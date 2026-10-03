@@ -174,6 +174,30 @@ export interface PublicReceipt {
   brand: { logo?: string; footer: string[] };
   /** VAT included per rate, or the exemption the sale was made under. */
   vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
+  /** KassenSichV: what a receipt in Germany must show of the TSE signature, or that the TSE was out. */
+  tse?: PublicTse;
+  revertTse?: PublicTse;
+}
+
+type PublicTse =
+  | { failed: true }
+  | { transactionNumber: number; signatureCounter: number; start: string; finish: string; clientId: string; serial: string; signature: string; test?: true };
+
+/** Only the fields a German receipt carries - never the failure reason, which can name the device. */
+function publicTse(tse: Transaction['tse']): PublicTse | undefined {
+  if (!tse) return undefined;
+  if ('failed' in tse) return { failed: true };
+  const s = tse.signed;
+  return {
+    transactionNumber: Number(s.transactionNumber) || 0,
+    signatureCounter: Number(s.signatureCounter) || 0,
+    start: String(s.start).slice(0, 30),
+    finish: String(s.finish).slice(0, 30),
+    clientId: String(s.clientId).slice(0, 60),
+    serial: String(s.serial).slice(0, 128),
+    signature: String(s.signature).slice(0, 400),
+    ...(s.test ? { test: true as const } : {}),
+  };
 }
 
 /** Lines at the till's price, in the currency the customer paid - see receiptBreakdown. */
@@ -223,6 +247,8 @@ export function publicReceipt(
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
     },
+    ...(publicTse(tx.tse) ? { tse: publicTse(tx.tse) } : {}),
+    ...(publicTse(tx.revertTse) ? { revertTse: publicTse(tx.revertTse) } : {}),
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -288,6 +314,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .good { color: var(--accent); }
 .row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
 .row.net { padding-left: 1rem; }
+.mono { font-family: ui-monospace, monospace; font-size: .7rem; word-break: break-all; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
@@ -405,6 +432,21 @@ const SCRIPT = String.raw`(function () {
     });
     if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
     if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
+    [['TSE', r.tse], ['TSE - Storno', r.revertTse]].forEach(function (pair) {
+      var t = pair[1];
+      if (!t) return;
+      receiptEl.appendChild(el('hr'));
+      receiptEl.appendChild(el('p', 'muted', pair[0]));
+      if (t.failed) { receiptEl.appendChild(el('p', 'muted', 'TSE ausgefallen - Beleg ohne TSE-Signatur')); return; }
+      if (t.test) receiptEl.appendChild(el('p', 'muted', 'Test-TSE - nicht zertifiziert'));
+      receiptEl.appendChild(row('Transaktion', String(t.transactionNumber), 'muted'));
+      receiptEl.appendChild(row('Signaturzähler', String(t.signatureCounter), 'muted'));
+      receiptEl.appendChild(row('Start', new Date(t.start).toLocaleString(), 'muted'));
+      receiptEl.appendChild(row('Ende', new Date(t.finish).toLocaleString(), 'muted'));
+      receiptEl.appendChild(row('Kasse', t.clientId, 'muted'));
+      receiptEl.appendChild(el('p', 'muted mono', 'TSE ' + t.serial));
+      receiptEl.appendChild(el('p', 'muted mono', 'Signatur ' + t.signature));
+    });
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
     receiptEl.appendChild(el('hr'));
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });

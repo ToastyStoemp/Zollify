@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction, TseHandle } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -138,6 +138,8 @@ export interface SaleEvent {
   asCharged?: { listTotals: number[]; discounts: { name: string; amount: number }[] };
   /** VAT as applied: rates per line (paired with `lines`) or the exemption. */
   tax?: SaleTax;
+  /** KassenSichV: the TSE transaction started at the sale's first item, finished by core when it records the sale. */
+  tseHandle?: TseHandle;
   payment: {
     provider: string;
     approved: boolean;
@@ -414,6 +416,18 @@ export interface Sdk {
    * (device-local, set under Settings → This device); `receiptUrl` turns a
    * sale's receipt token into the link its QR code carries.
    */
+  /**
+   * KassenSichV signing on this device. A till starts a TSE transaction at a
+   * sale's first item (`begin`) and hands the handle over with the sale;
+   * core finishes and signs it when it records the sale. `abort` closes one
+   * for a sale that was abandoned. Absent on shells without TSE support.
+   */
+  tse?: {
+    required(eventId: string | null): boolean;
+    begin(): Promise<TseHandle>;
+    abort(handle: TseHandle | null | undefined): Promise<void>;
+  };
+
   display: {
     publish(cart: DisplayCart): void;
     afterSale(): Promise<{ thankYou: boolean; receiptQr: boolean }>;

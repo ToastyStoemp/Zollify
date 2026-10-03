@@ -1,11 +1,13 @@
 import { computed, reactive, ref } from 'vue';
 import type { SaleEvent } from '@zollify/sdk';
-import type { PaymentLeg, Transaction, TxItem } from '@zollify/shared';
+import type { PaymentLeg, Transaction, TseHandle, TxItem } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
+import { getSalesEvent } from './sales-events';
+import { signCancellation, signSale, tseRequiredFor } from './tse';
 
 /**
  * Recorded sales.
@@ -121,6 +123,12 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
   const tx = toPlain(saleToTransaction(sale, await deviceId()));
+  // KassenSichV: a sale in Germany is signed by this device's TSE before it
+  // is stored, over the same figures its receipt prints. A TSE failure is
+  // kept on the sale rather than stopping it.
+  if (tseRequiredFor(getSalesEvent(tx.eventId))) {
+    tx.tse = toPlain(await signSale(tx, sale.tseHandle as TseHandle | undefined));
+  }
 
   await db.transactions.put(tx);
   transactions.set(tx.id, tx);
@@ -142,11 +150,14 @@ export async function revertTransaction(id: string): Promise<void> {
   if (existing.revertedAt) return;
 
   const revertedAt = Date.now();
-  const reverted: Transaction = toPlain({ ...existing, revertedAt, revertedBy: crypto.randomUUID() });
+  // A signed sale is cancelled by a signed receipt of its own, with the
+  // same figures negative - with a TSE there is no other way to cancel.
+  const revertTse = existing.tse ? toPlain(await signCancellation(existing)) : undefined;
+  const reverted: Transaction = toPlain({ ...existing, revertedAt, revertedBy: crypto.randomUUID(), ...(revertTse ? { revertTse } : {}) });
 
   await db.transactions.put(reverted);
   transactions.set(id, reverted);
-  await queueOp({ type: 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
+  await queueOp({ type: 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy, ...(revertTse ? { revertTse } : {}) } });
 }
 
 /**

@@ -50,6 +50,13 @@ const lines = computed(() => tx.value?.items ?? []);
 /** Lines at the till's price and each discount, in what the customer paid - matches the printed copy. */
 const breakdown = computed(() => (tx.value ? receiptAmounts(tx.value) : { lines: [], discounts: [] }));
 const subtotal = computed(() => breakdown.value.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100);
+/** KassenSichV: the sale's TSE outcome, and its cancellation's when reverted. */
+const tseBlocks = computed(() => {
+  const out: { title: string; tse: NonNullable<Transaction['tse']> }[] = [];
+  if (tx.value?.tse) out.push({ title: 'TSE', tse: tx.value.tse });
+  if (tx.value?.revertTse) out.push({ title: 'TSE - Storno', tse: tx.value.revertTse });
+  return out;
+});
 /** VAT per rate, lettered when a sale has more than one - as on the printed copy. */
 const vatRows = computed(() => (tx.value ? receiptVat(tx.value) : []));
 const letterFor = (i: number): string => {
@@ -160,6 +167,24 @@ async function print(): Promise<void> {
       <p v-if="tx.tax?.exempt && tx.tax.exNumber" class="exempt">EX: {{ tx.tax.exNumber }}</p>
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
+      <template v-for="block in tseBlocks" :key="block.title">
+        <div class="tse">
+          <p class="tse-title">{{ block.title }}</p>
+          <template v-if="'failed' in block.tse">
+            <p>TSE ausgefallen - Beleg ohne TSE-Signatur</p>
+            <p class="tse-reason">{{ block.tse.failed.reason }}</p>
+          </template>
+          <template v-else>
+            <p v-if="block.tse.signed.test" class="tse-test">Test-TSE - nicht zertifiziert</p>
+            <p class="row"><span>Transaktion</span><span>{{ block.tse.signed.transactionNumber }}</span></p>
+            <p class="row"><span>Signaturzähler</span><span>{{ block.tse.signed.signatureCounter }}</span></p>
+            <p class="row"><span>Start</span><span>{{ new Date(block.tse.signed.start).toLocaleString() }}</span></p>
+            <p class="row"><span>Ende</span><span>{{ new Date(block.tse.signed.finish).toLocaleString() }}</span></p>
+            <p class="row"><span>Kasse</span><span>{{ block.tse.signed.clientId }}</span></p>
+            <p class="tse-serial">TSE {{ block.tse.signed.serial }}</p>
+          </template>
+        </div>
+      </template>
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
       <p class="ref">{{ tx.id }}</p>
     </article>
@@ -214,6 +239,11 @@ h1 { font-size: 1.25rem; margin: 0; }
 .row.discount { color: #0a5a4a; }
 .row.vat { color: #5a6472; font-size: .75rem; }
 .row.vat.net { padding-left: 1.2rem; }
+.tse { border-top: 1px dashed #999; padding-top: .35rem; display: flex; flex-direction: column; gap: .15rem; font-size: .72rem; color: #5a6472; }
+.tse p { margin: 0; }
+.tse-title { font-weight: 700; color: #141a22; }
+.tse-test, .tse-reason { color: #c6512f; }
+.tse-serial { word-break: break-all; }
 .exempt { margin: 0; text-align: center; font-size: .75rem; color: #5a6472; }
 .row.subtotal { border-top: 1px dashed #999; padding-top: .35rem; }
 .reverted { margin: 0; color: #c6512f; }

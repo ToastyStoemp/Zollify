@@ -20,6 +20,10 @@ import {
   type UpdateCheck,
   afterSalePrefs,
   currentAccount,
+  refreshTseInfo,
+  setTseSettings,
+  tseState,
+  type TseDriverId,
   deviceFlavor,
   loadAfterSalePrefs,
   setAfterSalePrefs,
@@ -61,6 +65,23 @@ onMounted(async () => {
     error.value = err instanceof Error ? err.message : 'Could not read this device.';
   }
 });
+
+// ── KassenSichV: this device's TSE ─────────────────────────────────────────
+const checkingTse = ref(false);
+async function chooseTse(driver: TseDriverId): Promise<void> {
+  // A till needs a serial number for the TSE; suggest one from the device id.
+  const clientId = tseState.settings.clientId || (driver !== 'none' && id.value ? `ZOLLIFY-${id.value.slice(0, 8).toUpperCase()}` : '');
+  await setTseSettings({ driver, clientId });
+  if (driver !== 'none') await checkTse();
+}
+async function checkTse(): Promise<void> {
+  checkingTse.value = true;
+  try {
+    await refreshTseInfo();
+  } finally {
+    checkingTse.value = false;
+  }
+}
 
 // ── Diagnostics: send this device's log to the server for support ──────────
 const sending = ref(false);
@@ -190,6 +211,50 @@ function when(ts: number): string {
         <input type="checkbox" :checked="afterSalePrefs.receiptQr" @change="setAfterSalePrefs({ receiptQr: ($event.target as HTMLInputElement).checked })" />
         <span class="body"><span class="label">Receipt QR code</span><span class="sub">The customer scans it for their receipt online. Shows the receipt only - never other sales or your stock.</span></span>
       </label>
+    </div>
+
+    <h3>TSE (Germany)</h3>
+    <p class="hint">
+      German law (KassenSichV) wants every sale on an electronic till signed by a certified security device (TSE) in it.
+      This device's TSE signs its sales; a TSE that fails doesn't stop the till - the receipt says the sale was not signed.
+    </p>
+    <div class="tse-form">
+      <label>
+        <span>TSE</span>
+        <select :value="tseState.settings.driver" @change="chooseTse(($event.target as HTMLSelectElement).value as TseDriverId)">
+          <option value="none">None</option>
+          <option value="swissbit">Swissbit TSE (USB or microSD)</option>
+          <option value="test">Test TSE - development only, not certified</option>
+        </select>
+      </label>
+      <template v-if="tseState.settings.driver !== 'none'">
+        <label>
+          <span>Till serial number</span>
+          <input :value="tseState.settings.clientId" type="text" maxlength="30" @change="setTseSettings({ clientId: ($event.target as HTMLInputElement).value.trim() })" />
+          <small>Printed on receipts and given when registering the till with the tax office.</small>
+        </label>
+        <label>
+          <span>Sign</span>
+          <select :value="tseState.settings.scope" @change="setTseSettings({ scope: ($event.target as HTMLSelectElement).value as 'germany' | 'always' })">
+            <option value="germany">Sales at events in Germany</option>
+            <option value="always">Every sale</option>
+          </select>
+        </label>
+        <div class="row">
+          <button type="button" :disabled="checkingTse" @click="checkTse">{{ checkingTse ? 'Checking…' : 'Check TSE' }}</button>
+        </div>
+        <p v-if="tseState.error" class="error" role="alert">{{ tseState.error }}</p>
+        <dl v-else-if="tseState.info" class="facts">
+          <dt>Status</dt>
+          <dd :class="tseState.info.certified ? 'ok' : 'warn'">{{ tseState.info.certified ? 'Ready' : 'Ready - test TSE, not for real sales' }}</dd>
+          <dt>TSE serial</dt>
+          <dd class="mono">{{ tseState.info.serial }}</dd>
+          <dt>Signature</dt>
+          <dd>{{ tseState.info.algorithm }}</dd>
+          <dt v-if="tseState.info.expires">Certificate until</dt>
+          <dd v-if="tseState.info.expires">{{ tseState.info.expires }}</dd>
+        </dl>
+      </template>
     </div>
 
     <h3>Appearance</h3>
@@ -325,6 +390,9 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .toggles .body { display: flex; flex-direction: column; }
 .toggles .label { font-size: .875rem; font-weight: 600; }
 .toggles .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.tse-form { display: flex; flex-direction: column; gap: .6rem; width: 100%; }
+.tse-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.tse-form small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }

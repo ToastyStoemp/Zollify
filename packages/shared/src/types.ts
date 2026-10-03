@@ -1,5 +1,6 @@
 /** Data model v2 - shared between app and server. Grows in Phase 1/3. */
 import type { EventVat, SaleTax, TaxClass } from './vat';
+import type { SaleTse } from './tse';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
@@ -275,6 +276,10 @@ export interface Transaction {
   asCharged?: AsCharged;
   /** VAT as applied at the time of the sale - see SaleTax. Absent on sales made before VAT was tracked. */
   tax?: SaleTax;
+  /** KassenSichV: the TSE signature of this sale, or why there is none. Only on sales a TSE had to sign. */
+  tse?: SaleTse;
+  /** The TSE signature of the cancelling receipt, when a signed sale was reverted. */
+  revertTse?: SaleTse;
 }
 
 export interface AsCharged {

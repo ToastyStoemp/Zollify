@@ -128,4 +128,21 @@ export { mergeProducts, materializeMerge } from './merge';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting } from './synced-settings';
+export {
+  tseState,
+  loadTseSettings,
+  setTseSettings,
+  refreshTseInfo,
+  registerTseDriver,
+  tseRequiredFor,
+  beginTse,
+  signSale,
+  abortTse,
+  signCancellation,
+  resetTseCache,
+  type TseDriver,
+  type TseDriverId,
+  type TseInfo,
+  type TseSettings,
+} from './tse';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

@@ -26,6 +26,8 @@ const FX_TOKEN = 'FxFxFxFxFxFxFxFxFxFx01';
 const DISC_TOKEN = 'DiscDiscDiscDiscDisc02';
 const VAT_TOKEN = 'VatVatVatVatVatVatVat3';
 const EXEMPT_TOKEN = 'ExemptExemptExemptExe4';
+const TSE_TOKEN = 'TseTseTseTseTseTseTse5';
+const TSE_FAIL_TOKEN = 'TseFailTseFailTseFail6';
 
 let app: FastifyInstance;
 let dataDir: string;
@@ -131,6 +133,8 @@ beforeAll(async () => {
           asCharged: { listTotals: [40], discounts: [{ name: 'Bundle deal', amount: 4 }] },
         })),
         op(7, 'tx.create', sale('tx-vat', VAT_TOKEN, { currency: 'EUR', tax: { country: 'DE', exempt: false, rates: [19, 7] } })),
+        op(9, 'tx.create', sale('tx-tse', TSE_TOKEN, { currency: 'EUR', tse: { signed: { clientId: 'ZOLLIFY-1', serial: 'ab'.repeat(32), transactionNumber: 13, signatureCounter: 44131, start: '2026-10-03T12:00:01.000Z', finish: '2026-10-03T12:00:09.000Z', algorithm: 'ecdsa-plain-SHA384', timeFormat: 'unixTime', signature: 'SIGNATURE', publicKey: 'PUBLICKEY', processType: 'Kassenbeleg-V1', processData: 'Beleg^45.00_0.00_0.00_0.00_0.00^45.00:Bar' } } })),
+        op(10, 'tx.create', sale('tx-tse-fail', TSE_FAIL_TOKEN, { currency: 'EUR', tse: { failed: { reason: 'Swissbit on secret-device-id unplugged', at: 1 } } })),
         op(8, 'tx.create', sale('tx-exempt', EXEMPT_TOKEN, { currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } })),
       ],
     },
@@ -216,6 +220,17 @@ describe('online receipts', () => {
     const body = (await lookup(EXEMPT_TOKEN)).json();
     expect(body.vat).toEqual({ rows: [], exemptNote: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' });
     expect(body.seller.vatId).toBeUndefined();
+  });
+
+  it('shows the TSE signature a German receipt carries', async () => {
+    const body = (await lookup(TSE_TOKEN)).json();
+    expect(body.tse).toEqual({ transactionNumber: 13, signatureCounter: 44131, start: '2026-10-03T12:00:01.000Z', finish: '2026-10-03T12:00:09.000Z', clientId: 'ZOLLIFY-1', serial: 'ab'.repeat(32), signature: 'SIGNATURE' });
+  });
+
+  it('says a sale was not signed, without the reason (which can name the device)', async () => {
+    const res = await lookup(TSE_FAIL_TOKEN);
+    expect(res.json().tse).toEqual({ failed: true });
+    expect(res.body).not.toContain('secret-device-id');
   });
 
   it('refuses a lookup without a solved challenge', async () => {

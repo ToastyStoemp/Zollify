@@ -50,11 +50,11 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 
 | Requirement | Today | Change needed |
 |---|---|---|
-| TSE signing | None | Integrate a certified TSE. A cloud TSE (e.g. fiskaly) fits the multi-device setup best, one client per device. It needs internet, so add outage handling: keep selling, mark receipts as signed without TSE, log the failure. A hardware TSE (USB or microSD) is the offline alternative if the device can take one. |
+| TSE signing | **Built, driver pending**: a sale in Germany starts a TSE transaction at its first item and is signed when recorded, over the receipt's figures (DSFinV-K `Kassenbeleg-V1`); an outage keeps the till selling and marks the sale and receipt "TSE ausgefallen". Works today with an uncertified test TSE. | The native Swissbit driver, once a TSE (and its SDK) is bought - see [`tse-swissbit.md`](tse-swissbit.md). Payment terminals (myPOS Carbon/Go 2, SumUp) don't provide a TSE; it belongs to the till software. |
 | VAT per sale | **Done**: each event charges its country's standard or reduced rate per product (Settings → VAT, the event form, the product's "VAT rate"), or the small-business exemption; every sale keeps a snapshot (`tx.tax`) | Map the stored rates to DSFinV-K VAT keys when building the export. |
-| Receipt content (§6 KassenSichV) | Seller name, address and VAT ID, date, items, total, payment type; VAT and net per rate with lettered lines, or the exemption note and EX number | Add a sequential transaction number, start and end time, the till's serial number, and the TSE signature, counter and serial (often shown as a QR code). Applies to paper and online receipts alike. |
+| Receipt content (§6 KassenSichV) | Seller name, address and VAT ID, date, items, total, payment type; VAT and net per rate with lettered lines, or the exemption note and EX number; for signed sales the TSE transaction number, signature counter, start and end time, till and TSE serial, and the DSFinV-K QR code (paper) - also on the online receipt | A sequential receipt number of the till's own. |
 | A receipt for every sale | QR and printing are optional per device | A Germany mode (e.g. by event country) where every sale must offer a receipt by QR, print or both, with paper always available on request. |
-| Cancellations | Reverting marks the original sale and keeps it (good) | Record the reversal as its own signed cancellation transaction with negative amounts. |
+| Cancellations | **Done**: reverting a signed sale signs a cancelling receipt of its own with the same figures negative | - |
 | DSFinV-K export | CSV, PDF and backups only | A DSFinV-K export: till master data, daily closings, line items with VAT keys, payments and cash movements, plus the TSE export. |
 | Daily closing and cash movements | Cash-up screen; starting cash stored on the device only | Numbered daily closings, and recorded cash put in or taken out (Einlagen/Entnahmen), synced to the server and never changed afterwards. |
 | Unchangeable records | Append-only change log, sales never deleted (good) | Keep as is. Add a training-mode flag so practice sales are marked as such. |
@@ -66,8 +66,8 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 ## Suggested order
 
 1. ~~Store VAT on each sale.~~ Done.
-2. Integrate a cloud TSE with outage handling.
-3. Upgrade the receipt (paper and QR) to the §6 content.
+2. ~~TSE signing with outage handling~~ done; the Swissbit driver remains (see `tse-swissbit.md`).
+3. ~~Receipt TSE block and QR~~ done; a sequential receipt number remains.
 4. Add daily closings and cash movements.
 5. Build the DSFinV-K export.
 6. Add till registration data and the documentation template.

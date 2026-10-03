@@ -3,7 +3,7 @@ import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
-import { receiptQrPng } from './lib/after-sale';
+import { qrPng, receiptQrPng } from './lib/after-sale';
 import { serverBranding } from './lib/branding';
 import { sdk } from './runtime';
 
@@ -96,6 +96,48 @@ export async function printReceipt(lines: ReceiptLine[]): Promise<{ printed: boo
   return { printed: false, error: 'Printing is not available on this device' };
 }
 
+/**
+ * The TSE block a German receipt must carry: transaction number, signature
+ * counter, start and end, the TSE's and the till's serial numbers, and the
+ * signature - as the DSFinV-K QR code, which holds all of it for checking.
+ */
+function tseLines(tse: NonNullable<Transaction['tse']>, qrB64: string | undefined, title?: string): ReceiptLine[] {
+  const out: ReceiptLine[] = [{ kind: 'text', text: DIVIDER }];
+  const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
+  if (title) out.push(center(title));
+  if ('failed' in tse) {
+    out.push(center('TSE ausgefallen'));
+    out.push(center('Beleg ohne TSE-Signatur'));
+    for (const part of wrap(tse.failed.reason, WIDTH)) out.push(center(part));
+    return out;
+  }
+  const s = tse.signed;
+  if (s.test) out.push(center('TEST-TSE - NICHT ZERTIFIZIERT'));
+  out.push({ kind: 'text', text: row('TSE-Transaktion', String(s.transactionNumber)) });
+  out.push({ kind: 'text', text: row('Signaturzaehler', String(s.signatureCounter)) });
+  out.push({ kind: 'text', text: row('Start', s.start.replace('T', ' ').replace(/\.\d+Z$/, '')) });
+  out.push({ kind: 'text', text: row('Ende', s.finish.replace('T', ' ').replace(/\.\d+Z$/, '')) });
+  out.push({ kind: 'text', text: row('Kasse', s.clientId) });
+  out.push({ kind: 'text', text: 'TSE-Seriennummer:' });
+  for (let i = 0; i < s.serial.length; i += WIDTH) out.push({ kind: 'text', text: s.serial.slice(i, i + WIDTH) });
+  if (qrB64) {
+    out.push({ kind: 'image', imageB64: qrB64 });
+    out.push(center('TSE-Signatur'));
+  } else {
+    out.push({ kind: 'text', text: 'Signatur:' });
+    for (let i = 0; i < s.signature.length; i += WIDTH) out.push({ kind: 'text', text: s.signature.slice(i, i + WIDTH) });
+  }
+  return out;
+}
+
+/** The DSFinV-K QR for a signed TSE outcome; none for a failure or on an older shell. */
+async function tseQr(tse: Transaction['tse']): Promise<string | undefined> {
+  if (!tse || !('signed' in tse)) return undefined;
+  const payload = (shared as Record<string, unknown>).tseQrPayload as typeof shared.tseQrPayload | undefined;
+  // Wider than the receipt-link code: it carries the whole signature and public key.
+  return payload ? qrPng(payload(tse.signed), 360) : undefined;
+}
+
 /** VAT per rate for a sale (see vatBreakdown in @zollify/shared); none on an older shell or an untaxed sale. */
 export function receiptVat(tx: Transaction): shared.VatRow[] {
   const fn = (shared as Record<string, unknown>).vatBreakdown as typeof shared.vatBreakdown | undefined;
@@ -168,7 +210,16 @@ export async function loadReceiptConfig(): Promise<{
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string },
+  config: {
+    artist: ArtistInfo;
+    logoB64: string;
+    footerText: string;
+    /** Online-receipt QR, full paper width. */
+    qrB64?: string;
+    /** KassenSichV: the TSE signature as a QR (DSFinV-K V0), and the cancellation's when reverted. */
+    tseQrB64?: string;
+    revertTseQrB64?: string;
+  },
   eventCountry?: string,
 ): ReceiptLine[] {
   const { artist, logoB64, footerText } = config;
@@ -252,6 +303,10 @@ export function buildReceiptLines(
     if (leg.txRef) lines.push({ kind: 'text', text: `  Txn ${leg.txRef}` });
   }
 
+  // ── TSE (KassenSichV) ──
+  if (tx.tse) lines.push(...tseLines(tx.tse, config.tseQrB64));
+  if (tx.revertTse) lines.push(...tseLines(tx.revertTse, config.revertTseQrB64, 'STORNO - cancelled'));
+
   // ── Footer ──
   lines.push({ kind: 'space' });
   if (footerText) {
@@ -275,16 +330,18 @@ export function buildReceiptLines(
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
-  const [qrB64, logoB64, shared] = await Promise.all([
+  const [qrB64, logoB64, branding, tseQrB64, revertTseQrB64] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
+    tseQr(tx.tse),
+    tseQr(tx.revertTse),
   ]);
   return buildReceiptLines(
     tx,
     eventName,
-    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64 },
+    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || branding?.footer || '', qrB64, tseQrB64, revertTseQrB64 },
     eventCountry,
   );
 }

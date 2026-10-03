@@ -1,0 +1,428 @@
+import type Database from 'better-sqlite3';
+import type { FastifyRequest } from 'fastify';
+import { isReceiptToken, type SalesEvent, type Transaction } from '@zollify/shared';
+import {
+  issueChallenge,
+  parseProfile,
+  reduceTransactions,
+  verifyChallenge,
+  type PublicModuleContext,
+  type ServerModule,
+} from '@zollify/server-core';
+
+/**
+ * Online receipts - the server half of the POS module's receipt QR code.
+ *
+ * A customer scans `/p/pos/r#<token>`. The token never reaches this server in
+ * a URL: it lives in the fragment, and the page's script sends it in a POST
+ * body, so it stays out of access logs, proxies and Referer headers. The
+ * shell page and its script are static and hold no data at all.
+ *
+ * Layers against scraping, cheapest first for an honest visitor:
+ *   - the token is 128 random bits, unrelated to the sale id - nothing to
+ *     enumerate;
+ *   - every lookup costs a fresh proof-of-work, purpose-bound so it cannot be
+ *     spent anywhere else (see captcha.ts) - a fraction of a second on a phone,
+ *     real money across millions of guesses;
+ *   - per-IP rate limits on both the challenge and the lookup, and an IP that
+ *     keeps asking for receipts that do not exist is shut out for an hour;
+ *   - not-yet-synced, unknown, expired and switched-off all answer the same
+ *     404, so the endpoint is no oracle;
+ *   - responses are no-store, noindex and same-origin only.
+ *
+ * What leaves is built field by field in `publicReceipt` - never a spread of
+ * the stored sale. Device ids, card auth codes, processor references, cost and
+ * base-currency bookkeeping all stay here.
+ */
+
+const MODULE_ID = 'pos';
+const DIFFICULTY = Math.min(22, Math.max(10, Number(process.env.RECEIPT_CAPTCHA_BITS || 15)));
+const TTL_DAYS = Math.max(1, Number(process.env.RECEIPT_TTL_DAYS || 400));
+const MISS_WINDOW_MS = 15 * 60_000;
+const MISS_LIMIT = 10;
+const BLOCK_MS = 60 * 60_000;
+
+function migrate(db: Database.Database): void {
+  // Partial expression index: the lookup below must repeat this exact
+  // expression and WHERE clause for SQLite to use it.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_ops_receipt_token
+      ON ops (json_extract(payload, '$.receiptToken'))
+      WHERE type = 'tx.create';
+  `);
+}
+
+// ── Lookup ──────────────────────────────────────────────────────────────────
+
+interface Found {
+  accountId: string;
+  tx: Transaction;
+}
+
+function findSale(db: Database.Database, token: string): Found | null {
+  const row = db
+    .prepare(
+      `SELECT accountId, opId, payload FROM ops
+       WHERE type = 'tx.create' AND json_extract(payload, '$.receiptToken') = ?
+       LIMIT 1`,
+    )
+    .get(token) as { accountId: string; opId: string; payload: string } | undefined;
+  if (!row) return null;
+  const created = JSON.parse(row.payload) as Transaction;
+  // ZollTool wrote reverts as `txId`, Zollify writes `id` - check both.
+  const reverts = db
+    .prepare(
+      `SELECT opId, type, payload FROM ops
+       WHERE accountId = ? AND type = 'tx.revert'
+         AND (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.txId') = ?)`,
+    )
+    .all(row.accountId, created.id, created.id) as { opId: string; type: string; payload: string }[];
+  const [tx] = reduceTransactions([
+    { opId: row.opId, type: 'tx.create', payload: created },
+    ...reverts.map((r) => ({ opId: r.opId, type: r.type, payload: JSON.parse(r.payload) })),
+  ]);
+  return tx ? { accountId: row.accountId, tx } : null;
+}
+
+function eventName(db: Database.Database, accountId: string, eventId: string): string {
+  if (!eventId) return '';
+  const row = db
+    .prepare(
+      `SELECT payload FROM ops WHERE accountId = ? AND type = 'event.upsert' AND json_extract(payload, '$.id') = ?
+       ORDER BY seq DESC LIMIT 1`,
+    )
+    .get(accountId, eventId) as { payload: string } | undefined;
+  if (!row) return '';
+  const ev = JSON.parse(row.payload) as SalesEvent;
+  return ev.deletedAt ? '' : String(ev.name ?? '');
+}
+
+function seller(db: Database.Database, accountId: string): PublicReceipt['seller'] {
+  const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
+    | { name: string; profile: string | null }
+    | undefined;
+  const artist = parseProfile(row?.profile).artist;
+  return {
+    // Phone, email and EORI stay off: a receipt needs who sold it and their
+    // tax registration, not a way to reach them at home.
+    name: artist.companyName.trim() || artist.fullName.trim() || row?.name || '',
+    address: [artist.street, artist.postCodeCity, artist.countryOfOrigin].map((s) => s.trim()).filter(Boolean),
+    vatId: artist.vatId.trim() || undefined,
+  };
+}
+
+// ── What the customer sees ──────────────────────────────────────────────────
+
+export interface PublicReceipt {
+  seller: { name: string; address: string[]; vatId?: string };
+  event: string;
+  at: number;
+  number: string;
+  currency: string;
+  lines: { title: string; variant?: string; qty: number; amount: number }[];
+  discounts: { name: string; amount: number }[];
+  total: number;
+  payments: { label: string; amount: number }[];
+  status: 'paid' | 'voided';
+}
+
+const toMinor = (n: number): number => Math.round(n * 100);
+
+/**
+ * Line amounts in the currency the customer paid.
+ *
+ * A converted sale records its lines in the booth's book currency and only
+ * the total in the charged one; scaling the lines by total/baseTotal and
+ * putting the rounding remainder on the largest line makes them add up to
+ * exactly what was paid.
+ */
+function chargedLines(tx: Transaction): PublicReceipt['lines'] {
+  const converted = tx.baseCurrency && tx.baseCurrency !== tx.currency && (tx.baseTotal ?? 0) > 0;
+  const scale = converted ? tx.total / tx.baseTotal! : 1;
+  const minor = tx.items.map((i) => toMinor(i.lineTotal * scale));
+  if (converted && minor.length) {
+    const drift = toMinor(tx.total) - minor.reduce((a, b) => a + b, 0);
+    const biggest = minor.indexOf(Math.max(...minor));
+    minor[biggest] = minor[biggest]! + drift;
+  }
+  return tx.items.map((i, n) => ({
+    title: String(i.title ?? ''),
+    variant: i.variantLabel ? String(i.variantLabel) : undefined,
+    qty: Number(i.qty) || 0,
+    amount: minor[n]! / 100,
+  }));
+}
+
+const CARD_METHODS = new Set(['card', 'split', 'cash']);
+
+function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string): string {
+  if (kind === 'cash') return 'Cash';
+  // A booth's own method name (TWINT, PayPal QR…) is what the customer used.
+  if (!CARD_METHODS.has(tx.method)) return String(tx.method).slice(0, 40);
+  return cardBrand ? `Card · ${String(cardBrand).slice(0, 30)}` : 'Card';
+}
+
+/** The whitelist. Anything not copied here does not leave the server. */
+export function publicReceipt(tx: Transaction, extra: { seller: PublicReceipt['seller']; event: string }): PublicReceipt {
+  return {
+    seller: extra.seller,
+    event: extra.event,
+    at: tx.timestamp,
+    number: tx.id.slice(-8).toUpperCase(),
+    currency: tx.currency,
+    lines: chargedLines(tx),
+    // Discounts are normally spread into the line amounts; older sales may
+    // still carry them separately, in the charged currency.
+    discounts: (tx.discounts ?? []).map((d) => ({ name: String(d.name ?? ''), amount: Number(d.amount) || 0 })),
+    total: tx.total,
+    payments: (tx.payments ?? []).map((p) => ({ label: paymentLabel(tx, p.kind, p.cardBrand), amount: Number(p.amount) || 0 })),
+    status: tx.revertedAt ? 'voided' : 'paid',
+  };
+}
+
+// ── Abuse control ───────────────────────────────────────────────────────────
+
+const misses = new Map<string, { count: number; since: number; blockedUntil: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, m] of misses) if (m.blockedUntil < now && now - m.since > MISS_WINDOW_MS) misses.delete(ip);
+}, 10 * 60_000).unref?.();
+
+function blocked(ip: string): boolean {
+  return (misses.get(ip)?.blockedUntil ?? 0) > Date.now();
+}
+
+function recordMiss(ip: string): void {
+  const now = Date.now();
+  const m = misses.get(ip);
+  if (!m || now - m.since > MISS_WINDOW_MS) {
+    misses.set(ip, { count: 1, since: now, blockedUntil: 0 });
+    return;
+  }
+  m.count++;
+  if (m.count >= MISS_LIMIT) m.blockedUntil = now + BLOCK_MS;
+}
+
+/** Test hook: forget every IP's history. */
+export function resetReceiptAbuseState(): void {
+  misses.clear();
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
+
+const PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="referrer" content="no-referrer">
+<title>Your receipt</title>
+<style>
+:root { --bg: #f1f4f6; --card: #fff; --ink: #1a2230; --muted: #5a6472; --line: #d6dde4; --accent: #0e7c66; --bad: #c6512f; color-scheme: light dark; }
+@media (prefers-color-scheme: dark) { :root { --bg: #11161d; --card: #1a2129; --ink: #e8edf2; --muted: #9aa5b1; --line: #2c3540; --accent: #3fbf9f; --bad: #e57a5a; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 26rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.25rem; }
+h1 { font-size: 1.25rem; margin: 0 0 .15rem; text-align: center; }
+.c { text-align: center; }
+.muted { color: var(--muted); font-size: .85rem; margin: 0; }
+hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
+.row { display: flex; justify-content: space-between; gap: 1rem; margin: .3rem 0; }
+.row span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.total { font-size: 1.3rem; font-weight: 700; }
+.void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
+.status { text-align: center; padding: 2rem 1rem; }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
+.actions { display: flex; justify-content: center; margin-top: 1rem; }
+@media print { body { background: #fff; } .card { border: 0; } .actions { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div id="status" class="card status" role="status"><p>Loading your receipt…</p></div>
+  <article id="receipt" class="card" hidden></article>
+  <div class="actions"><button id="print" type="button" hidden>Print or save as PDF</button></div>
+</main>
+<noscript><p class="c">Please enable JavaScript to view your receipt.</p></noscript>
+<script src="/p/pos/r/receipt.js"></script>
+</body>
+</html>
+`;
+
+/**
+ * The page's script, plain ES5-ish so any phone browser runs it. SHA-256 is
+ * synchronous on purpose: WebCrypto's digest is async per call and far too
+ * slow for a proof-of-work loop. Mirrors apps/web/src/lib/captcha.ts.
+ */
+const SCRIPT = String.raw`(function () {
+  'use strict';
+  var K = new Int32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+  function rr(x, n) { return (x >>> n) | (x << (32 - n)); }
+  function sha256(msg) {
+    var H = new Int32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+    var l = msg.length, bl = (((l + 8) >> 6) + 1) << 6, bytes = new Uint8Array(bl), w = new Int32Array(64), i, o;
+    bytes.set(msg); bytes[l] = 0x80;
+    var bitLen = l * 8;
+    bytes[bl - 4] = (bitLen >>> 24) & 255; bytes[bl - 3] = (bitLen >>> 16) & 255; bytes[bl - 2] = (bitLen >>> 8) & 255; bytes[bl - 1] = bitLen & 255;
+    for (o = 0; o < bl; o += 64) {
+      for (i = 0; i < 16; i++) w[i] = (bytes[o + i * 4] << 24) | (bytes[o + i * 4 + 1] << 16) | (bytes[o + i * 4 + 2] << 8) | bytes[o + i * 4 + 3];
+      for (i = 16; i < 64; i++) {
+        var s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+        var s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+      }
+      var a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+      for (i = 0; i < 64; i++) {
+        var t1 = (h + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) | 0;
+        var t2 = ((rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+      H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+    }
+    return H;
+  }
+  function zeroBits(H) {
+    var bits = 0;
+    for (var i = 0; i < 8; i++) {
+      if (H[i] === 0) { bits += 32; continue; }
+      return bits + Math.clz32(H[i]);
+    }
+    return bits;
+  }
+  function solve(nonce, difficulty) {
+    var enc = new TextEncoder();
+    for (var i = 0; ; i++) if (zeroBits(sha256(enc.encode(nonce + ':' + i))) >= difficulty) return String(i);
+  }
+
+  var statusEl = document.getElementById('status');
+  var receiptEl = document.getElementById('receipt');
+  var printBtn = document.getElementById('print');
+  function say(text) { statusEl.textContent = ''; var p = document.createElement('p'); p.textContent = text; statusEl.appendChild(p); }
+  function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function row(left, right, cls) { var r = el('div', 'row' + (cls ? ' ' + cls : '')); r.appendChild(el('span', '', left)); r.appendChild(el('span', '', right)); return r; }
+
+  var token = (location.hash || '').slice(1);
+  // Drop the token from the address bar and history once read.
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  if (!/^[A-Za-z0-9_-]{22}$/.test(token)) { say('This receipt link is incomplete. Please scan the code again.'); return; }
+
+  function money(n, cur) {
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(n); }
+    catch (e) { return cur + ' ' + n.toFixed(2); }
+  }
+
+  function render(r) {
+    receiptEl.textContent = '';
+    if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
+    if (r.seller.name) receiptEl.appendChild(el('h1', '', r.seller.name));
+    r.seller.address.forEach(function (line) { receiptEl.appendChild(el('p', 'muted c', line)); });
+    if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', 'VAT ' + r.seller.vatId));
+    receiptEl.appendChild(el('hr'));
+    if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
+    receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
+    receiptEl.appendChild(el('hr'));
+    r.lines.forEach(function (l) {
+      receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency)));
+    });
+    r.discounts.forEach(function (d) { receiptEl.appendChild(row(d.name, '−' + money(d.amount, r.currency))); });
+    receiptEl.appendChild(el('hr'));
+    receiptEl.appendChild(row('Total', money(r.total, r.currency), 'total'));
+    r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
+    receiptEl.appendChild(el('hr'));
+    receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    statusEl.hidden = true;
+    receiptEl.hidden = false;
+    printBtn.hidden = false;
+  }
+  printBtn.onclick = function () { window.print(); };
+
+  function fail(res) {
+    if (res.status === 429) say('Too many attempts from this network. Please try again later.');
+    else if (res.status === 404) say("We couldn't find this receipt. If you just paid, the booth may still be offline - try again in a little while.");
+    else say('Something went wrong. Please try again in a moment.');
+  }
+
+  fetch('/p/pos/r/challenge', { cache: 'no-store', credentials: 'omit' })
+    .then(function (res) { if (!res.ok) { fail(res); throw null; } return res.json(); })
+    .then(function (ch) {
+      // Let the "Loading…" paint before the CPU-bound solve.
+      return new Promise(function (ok) { setTimeout(function () { ok({ ch: ch, solution: solve(ch.nonce, ch.difficulty) }); }, 30); });
+    })
+    .then(function (s) {
+      return fetch('/p/pos/r/lookup', {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: token, captchaToken: s.ch.token, captchaSolution: s.solution }),
+      });
+    })
+    .then(function (res) { if (!res.ok) { fail(res); throw null; } return res.json(); })
+    .then(render)
+    .catch(function (err) { if (err !== null) say('Could not reach the server. Check your connection and try again.'); });
+})();
+`;
+
+// ── The module ──────────────────────────────────────────────────────────────
+
+function ipOf(req: FastifyRequest): string {
+  return req.ip;
+}
+
+export const receiptsServerModule: ServerModule = {
+  id: MODULE_ID,
+  migrate,
+
+  // Nothing for signed-in users yet: the till already has the sale locally.
+  routes: () => async () => {},
+
+  publicRoutes: (ctx: PublicModuleContext) => async (app) => {
+    // Undo the /p/ prefix's cross-origin allowances: a receipt is never meant
+    // to be embedded or fetched from anywhere but its own page.
+    app.addHook('onSend', async (_req, reply) => {
+      reply.removeHeader('access-control-allow-origin');
+      reply.header('cross-origin-resource-policy', 'same-origin');
+      reply.header('cache-control', 'no-store');
+      reply.header('x-robots-tag', 'noindex, nofollow, noarchive');
+      reply.header('referrer-policy', 'no-referrer');
+    });
+
+    app.get('/r', async (_req, reply) => reply.type('text/html; charset=utf-8').send(PAGE));
+    app.get('/r/', async (_req, reply) => reply.type('text/html; charset=utf-8').send(PAGE));
+    app.get('/r/receipt.js', async (_req, reply) => reply.type('text/javascript; charset=utf-8').send(SCRIPT));
+
+    app.get('/r/challenge', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+      if (blocked(ipOf(req))) return reply.code(429).send({ error: 'rate_limited' });
+      return issueChallenge('receipt', DIFFICULTY);
+    });
+
+    app.post<{ Body: { token?: unknown; captchaToken?: unknown; captchaSolution?: unknown } }>(
+      '/r/lookup',
+      { config: { rateLimit: { max: 20, timeWindow: '1 minute' } }, bodyLimit: 2048 },
+      async (req, reply) => {
+        const ip = ipOf(req);
+        if (blocked(ip)) return reply.code(429).send({ error: 'rate_limited' });
+        const body = req.body ?? {};
+        const pow = verifyChallenge(String(body.captchaToken ?? ''), String(body.captchaSolution ?? ''), 'receipt');
+        if (!pow.ok) return reply.code(403).send({ error: 'challenge_failed' });
+
+        const notFound = () => {
+          recordMiss(ip);
+          return reply.code(404).send({ error: 'not_found' });
+        };
+        if (!isReceiptToken(body.token)) return notFound();
+        const found = findSale(ctx.db, body.token);
+        if (!found || !ctx.isEnabled(found.accountId)) return notFound();
+        if (Date.now() - found.tx.timestamp > TTL_DAYS * 86_400_000) return notFound();
+
+        return publicReceipt(found.tx, {
+          seller: seller(ctx.db, found.accountId),
+          event: eventName(ctx.db, found.accountId, found.tx.eventId),
+        });
+      },
+    );
+  },
+};

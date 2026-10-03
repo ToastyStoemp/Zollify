@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
-import { currentAccount, displayCarts, realtimeConnected } from '@zollify/platform';
-import { Icon } from '@zollify/ui';
+import { afterSalePrefs, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected } from '@zollify/platform';
+import { AfterSalePanel, Icon } from '@zollify/ui';
 
 /**
  * Customer display - ZollTool's. This device mirrors another register's cart
@@ -11,6 +11,8 @@ import { Icon } from '@zollify/ui';
  */
 
 const THANKS_DISPLAY_MS = 8_000;
+/** Long enough to get a phone out and scan. */
+const RECEIPT_DISPLAY_MS = 30_000;
 const IDLE_SCREEN_MS = 60_000;
 
 const account = currentAccount;
@@ -26,15 +28,17 @@ const current = computed(() => (selectedId.value && displayCarts[selectedId.valu
 /** No update for a while - the register is gone or offline. */
 const stale = computed(() => !!current.value && now.value - current.value.receivedAt > 90_000);
 
+// This display's own choice (Settings → This device), not the register's.
+const receiptUrl = computed(() => (afterSalePrefs.receiptQr ? current.value?.paid?.receiptUrl : undefined));
 // "Thank you!" clears itself even if the register never starts the next sale.
-const thanksRaw = computed(() => !!current.value?.paid && !current.value.lines.length);
+const thanksRaw = computed(() => !!current.value?.paid && !current.value.lines.length && (afterSalePrefs.thankYou || !!receiptUrl.value));
 const thanksExpired = ref(false);
 let thanksTimer: ReturnType<typeof setTimeout> | undefined;
 watch(thanksRaw, (on) => {
   clearTimeout(thanksTimer);
   if (on) {
     thanksExpired.value = false;
-    thanksTimer = setTimeout(() => (thanksExpired.value = true), THANKS_DISPLAY_MS);
+    thanksTimer = setTimeout(() => (thanksExpired.value = true), receiptUrl.value ? RECEIPT_DISPLAY_MS : THANKS_DISPLAY_MS);
   }
 });
 const screen = computed<'idle' | 'thanks' | 'cart'>(() => (thanksRaw.value && !thanksExpired.value ? 'thanks' : current.value?.lines.length ? 'cart' : 'idle'));
@@ -66,6 +70,7 @@ watch(
 );
 
 onMounted(() => {
+  void loadAfterSalePrefs().catch(() => {});
   clock = setInterval(() => (now.value = Date.now()), 5000);
 });
 onUnmounted(() => {
@@ -95,8 +100,7 @@ const amount = (n: number): string => n.toFixed(2);
     </div>
 
     <div v-else-if="screen === 'thanks' && current" class="thanks">
-      <p class="big">Thank you!</p>
-      <p class="paid">{{ fmtPrice(current.paid!.total, current.currency) }}</p>
+      <AfterSalePanel :thank-you="afterSalePrefs.thankYou" :total="fmtPrice(current.paid!.total, current.currency)" :receipt-url="receiptUrl" :qr-size="260" />
     </div>
 
     <template v-else-if="current">
@@ -128,8 +132,6 @@ const amount = (n: number): string => n.toFixed(2);
 .pulse { animation: pulse 1.6s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
-.big { margin: 0; font-size: 2.5rem; font-weight: 800; color: var(--zfy-accent); }
-.paid { margin: 0; font-size: 4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .event { margin: 0; text-align: center; font-size: 1.1rem; color: var(--zfy-muted); }
 .stale { margin-left: .6rem; font-size: .7rem; padding: .15rem .5rem; border-radius: 4px; background: var(--zfy-signal-soft); color: var(--zfy-warning-ink); }
 .lines { flex: 1; overflow-y: auto; width: 100%; max-width: 44rem; margin: 1.5rem auto 0; display: flex; flex-direction: column; gap: .6rem; }

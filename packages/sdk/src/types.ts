@@ -128,6 +128,8 @@ export interface SaleEvent {
   baseTotal?: number;
   exchangeRate?: number;
   lines: SaleLine[];
+  /** Secret for the customer's online receipt; see @zollify/shared receipt-link. */
+  receiptToken?: string;
   payment: {
     provider: string;
     approved: boolean;
@@ -398,8 +400,17 @@ export interface Sdk {
   account(): AccountSnapshot | null;
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
 
-  /** Customer display: publish what this register's cart looks like right now. */
-  display: { publish(cart: DisplayCart): void };
+  /**
+   * Customer display: publish what this register's cart looks like right now.
+   * `afterSale` is what this device's owner chose to show once a sale is paid
+   * (device-local, set under Settings → This device); `receiptUrl` turns a
+   * sale's receipt token into the link its QR code carries.
+   */
+  display: {
+    publish(cart: DisplayCart): void;
+    afterSale(): Promise<{ thankYou: boolean; receiptQr: boolean }>;
+    receiptUrl(token: string): string;
+  };
 
   /**
    * Point-to-point messages between this account's devices over the live

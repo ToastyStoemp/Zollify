@@ -3,6 +3,7 @@ import type { SaleEvent, SaleLine } from '@zollify/sdk';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
+import { mintReceiptToken } from './lib/after-sale';
 import {
   computeCartTotals,
   distributeTotal,
@@ -298,6 +299,9 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }) => line),
+      // Minted for every sale, whether or not a QR is shown: a receipt can
+      // still be handed over later from the sale's receipt screen.
+      receiptToken: mintReceiptToken(),
       payment: {
         provider: pay.method === 'card' ? providerName : pay.method,
         approved: true,

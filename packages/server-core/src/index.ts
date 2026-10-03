@@ -14,6 +14,7 @@ export {
   registerAuthRoutes,
   seedOwner,
   parseAllowedEvents,
+  parseProfile,
   type JwtClaims,
 } from './auth';
 export {
@@ -43,6 +44,7 @@ export {
 export { registerModuleRoutes } from './routes/modules';
 export { registerRefreshCookie, REFRESH_COOKIE, type RefreshCookieOptions } from './refresh-cookie';
 export { loadDotEnv } from './env';
+export { issueChallenge, verifyChallenge, type ChallengePurpose } from './captcha';
 export { makeSecretBox, type SecretBox } from './secretbox';
 export { registerStatic, type StaticOptions } from './static';
 export { reduceEvents, reduceProducts, reduceDiscounts, reduceTransactions, reduceMerges, type ReducibleOp } from './reduce';

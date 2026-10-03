@@ -251,4 +251,10 @@ export interface Transaction {
   /** Op id of the revert that cancelled this transaction, if any. */
   revertedBy?: string;
   revertedAt?: number;
+  /**
+   * Secret for the customer's online receipt (see receipt-link.ts). Random,
+   * unrelated to the id, and the only thing the public receipt page accepts -
+   * knowing a sale's id gets you nothing.
+   */
+  receiptToken?: string;
 }

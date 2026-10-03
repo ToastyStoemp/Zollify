@@ -74,6 +74,10 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 
 Steps 1-3 are needed before selling at a German convention. Steps 4-5 are needed for a tax inspection (Kassennachschau / Außenprüfung).
 
+## Switching it on
+
+Settings → Modules → Built in → **Germany (KassenSichV)**, per account. It shows the TSE settings (This device), closing the day (Cash up) and the tax export panel; switched off they are hidden. The signing itself is core and never follows the switch: a device that has a TSE (or signs through a main TSE device) keeps signing and keeps its screens. Creating or editing an event in Germany warns when its sales would go unsigned - the switch off, or no device with a TSE - and the event card says so too.
+
 ## How the export maps Zollify
 
 - **Closing** (Z_NR) = one till's receipts for one day at one event in one currency. Z_KASSE_ID and KASSE_SERIENNR are the till serial number (the TSE client id).

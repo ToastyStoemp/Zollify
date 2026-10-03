@@ -26,6 +26,7 @@ import {
   tseMode,
   setMainTseDevice,
   removeMainTseDevice,
+  kassensichvVisible,
   assignTseHost,
   assignedTseHost,
   shellConfirm,
@@ -275,6 +276,7 @@ function when(ts: number): string {
       </label>
     </div>
 
+    <template v-if="kassensichvVisible()">
     <h3>TSE (Germany)</h3>
     <p class="hint">
       German law (KassenSichV) wants every sale on an electronic till signed by a certified security device (TSE).
@@ -363,6 +365,7 @@ function when(ts: number): string {
         </dl>
       </template>
     </div>
+    </template>
 
     <h3>Appearance</h3>
     <div class="themes" role="radiogroup" aria-label="Theme">

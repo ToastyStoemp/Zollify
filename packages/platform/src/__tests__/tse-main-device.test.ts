@@ -189,3 +189,24 @@ describe('a main TSE device', () => {
     expect(await ask({ from: 'phone', op: 'info' })).toMatchObject({ ok: false, error: expect.stringContaining('no longer a main TSE device') });
   });
 });
+
+describe('the Germany (KassenSichV) switch', () => {
+  it('warns about German events while off, and never stops a TSE that is set up', async () => {
+    expect(tse.germanyTseGap()).toBe('off');
+    expect(tse.kassensichvVisible()).toBe(false);
+
+    await tse.setKassensichv(true);
+    expect(tse.kassensichvVisible()).toBe(true);
+    expect(tse.germanyTseGap()).toBe('no-tse');
+    // Synced like any account setting.
+    const ops = await openCoreDb(account.accountId).ops.toArray();
+    expect(ops.some((o) => o.type === 'setting.upsert' && (o.payload as { key: string }).key === 'core.kassensichv')).toBe(true);
+
+    // A device with a TSE keeps signing - and its screens stay - with the switch off.
+    await tse.setTseSettings({ driver: 'test', clientId: 'MAIN-1' });
+    await tse.setKassensichv(false);
+    expect(tse.germanyTseGap()).toBeNull();
+    expect(tse.kassensichvVisible()).toBe(true);
+    expect((await txs.recordSale(sale())).tse).toHaveProperty('signed');
+  });
+});

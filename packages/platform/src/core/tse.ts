@@ -98,7 +98,16 @@ const DEFAULTS: TseSettings = { driver: 'none', clientId: '', scope: 'germany' }
 /** Synced, account-wide: the device ids of the main TSE devices, in the order they are tried. */
 export const TSE_MAIN_KEY = 'core.tseMainDevices';
 
-export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null; mainDevices: string[]; deviceId: string; outages: TseOutage[] }>({
+/**
+ * Synced, account-wide: the "Germany (KassenSichV)" switch. It shows or
+ * hides the TSE settings, closing the day and the tax export - it never
+ * stops a TSE that is set up from signing: an unsigned sale must not be one
+ * switch away.
+ */
+export const KASSENSICHV_KEY = 'core.kassensichv';
+
+export const tseState = reactive<{ settings: TseSettings; info: TseInfo | null; error: string | null; mainDevices: string[]; deviceId: string; outages: TseOutage[]; feature: boolean }>({
+  feature: false,
   settings: { ...DEFAULTS },
   info: null,
   error: null,
@@ -122,6 +131,7 @@ export async function loadTseSettings(): Promise<TseSettings> {
   tseState.settings = { ...DEFAULTS, ...((row?.value as Partial<TseSettings>) ?? {}) };
   tseState.deviceId = await deviceId();
   applyMainTseDevices(await getSyncedSetting<string[]>(TSE_MAIN_KEY));
+  applyKassensichv(await getSyncedSetting<boolean>(KASSENSICHV_KEY));
   tseState.outages = (await getSyncedSetting<TseOutage[]>(outageKey(await tillId()))) ?? [];
   return tseState.settings;
 }
@@ -146,6 +156,36 @@ export async function assignTseHost(host: string): Promise<void> {
   if (assignedTseHost()) throw new Error('This till already has its main TSE device. A till stays with one TSE - use a new till serial number to move.');
   if (!tseState.mainDevices.includes(host) || host === tseState.deviceId) throw new Error('That device is not one of the main TSE devices.');
   await setTseSettings({ assigned: { till: await tillId(), host } });
+}
+
+/** Takes in the KassenSichV switch - at load, and whenever sync brings a change. */
+export function applyKassensichv(on: unknown): void {
+  tseState.feature = on === true;
+}
+
+/** Switches the account's Germany (KassenSichV) features on or off. */
+export async function setKassensichv(on: boolean): Promise<void> {
+  applyKassensichv(on);
+  await setSyncedSetting(KASSENSICHV_KEY, on);
+}
+
+/**
+ * Whether the Germany screens show here: when switched on - or, switched
+ * off, while this device still signs (a TSE of its own, or a main TSE
+ * device to sign through), so a working TSE never disappears from view.
+ */
+export function kassensichvVisible(): boolean {
+  return tseState.feature || tseMode() !== 'none';
+}
+
+/**
+ * Whether sales at an event in Germany would go unsigned on this account:
+ * the switch is off, or no device has a TSE. For the warning on such events.
+ */
+export function germanyTseGap(): 'off' | 'no-tse' | null {
+  if (!tseState.feature && tseMode() === 'none') return 'off';
+  if (tseMode() === 'none' && !tseState.mainDevices.length) return 'no-tse';
+  return null;
 }
 
 /** Takes in the list of main TSE devices - at load, and whenever sync brings a new one. */
@@ -617,4 +657,5 @@ export function resetTseCache(): void {
   tseState.deviceId = '';
   waiting.clear();
   tseState.outages = [];
+  tseState.feature = false;
 }

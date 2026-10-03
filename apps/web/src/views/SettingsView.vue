@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { currentAccount } from '@zollify/platform';
+import { currentAccount, kassensichvVisible } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { Icon } from '@zollify/ui';
@@ -11,6 +11,8 @@ interface Panel {
   label: string;
   group: 'Core' | 'Modules';
   minRole?: Role;
+  /** Shown only while this holds - a feature switched off on the account. */
+  when?: () => boolean;
   component: () => Promise<Component | { default: Component }>;
 }
 
@@ -48,6 +50,7 @@ const corePanels: Panel[] = [
     label: 'Tax export (Germany)',
     group: 'Core',
     minRole: 'admin',
+    when: kassensichvVisible,
     component: () => import('./TaxExportSettings.vue'),
   },
   {
@@ -98,7 +101,7 @@ const panels = computed<Panel[]>(() => {
   const role = account.value?.role;
   if (!role) return [];
 
-  const core = corePanels.filter((p) => !p.minRole || roleAtLeast(role, p.minRole));
+  const core = corePanels.filter((p) => (!p.minRole || roleAtLeast(role, p.minRole)) && (!p.when || p.when()));
   const fromModules: Panel[] = contributions.settingsFor(role).map((p) => ({
     id: p.id,
     label: p.label,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { authFetch } from '@zollify/platform';
+import { authFetch, kassensichvVisible, setKassensichv, shellConfirm, tseState } from '@zollify/platform';
 import { loadEnabledModules, loadOutcomes, loader, unloadModule } from '../boot';
 
 interface AvailableModule {
@@ -14,6 +14,32 @@ interface AvailableModule {
 }
 
 const router = useRouter();
+
+/**
+ * Built into core rather than a module: signing happens where sales are
+ * recorded, so it cannot be unloaded mid-event. The switch shows or hides
+ * the Germany screens; a TSE that is set up keeps signing either way.
+ */
+const switchingGermany = ref(false);
+async function toggleGermany(): Promise<void> {
+  const on = !tseState.feature;
+  if (!on) {
+    const ok = await shellConfirm(
+      "Hides the TSE settings, closing the day and the tax export. Devices that have a TSE keep signing their sales - that can't be switched off here.",
+      'Switch off Germany (KassenSichV)?',
+    );
+    if (!ok) return;
+  }
+  switchingGermany.value = true;
+  error.value = null;
+  try {
+    await setKassensichv(on);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not change that.';
+  } finally {
+    switchingGermany.value = false;
+  }
+}
 const modules = ref<AvailableModule[]>([]);
 const busy = ref<string | null>(null);
 const error = ref<string | null>(null);
@@ -100,6 +126,24 @@ async function toggle(mod: AvailableModule): Promise<void> {
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
+    <h3>Built in</h3>
+    <ul class="list">
+      <li>
+        <div class="meta">
+          <strong>Germany (KassenSichV)</strong>
+          <span class="ver">core</span>
+          <p class="desc">
+            Signing sales with a TSE, closing the day and the DSFinV-K tax export - what an electronic till needs at events in Germany.
+          </p>
+          <p v-if="!tseState.feature && kassensichvVisible()" class="requires">Switched off, but a device here has a TSE - it keeps signing.</p>
+        </div>
+        <button type="button" :class="tseState.feature ? 'quiet' : 'primary'" :disabled="switchingGermany" @click="toggleGermany">
+          {{ switchingGermany ? 'Working…' : tseState.feature ? 'Switch off' : 'Switch on' }}
+        </button>
+      </li>
+    </ul>
+
+    <h3>Modules</h3>
     <ul class="list">
       <li v-for="mod in modules" :key="mod.moduleId">
         <div class="meta">
@@ -123,6 +167,7 @@ async function toggle(mod: AvailableModule): Promise<void> {
 .modules { display: flex; flex-direction: column; gap: 1rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h2 { margin: 0; font-size: 1.05rem; }
+h3 { margin: .25rem 0 0; font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted, #5a6472); }
 .lede, .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }

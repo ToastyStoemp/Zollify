@@ -5,6 +5,7 @@ import {
   activeEventId,
   allClosings,
   closeTillNow,
+  kassensichvVisible,
   currentAccount,
   openReceipts,
   tillId,
@@ -183,7 +184,7 @@ function isCoin(value: number): boolean {
         </li>
       </ul>
 
-      <div class="close-day">
+      <div v-if="kassensichvVisible()" class="close-day">
         <h2>Close the day</h2>
         <p class="sub">
           This device ({{ till }}) has taken {{ open }} receipt{{ open === 1 ? '' : 's' }} since its last closing.

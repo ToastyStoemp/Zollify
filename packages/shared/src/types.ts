@@ -287,6 +287,37 @@ export interface Transaction {
 }
 
 /**
+ * A till's closing (Kassenabschluss, DSFinV-K "Z"): the receipts it took
+ * since its previous closing, closed once and never changed. Every receipt
+ * belongs to exactly one closing; the tax export is organised by them.
+ *
+ * Made by the till itself - when the day, the event or the currency changes
+ * before its next receipt, at start-up on a new day, or by hand - so its
+ * numbers never collide with another device's.
+ */
+export interface CashClosing {
+  id: string;
+  till: string;
+  /** Z_NR: counts up per till from 1, never reset. */
+  number: number;
+  createdAt: number;
+  /** The local day its receipts were taken on, YYYY-MM-DD. */
+  businessDay: string;
+  /** The receipt numbers on the till it covers, both included. */
+  firstReceipt: number;
+  lastReceipt: number;
+  eventId: string;
+  currency: string;
+  deviceId: string;
+  /** What the till is and runs, for the export's master data. */
+  device: { brand: string; model: string; software: string; version: string };
+  /** Figures at closing time, so an export can be checked against them. */
+  receipts: number;
+  total: number;
+  cash: number;
+}
+
+/**
  * A receipt's number: counted up per till, without gaps, as German (and
  * Austrian) till rules expect. `till` names the till that counted it, so
  * two devices on one account never print the same receipt number.

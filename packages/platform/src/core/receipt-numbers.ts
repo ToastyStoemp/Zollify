@@ -32,8 +32,27 @@ function highestIn(rows: Transaction[], till: string): number {
   return max;
 }
 
+/** What a receipt was taken for: a till closes when the next one differs (see closings.ts). */
+export interface ReceiptContext {
+  /** Local day, YYYY-MM-DD. */
+  day: string;
+  eventId: string;
+  currency: string;
+}
+
+const CONTEXT_KEY = 'core.receiptContexts';
+
+/** The last receipt number this till took, and what for. */
+export async function lastReceipt(till: string): Promise<{ number: number; context: ReceiptContext | null }> {
+  const db = openCoreDb(requireAccountId());
+  const counters = (await db.settings.get(KEY))?.value as Record<string, number> | undefined;
+  const contexts = (await db.settings.get(CONTEXT_KEY))?.value as Record<string, ReceiptContext> | undefined;
+  const number = counters?.[till] ?? highestIn(await db.transactions.toArray(), till);
+  return { number, context: contexts?.[till] ?? null };
+}
+
 /** Takes the next receipt number on this till. Atomic across tabs: the count and its update are one database transaction. */
-export async function nextReceiptNumber(): Promise<ReceiptNumber> {
+export async function nextReceiptNumber(context?: ReceiptContext): Promise<ReceiptNumber> {
   const till = await tillId();
   const db = openCoreDb(requireAccountId());
   return db.transaction('rw', db.settings, db.transactions, async () => {
@@ -42,6 +61,10 @@ export async function nextReceiptNumber(): Promise<ReceiptNumber> {
     const number = last + 1;
     counters[till] = number;
     await db.settings.put({ key: KEY, value: counters });
+    if (context) {
+      const contexts = { ...((await db.settings.get(CONTEXT_KEY))?.value as Record<string, ReceiptContext> | undefined), [till]: context };
+      await db.settings.put({ key: CONTEXT_KEY, value: contexts });
+    }
     return { till, number };
   });
 }

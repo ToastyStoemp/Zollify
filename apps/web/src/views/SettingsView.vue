@@ -44,6 +44,13 @@ const corePanels: Panel[] = [
     component: () => import('./DataSettings.vue'),
   },
   {
+    id: 'core.taxexport',
+    label: 'Tax export (Germany)',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./TaxExportSettings.vue'),
+  },
+  {
     id: 'core.security',
     label: 'Account & security',
     group: 'Core',

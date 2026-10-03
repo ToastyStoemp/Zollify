@@ -18,6 +18,8 @@ export const OpTypeSchema = z.enum([
   'discount.delete',
   'image.meta',
   'setting.upsert',
+  /** A till's closing (CashClosing). Insert-if-absent, never changed. */
+  'closing.create',
 ]);
 
 export const OpSchema = z.object({

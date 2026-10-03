@@ -27,7 +27,7 @@ Implement a Capacitor plugin named **`SwissbitTse`** (Kotlin, `android/app/src/m
 | Method | Arguments | Returns | Swissbit WORM API |
 |---|---|---|---|
 | `isAvailable()` | - | `{ available: boolean }` | `worm_init` on the TSE's mount point / USB device; self-test |
-| `info()` | - | `{ serial, publicKey, algorithm, timeFormat, certified: true, expires? }` | `worm_info_*`: serial number (hex SHA-256 of the public key), public key (base64), signature algorithm (e.g. `ecdsa-plain-SHA384`), log time format (`unixTime`), certificate expiry |
+| `info()` | - | `{ serial, publicKey, algorithm, timeFormat, certified: true, expires?, certificate? }` | `worm_info_*`: serial number (hex SHA-256 of the public key), public key (base64), signature algorithm (e.g. `ecdsa-plain-SHA384`), log time format (`unixTime`), certificate expiry |
 | `startTransaction({ clientId })` | till serial | `{ transactionNumber, logTime }` (logTime in ms) | `worm_transaction_start(clientId, processData = "", processType = "")` |
 | `finishTransaction({ clientId, transactionNumber, processType, processData })` | as named | `{ signatureCounter, logTime, signature }` (signature base64) | `worm_transaction_finish(...)` |
 
@@ -43,6 +43,9 @@ Also needed once, at setup and on the TSE's own schedule:
 phone, say), each under its own till serial number (`clientId`). The plugin must therefore accept any `clientId`:
 when `startTransaction` gets one the TSE does not know yet, register it as a client first
 (`worm_tse_registerClient`) and carry on. Each of those tills is registered with the tax office too.
+
+**Certificate.** The DSFinV-K export's tse.csv carries the TSE's certificate (base64). Return it from `info()` as
+`certificate` and add it to the export (TSE_ZERTIFIKAT_I…) - today those fields are empty.
 
 Errors should reject the call with a readable message; Zollify records it as a TSE outage on the sale
 ("TSE ausgefallen") and keeps selling, as the rules require.

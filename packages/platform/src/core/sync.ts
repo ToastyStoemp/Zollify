@@ -10,6 +10,7 @@ import type {
   DiscountRule,
   InventoryItem,
   ProductMerge,
+  CashClosing,
 } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -24,6 +25,7 @@ import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
 import { base64ToBlob } from './images';
 import { TSE_MAIN_KEY, applyMainTseDevices } from './tse';
+import { applyClosing } from './closings';
 
 /**
  * Offline-first sync.
@@ -238,6 +240,8 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       await db.images.put({ id: incoming.imageId, productId: incoming.productId, updatedAt: incoming.updatedAt, thumb, full: existing?.full ?? thumb });
       return 1;
     }
+    case 'closing.create':
+      return applyClosing(op.payload as CashClosing);
     case 'setting.upsert': {
       // Generic account-wide key/value, LWW on updatedAt - currently used
       // for the synced default active event (see DEFAULT_ACTIVE_KEY in

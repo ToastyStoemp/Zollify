@@ -10,6 +10,7 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { registerDsfinvk } from './dsfinvk/route';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -509,6 +510,9 @@ export const receiptsServerModule: ServerModule = {
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
+
+    // KassenSichV: the DSFinV-K export of the till records.
+    registerDsfinvk(app, ctx);
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
       const who = ctx.identity(req);

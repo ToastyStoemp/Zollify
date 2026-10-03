@@ -7,6 +7,7 @@ import type {
   Product,
   SalesEvent,
   Transaction,
+  CashClosing,
 } from '@zollify/shared';
 
 /**
@@ -53,6 +54,7 @@ export type CoreDb = Dexie & {
   images: EntityTable<ImageRec, 'id'>;
   ops: Dexie.Table<OutboxOp, number>;
   settings: Dexie.Table<SettingRow, string>;
+  closings: EntityTable<CashClosing, 'id'>;
 };
 
 const open = new Map<string, CoreDb>();
@@ -113,6 +115,9 @@ export function openCoreDb(accountId: string): CoreDb {
 
       if (largest.size) await tx.table('inventory').bulkPut([...largest.values()]);
     });
+
+  /** v3: tills' closings (Kassenabschlüsse) - see closings.ts. */
+  db.version(3).stores({ closings: 'id, till, createdAt' });
 
   open.set(name, db);
   return db;

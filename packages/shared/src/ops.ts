@@ -12,7 +12,8 @@ export type OpType =
   | 'discount.upsert'
   | 'discount.delete'
   | 'image.meta'
-  | 'setting.upsert';
+  | 'setting.upsert'
+  | 'closing.create';
 
 export interface Op {
   /** uuidv7, client-generated, globally unique - the idempotency key. */

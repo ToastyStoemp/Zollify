@@ -153,4 +153,5 @@ export {
   type TseSettings,
 } from './tse';
 export { nextReceiptNumber } from './receipt-numbers';
+export { loadClosings, allClosings, closeStaleDay, closeTillNow, openReceipts, resetClosingCache, localDay } from './closings';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

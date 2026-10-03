@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
+import { strFromU8, unzipSync } from 'fflate';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled } from '@zollify/server-core';
 
@@ -137,6 +138,8 @@ beforeAll(async () => {
         op(7, 'tx.create', sale('tx-vat', VAT_TOKEN, { currency: 'EUR', tax: { country: 'DE', exempt: false, rates: [19, 7] } })),
         op(9, 'tx.create', sale('tx-tse', TSE_TOKEN, { currency: 'EUR', receipt: { till: 'ZOLLIFY-1', number: 42 }, tse: { signed: TSE_SIGNED } })),
         // Cancelled on another till, which numbered and signed the cancellation.
+        // Till 1 closed the day of receipt 42.
+        op(12, 'closing.create', { id: 'cl-1', till: 'ZOLLIFY-1', number: 1, createdAt: Date.parse('2026-10-03T20:00:00Z'), businessDay: '2026-10-03', firstReceipt: 42, lastReceipt: 42, eventId: 'ev-1', currency: 'EUR', deviceId: 'dev-1', device: { brand: 'myPOS', model: 'Carbon', software: 'Zollify', version: 'test' }, receipts: 1, total: 45, cash: 0 }),
         op(11, 'tx.revert', { id: 'tx-tse', revertedAt: Date.now(), revertReceipt: { till: 'ZOLLIFY-2', number: 7 }, revertTse: { signed: { ...TSE_SIGNED, clientId: 'ZOLLIFY-2', transactionNumber: 3 } } }),
         op(10, 'tx.create', sale('tx-tse-fail', TSE_FAIL_TOKEN, { currency: 'EUR', tse: { failed: { reason: 'Swissbit on secret-device-id unplugged', at: 1 } } })),
         op(8, 'tx.create', sale('tx-exempt', EXEMPT_TOKEN, { currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } })),
@@ -245,6 +248,25 @@ describe('online receipts', () => {
     expect(body.number).toBe('TX-VOID');
     expect(body.till).toBeUndefined();
     expect(body.cancelledBy).toBeUndefined();
+  });
+
+  it('exports the till records as DSFinV-K for owners, summary first, then the ZIP', async () => {
+    const url = '/api/m/pos/dsfinvk?from=2026-10-01&to=2026-10-31&all=1';
+    const summary = (await app.inject({ method: 'GET', url, headers: auth() })).json();
+    expect(summary).toMatchObject({ closings: 1, receipts: 1 });
+    // The cancellation was numbered on another till, which has not closed yet.
+    expect(summary.warnings.some((w: string) => w.startsWith('Till ZOLLIFY-2: 1 receipt(s) not closed yet'))).toBe(true);
+    const zip = await app.inject({ method: 'GET', url: `${url}&download=1`, headers: auth() });
+    expect(zip.statusCode).toBe(200);
+    expect(zip.headers['content-type']).toBe('application/zip');
+    const files = unzipSync(new Uint8Array(zip.rawPayload));
+    expect(Object.keys(files)).toHaveLength(22);
+    const heads = strFromU8(files['transactions.csv']!).split('\r\n');
+    expect(heads[1]).toMatch(/^ZOLLIFY-1;2026-10-03T20:00:00Z;1;42;42;Beleg;;;0;/);
+    // Germany only by default: this event has no country.
+    expect((await app.inject({ method: 'GET', url: url.replace('&all=1', ''), headers: auth() })).json()).toMatchObject({ closings: 0 });
+    expect((await app.inject({ method: 'GET', url: '/api/m/pos/dsfinvk?from=2026-10-31&to=2026-10-01', headers: auth() })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(401);
   });
 
   it('says a sale was not signed, without the reason (which can name the device)', async () => {

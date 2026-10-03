@@ -36,13 +36,15 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     const p = op.payload as Record<string, unknown> | null;
     if (!p) return undefined;
     if (op.type === 'event.upsert') return p.id as string;
-    return p.eventId as string | undefined; // event.close, tx.create, stock.set
+    return p.eventId as string | undefined; // event.close, tx.create, stock.set, closing.create
   };
   // Which ops a restricted user is allowed to RECEIVE.
   function opReadable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (GLOBAL_TYPES.has(op.type)) return true;
     if (op.type === 'tx.revert') {
-      const txId = (op.payload as { txId?: string } | null)?.txId;
+      // ZollTool wrote `txId`, Zollify writes `id`.
+      const p = op.payload as { txId?: string; id?: string } | null;
+      const txId = p?.txId ?? p?.id;
       const row = txId ? (txEventOf.get(accountId, txId) as { eid?: string } | undefined) : undefined;
       return !!row?.eid && allowed.has(row.eid);
     }
@@ -53,7 +55,8 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
   // events (never catalog, discounts, other events, or account settings).
   function opWritable(allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (op.type === 'tx.revert') return true; // only reverts a tx already on their device
-    if (op.type === 'tx.create' || op.type === 'stock.set') {
+    // A helper's till closes its own days at the events it sells at.
+    if (op.type === 'tx.create' || op.type === 'stock.set' || op.type === 'closing.create') {
       const eid = eventIdOf(op);
       return !!eid && allowed.has(eid);
     }

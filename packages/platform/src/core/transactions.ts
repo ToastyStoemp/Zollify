@@ -8,7 +8,7 @@ import { toPlain } from './plain';
 import { deviceId } from './device';
 import { getSalesEvent } from './sales-events';
 import { signCancellation, signSale, tseRequiredFor } from './tse';
-import { nextReceiptNumber } from './receipt-numbers';
+import { localDay, takeReceiptNumber } from './closings';
 
 /**
  * Recorded sales.
@@ -124,7 +124,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
   const tx = toPlain(saleToTransaction(sale, await deviceId()));
-  tx.receipt = await nextReceiptNumber();
+  tx.receipt = await takeReceiptNumber({ day: localDay(tx.timestamp), eventId: tx.eventId, currency: tx.currency });
   // KassenSichV: a sale in Germany is signed by this device's TSE before it
   // is stored, over the same figures its receipt prints. A TSE failure is
   // kept on the sale rather than stopping it.
@@ -155,7 +155,7 @@ export async function revertTransaction(id: string): Promise<void> {
   // A signed sale is cancelled by a signed receipt of its own, with the
   // same figures negative - with a TSE there is no other way to cancel.
   // It is numbered as a receipt of its own, on the till that cancels it.
-  const revertReceipt = await nextReceiptNumber();
+  const revertReceipt = await takeReceiptNumber({ day: localDay(revertedAt), eventId: existing.eventId, currency: existing.currency });
   const revertTse = existing.tse ? toPlain(await signCancellation(existing)) : undefined;
   const marker = { revertedAt, revertedBy: crypto.randomUUID(), revertReceipt, ...(revertTse ? { revertTse } : {}) };
   const reverted: Transaction = toPlain({ ...existing, ...marker });

@@ -55,8 +55,8 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 | Receipt content (§6 KassenSichV) | **Done**: seller name, address and VAT ID, date, a receipt number counted per till (sales and cancellations alike, never reused), the till, items, total, payment type; VAT and net per rate with lettered lines, or the exemption note and EX number; for signed sales the TSE transaction number, signature counter, start and end time, TSE serial and the DSFinV-K QR code (paper) - also on screen and on the online receipt. Settings warns when the profile lacks the name or address. | - |
 | A receipt for every sale | QR and printing are optional per device | A Germany mode (e.g. by event country) where every sale must offer a receipt by QR, print or both, with paper always available on request. |
 | Cancellations | **Done**: reverting a sale gives a cancellation receipt of its own - its own number, its own TSE signature, every amount negative, pointing to the receipt it cancels; reprinting a reverted sale prints both | - |
-| DSFinV-K export | CSV, PDF and backups only | A DSFinV-K export: till master data, daily closings, line items with VAT keys, payments and cash movements, plus the TSE export. |
-| Daily closing and cash movements | Cash-up screen; starting cash stored on the device only | Numbered daily closings, and recorded cash put in or taken out (Einlagen/Entnahmen), synced to the server and never changed afterwards. |
+| DSFinV-K export | **Done**: Settings → Tax export (Germany) checks a period, lists what is missing (a day not closed, a receipt not synced, a test TSE) and downloads the ZIP: all 20 files with the official index.xml and DTD, built on the server from every device's synced records. Passes an independent DSFinV-K validator. See "How the export maps Zollify" below. | Cash movements; the TSE's certificate (from the Swissbit driver); the TSE's own TAR export (Swissbit driver). |
+| Daily closing and cash movements | **Closings done**: each till closes itself when the day, event or currency changes before its next receipt, at start-up on a new day, or by hand (Cash up → Close the day); numbered per till, synced, never changed. Starting cash stored on the device only | Recorded cash put in or taken out (Anfangsbestand, Einlagen/Entnahmen) as their own receipts. |
 | Unchangeable records | Append-only change log, sales never deleted (good) | Keep as is. Add a training-mode flag so practice sales are marked as such. |
 | Till registration | Device list with names | Store a serial number and start and end dates per device, and generate the data to enter in ELSTER. |
 | Record keeping | Server keeps the change log; online receipts expire after 400 days | Keep server data and backups for 8 to 10 years, independent of the online receipt's expiry. |
@@ -68,11 +68,20 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 1. ~~Store VAT on each sale.~~ Done.
 2. ~~TSE signing with outage handling~~ done; the Swissbit driver remains (see `tse-swissbit.md`).
 3. ~~Receipt TSE block and QR, receipt numbers, cancellation receipts~~ done.
-4. Add daily closings and cash movements.
-5. Build the DSFinV-K export.
+4. ~~Daily closings~~ done; cash movements remain.
+5. ~~DSFinV-K export~~ done.
 6. Add till registration data and the documentation template.
 
 Steps 1-3 are needed before selling at a German convention. Steps 4-5 are needed for a tax inspection (Kassennachschau / Außenprüfung).
+
+## How the export maps Zollify
+
+- **Closing** (Z_NR) = one till's receipts for one day at one event in one currency. Z_KASSE_ID and KASSE_SERIENNR are the till serial number (the TSE client id).
+- **Receipt** (BON_ID = BON_NR = the printed receipt number). Every sale is BON_TYP "Beleg". A cancellation is a "Beleg" of its own with BON_STORNO 1, every amount and quantity negative, and a reference (REF_TYP "Transaktion") to the receipt it cancels - the way the DSFinV-K wants it once a TSE is in use.
+- **Lines**: GV_TYP "Umsatz" at what each line cost after discounts; the list price and the discount beside it (Bonpos_Preisfindung).
+- **VAT keys** (Anlage 2): 19% → 1, 7% → 2, 10.7% → 3, 5.5% → 4; a sale exempt as a small business → 6 "Umsatzsteuerfrei" (common practice - **confirm with the Steuerberater**); a sale without VAT data → 7 and KEINE_UST_ZUORDNUNG.
+- **Payments**: cash "Bar", everything else "Unbar" named after the method (e.g. "mypos", "TWINT").
+- **Not exported yet**: carts abandoned after the TSE transaction started (AVBelegabbruch - signed on the TSE, so they are in the TSE's own export), training sales (AVTraining - there is no training mode), cash movements, the TSE certificate.
 
 ## Sources
 

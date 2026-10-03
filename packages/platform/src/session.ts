@@ -214,6 +214,8 @@ async function parseBody(res: Response): Promise<unknown> {
   if (res.status === 204) return null;
   const type = res.headers.get('content-type') ?? '';
   if (type.includes('application/json')) return res.json();
+  // A file (the tax export's ZIP, say) comes back as one.
+  if (type.includes('application/zip') || type.includes('application/octet-stream')) return res.blob();
   return res.text();
 }
 

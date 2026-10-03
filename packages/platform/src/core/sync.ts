@@ -10,6 +10,7 @@ import type {
   DiscountRule,
   InventoryItem,
   ProductMerge,
+  CashClosing,
 } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
@@ -23,6 +24,8 @@ import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
 import { base64ToBlob } from './images';
+import { KASSENSICHV_KEY, TSE_MAIN_KEY, applyKassensichv, applyMainTseDevices } from './tse';
+import { applyClosing } from './closings';
 
 /**
  * Offline-first sync.
@@ -155,14 +158,16 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'tx.revert': {
-      const { id, revertedAt, revertedBy } = op.payload as {
+      const { id, revertedAt, revertedBy, revertTse, revertReceipt } = op.payload as {
         id: string;
         revertedAt: number;
         revertedBy: string;
+        revertTse?: Transaction['revertTse'];
+        revertReceipt?: Transaction['revertReceipt'];
       };
       const existing = await db.transactions.get(id);
       if (existing && !existing.revertedAt) {
-        await db.transactions.put({ ...existing, revertedAt, revertedBy });
+        await db.transactions.put({ ...existing, revertedAt, revertedBy, ...(revertReceipt ? { revertReceipt } : {}), ...(revertTse ? { revertTse } : {}) });
         return 1;
       }
       return 0;
@@ -235,6 +240,8 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       await db.images.put({ id: incoming.imageId, productId: incoming.productId, updatedAt: incoming.updatedAt, thumb, full: existing?.full ?? thumb });
       return 1;
     }
+    case 'closing.create':
+      return applyClosing(op.payload as CashClosing);
     case 'setting.upsert': {
       // Generic account-wide key/value, LWW on updatedAt - currently used
       // for the synced default active event (see DEFAULT_ACTIVE_KEY in
@@ -245,6 +252,8 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       const existing = await db.settings.get(incoming.key);
       if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
         await db.settings.put(incoming);
+        if (incoming.key === TSE_MAIN_KEY) applyMainTseDevices(incoming.value);
+        if (incoming.key === KASSENSICHV_KEY) applyKassensichv(incoming.value);
         return 1;
       }
       return 0;

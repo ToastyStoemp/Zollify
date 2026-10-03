@@ -3,7 +3,7 @@ import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
-import { receiptQrPng } from './lib/after-sale';
+import { qrPng, receiptQrPng } from './lib/after-sale';
 import { serverBranding } from './lib/branding';
 import { sdk } from './runtime';
 
@@ -96,6 +96,48 @@ export async function printReceipt(lines: ReceiptLine[]): Promise<{ printed: boo
   return { printed: false, error: 'Printing is not available on this device' };
 }
 
+/**
+ * The TSE block a German receipt must carry: transaction number, signature
+ * counter, start and end, the TSE's and the till's serial numbers, and the
+ * signature - as the DSFinV-K QR code, which holds all of it for checking.
+ */
+function tseLines(tse: NonNullable<Transaction['tse']>, qrB64: string | undefined, till?: string): ReceiptLine[] {
+  const out: ReceiptLine[] = [{ kind: 'text', text: DIVIDER }];
+  const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
+  if ('failed' in tse) {
+    out.push(center('TSE ausgefallen'));
+    out.push(center('Beleg ohne TSE-Signatur'));
+    for (const part of wrap(tse.failed.reason, WIDTH)) out.push(center(part));
+    return out;
+  }
+  const s = tse.signed;
+  if (s.test) out.push(center('TEST-TSE - NICHT ZERTIFIZIERT'));
+  out.push({ kind: 'text', text: row('TSE-Transaktion', String(s.transactionNumber)) });
+  out.push({ kind: 'text', text: row('Signaturzaehler', String(s.signatureCounter)) });
+  out.push({ kind: 'text', text: row('Start', s.start.replace('T', ' ').replace(/\.\d+Z$/, '')) });
+  out.push({ kind: 'text', text: row('Ende', s.finish.replace('T', ' ').replace(/\.\d+Z$/, '')) });
+  // The till is already named at the top when the receipt is numbered.
+  if (s.clientId !== till) out.push({ kind: 'text', text: row('Kasse', s.clientId) });
+  out.push({ kind: 'text', text: 'TSE-Seriennummer:' });
+  for (let i = 0; i < s.serial.length; i += WIDTH) out.push({ kind: 'text', text: s.serial.slice(i, i + WIDTH) });
+  if (qrB64) {
+    out.push({ kind: 'image', imageB64: qrB64 });
+    out.push(center('TSE-Signatur'));
+  } else {
+    out.push({ kind: 'text', text: 'Signatur:' });
+    for (let i = 0; i < s.signature.length; i += WIDTH) out.push({ kind: 'text', text: s.signature.slice(i, i + WIDTH) });
+  }
+  return out;
+}
+
+/** The DSFinV-K QR for a signed TSE outcome; none for a failure or on an older shell. */
+async function tseQr(tse: Transaction['tse']): Promise<string | undefined> {
+  if (!tse || !('signed' in tse)) return undefined;
+  const payload = (shared as Record<string, unknown>).tseQrPayload as typeof shared.tseQrPayload | undefined;
+  // Wider than the receipt-link code: it carries the whole signature and public key.
+  return payload ? qrPng(payload(tse.signed), 360) : undefined;
+}
+
 /** VAT per rate for a sale (see vatBreakdown in @zollify/shared); none on an older shell or an untaxed sale. */
 export function receiptVat(tx: Transaction): shared.VatRow[] {
   const fn = (shared as Record<string, unknown>).vatBreakdown as typeof shared.vatBreakdown | undefined;
@@ -168,12 +210,32 @@ export async function loadReceiptConfig(): Promise<{
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string },
+  config: {
+    artist: ArtistInfo;
+    logoB64: string;
+    footerText: string;
+    /** Online-receipt QR, full paper width. */
+    qrB64?: string;
+    /** KassenSichV: the TSE signature as a QR (DSFinV-K V0), and the cancellation's when reverted. */
+    tseQrB64?: string;
+    revertTseQrB64?: string;
+  },
   eventCountry?: string,
+  /**
+   * The cancellation of a reverted sale instead of the sale: a receipt of its
+   * own, with its own number and TSE signature and every amount negative -
+   * how a cancellation has to look with a TSE.
+   */
+  cancellation = false,
 ): ReceiptLine[] {
   const { artist, logoB64, footerText } = config;
   const lines: ReceiptLine[] = [];
   const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
+  // Amounts are worked out on the sale as it was, then turned negative for a cancellation.
+  const sign = cancellation ? -1 : 1;
+  const money = (n: number): string => fmtPrice(sign * n || 0, tx.currency);
+  const number = cancellation ? tx.revertReceipt : tx.receipt;
+  const tse = cancellation ? tx.revertTse : tx.tse;
 
   // ── Header: logo + artist block ──
   if (logoB64) lines.push({ kind: 'image', imageB64: logoB64 });
@@ -189,9 +251,19 @@ export function buildReceiptLines(
   if (vat) lines.push(center(`VAT: ${vat}`));
 
   lines.push({ kind: 'text', text: DIVIDER });
-  const when = new Date(tx.timestamp);
+  if (cancellation) {
+    lines.push({ ...center('STORNO / CANCELLATION'), doubleHeight: true });
+    if (tx.receipt) lines.push(center(`of receipt no. ${tx.receipt.number}`));
+    lines.push({ kind: 'text', text: DIVIDER });
+  }
+  const when = new Date(cancellation ? (tx.revertedAt ?? tx.timestamp) : tx.timestamp);
   lines.push({ kind: 'text', text: row(eventName, when.toLocaleDateString('de-CH')) });
   lines.push({ kind: 'text', text: row('', when.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })) });
+  // The receipt's own number, counted per till.
+  if (number) {
+    lines.push({ kind: 'text', text: row('Receipt no.', String(number.number)) });
+    lines.push({ kind: 'text', text: row('Till', number.till) });
+  }
   lines.push({ kind: 'text', text: DIVIDER });
 
   // ── Items ──
@@ -210,26 +282,27 @@ export function buildReceiptLines(
     const amount = breakdown.lines[n] ?? item.lineTotal;
     const rate = tx.tax?.rates[n];
     const letter = marked && rate != null ? ` ${letterOf.get(rate) ?? ''}` : '';
-    lines.push({ kind: 'text', text: row(`${item.qty} x ${name}`, `${fmtPrice(amount, tx.currency)}${letter}`) });
+    lines.push({ kind: 'text', text: row(`${sign * item.qty} x ${name}`, `${money(amount)}${letter}`) });
     if (item.qty > 1) lines.push({ kind: 'text', text: `   à ${fmtPrice(Math.round((amount / item.qty) * 100) / 100, tx.currency)}` });
   });
   if (breakdown.discounts.length) {
     lines.push({ kind: 'text', text: DIVIDER });
     const subtotal = breakdown.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100;
-    lines.push({ kind: 'text', text: row('Subtotal', fmtPrice(subtotal, tx.currency)) });
+    lines.push({ kind: 'text', text: row('Subtotal', money(subtotal)) });
     for (const d of breakdown.discounts) {
-      lines.push({ kind: 'text', text: row(d.name, `-${fmtPrice(d.amount, tx.currency)}`) });
+      // A cancelled discount is given back: it counts up.
+      lines.push({ kind: 'text', text: row(d.name, cancellation ? `+${fmtPrice(d.amount, tx.currency)}` : `-${fmtPrice(d.amount, tx.currency)}`) });
     }
   }
 
   lines.push({ kind: 'text', text: DIVIDER });
-  lines.push({ kind: 'text', text: row('TOTAL', fmtPrice(tx.total, tx.currency)), doubleHeight: true });
+  lines.push({ kind: 'text', text: row('TOTAL', money(tx.total)), doubleHeight: true });
 
   // ── VAT ──
   // Prices are gross: the VAT inside the total, per rate, with the net.
   for (const r of vatRows) {
-    lines.push({ kind: 'text', text: row(`${marked ? `${r.letter} ` : ''}incl. VAT ${vatRateLabel(r.rate)}`, fmtPrice(r.vat, tx.currency)) });
-    lines.push({ kind: 'text', text: row('   net', fmtPrice(r.net, tx.currency)) });
+    lines.push({ kind: 'text', text: row(`${marked ? `${r.letter} ` : ''}incl. VAT ${vatRateLabel(r.rate)}`, money(r.vat)) });
+    lines.push({ kind: 'text', text: row('   net', money(r.net)) });
   }
   if (tx.tax?.exempt) {
     if (tx.tax.note) for (const part of wrap(tx.tax.note, WIDTH)) lines.push(center(part));
@@ -240,7 +313,7 @@ export function buildReceiptLines(
   for (const leg of tx.payments) {
     const label =
       leg.kind === 'cash' ? 'Cash' : leg.provider && leg.provider !== 'card' ? leg.provider : 'Card';
-    lines.push({ kind: 'text', text: row(label, fmtPrice(leg.amount, tx.currency)) });
+    lines.push({ kind: 'text', text: row(cancellation ? `${label} refunded` : label, money(leg.amount)) });
     if (leg.cardBrand || leg.authCode) {
       lines.push({
         kind: 'text',
@@ -252,17 +325,26 @@ export function buildReceiptLines(
     if (leg.txRef) lines.push({ kind: 'text', text: `  Txn ${leg.txRef}` });
   }
 
+  // ── TSE (KassenSichV) ──
+  if (tse) lines.push(...tseLines(tse, cancellation ? config.revertTseQrB64 : config.tseQrB64, number?.till));
+  // A cancelled sale's receipt points to the cancellation's.
+  if (!cancellation && tx.revertedAt) {
+    lines.push({ kind: 'text', text: DIVIDER });
+    lines.push(center(tx.revertReceipt ? `CANCELLED - receipt no. ${tx.revertReceipt.number}` : 'CANCELLED'));
+  }
+
   // ── Footer ──
   lines.push({ kind: 'space' });
   if (footerText) {
     for (const part of footerText.split('\n')) lines.push(center(part));
   }
-  if (config.qrB64) {
+  if (config.qrB64 && !cancellation) {
     lines.push({ kind: 'image', imageB64: config.qrB64 });
     lines.push(center('Scan for your receipt online'));
     lines.push({ kind: 'space' });
   }
-  lines.push(center(`Receipt ${tx.id.slice(-8)}`));
+  // Sales from before receipts were numbered keep their old reference.
+  if (!number) lines.push(center(`Receipt ${tx.id.slice(-8)}`));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 
@@ -275,18 +357,23 @@ export function buildReceiptLines(
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
-  const [qrB64, logoB64, shared] = await Promise.all([
+  const [qrB64, logoB64, branding, tseQrB64, revertTseQrB64] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
+    tseQr(tx.tse),
+    tseQr(tx.revertTse),
   ]);
-  return buildReceiptLines(
-    tx,
-    eventName,
-    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64 },
-    eventCountry,
-  );
+  const full = { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || branding?.footer || '', qrB64, tseQrB64, revertTseQrB64 };
+  const lines = buildReceiptLines(tx, eventName, full, eventCountry);
+  // A reverted sale prints with its cancellation receipt after it.
+  return hasCancellationReceipt(tx) ? [...lines, ...buildReceiptLines(tx, eventName, full, eventCountry, true)] : lines;
+}
+
+/** A reverted sale whose cancellation is a receipt of its own: numbered, or signed by a TSE. */
+export function hasCancellationReceipt(tx: Transaction): boolean {
+  return Boolean(tx.revertedAt && (tx.revertReceipt || tx.revertTse));
 }
 
 /**

@@ -8,7 +8,7 @@ import { sourcingServerModule } from './modules/sourcing';
 import { publicEventsServerModule } from './modules/public-events';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
-import { receiptsServerModule } from './modules/receipts';
+import { posServerModule } from './modules/receipts';
 
 loadDotEnv();
 
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     publicEventsServerModule,
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
-    receiptsServerModule,
+    posServerModule(jwtSecret),
   ];
 
   const app = await buildGateway({

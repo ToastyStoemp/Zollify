@@ -14,6 +14,9 @@ import {
   getAccount,
   loadCatalog,
   loadInventory,
+  loadTseSettings,
+  loadClosings,
+  closeStaleDay,
   loadSalesEvents,
   loadDiscounts,
   loadTransactions,
@@ -78,8 +81,12 @@ async function boot(): Promise<void> {
       loadTransactions().catch((err) => console.error('[zollify] history load failed', err)),
       loadDiscounts().catch((err) => console.error('[zollify] discounts load failed', err)),
       loadInventory().catch((err) => console.error('[zollify] inventory load failed', err)),
+      loadTseSettings().catch((err) => console.error('[zollify] TSE settings load failed', err)),
+      loadClosings().catch((err) => console.error('[zollify] closings load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
+    // A till left unclosed overnight closes yesterday before today's first sale.
+    await closeStaleDay().catch((err) => console.error('[zollify] closing failed', err));
   }
 
   await loadEnabledModules(router).catch((err) => {

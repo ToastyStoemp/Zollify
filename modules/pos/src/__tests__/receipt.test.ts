@@ -138,4 +138,84 @@ describe('printed receipt amounts', () => {
     expect(lines.join('\n')).not.toContain('VAT: DE123456789');
     expect(lines.join('\n')).not.toContain('incl. VAT');
   });
+
+  const signed = {
+    signed: {
+      clientId: 'ZOLLIFY-TEST1',
+      serial: 'a'.repeat(64),
+      transactionNumber: 13,
+      signatureCounter: 44131,
+      start: '2026-10-03T12:00:01.000Z',
+      finish: '2026-10-03T12:00:09.000Z',
+      algorithm: 'ecdsa-plain-SHA384',
+      timeFormat: 'unixTime',
+      signature: 'SIG'.repeat(12),
+      publicKey: 'PK',
+      processType: 'Kassenbeleg-V1',
+      processData: 'Beleg^45.00_0.00_0.00_0.00_0.00^45.00:Bar',
+      test: true,
+    },
+  };
+
+  it('prints the TSE block a German receipt needs', () => {
+    const lines = text(sale({ currency: 'EUR', tse: signed }));
+    expect(lines).toContain('TEST-TSE - NICHT ZERTIFIZIERT');
+    expect(amountOn(lines, 'TSE-Transaktion')).toBe('13');
+    expect(amountOn(lines, 'Signaturzaehler')).toBe('44131');
+    expect(amountOn(lines, 'Start')).toBe('2026-10-03 12:00:01');
+    expect(amountOn(lines, 'Ende')).toBe('2026-10-03 12:00:09');
+    expect(amountOn(lines, 'Kasse')).toBe('ZOLLIFY-TEST1');
+    // Serial and (without a QR image) the signature, wrapped to the paper.
+    expect(lines).toContain('a'.repeat(32));
+    const at = lines.indexOf('Signatur:');
+    expect(lines.slice(at + 1, at + 3).join('')).toBe('SIG'.repeat(12));
+  });
+
+  it('says plainly when the TSE was out', () => {
+    const lines = text(sale({ tse: { failed: { reason: 'TSE not responding', at: 1 } } })).map((l) => l.trim());
+    expect(lines).toContain('TSE ausgefallen');
+    expect(lines).toContain('Beleg ohne TSE-Signatur');
+    expect(lines).toContain('TSE not responding');
+  });
+
+  it('prints the receipt number and till, once', () => {
+    const lines = text(sale({ currency: 'EUR', tse: signed, receipt: { till: 'ZOLLIFY-TEST1', number: 42 } }));
+    expect(amountOn(lines, 'Receipt no.')).toBe('42');
+    expect(amountOn(lines, 'Till')).toBe('ZOLLIFY-TEST1');
+    // Named at the top already, so the TSE block leaves the till out.
+    expect(lines.some((l) => l.startsWith('Kasse'))).toBe(false);
+    // The old short reference is only for sales from before numbering.
+    expect(lines.some((l) => l.trim().startsWith('Receipt tx-'))).toBe(false);
+  });
+
+  const reverted = sale({
+    currency: 'EUR',
+    tse: signed,
+    receipt: { till: 'ZOLLIFY-TEST1', number: 42 },
+    revertedAt: Date.UTC(2026, 9, 3, 11, 0),
+    revertReceipt: { till: 'ZOLLIFY-TEST1', number: 43 },
+    revertTse: { signed: { ...signed.signed, transactionNumber: 14, processData: 'Beleg^-45.00_0.00_0.00_0.00_0.00^-45.00:Bar' } },
+    asCharged: { listTotals: [44, 5], discounts: [{ name: 'Bundle', amount: 4 }] },
+  });
+
+  it('points a cancelled sale’s receipt to its cancellation', () => {
+    const lines = text(reverted).map((l) => l.trim());
+    expect(lines).toContain('CANCELLED - receipt no. 43');
+    expect(lines.filter((l) => l.startsWith('TSE-Transaktion'))).toEqual(['TSE-Transaktion               13']);
+  });
+
+  it('prints a cancellation as a receipt of its own: own number and signature, every amount negative', () => {
+    const lines = buildReceiptLines(reverted, 'Con', { artist: {}, logoB64: '', footerText: '' }, undefined, true)
+      .filter((l) => l.kind === 'text')
+      .map((l) => l.text ?? '');
+    expect(lines.map((l) => l.trim())).toContain('STORNO / CANCELLATION');
+    expect(lines.map((l) => l.trim())).toContain('of receipt no. 42');
+    expect(amountOn(lines, 'Receipt no.')).toBe('43');
+    expect(amountOn(lines, '-2 x Print')).toBe('EUR -44.00');
+    expect(amountOn(lines, 'Bundle')).toBe('+EUR 4.00');
+    expect(amountOn(lines, 'TOTAL')).toBe('EUR -45.00');
+    expect(amountOn(lines, 'Cash refunded')).toBe('EUR -45.00');
+    expect(amountOn(lines, 'TSE-Transaktion')).toBe('14');
+    expect(amountOn(lines, 'Start')).toBe('2026-10-03 12:00:01');
+  });
 });

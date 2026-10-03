@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { CURRENCY_COINS, denominationsFor, fmtPrice, round2 } from '@zollify/shared';
 import {
   activeEventId,
+  allClosings,
+  closeTillNow,
+  kassensichvVisible,
   currentAccount,
+  openReceipts,
+  tillId,
   getSalesEvent,
   recentTransactions,
   visibleEvents,
@@ -104,6 +109,33 @@ function setCount(value: number, qty: number): void {
   counted.value = next;
 }
 
+// ── Closing the day on this till (Kassenabschluss) ─────────────────────────
+// Every receipt this device took since its last closing goes into one. The
+// till also closes itself when the day, event or currency changes, and at
+// start-up on a new day - this is for closing at the end of a day by hand.
+const till = ref('');
+const open = ref(0);
+const closing = ref(false);
+const closeError = ref<string | null>(null);
+const lastClosing = computed(() => allClosings().find((c) => c.till === till.value) ?? null);
+async function refreshTill(): Promise<void> {
+  till.value = await tillId();
+  open.value = await openReceipts();
+}
+onMounted(() => void refreshTill().catch(() => undefined));
+async function closeDay(): Promise<void> {
+  closing.value = true;
+  closeError.value = null;
+  try {
+    await closeTillNow();
+    await refreshTill();
+  } catch (err) {
+    closeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    closing.value = false;
+  }
+}
+
 function label(value: number): string {
   return value < 1 ? `${Math.round(value * 100)}c` : String(value);
 }
@@ -151,6 +183,20 @@ function isCoin(value: number): boolean {
           <strong class="bad">{{ fmtPrice(reverted, currency) }}</strong>
         </li>
       </ul>
+
+      <div v-if="kassensichvVisible()" class="close-day">
+        <h2>Close the day</h2>
+        <p class="sub">
+          This device ({{ till }}) has taken {{ open }} receipt{{ open === 1 ? '' : 's' }} since its last closing.
+          Closing files them - numbered, never changed - for the tax export. The till also closes on its own when the day or event changes.
+        </p>
+        <p v-if="lastClosing" class="sub">
+          Last closing: no. {{ lastClosing.number }}, {{ lastClosing.businessDay }} - {{ lastClosing.receipts }} receipt{{ lastClosing.receipts === 1 ? '' : 's' }},
+          {{ fmtPrice(lastClosing.total, lastClosing.currency || currency) }}
+        </p>
+        <p v-if="closeError" class="bad" role="alert">{{ closeError }}</p>
+        <div><button type="button" :disabled="closing || open === 0" @click="closeDay">{{ closing ? 'Closing…' : 'Close the day' }}</button></div>
+      </div>
 
       <div class="count">
         <h2>Count the box</h2>
@@ -208,6 +254,8 @@ h2 { margin: 0; font-size: 1.05rem; }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
 .totals .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .count { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
+.close-day { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .5rem; max-width: 34rem; }
+.close-day .sub { margin: 0; font-size: .875rem; color: var(--zfy-muted, #5a6472); }
 .float { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
 .float input { width: 8rem; }
 .denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: .4rem; }

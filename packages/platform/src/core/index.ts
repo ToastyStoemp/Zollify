@@ -128,4 +128,36 @@ export { mergeProducts, materializeMerge } from './merge';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting } from './synced-settings';
+export {
+  tseState,
+  loadTseSettings,
+  setTseSettings,
+  refreshTseInfo,
+  registerTseDriver,
+  tseRequiredFor,
+  beginTse,
+  signSale,
+  abortTse,
+  signCancellation,
+  resetTseCache,
+  tillId,
+  defaultTillId,
+  tseMode,
+  setMainTseDevice,
+  removeMainTseDevice,
+  assignTseHost,
+  setKassensichv,
+  kassensichvVisible,
+  germanyTseGap,
+  assignedTseHost,
+  applyMainTseDevices,
+  TSE_MAIN_KEY,
+  type TseDriver,
+  type TseDriverId,
+  type TseInfo,
+  type TseSettings,
+  type TseOutage,
+} from './tse';
+export { nextReceiptNumber } from './receipt-numbers';
+export { loadClosings, allClosings, closeStaleDay, closeTillNow, openReceipts, resetClosingCache, localDay } from './closings';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

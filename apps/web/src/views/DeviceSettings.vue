@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import type { DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
@@ -20,6 +20,18 @@ import {
   type UpdateCheck,
   afterSalePrefs,
   currentAccount,
+  refreshTseInfo,
+  setTseSettings,
+  defaultTillId,
+  tseMode,
+  setMainTseDevice,
+  removeMainTseDevice,
+  kassensichvVisible,
+  assignTseHost,
+  assignedTseHost,
+  shellConfirm,
+  tseState,
+  type TseDriverId,
   deviceFlavor,
   loadAfterSalePrefs,
   setAfterSalePrefs,
@@ -61,6 +73,78 @@ onMounted(async () => {
     error.value = err instanceof Error ? err.message : 'Could not read this device.';
   }
 });
+
+// ── KassenSichV: this device's TSE ─────────────────────────────────────────
+const checkingTse = ref(false);
+async function chooseTse(driver: TseDriverId): Promise<void> {
+  // A till needs a serial number for the TSE; suggest one from the device id.
+  const clientId = tseState.settings.clientId || (driver !== 'none' && id.value ? defaultTillId(id.value) : '');
+  // Without its own TSE a device can't sign for others any more.
+  if (driver === 'none' && isMainTse.value) await setMainTseDevice(false);
+  await setTseSettings({ driver, clientId });
+  if (tseMode() !== 'none') await checkTse();
+}
+
+/** The account's main TSE devices: other devices without a TSE sign through them. */
+const isMainTse = computed(() => !!id.value && tseState.mainDevices.includes(id.value));
+const deviceLabel = (d: string): string => devices.value.find((x) => x.id === d)?.name || `Device ${d.slice(0, 8)}`;
+const mainTseNames = computed(() => tseState.mainDevices.filter((d) => d !== id.value).map(deviceLabel));
+const tseError = ref<string | null>(null);
+/** Main TSE devices this till could be assigned to. */
+const hostChoices = computed(() => tseState.mainDevices.filter((d) => d !== id.value));
+const hostPick = ref('');
+const assigned = computed(() => assignedTseHost());
+watch(hostChoices, (list) => {
+  if (!list.includes(hostPick.value)) hostPick.value = list[0] ?? '';
+}, { immediate: true });
+async function assignHost(): Promise<void> {
+  tseError.value = null;
+  const host = hostPick.value || hostChoices.value[0];
+  if (!host) return;
+  const till = tseState.settings.clientId.trim() || defaultTillId(id.value);
+  const ok = await shellConfirm(
+    `This till (${till}) will sign through ${deviceLabel(host)} from now on. This can't be changed afterwards: German rules tie a till to one TSE, and the tax office is told which. ` +
+      `If that device is ever replaced, this device needs a new till serial number - a new till, registered again.`,
+    'Assign main TSE device?',
+  );
+  if (!ok) return;
+  try {
+    await assignTseHost(host);
+    await checkTse();
+  } catch (err) {
+    tseError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+async function removeMain(d: string): Promise<void> {
+  const ok = await shellConfirm(
+    `Tills assigned to ${deviceLabel(d)} can't move to another TSE: until they get a new till serial number, their sales count as signed during an outage, by another main TSE device.`,
+    'Remove main TSE device?',
+  );
+  if (ok) await removeMainTseDevice(d);
+}
+const fmtWhen = (ms: number): string => new Date(ms).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+
+async function toggleMainTse(on: boolean): Promise<void> {
+  tseError.value = null;
+  try {
+    await setMainTseDevice(on);
+  } catch (err) {
+    tseError.value = err instanceof Error ? err.message : String(err);
+  }
+}
+/** A German receipt must name the seller and their address (§ 6 KassenSichV); the receipt takes them from the profile. */
+const sellerMissing = computed(() => {
+  const a = account.value?.profile.artist;
+  return !(a?.companyName?.trim() || a?.fullName?.trim()) || !a?.street?.trim() || !a?.postCodeCity?.trim();
+});
+async function checkTse(): Promise<void> {
+  checkingTse.value = true;
+  try {
+    await refreshTseInfo();
+  } finally {
+    checkingTse.value = false;
+  }
+}
 
 // ── Diagnostics: send this device's log to the server for support ──────────
 const sending = ref(false);
@@ -191,6 +275,98 @@ function when(ts: number): string {
         <span class="body"><span class="label">Receipt QR code</span><span class="sub">The customer scans it for their receipt online. Shows the receipt only - never other sales or your stock.</span></span>
       </label>
     </div>
+
+    <template v-if="kassensichvVisible()">
+    <h3>TSE (Germany)</h3>
+    <p class="hint">
+      German law (KassenSichV) wants every sale on an electronic till signed by a certified security device (TSE).
+      A device with a TSE signs its own sales, and - as a main TSE device - those of devices without one, such as a backup
+      phone, over the live connection. A TSE that fails doesn't stop the till - the receipt says the sale was not signed.
+    </p>
+    <div class="tse-form">
+      <label>
+        <span>TSE</span>
+        <select :value="tseState.settings.driver" @change="chooseTse(($event.target as HTMLSelectElement).value as TseDriverId)">
+          <option value="none">{{ mainTseNames.length ? 'None - sign through a main TSE device' : 'None' }}</option>
+          <option value="swissbit">Swissbit TSE (USB or microSD)</option>
+          <option value="fiskaly">fiskaly cloud TSE (set up under Settings → TSE (fiskaly cloud))</option>
+          <option value="test">Test TSE - development only, not certified</option>
+        </select>
+      </label>
+      <label v-if="tseMode() === 'own'" class="check">
+        <input type="checkbox" :checked="isMainTse" @change="toggleMainTse(($event.target as HTMLInputElement).checked)" />
+        <span>Main TSE device - devices without a TSE of their own sign through this one. Keep it on and connected while they sell.</span>
+      </label>
+      <template v-else-if="tseMode() === 'remote'">
+        <div v-if="assigned" class="hint">
+          Signs through <strong>{{ deviceLabel(assigned) }}</strong> - assigned to this till, can't be changed. Needs a connection while selling.
+          While it is out, another main TSE device signs and the outage is logged.
+        </div>
+        <div v-else class="assign">
+          <p class="error" role="alert">No main TSE device assigned to this till - its sales at events in Germany are not signed.</p>
+          <label>
+            <span>Main TSE device for this till</span>
+            <select v-model="hostPick">
+              <option v-for="d in hostChoices" :key="d" :value="d">{{ deviceLabel(d) }}</option>
+            </select>
+          </label>
+          <small>Once assigned this can't be changed: a till belongs to one TSE.</small>
+          <div class="row"><button type="button" @click="assignHost">Assign</button></div>
+        </div>
+        <details v-if="tseState.outages.length" class="outages">
+          <summary>TSE outages ({{ tseState.outages.length }})</summary>
+          <ul>
+            <li v-for="(o, i) in [...tseState.outages].reverse().slice(0, 20)" :key="i">
+              {{ fmtWhen(o.from) }} - {{ o.to ? fmtWhen(o.to) : 'ongoing' }}: {{ o.reason }}
+            </li>
+          </ul>
+        </details>
+      </template>
+      <p v-else-if="tseState.settings.driver === 'none'" class="hint">No main TSE device on this account yet - this device signs nothing.</p>
+      <p v-if="tseState.mainDevices.length" class="hint">Main TSE devices:</p>
+      <ul v-if="tseState.mainDevices.length" class="main-tse">
+        <li v-for="d in tseState.mainDevices" :key="d">
+          <span>{{ d === id ? 'This device' : deviceLabel(d) }}</span>
+          <button v-if="d !== id" type="button" class="quiet" @click="removeMain(d)">Remove</button>
+        </li>
+      </ul>
+      <p v-if="tseError" class="error" role="alert">{{ tseError }}</p>
+      <template v-if="tseMode() !== 'none'">
+        <label>
+          <span>Till serial number</span>
+          <input :value="tseState.settings.clientId" type="text" maxlength="30" @change="setTseSettings({ clientId: ($event.target as HTMLInputElement).value.trim() })" />
+          <small>Printed on receipts and given when registering the till with the tax office. Receipt numbers count up per till serial number, so changing it starts them again from 1.</small>
+        </label>
+        <label>
+          <span>Sign</span>
+          <select :value="tseState.settings.scope" @change="setTseSettings({ scope: ($event.target as HTMLSelectElement).value as 'germany' | 'always' })">
+            <option value="germany">Sales at events in Germany</option>
+            <option value="always">Every sale</option>
+          </select>
+        </label>
+        <div class="row">
+          <button type="button" :disabled="checkingTse" @click="checkTse">{{ checkingTse ? 'Checking…' : 'Check TSE' }}</button>
+        </div>
+        <p v-if="sellerMissing" class="error" role="alert">
+          Receipts in Germany must show your business name and address. Add them under Settings → Profile, or set them in the till's
+          receipt settings.
+        </p>
+        <p v-if="tseState.error" class="error" role="alert">{{ tseState.error }}</p>
+        <dl v-else-if="tseState.info" class="facts">
+          <dt>Status</dt>
+          <dd :class="tseState.info.certified ? 'ok' : 'warn'">
+            {{ tseState.info.certified ? 'Ready' : tseState.settings.driver === 'fiskaly' ? 'Ready - fiskaly TEST environment, not for real sales' : 'Ready - test TSE, not for real sales' }}{{ tseMode() === 'remote' ? ' (through a main TSE device)' : '' }}
+          </dd>
+          <dt>TSE serial</dt>
+          <dd class="mono">{{ tseState.info.serial }}</dd>
+          <dt>Signature</dt>
+          <dd>{{ tseState.info.algorithm }}</dd>
+          <dt v-if="tseState.info.expires">Certificate until</dt>
+          <dd v-if="tseState.info.expires">{{ tseState.info.expires }}</dd>
+        </dl>
+      </template>
+    </div>
+    </template>
 
     <h3>Appearance</h3>
     <div class="themes" role="radiogroup" aria-label="Theme">
@@ -325,6 +501,16 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .toggles .body { display: flex; flex-direction: column; }
 .toggles .label { font-size: .875rem; font-weight: 600; }
 .toggles .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.tse-form { display: flex; flex-direction: column; gap: .6rem; width: 100%; }
+.tse-form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.tse-form small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
+.tse-form label.check { flex-direction: row; align-items: flex-start; gap: .5rem; }
+.assign { display: flex; flex-direction: column; gap: .4rem; }
+.assign label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.outages { font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.outages ul { margin: .3rem 0 0; padding-left: 1.1rem; }
+.main-tse { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.main-tse li { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .btn { display: inline-flex; align-items: center; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }

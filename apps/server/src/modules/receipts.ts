@@ -10,6 +10,10 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { makeSecretBox } from '@zollify/server-core';
+import { registerDsfinvk } from './dsfinvk/route';
+import { FISKALY_BASE, FiskalyApi } from './fiskaly/api';
+import { migrateFiskaly, registerFiskaly } from './fiskaly/route';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -164,7 +168,12 @@ export interface PublicReceipt {
   seller: { name: string; address: string[]; vatId?: string };
   event: string;
   at: number;
+  /** The till's receipt number, or - on a sale from before numbering - a short reference. */
   number: string;
+  /** The till that numbered it; absent with a short reference. */
+  till?: string;
+  /** The cancelling receipt's number, when the sale was cancelled. */
+  cancelledBy?: { number: string; till: string };
   currency: string;
   lines: { title: string; variant?: string; qty: number; amount: number; /** VAT rate letter, when a sale has more than one. */ vat?: string }[];
   discounts: { name: string; amount: number }[];
@@ -174,6 +183,30 @@ export interface PublicReceipt {
   brand: { logo?: string; footer: string[] };
   /** VAT included per rate, or the exemption the sale was made under. */
   vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
+  /** KassenSichV: what a receipt in Germany must show of the TSE signature, or that the TSE was out. */
+  tse?: PublicTse;
+  revertTse?: PublicTse;
+}
+
+type PublicTse =
+  | { failed: true }
+  | { transactionNumber: number; signatureCounter: number; start: string; finish: string; clientId: string; serial: string; signature: string; test?: true };
+
+/** Only the fields a German receipt carries - never the failure reason, which can name the device. */
+function publicTse(tse: Transaction['tse']): PublicTse | undefined {
+  if (!tse) return undefined;
+  if ('failed' in tse) return { failed: true };
+  const s = tse.signed;
+  return {
+    transactionNumber: Number(s.transactionNumber) || 0,
+    signatureCounter: Number(s.signatureCounter) || 0,
+    start: String(s.start).slice(0, 30),
+    finish: String(s.finish).slice(0, 30),
+    clientId: String(s.clientId).slice(0, 60),
+    serial: String(s.serial).slice(0, 128),
+    signature: String(s.signature).slice(0, 400),
+    ...(s.test ? { test: true as const } : {}),
+  };
 }
 
 /** Lines at the till's price, in the currency the customer paid - see receiptBreakdown. */
@@ -211,7 +244,11 @@ export function publicReceipt(
     seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
-    number: tx.id.slice(-8).toUpperCase(),
+    number: tx.receipt ? String(Number(tx.receipt.number) || 0) : tx.id.slice(-8).toUpperCase(),
+    ...(tx.receipt ? { till: String(tx.receipt.till).slice(0, 60) } : {}),
+    ...(tx.revertedAt && tx.revertReceipt
+      ? { cancelledBy: { number: String(Number(tx.revertReceipt.number) || 0), till: String(tx.revertReceipt.till).slice(0, 60) } }
+      : {}),
     currency: tx.currency,
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
@@ -223,6 +260,8 @@ export function publicReceipt(
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
     },
+    ...(publicTse(tx.tse) ? { tse: publicTse(tx.tse) } : {}),
+    ...(publicTse(tx.revertTse) ? { revertTse: publicTse(tx.revertTse) } : {}),
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -288,6 +327,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .good { color: var(--accent); }
 .row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
 .row.net { padding-left: 1rem; }
+.mono { font-family: ui-monospace, monospace; font-size: .7rem; word-break: break-all; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
@@ -386,6 +426,7 @@ const SCRIPT = String.raw`(function () {
     receiptEl.appendChild(el('hr'));
     if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
+    if (r.till) receiptEl.appendChild(el('p', 'muted', 'Receipt no. ' + r.number + ' · Till ' + r.till));
     receiptEl.appendChild(el('hr'));
     r.lines.forEach(function (l) {
       receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency) + (l.vat ? ' ' + l.vat : '')));
@@ -405,10 +446,27 @@ const SCRIPT = String.raw`(function () {
     });
     if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
     if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
+    var c = r.cancelledBy;
+    [['TSE', r.tse, r.till], ['TSE - Storno' + (c ? ' - receipt no. ' + c.number : ''), r.revertTse, c && c.till]].forEach(function (pair) {
+      var t = pair[1];
+      if (!t) return;
+      receiptEl.appendChild(el('hr'));
+      receiptEl.appendChild(el('p', 'muted', pair[0]));
+      if (t.failed) { receiptEl.appendChild(el('p', 'muted', 'TSE ausgefallen - Beleg ohne TSE-Signatur')); return; }
+      if (t.test) receiptEl.appendChild(el('p', 'muted', 'Test-TSE - nicht zertifiziert'));
+      receiptEl.appendChild(row('Transaktion', String(t.transactionNumber), 'muted'));
+      receiptEl.appendChild(row('Signaturzähler', String(t.signatureCounter), 'muted'));
+      receiptEl.appendChild(row('Start', new Date(t.start).toLocaleString(), 'muted'));
+      receiptEl.appendChild(row('Ende', new Date(t.finish).toLocaleString(), 'muted'));
+      if (t.clientId !== pair[2]) receiptEl.appendChild(row('Kasse', t.clientId, 'muted'));
+      receiptEl.appendChild(el('p', 'muted mono', 'TSE ' + t.serial));
+      receiptEl.appendChild(el('p', 'muted mono', 'Signatur ' + t.signature));
+    });
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
     receiptEl.appendChild(el('hr'));
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
-    receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    if (c) receiptEl.appendChild(el('p', 'muted c', 'Cancelled by receipt no. ' + c.number + (c.till !== r.till ? ' (till ' + c.till + ')' : '')));
+    if (!r.till) receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
     statusEl.hidden = true;
     receiptEl.hidden = false;
     printBtn.hidden = false;
@@ -448,13 +506,42 @@ function ipOf(req: FastifyRequest): string {
   return req.ip;
 }
 
-export const receiptsServerModule: ServerModule = {
+export interface PosServerOptions {
+  /** For tests: fiskaly's API stand-in. */
+  fiskaly?: FiskalyApi;
+}
+
+/**
+ * The till's server half. Built with the server secret: it keeps the
+ * account's fiskaly credentials encrypted (see fiskaly/route.ts).
+ */
+export function posServerModule(jwtSecret: string, options: PosServerOptions = {}): ServerModule {
+  const box = makeSecretBox(jwtSecret, 'zollify-module-credentials-v1');
+  const fiskaly = options.fiskaly ?? new FiskalyApi((url, init) => fetch(url, init), process.env.FISKALY_BASE_URL || FISKALY_BASE);
+  return {
+    ...receiptsServerModule,
+    migrate(db) {
+      migrate(db);
+      migrateFiskaly(db);
+    },
+    routes: (ctx: ModuleContext) => async (app) => {
+      await receiptsServerModule.routes!(ctx)(app, {});
+      // KassenSichV: the fiskaly cloud TSE, signed here.
+      registerFiskaly(app, ctx, box, fiskaly);
+    },
+  };
+}
+
+const receiptsServerModule: ServerModule = {
   id: MODULE_ID,
   migrate,
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
+
+    // KassenSichV: the DSFinV-K export of the till records.
+    registerDsfinvk(app, ctx);
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
       const who = ctx.identity(req);

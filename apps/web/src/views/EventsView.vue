@@ -17,6 +17,8 @@ import {
   setActiveEvent,
   setClaim,
   shellConfirm,
+  germanyTseGap,
+  setKassensichv,
   upsertSalesEvent,
   visibleEvents,
 } from '@zollify/platform';
@@ -265,6 +267,23 @@ const vatPreview = computed(() => {
   if (r.standard == null) return 'No VAT rates known for this country - enter them, or sales are recorded without VAT.';
   return `Charging ${fmtRate(r.standard)}${r.reduced != null && r.reduced !== r.standard ? `, ${fmtRate(r.reduced)} on reduced products` : ''}.`;
 });
+/**
+ * KassenSichV: an event in Germany while sales there would go unsigned -
+ * the Germany features switched off, or no device with a TSE yet.
+ */
+const isGerman = (country: string | undefined): boolean => countryCodeOf(country) === 'DE';
+const formTseGap = computed(() => (isGerman(form.country) ? germanyTseGap() : null));
+const cardTseGap = (e: SalesEvent): ReturnType<typeof germanyTseGap> => (isGerman(e.venue?.country) && !eventIsOver(e) ? germanyTseGap() : null);
+const switchingOn = ref(false);
+async function switchKassensichvOn(): Promise<void> {
+  switchingOn.value = true;
+  try {
+    await setKassensichv(true);
+  } finally {
+    switchingOn.value = false;
+  }
+}
+
 /** Short VAT summary for an event card. */
 function vatSummary(e: SalesEvent): string {
   const r = resolveEventVat(e, account.value?.profile);
@@ -358,6 +377,7 @@ async function save(): Promise<void> {
           </div>
           <p class="when">{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p v-if="cardTseGap(e)" class="tse-chip">{{ cardTseGap(e) === 'off' ? 'In Germany - TSE switched off' : 'In Germany - no TSE set up' }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active'" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -397,6 +417,16 @@ async function save(): Promise<void> {
           <label><span>City</span><input v-model="form.city" type="text" /></label>
           <label><span>Postcode</span><input v-model="form.postcode" type="text" /></label>
           <label><span>Country</span><CountryPicker v-model="form.country" store="name" /></label>
+        </div>
+        <div v-if="formTseGap" class="tse-warning" role="alert">
+          <template v-if="formTseGap === 'off'">
+            <strong>Selling in Germany needs a TSE.</strong> German law (KassenSichV) wants every sale on an electronic till signed by a
+            certified security device, and Zollify's Germany features are switched off - sales at this event would not be signed.
+            <button v-if="canEdit" type="button" :disabled="switchingOn" @click="switchKassensichvOn">Switch on Germany (KassenSichV)</button>
+          </template>
+          <template v-else>
+            <strong>No device has a TSE yet.</strong> Sales at this event would not be signed - set one up under Settings → This device → TSE.
+          </template>
         </div>
         <label><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
 
@@ -515,4 +545,6 @@ legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .choice { display: flex; gap: 1rem; flex-wrap: wrap; }
 .radio { flex-direction: row; align-items: center; gap: .4rem; }
 .footer { display: flex; justify-content: flex-end; gap: .5rem; }
+.tse-warning { border: 1px solid var(--zfy-danger, #c6512f); border-radius: 10px; padding: .6rem .8rem; font-size: .85rem; color: var(--zfy-danger, #c6512f); display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.tse-chip { margin: 0; font-size: .8rem; color: var(--zfy-danger, #c6512f); }
 </style>

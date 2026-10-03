@@ -8,6 +8,8 @@ import type {
   DisplaySubscribeMessage,
   NudgeMessage,
   PaymentResultMessage,
+  TseRequestMessage,
+  TseResultMessage,
   PaymentTriggerMessage,
   ShellUpdateMessage,
 } from '@zollify/shared';
@@ -15,6 +17,7 @@ import type { JwtClaims } from './auth';
 import { touchDevice } from './db';
 
 type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
+type TseMessage = TseRequestMessage | TseResultMessage;
 
 /**
  * WebSocket is a doorbell only: after a push, every *other* connected device
@@ -100,14 +103,20 @@ export class Rooms {
    * only the named target device gets the message, unlike the broadcast
    * relayDisplayCart. Ephemeral - nothing is stored.
    */
-  relayToDevice(accountId: string, fromDeviceId: string, msg: PaymentMessage): void {
+  /** Whether the target device was connected to receive it. */
+  relayToDevice(accountId: string, fromDeviceId: string, msg: PaymentMessage | TseMessage): boolean {
     const room = this.byAccount.get(accountId);
-    if (!room) return;
-    const stamped: PaymentMessage = { ...msg, from: fromDeviceId };
+    if (!room) return false;
+    const stamped: PaymentMessage | TseMessage = { ...msg, from: fromDeviceId };
     const json = JSON.stringify(stamped);
+    let delivered = false;
     for (const { socket, deviceId } of room) {
-      if (deviceId === msg.to && socket.readyState === socket.OPEN) socket.send(json);
+      if (deviceId === msg.to && socket.readyState === socket.OPEN) {
+        socket.send(json);
+        delivered = true;
+      }
     }
+    return delivered;
   }
 }
 
@@ -174,21 +183,28 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       }
     }
     socket.on('message', (raw) => {
-      // Registers push ephemeral customer-display cart snapshots and the
-      // remote-payment trigger/result handshake; everything else is ignored
+      // Registers push ephemeral customer-display cart snapshots, the
+      // remote-payment trigger/result handshake and requests to a main TSE
+      // device (and its answers); everything else is ignored
       // (sync data always travels over HTTP).
       try {
-        const msg = JSON.parse(String(raw)) as DisplayCartMessage | PaymentMessage | DisplaySubscribeMessage;
+        const msg = JSON.parse(String(raw)) as DisplayCartMessage | PaymentMessage | TseMessage | DisplaySubscribeMessage;
         if (msg?.type === 'display.subscribe') {
           rooms.setDisplay(claims.accountId, member, msg.on === true);
         } else if (msg?.type === 'display.cart' && msg.cart && typeof msg.cart === 'object') {
           rooms.relayDisplayCart(claims.accountId, deviceId ?? 'unknown', msg.cart);
         } else if (
-          (msg?.type === 'payment.trigger' || msg?.type === 'payment.result') &&
+          (msg?.type === 'payment.trigger' || msg?.type === 'payment.result' || msg?.type === 'tse.request' || msg?.type === 'tse.result') &&
           typeof msg.to === 'string' &&
           typeof msg.requestId === 'string'
         ) {
-          rooms.relayToDevice(claims.accountId, deviceId ?? 'unknown', msg);
+          const delivered = rooms.relayToDevice(claims.accountId, deviceId ?? 'unknown', msg);
+          // A till waiting on a main TSE device that isn't connected hears so
+          // at once and tries the next one, instead of waiting out a timeout.
+          if (!delivered && msg.type === 'tse.request') {
+            const reply: TseResultMessage = { type: 'tse.result', to: deviceId ?? 'unknown', from: msg.to, requestId: msg.requestId, ok: false, error: 'The main TSE device is not connected.' };
+            socket.send(JSON.stringify(reply));
+          }
         }
       } catch {
         /* not JSON - ignore */

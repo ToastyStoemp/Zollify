@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VatProfileSchema, VatProfileUpdateSchema, type VatProfile } from './vat';
 
 /** Wire protocol between app and sync server - validated with zod on both sides. */
 
@@ -133,6 +134,15 @@ export const ArtistDetailsSchema = z.object({
   eori: z.string().max(40).default(''),
 });
 export type ArtistDetails = z.infer<typeof ArtistDetailsSchema>;
+/**
+ * A change to some artist fields. Built without the defaults: in zod 4
+ * `.partial()` keeps them, so an update naming one field blanked the rest.
+ */
+const ArtistDetailsUpdateSchema = z.object(
+  Object.fromEntries(Object.entries(ArtistDetailsSchema.shape).map(([k, v]) => [k, v.unwrap()])) as {
+    [K in keyof typeof ArtistDetailsSchema.shape]: ReturnType<(typeof ArtistDetailsSchema.shape)[K]['unwrap']>;
+  },
+).partial();
 
 /** Account-wide settings that every device shares; kept on the server, not synced as ops. */
 export interface AccountProfile {
@@ -141,6 +151,8 @@ export interface AccountProfile {
   artist: ArtistDetails;
   /** ISO code new events and the cash-up fall back to. */
   defaultCurrency: string;
+  /** Small-business VAT exemptions, by country - see resolveEventVat. */
+  vat?: VatProfile;
 }
 
 export const CurrencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/);
@@ -148,14 +160,15 @@ export const CurrencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{
 export const ProfileUpdateSchema = z.object({
   /** Renames the account; owner only. */
   name: z.string().trim().min(1).max(80).optional(),
-  artist: ArtistDetailsSchema.partial().optional(),
+  artist: ArtistDetailsUpdateSchema.optional(),
   defaultCurrency: CurrencyCodeSchema.optional(),
   setupCompleted: z.boolean().optional(),
+  vat: VatProfileUpdateSchema.optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export function emptyProfile(): AccountProfile {
-  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF' };
+  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF', vat: VatProfileSchema.parse({}) };
 }
 
 export interface AuthUser {

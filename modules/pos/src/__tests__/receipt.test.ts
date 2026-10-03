@@ -102,4 +102,40 @@ describe('printed receipt amounts', () => {
     expect(amountOn(lines, 'Discount')).toBe('-CHF 4.00');
     expect(amountOn(lines, 'TOTAL')).toBe('CHF 36.00');
   });
+
+  it('prints VAT per rate, lettering the lines when a sale mixes rates', () => {
+    const lines = text(
+      sale({
+        currency: 'EUR',
+        items: [
+          { pid: 'p1', vid: null, title: 'Print', qty: 2, unitPrice: 20, lineTotal: 40 },
+          { pid: 'p2', vid: null, title: 'Artbook', qty: 1, unitPrice: 10.7, lineTotal: 10.7 },
+        ],
+        total: 50.7,
+        payments: [{ kind: 'cash', amount: 50.7 }],
+        tax: { country: 'DE', exempt: false, rates: [19, 7] },
+      }),
+    );
+    expect(amountOn(lines, '2 x Print')).toBe('EUR 40.00 A');
+    expect(amountOn(lines, '1 x Artbook')).toBe('EUR 10.70 B');
+    expect(amountOn(lines, 'A incl. VAT 19%')).toBe('EUR 6.39');
+    expect(amountOn(lines, 'B incl. VAT 7%')).toBe('EUR 0.70');
+  });
+
+  it('prints one rate without letters', () => {
+    const lines = text(sale({ currency: 'EUR', tax: { country: 'DE', exempt: false, rates: [19, 19] } }));
+    expect(amountOn(lines, '2 x Print')).toBe('EUR 40.00');
+    expect(amountOn(lines, 'incl. VAT 19%')).toBe('EUR 7.18');
+  });
+
+  it('prints the exemption and the EX number instead of VAT, and no VAT number', () => {
+    const tx = sale({ currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } });
+    const lines = buildReceiptLines(tx, 'Con', { artist: { companyName: 'Harbour', vatNumber: 'DE123456789' }, logoB64: '', footerText: '' })
+      .filter((l) => l.kind === 'text')
+      .map((l) => (l.text ?? '').trim());
+    expect(lines).toContain('VAT exempt under the EU SME');
+    expect(lines).toContain('EX: DE123456789EX');
+    expect(lines.join('\n')).not.toContain('VAT: DE123456789');
+    expect(lines.join('\n')).not.toContain('incl. VAT');
+  });
 });

@@ -96,6 +96,31 @@ export async function printReceipt(lines: ReceiptLine[]): Promise<{ printed: boo
   return { printed: false, error: 'Printing is not available on this device' };
 }
 
+/** VAT per rate for a sale (see vatBreakdown in @zollify/shared); none on an older shell or an untaxed sale. */
+export function receiptVat(tx: Transaction): shared.VatRow[] {
+  const fn = (shared as Record<string, unknown>).vatBreakdown as typeof shared.vatBreakdown | undefined;
+  return fn && tx.tax ? fn(tx) : [];
+}
+
+export function vatRateLabel(rate: number): string {
+  const fn = (shared as Record<string, unknown>).fmtRate as typeof shared.fmtRate | undefined;
+  return fn ? fn(rate) : `${rate}%`;
+}
+
+/** Word-wraps text to the paper width. */
+function wrap(text: string, width: number): string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if (line && line.length + 1 + word.length > width) {
+      out.push(line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
 /**
  * Lines and discounts as a receipt lists them (see receiptBreakdown in
  * @zollify/shared). Looked up at runtime: this bundle may run on an older
@@ -159,7 +184,8 @@ export function buildReceiptLines(
   if (cityLine) lines.push(center(cityLine));
   if (artist.phone) lines.push(center(artist.phone));
   if (artist.email) lines.push(center(artist.email));
-  const vat = resolveVatNumber(artist, eventCountry);
+  // An exempt sale prints its exemption instead (see the VAT block below).
+  const vat = tx.tax?.exempt ? '' : resolveVatNumber(artist, eventCountry);
   if (vat) lines.push(center(`VAT: ${vat}`));
 
   lines.push({ kind: 'text', text: DIVIDER });
@@ -174,10 +200,17 @@ export function buildReceiptLines(
   // book currency; printing those under the charged currency was wrong, and
   // discounts spread into the lines made a line disagree with its own "à".)
   const breakdown = receiptAmounts(tx);
+  // With more than one VAT rate on a sale, each line is marked with its
+  // rate's letter, so it is clear which items carry which rate.
+  const vatRows = receiptVat(tx);
+  const letterOf = new Map(vatRows.map((r) => [r.rate, r.letter]));
+  const marked = vatRows.length > 1;
   tx.items.forEach((item, n) => {
     const name = item.variantLabel ? `${item.title} (${item.variantLabel})` : item.title;
     const amount = breakdown.lines[n] ?? item.lineTotal;
-    lines.push({ kind: 'text', text: row(`${item.qty} x ${name}`, fmtPrice(amount, tx.currency)) });
+    const rate = tx.tax?.rates[n];
+    const letter = marked && rate != null ? ` ${letterOf.get(rate) ?? ''}` : '';
+    lines.push({ kind: 'text', text: row(`${item.qty} x ${name}`, `${fmtPrice(amount, tx.currency)}${letter}`) });
     if (item.qty > 1) lines.push({ kind: 'text', text: `   à ${fmtPrice(Math.round((amount / item.qty) * 100) / 100, tx.currency)}` });
   });
   if (breakdown.discounts.length) {
@@ -191,6 +224,17 @@ export function buildReceiptLines(
 
   lines.push({ kind: 'text', text: DIVIDER });
   lines.push({ kind: 'text', text: row('TOTAL', fmtPrice(tx.total, tx.currency)), doubleHeight: true });
+
+  // ── VAT ──
+  // Prices are gross: the VAT inside the total, per rate, with the net.
+  for (const r of vatRows) {
+    lines.push({ kind: 'text', text: row(`${marked ? `${r.letter} ` : ''}incl. VAT ${vatRateLabel(r.rate)}`, fmtPrice(r.vat, tx.currency)) });
+    lines.push({ kind: 'text', text: row('   net', fmtPrice(r.net, tx.currency)) });
+  }
+  if (tx.tax?.exempt) {
+    if (tx.tax.note) for (const part of wrap(tx.tax.note, WIDTH)) lines.push(center(part));
+    if (tx.tax.exNumber) lines.push(center(`EX: ${tx.tax.exNumber}`));
+  }
 
   // ── Payment legs ──
   for (const leg of tx.payments) {

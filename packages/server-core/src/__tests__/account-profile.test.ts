@@ -112,6 +112,25 @@ describe('account profile', () => {
     expect(res.json().user.profile.artist.fullName).toBe('Wolf');
   });
 
+  it('keeps the small-business VAT exemptions, merged field by field', async () => {
+    const put = (vat: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { vat } });
+    expect((await put({ exemptCountries: ['de', 'NL'], exNumber: 'DE123456789EX' })).statusCode).toBe(200);
+    expect((await put({ homeNote: 'Kleinunternehmer' })).statusCode).toBe(200);
+
+    const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(profile.vat).toEqual({ exemptCountries: ['DE', 'NL'], exNumber: 'DE123456789EX', homeNote: 'Kleinunternehmer', crossBorderNote: '' });
+
+    expect((await put({ exemptCountries: ['Germany'] })).statusCode).toBe(400);
+  });
+
+  it('changes only the artist fields sent', async () => {
+    const put = (artist: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { artist } });
+    await put({ companyName: 'Harbour Prints', street: 'Hafenweg 1' });
+    await put({ street: 'Seestrasse 2' });
+    const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(profile.artist).toMatchObject({ companyName: 'Harbour Prints', street: 'Seestrasse 2' });
+  });
+
   it('rejects a profile that fails validation', async () => {
     const res = await app.inject({
       method: 'PUT',

@@ -105,6 +105,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
     currency: sale.currency,
     ...(sale.receiptToken ? { receiptToken: sale.receiptToken } : {}),
     ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: sale.asCharged } : {}),
+    ...(sale.tax && sale.tax.rates.length === items.length ? { tax: sale.tax } : {}),
     // Only set when the sale was converted; an unconverted sale leaves these
     // absent rather than duplicating its own currency into them.
     ...(sale.baseCurrency && sale.baseCurrency !== sale.currency

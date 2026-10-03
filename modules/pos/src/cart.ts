@@ -3,7 +3,7 @@ import type { SaleEvent, SaleLine } from '@zollify/sdk';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
-import { mintReceiptToken } from './lib/after-sale';
+import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
   computeCartTotals,
   distributeTotal,
@@ -289,6 +289,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       base,
     );
 
+    const tax = saleTaxFor(cart.eventId, priced.map((l) => l.productId));
     const sale: SaleEvent = {
       saleId,
       eventId: cart.eventId,
@@ -298,7 +299,9 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseCurrency: cart.baseCurrency,
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
-      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }) => line),
+      // Each line carries the VAT rate actually applied (null when exempt or unknown).
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
+      ...(tax ? { tax } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.
       receiptToken: mintReceiptToken(),

@@ -6,6 +6,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ArtistDetailsSchema,
+  VatProfileSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
   RegisterRequestSchema,
@@ -95,6 +96,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       setupCompletedAt: typeof parsed.setupCompletedAt === 'number' ? parsed.setupCompletedAt : null,
       artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
+      vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
     };
   } catch {
     return emptyProfile();

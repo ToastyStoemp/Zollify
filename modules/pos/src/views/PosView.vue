@@ -392,7 +392,8 @@ function add(pid: string, vid: string | null): void {
     name: v ? `${p.title} · ${v.name}` : p.title,
     qty: 1,
     unitPrice: v?.price ?? p.price,
-    taxRate: p.vatRate ?? null,
+    // Set at checkout from the event's VAT; p.vatRate is the Swiss import rate.
+    taxRate: null,
     type: p.type,
   });
 }

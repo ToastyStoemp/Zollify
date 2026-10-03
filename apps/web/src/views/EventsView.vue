@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent } from '@zollify/shared';
-import { fmtPrice, toLocalPrice } from '@zollify/shared';
+import { VAT_RATES, countryCodeOf, fmtPrice, fmtRate, resolveEventVat, toLocalPrice, type EventVat } from '@zollify/shared';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -135,6 +135,10 @@ const form = reactive({
   copyStockFrom: '',
   /** 'claims' copies the claims as they were; 'unsold' claims only what that event did not sell. */
   stockMode: 'unsold' as 'claims' | 'unsold',
+  /** VAT: 'auto' follows the country and Settings → VAT; rates blank = the country's. */
+  vatMode: 'auto' as 'auto' | 'charge' | 'exempt',
+  vatStandard: '',
+  vatReduced: '',
   /** Event whose price overrides come along - only while the local currency still matches it. */
   pricesFrom: '',
 });
@@ -155,6 +159,9 @@ function openNew(): void {
     roundingIncrement: '0',
     copyStockFrom: '',
     stockMode: 'unsold',
+    vatMode: 'auto',
+    vatStandard: '',
+    vatReduced: '',
     pricesFrom: '',
   });
   rateError.value = '';
@@ -182,8 +189,14 @@ function openDuplicate(e: SalesEvent): void {
     copyStockFrom: claimsForEvent(e.id).length ? e.id : '',
     stockMode: eventIsOver(e) ? 'unsold' : 'claims',
     pricesFrom: e.id,
+    ...vatFormOf(e.vat),
   });
 }
+const vatFormOf = (vat: EventVat | undefined) => ({
+  vatMode: vat?.mode ?? 'auto',
+  vatStandard: vat?.standard != null ? String(vat.standard) : '',
+  vatReduced: vat?.reduced != null ? String(vat.reduced) : '',
+});
 function openEdit(e: SalesEvent): void {
   editId.value = e.id;
   Object.assign(form, {
@@ -200,6 +213,7 @@ function openEdit(e: SalesEvent): void {
     roundingIncrement: String(e.roundingIncrement ?? 0),
     copyStockFrom: '',
     stockMode: 'unsold',
+    ...vatFormOf(e.vat),
     pricesFrom: '',
   });
   rateError.value = '';
@@ -227,6 +241,36 @@ function pickPricesFrom(): void {
 const stockSource = computed(() => (form.copyStockFrom ? visibleEvents.value.find((e) => e.id === form.copyStockFrom) : undefined));
 /** The source still reserves its own claims until it is over, so copying them as-is would hold the same stock twice. */
 const stockSourceRunning = computed(() => Boolean(stockSource.value) && !eventIsOver(stockSource.value));
+
+// ── VAT ─────────────────────────────────────────────────────────────────────
+const vatCountry = computed(() => countryCodeOf(form.country));
+const countryRates = computed(() => VAT_RATES[vatCountry.value]);
+const parseRate = (v: string): number | undefined => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) && n >= 0 && n < 100 ? n : undefined;
+};
+function formVat(): EventVat | undefined {
+  const vat: EventVat = {};
+  if (form.vatMode !== 'auto') vat.mode = form.vatMode;
+  const standard = parseRate(form.vatStandard);
+  const reduced = parseRate(form.vatReduced);
+  if (standard != null) vat.standard = standard;
+  if (reduced != null) vat.reduced = reduced;
+  return Object.keys(vat).length ? vat : undefined;
+}
+/** What this event's receipts will say, as the form stands. */
+const vatPreview = computed(() => {
+  const r = resolveEventVat({ venue: { country: form.country }, vat: formVat() }, account.value?.profile);
+  if (r.exempt) return `Exempt - receipts say “${r.note}”${r.exNumber ? ` with EX ${r.exNumber}` : ''}.`;
+  if (r.standard == null) return 'No VAT rates known for this country - enter them, or sales are recorded without VAT.';
+  return `Charging ${fmtRate(r.standard)}${r.reduced != null && r.reduced !== r.standard ? `, ${fmtRate(r.reduced)} on reduced products` : ''}.`;
+});
+/** Short VAT summary for an event card. */
+function vatSummary(e: SalesEvent): string {
+  const r = resolveEventVat(e, account.value?.profile);
+  if (r.exempt) return 'VAT exempt';
+  return r.standard != null ? `VAT ${fmtRate(r.standard)}` : '';
+}
 
 async function fetchRate(): Promise<void> {
   if (!form.localCurrency.trim()) return;
@@ -276,6 +320,7 @@ async function save(): Promise<void> {
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
     roundingIncrement: Number(form.roundingIncrement) || 0,
+    vat: formVat(),
     status: existing?.status ?? 'planned',
     updatedAt: Date.now(),
   };
@@ -311,7 +356,7 @@ async function save(): Promise<void> {
             <strong>{{ e.name }}</strong>
             <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
           </div>
-          <p class="when">{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template></p>
+          <p class="when">{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
@@ -384,6 +429,32 @@ async function save(): Promise<void> {
             <span v-if="rateError" class="warn">{{ rateError }}</span>
             <span v-else-if="localExample" class="hint">{{ localExample }}</span>
           </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>VAT</legend>
+          <div class="three">
+            <label>
+              <span>VAT here</span>
+              <select v-model="form.vatMode">
+                <option value="auto">Automatic</option>
+                <option value="charge">Charge VAT</option>
+                <option value="exempt">Exempt (small business)</option>
+              </select>
+            </label>
+            <template v-if="form.vatMode !== 'exempt'">
+              <label>
+                <span>Standard rate %</span>
+                <input v-model="form.vatStandard" type="number" min="0" max="99" step="0.1" inputmode="decimal" :placeholder="countryRates ? String(countryRates.standard) : '-'" />
+              </label>
+              <label>
+                <span>Reduced rate %</span>
+                <input v-model="form.vatReduced" type="number" min="0" max="99" step="0.1" inputmode="decimal" list="zfy-reduced-rates" :placeholder="countryRates ? String(countryRates.reduced[0] ?? countryRates.standard) : '-'" />
+                <datalist id="zfy-reduced-rates"><option v-for="r in countryRates?.reduced ?? []" :key="r" :value="r" /></datalist>
+              </label>
+            </template>
+          </div>
+          <p class="hint">{{ vatPreview }} Automatic is exempt in the countries ticked under Settings → VAT; blank rates use the country's.</p>
         </fieldset>
 
         <label v-if="!editId">

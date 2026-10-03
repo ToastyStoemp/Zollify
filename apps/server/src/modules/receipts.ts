@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
-import { isReceiptToken, type SalesEvent, type Transaction } from '@zollify/shared';
+import { isReceiptToken, receiptBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
   issueChallenge,
   parseProfile,
@@ -174,30 +174,14 @@ export interface PublicReceipt {
   brand: { logo?: string; footer: string[] };
 }
 
-const toMinor = (n: number): number => Math.round(n * 100);
-
-/**
- * Line amounts in the currency the customer paid.
- *
- * A converted sale records its lines in the booth's book currency and only
- * the total in the charged one; scaling the lines by total/baseTotal and
- * putting the rounding remainder on the largest line makes them add up to
- * exactly what was paid.
- */
+/** Lines at the till's price, in the currency the customer paid - see receiptBreakdown. */
 function chargedLines(tx: Transaction): PublicReceipt['lines'] {
-  const converted = tx.baseCurrency && tx.baseCurrency !== tx.currency && (tx.baseTotal ?? 0) > 0;
-  const scale = converted ? tx.total / tx.baseTotal! : 1;
-  const minor = tx.items.map((i) => toMinor(i.lineTotal * scale));
-  if (converted && minor.length) {
-    const drift = toMinor(tx.total) - minor.reduce((a, b) => a + b, 0);
-    const biggest = minor.indexOf(Math.max(...minor));
-    minor[biggest] = minor[biggest]! + drift;
-  }
+  const amounts = receiptBreakdown(tx).lines;
   return tx.items.map((i, n) => ({
     title: String(i.title ?? ''),
     variant: i.variantLabel ? String(i.variantLabel) : undefined,
     qty: Number(i.qty) || 0,
-    amount: minor[n]! / 100,
+    amount: amounts[n]!,
   }));
 }
 
@@ -222,9 +206,7 @@ export function publicReceipt(
     number: tx.id.slice(-8).toUpperCase(),
     currency: tx.currency,
     lines: chargedLines(tx),
-    // Discounts are normally spread into the line amounts; older sales may
-    // still carry them separately, in the charged currency.
-    discounts: (tx.discounts ?? []).map((d) => ({ name: String(d.name ?? ''), amount: Number(d.amount) || 0 })),
+    discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
     total: tx.total,
     payments: (tx.payments ?? []).map((p) => ({ label: paymentLabel(tx, p.kind, p.cardBrand), amount: Number(p.amount) || 0 })),
     status: tx.revertedAt ? 'voided' : 'paid',
@@ -290,6 +272,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .total { font-size: 1.3rem; font-weight: 700; }
 .logo { display: block; margin: 0 auto .75rem; max-width: 70%; max-height: 7rem; object-fit: contain; }
 @media (prefers-color-scheme: dark) { .logo { background: #fff; padding: .5rem; border-radius: 10px; } }
+.good { color: var(--accent); }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
@@ -392,7 +375,12 @@ const SCRIPT = String.raw`(function () {
     r.lines.forEach(function (l) {
       receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency)));
     });
-    r.discounts.forEach(function (d) { receiptEl.appendChild(row(d.name, '−' + money(d.amount, r.currency))); });
+    if (r.discounts.length) {
+      var sub = r.lines.reduce(function (s, l) { return s + Math.round(l.amount * 100); }, 0) / 100;
+      receiptEl.appendChild(el('hr'));
+      receiptEl.appendChild(row('Subtotal', money(sub, r.currency)));
+    }
+    r.discounts.forEach(function (d) { receiptEl.appendChild(row(d.name, '−' + money(d.amount, r.currency), 'good')); });
     receiptEl.appendChild(el('hr'));
     receiptEl.appendChild(row('Total', money(r.total, r.currency), 'total'));
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });

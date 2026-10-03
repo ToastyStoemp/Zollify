@@ -302,6 +302,15 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.
       receiptToken: mintReceiptToken(),
+      // What the screen showed, for the receipt: list prices and each
+      // discount by name, in the charged currency.
+      asCharged: {
+        listTotals: chargeLines.value.map((l) => l.lineTotal),
+        discounts: [
+          ...chargeTotals.value.ruleDiscounts.filter((r) => r.amount > 0).map((r) => ({ name: r.rule.name, amount: r.amount })),
+          ...(cart.custom && chargeTotals.value.customDiscountAmount > 0 ? [{ name: cart.custom.name || 'Discount', amount: chargeTotals.value.customDiscountAmount }] : []),
+        ],
+      },
       payment: {
         provider: pay.method === 'card' ? providerName : pay.method,
         approved: true,

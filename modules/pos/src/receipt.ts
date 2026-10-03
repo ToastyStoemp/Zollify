@@ -1,5 +1,6 @@
 import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
+import * as shared from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { receiptQrPng } from './lib/after-sale';
@@ -95,6 +96,18 @@ export async function printReceipt(lines: ReceiptLine[]): Promise<{ printed: boo
   return { printed: false, error: 'Printing is not available on this device' };
 }
 
+/**
+ * Lines and discounts as a receipt lists them (see receiptBreakdown in
+ * @zollify/shared). Looked up at runtime: this bundle may run on an older
+ * shell whose @zollify/shared predates it, and a named import of a missing
+ * export would stop the whole POS from loading there - which gets the
+ * receipt as it used to print instead.
+ */
+export function receiptAmounts(tx: Transaction): shared.ReceiptBreakdown {
+  const fn = (shared as Record<string, unknown>).receiptBreakdown as ((t: Transaction) => shared.ReceiptBreakdown) | undefined;
+  return fn ? fn(tx) : { lines: tx.items.map((i) => i.lineTotal), discounts: tx.discounts.map((d) => ({ name: d.name, amount: d.amount })) };
+}
+
 /** Printable width of the Carbon paper in characters (myPOS "Smart" format). */
 const WIDTH = 32;
 /** Thermal print head width in pixels. */
@@ -156,15 +169,24 @@ export function buildReceiptLines(
   lines.push({ kind: 'text', text: DIVIDER });
 
   // ── Items ──
-  for (const item of tx.items) {
+  // Lines at the price on the till, then each discount, in what the customer
+  // paid - see receiptBreakdown. (A converted sale stores its lines in the
+  // book currency; printing those under the charged currency was wrong, and
+  // discounts spread into the lines made a line disagree with its own "à".)
+  const breakdown = receiptAmounts(tx);
+  tx.items.forEach((item, n) => {
     const name = item.variantLabel ? `${item.title} (${item.variantLabel})` : item.title;
-    lines.push({ kind: 'text', text: row(`${item.qty} x ${name}`, fmtPrice(item.lineTotal, tx.currency)) });
-    if (item.qty > 1) {
-      lines.push({ kind: 'text', text: `   à ${fmtPrice(item.unitPrice, tx.currency)}` });
+    const amount = breakdown.lines[n] ?? item.lineTotal;
+    lines.push({ kind: 'text', text: row(`${item.qty} x ${name}`, fmtPrice(amount, tx.currency)) });
+    if (item.qty > 1) lines.push({ kind: 'text', text: `   à ${fmtPrice(Math.round((amount / item.qty) * 100) / 100, tx.currency)}` });
+  });
+  if (breakdown.discounts.length) {
+    lines.push({ kind: 'text', text: DIVIDER });
+    const subtotal = breakdown.lines.reduce((s, a) => s + Math.round(a * 100), 0) / 100;
+    lines.push({ kind: 'text', text: row('Subtotal', fmtPrice(subtotal, tx.currency)) });
+    for (const d of breakdown.discounts) {
+      lines.push({ kind: 'text', text: row(d.name, `-${fmtPrice(d.amount, tx.currency)}`) });
     }
-  }
-  for (const d of tx.discounts) {
-    lines.push({ kind: 'text', text: row(d.name, `-${fmtPrice(d.amount, tx.currency)}`) });
   }
 
   lines.push({ kind: 'text', text: DIVIDER });
@@ -210,7 +232,8 @@ export function buildReceiptLines(
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
   const [qrB64, logoB64, shared] = await Promise.all([
-    config.printQr ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
+    // A cancelled sale's link only says so; no point printing it.
+    config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
   ]);

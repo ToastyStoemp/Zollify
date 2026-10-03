@@ -257,4 +257,19 @@ export interface Transaction {
    * knowing a sale's id gets you nothing.
    */
   receiptToken?: string;
+  /**
+   * What the till showed, in the charged currency - for receipts only.
+   *
+   * `items[].lineTotal` already has every discount spread into it (the books
+   * and customs read those), so these are never subtracted again: they only
+   * let a receipt list each line at the price on the screen and name each
+   * discount, the way the customer saw it. `listTotals` pairs with `items`
+   * by index.
+   */
+  asCharged?: AsCharged;
+}
+
+export interface AsCharged {
+  listTotals: number[];
+  discounts: { name: string; amount: number }[];
 }

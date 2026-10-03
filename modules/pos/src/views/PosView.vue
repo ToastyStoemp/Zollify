@@ -30,7 +30,8 @@ import { findSearchMatch, typeColor } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
-import { AfterSalePanel, afterSalePrefs, receiptUrl as receiptUrlFor } from '../lib/after-sale';
+import { afterSalePrefs, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
+import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
 
 /**
@@ -662,7 +663,6 @@ function finish(sale: SaleEvent, message: string): void {
 // ── After the sale: thank-you and receipt QR on this screen ─────────────────
 // Device-local choices (Settings → This device), independent of what any
 // customer display on the account shows.
-type PrintState = 'idle' | 'printing' | 'printed' | 'failed';
 const afterSale = ref<{
   saleId: string;
   thankYou: boolean;
@@ -1010,19 +1010,19 @@ async function cancelPayment(): Promise<void> {
       </template>
     </ModalShell>
 
-    <div v-if="afterSale" class="after-sale" role="dialog" aria-modal="true" aria-label="Sale complete" @click.self="dismissAfterSale">
-      <div class="after-sale-card">
-        <component :is="AfterSalePanel" :thank-you="afterSale.thankYou" :total="afterSale.total" :receipt-url="afterSale.receiptUrl" :logo="afterSale.logo" :qr-size="240" />
-        <p v-if="afterSale.print === 'printed'" class="print-note" role="status"><Icon name="check" :size="14" /> Receipt printed</p>
-        <div class="after-sale-actions">
-          <button v-if="afterSale.canPrint" type="button" :disabled="afterSale.print === 'printing'" @click="printFromAfterSale">
-            <Icon name="printer" :size="16" />
-            {{ afterSale.print === 'printing' ? 'Printing…' : afterSale.print === 'printed' ? 'Print again' : afterSale.print === 'failed' ? 'Retry print' : 'Print receipt' }}
-          </button>
-          <button type="button" class="primary" @click="dismissAfterSale">Next sale</button>
-        </div>
-      </div>
-    </div>
+    <AfterSaleOverlay
+      v-if="afterSale"
+      aria-label="Sale complete"
+      :thank-you="afterSale.thankYou"
+      :total="afterSale.total"
+      :receipt-url="afterSale.receiptUrl"
+      :logo="afterSale.logo"
+      :can-print="afterSale.canPrint"
+      :print="afterSale.print"
+      close-label="Next sale"
+      @print="printFromAfterSale"
+      @close="dismissAfterSale"
+    />
   </div>
 </template>
 
@@ -1053,13 +1053,6 @@ async function cancelPayment(): Promise<void> {
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .notice.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
-.after-sale { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 1rem; background: color-mix(in srgb, var(--zfy-ink, #1a2230) 45%, transparent); }
-.after-sale-card { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; padding: 2rem 2.5rem; border-radius: 18px; background: var(--zfy-surface, #fff); box-shadow: 0 20px 50px rgb(0 0 0 / .25); max-width: 100%; }
-.after-sale-card .primary { min-width: 10rem; }
-.after-sale-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
-.after-sale-actions button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
-.print-note { margin: -.5rem 0 0; display: inline-flex; align-items: center; gap: .3rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); }
-@media (max-width: 420px) { .after-sale-card { padding: 1.5rem 1.25rem; } }
 .last { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .last .spacer, .actions .spacer { flex: 1; }
 .last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }

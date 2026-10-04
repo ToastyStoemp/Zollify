@@ -1,4 +1,5 @@
 /** Data model v2 - shared between app and server. Grows in Phase 1/3. */
+import type { EventVat, SaleTax, TaxClass } from './vat';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
@@ -32,6 +33,8 @@ export interface SalesEvent {
   customs?: Record<string, unknown>;
   /** Per-event German customs (ATLAS) state - separate from `customs` so the two modules never collide. */
   customsDe?: Record<string, unknown>;
+  /** VAT at this event - see resolveEventVat. Absent = from the country and the booth's exemptions. */
+  vat?: EventVat;
   updatedAt: number;
   deletedAt?: number;
 }
@@ -67,7 +70,10 @@ export interface Product {
   weightG?: number;
   tariffNo?: string;
   tariffRate?: number;
+  /** Swiss import VAT rate, for customs paperwork - not what sales are taxed at (see taxClass). */
   vatRate?: number;
+  /** Which VAT rate sales take at an event: the country's standard (default) or reduced rate. */
+  taxClass?: TaxClass;
   packagingType?: string;
   originCountry?: string;
   /** Customs: overrides the HS-code-derived permit obligation in the e-dec XML. */
@@ -267,6 +273,8 @@ export interface Transaction {
    * by index.
    */
   asCharged?: AsCharged;
+  /** VAT as applied at the time of the sale - see SaleTax. Absent on sales made before VAT was tracked. */
+  tax?: SaleTax;
 }
 
 export interface AsCharged {

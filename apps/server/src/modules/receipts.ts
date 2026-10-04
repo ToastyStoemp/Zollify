@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
-import { isReceiptToken, receiptBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
+import { fmtRate, isReceiptToken, receiptBreakdown, vatBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
   issueChallenge,
   parseProfile,
@@ -166,22 +166,27 @@ export interface PublicReceipt {
   at: number;
   number: string;
   currency: string;
-  lines: { title: string; variant?: string; qty: number; amount: number }[];
+  lines: { title: string; variant?: string; qty: number; amount: number; /** VAT rate letter, when a sale has more than one. */ vat?: string }[];
   discounts: { name: string; amount: number }[];
   total: number;
   payments: { label: string; amount: number }[];
   status: 'paid' | 'voided';
   brand: { logo?: string; footer: string[] };
+  /** VAT included per rate, or the exemption the sale was made under. */
+  vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
 }
 
 /** Lines at the till's price, in the currency the customer paid - see receiptBreakdown. */
 function chargedLines(tx: Transaction): PublicReceipt['lines'] {
   const amounts = receiptBreakdown(tx).lines;
+  const rows = vatBreakdown(tx);
+  const letterOf = rows.length > 1 ? new Map(rows.map((r) => [r.rate, r.letter])) : null;
   return tx.items.map((i, n) => ({
     title: String(i.title ?? ''),
     variant: i.variantLabel ? String(i.variantLabel) : undefined,
     qty: Number(i.qty) || 0,
     amount: amounts[n]!,
+    ...(letterOf && tx.tax?.rates[n] != null ? { vat: letterOf.get(tx.tax.rates[n]!) } : {}),
   }));
 }
 
@@ -199,8 +204,11 @@ export function publicReceipt(
   tx: Transaction,
   extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding },
 ): PublicReceipt {
+  const rows = vatBreakdown(tx);
+  const exempt = tx.tax?.exempt === true;
   return {
-    seller: extra.seller,
+    // An exempt sale shows its exemption, not a VAT number - as on paper.
+    seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
     number: tx.id.slice(-8).toUpperCase(),
@@ -214,6 +222,11 @@ export function publicReceipt(
       // Inline, so the logo needs no URL of its own that could name the account.
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
+    },
+    vat: {
+      rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
+      ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
+      ...(exempt && tx.tax?.exNumber ? { exNumber: String(tx.tax.exNumber).slice(0, 40) } : {}),
     },
   };
 }
@@ -273,6 +286,8 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .logo { display: block; margin: 0 auto .75rem; max-width: 70%; max-height: 7rem; object-fit: contain; }
 @media (prefers-color-scheme: dark) { .logo { background: #fff; padding: .5rem; border-radius: 10px; } }
 .good { color: var(--accent); }
+.row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
+.row.net { padding-left: 1rem; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
@@ -373,7 +388,7 @@ const SCRIPT = String.raw`(function () {
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
     receiptEl.appendChild(el('hr'));
     r.lines.forEach(function (l) {
-      receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency)));
+      receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency) + (l.vat ? ' ' + l.vat : '')));
     });
     if (r.discounts.length) {
       var sub = r.lines.reduce(function (s, l) { return s + Math.round(l.amount * 100); }, 0) / 100;
@@ -383,6 +398,13 @@ const SCRIPT = String.raw`(function () {
     r.discounts.forEach(function (d) { receiptEl.appendChild(row(d.name, '−' + money(d.amount, r.currency), 'good')); });
     receiptEl.appendChild(el('hr'));
     receiptEl.appendChild(row('Total', money(r.total, r.currency), 'total'));
+    var vat = r.vat || { rows: [] };
+    vat.rows.forEach(function (v) {
+      receiptEl.appendChild(row((v.letter ? v.letter + ' ' : '') + 'incl. VAT ' + v.rate, money(v.vat, r.currency), 'muted'));
+      receiptEl.appendChild(row('net', money(v.net, r.currency), 'muted net'));
+    });
+    if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
+    if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
     r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
     receiptEl.appendChild(el('hr'));
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });

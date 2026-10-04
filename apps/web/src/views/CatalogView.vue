@@ -228,6 +228,7 @@ const form = reactive({
   originCountry: '',
   year: '',
   material: '',
+  taxClass: 'standard' as 'standard' | 'reduced',
   forSale: true,
   unlisted: false,
   onHand: 0,
@@ -254,6 +255,7 @@ function resetForm(p?: Product): void {
     originCountry: p?.originCountry ?? '',
     year: p?.year != null ? String(p.year) : '',
     material: p?.material ?? '',
+    taxClass: p?.taxClass ?? 'standard',
     forSale: p?.forSale ?? true,
     unlisted: p?.unlisted ?? false,
     onHand: p ? onHandFor(p.id, '') : 0,
@@ -370,6 +372,8 @@ async function save(): Promise<void> {
       originCountry: form.originCountry.trim() || undefined,
       year: form.year ? parseInt(form.year, 10) || undefined : undefined,
       material: form.material.trim() || undefined,
+      // Standard is the default, so only "reduced" is stored.
+      taxClass: form.taxClass === 'reduced' ? 'reduced' : undefined,
       variants,
       imageId,
       sortOrder: prior?.sortOrder ?? allProducts.value.length,
@@ -543,6 +547,14 @@ async function remove(product: Product): Promise<void> {
           <label v-if="!form.variants.length"><span>On hand</span><input v-model.number="form.onHand" type="number" min="0" inputmode="numeric" /></label>
         </div>
         <label><span>Price note</span><input v-model="form.priceNote" type="text" placeholder="Shown on the price sheet, e.g. “signed”" /></label>
+        <label>
+          <span>VAT rate</span>
+          <select v-model="form.taxClass">
+            <option value="standard">Standard</option>
+            <option value="reduced">Reduced (e.g. books, some original art)</option>
+          </select>
+          <small class="hint">The actual rate follows each event's country - see Settings → VAT.</small>
+        </label>
 
         <details class="customs" :open="Boolean(form.tariffNo || form.originCountry || form.year || form.material)">
           <summary>Customs details</summary>

@@ -24,6 +24,8 @@ const TOKEN = 'AbCdEfGhIjKlMnOpQrStUv';
 const VOID_TOKEN = 'VoidVoidVoidVoidVoid00';
 const FX_TOKEN = 'FxFxFxFxFxFxFxFxFxFx01';
 const DISC_TOKEN = 'DiscDiscDiscDiscDisc02';
+const VAT_TOKEN = 'VatVatVatVatVatVatVat3';
+const EXEMPT_TOKEN = 'ExemptExemptExemptExe4';
 
 let app: FastifyInstance;
 let dataDir: string;
@@ -128,6 +130,8 @@ beforeAll(async () => {
           method: 'cash',
           asCharged: { listTotals: [40], discounts: [{ name: 'Bundle deal', amount: 4 }] },
         })),
+        op(7, 'tx.create', sale('tx-vat', VAT_TOKEN, { currency: 'EUR', tax: { country: 'DE', exempt: false, rates: [19, 7] } })),
+        op(8, 'tx.create', sale('tx-exempt', EXEMPT_TOKEN, { currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } })),
       ],
     },
   });
@@ -196,6 +200,22 @@ describe('online receipts', () => {
     expect(body.lines).toEqual([{ title: 'Harbour print', qty: 2, amount: 40 }]);
     expect(body.discounts).toEqual([{ name: 'Bundle deal', amount: 4 }]);
     expect(body.total).toBe(36);
+  });
+
+  it('shows the VAT in each rate, with the lines lettered by rate', async () => {
+    const body = (await lookup(VAT_TOKEN)).json();
+    expect(body.lines.map((l: { vat?: string }) => l.vat)).toEqual(['A', 'B']);
+    expect(body.vat.rows).toEqual([
+      { letter: 'A', rate: '19%', net: 33.61, vat: 6.39 },
+      { letter: 'B', rate: '7%', net: 4.67, vat: 0.33 },
+    ]);
+    expect(body.seller.vatId).toBe('CHE-123.456.789');
+  });
+
+  it('shows an exempt sale’s note and EX number, and no VAT number', async () => {
+    const body = (await lookup(EXEMPT_TOKEN)).json();
+    expect(body.vat).toEqual({ rows: [], exemptNote: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' });
+    expect(body.seller.vatId).toBeUndefined();
   });
 
   it('refuses a lookup without a solved challenge', async () => {

@@ -72,6 +72,22 @@ export function receiptBreakdown(
   };
 }
 
+/**
+ * What each line actually cost the customer, in the charged currency, after
+ * discounts - the base for VAT. From the till's snapshot when there is one
+ * (its prices, discounts spread across them), so the VAT matches the line
+ * prices printed above it; otherwise the book amounts scaled to the total.
+ */
+export function paidLineTotals(
+  tx: Pick<Transaction, 'items' | 'total' | 'currency' | 'baseCurrency' | 'baseTotal' | 'discounts' | 'asCharged'>,
+): number[] {
+  const snap = tx.asCharged;
+  if (snap && snap.listTotals.length === tx.items.length) {
+    return spreadTo(snap.listTotals.map(toMinor), toMinor(tx.total)).map((m) => m / 100);
+  }
+  return chargedLineTotals(tx);
+}
+
 /** Scales whole-cent amounts to sum to `target`, the remainder on the largest. */
 function spreadTo(minor: number[], target: number): number[] {
   const sum = minor.reduce((a, b) => a + b, 0);

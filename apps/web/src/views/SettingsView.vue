@@ -31,6 +31,13 @@ const corePanels: Panel[] = [
     component: () => import('./ProfileSettings.vue'),
   },
   {
+    id: 'core.vat',
+    label: 'VAT',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./VatSettings.vue'),
+  },
+  {
     id: 'core.data',
     label: 'Backup & restore',
     group: 'Core',

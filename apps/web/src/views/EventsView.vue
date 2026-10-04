@@ -35,6 +35,9 @@ const baseCurrency = computed(() => account.value?.profile.defaultCurrency ?? 'C
 const error = ref<string | null>(null);
 
 const hasRoute = (name: string): boolean => router.hasRoute(name);
+// One Customs button per event; the hub then asks which country's paperwork.
+const customsOn = (): boolean =>
+  hasRoute('customs-hub:index') && (hasRoute('customs-ch:documents') || hasRoute('customs-de:documents'));
 
 // Sort key = the event's date; undated events sort last.
 const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '￿';
@@ -364,8 +367,7 @@ async function save(): Promise<void> {
             <button v-else type="button" @click="sell(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" class="btn"><Icon name="coins" :size="14" /> Prices</router-link>
-            <router-link v-if="hasRoute('customs-ch:documents')" :to="{ name: 'customs-ch:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (CH)</router-link>
-            <router-link v-if="hasRoute('customs-de:documents')" :to="{ name: 'customs-de:documents', params: { eventId: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs (DE)</router-link>
+            <router-link v-if="customsOn()" :to="{ name: 'customs-hub:index', query: { event: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
             <button v-if="canEdit" type="button" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
             <!-- Only meaningful for an active event - close() on a planned one

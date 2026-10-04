@@ -24,7 +24,7 @@ loadDotEnv();
 
 
 /** What a brand-new account starts with, so it isn't an empty shell. */
-const DEFAULT_MODULES = ['pos', 'customs-ch'];
+const DEFAULT_MODULES = ['pos', 'customs-hub', 'customs-ch'];
 
 /**
  * The signing secret, minted once and kept in the data volume when the

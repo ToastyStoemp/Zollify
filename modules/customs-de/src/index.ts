@@ -15,11 +15,11 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-de',
-  version: '0.1.10',
+  version: '0.1.11',
   sdk: '^0.1.0',
   title: 'Customs (Germany)',
   description: 'ATLAS export/re-import preparation: packing lists and a filing checklist.',
-  requires: ['catalog'],
+  requires: ['catalog', 'customs-hub'],
   minRole: 'admin',
 
   setup(sdk: Sdk) {

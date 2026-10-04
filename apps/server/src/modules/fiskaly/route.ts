@@ -72,6 +72,16 @@ const SERIAL = /^[^/_]{1,70}$/;
 export function registerFiskaly(app: FastifyInstance, ctx: ModuleContext, box: SecretBox, api: FiskalyApi): void {
   const db = ctx.db;
   const tokens = new Map<string, FiskalyAuth>();
+  // fiskaly has one admin session per TSS - one request's logout ends another's -
+  // so admin work (setup, registering tills) runs one at a time per account.
+  const adminQueue = new Map<string, Promise<unknown>>();
+  function asAdmin<T>(accountId: string, work: () => Promise<T>): Promise<T> {
+    const next = (adminQueue.get(accountId) ?? Promise.resolve()).then(work, work);
+    const settled = next.catch(() => undefined);
+    adminQueue.set(accountId, settled);
+    void settled.then(() => adminQueue.get(accountId) === settled && adminQueue.delete(accountId));
+    return next;
+  }
 
   const row = (accountId: string): Row | undefined => db.prepare('SELECT * FROM fiskaly_config WHERE accountId = ?').get(accountId) as Row | undefined;
   const secrets = (r: Row): Secrets => box.decrypt(r.blob) as Secrets;
@@ -109,19 +119,31 @@ export function registerFiskaly(app: FastifyInstance, ctx: ModuleContext, box: S
     return { r, s: secrets(r), tssId: r.tssId };
   }
 
-  /** The fiskaly client id for a till, registering the till with the TSS the first time. */
+  /**
+   * The fiskaly client id for a till, registering the till with the TSS the
+   * first time. A till fiskaly already knows (its answer lost to a timeout or
+   * a restart) is picked up again: fiskaly refuses a serial number twice.
+   */
   async function clientFor(accountId: string, auth: FiskalyAuth, s: Secrets, tssId: string, serial: string): Promise<string> {
-    const known = db.prepare('SELECT clientId FROM fiskaly_clients WHERE accountId = ? AND tssId = ? AND serial = ?').get(accountId, tssId, serial) as { clientId: string } | undefined;
-    if (known) return known.clientId;
-    const clientId = randomUUID();
-    await api.adminLogin(auth.token, tssId, s.adminPin!);
-    try {
-      await api.createClient(auth.token, tssId, clientId, serial);
-    } finally {
-      await api.adminLogout(auth.token, tssId).catch(() => undefined);
-    }
-    db.prepare('INSERT INTO fiskaly_clients (accountId, tssId, serial, clientId) VALUES (?, ?, ?, ?)').run(accountId, tssId, serial, clientId);
-    return clientId;
+    const known = () => db.prepare('SELECT clientId FROM fiskaly_clients WHERE accountId = ? AND tssId = ? AND serial = ?').get(accountId, tssId, serial) as { clientId: string } | undefined;
+    const cached = known();
+    if (cached) return cached.clientId;
+    return asAdmin(accountId, async () => {
+      const again = known();
+      if (again) return again.clientId;
+      let clientId = await api.findClient(auth.token, tssId, serial);
+      if (!clientId) {
+        clientId = randomUUID();
+        await api.adminLogin(auth.token, tssId, s.adminPin!);
+        try {
+          await api.createClient(auth.token, tssId, clientId, serial);
+        } finally {
+          await api.adminLogout(auth.token, tssId).catch(() => undefined);
+        }
+      }
+      db.prepare('INSERT OR IGNORE INTO fiskaly_clients (accountId, tssId, serial, clientId) VALUES (?, ?, ?, ?)').run(accountId, tssId, serial, clientId);
+      return clientId;
+    });
   }
 
   app.get('/fiskaly', async (req) => {
@@ -157,49 +179,53 @@ export function registerFiskaly(app: FastifyInstance, ctx: ModuleContext, box: S
   app.post('/fiskaly/setup', async (req, reply) => {
     const who = ctx.identity(req);
     if (!isAdmin(who.role)) return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can set up the TSE.' });
-    const r = row(who.accountId);
-    if (!r) return reply.code(400).send({ error: 'invalid', message: 'Save the fiskaly API key first.' });
-    const s = secrets(r);
+    if (!row(who.accountId)) return reply.code(400).send({ error: 'invalid', message: 'Save the fiskaly API key first.' });
     try {
-      const auth = await token(who.accountId, s);
-      let tssId = r.tssId;
-      let state = r.tssState;
-      // Each step is saved before the next, so a failed setup picks up where it stopped.
-      if (!tssId) {
-        tssId = randomUUID();
-        const created = await api.createTss(auth.token, tssId);
-        s.adminPuk = created.adminPuk;
-        state = created.state || 'CREATED';
-        save(who.accountId, s, { tssId, tssState: state });
-      }
-      if (state === 'CREATED') {
-        await api.setTssState(auth.token, tssId, 'UNINITIALIZED');
-        state = 'UNINITIALIZED';
-        save(who.accountId, s, { tssState: state });
-      }
-      if (state === 'UNINITIALIZED') {
-        if (!s.adminPin) {
-          const pin = String(randomInt(10 ** 9, 10 ** 10));
-          await api.setAdminPin(auth.token, tssId, s.adminPuk!, pin);
-          s.adminPin = pin;
-          save(who.accountId, s);
-        }
-        await api.adminLogin(auth.token, tssId, s.adminPin);
-        try {
-          await api.setTssState(auth.token, tssId, 'INITIALIZED');
-        } finally {
-          await api.adminLogout(auth.token, tssId).catch(() => undefined);
-        }
-        state = 'INITIALIZED';
-      }
-      const tss = await api.getTss(auth.token, tssId);
-      save(who.accountId, s, { tssState: String(tss.state ?? state), tssSerial: String(tss.serial_number ?? '') || null });
-      const after = row(who.accountId)!;
-      return { configured: true, env: after.env, tss: { id: after.tssId, state: after.tssState, serial: after.tssSerial } };
+      return await asAdmin(who.accountId, () => setup(who.accountId));
     } catch (err) {
       return fail(reply, err);
     }
   });
+
+  /** Creates and initialises the account's TSS. Each step is saved before the next, so a failed setup picks up where it stopped. */
+  async function setup(accountId: string) {
+    const r = row(accountId)!;
+    const s = secrets(r);
+    const auth = await token(accountId, s);
+    let tssId = r.tssId;
+    let state = r.tssState;
+    if (!tssId) {
+      tssId = randomUUID();
+      const created = await api.createTss(auth.token, tssId);
+      s.adminPuk = created.adminPuk;
+      state = created.state || 'CREATED';
+      save(accountId, s, { tssId, tssState: state });
+    }
+    if (state === 'CREATED') {
+      await api.setTssState(auth.token, tssId, 'UNINITIALIZED');
+      state = 'UNINITIALIZED';
+      save(accountId, s, { tssState: state });
+    }
+    if (state === 'UNINITIALIZED') {
+      if (!s.adminPin) {
+        const pin = String(randomInt(10 ** 9, 10 ** 10));
+        await api.setAdminPin(auth.token, tssId, s.adminPuk!, pin);
+        s.adminPin = pin;
+        save(accountId, s);
+      }
+      await api.adminLogin(auth.token, tssId, s.adminPin);
+      try {
+        await api.setTssState(auth.token, tssId, 'INITIALIZED');
+      } finally {
+        await api.adminLogout(auth.token, tssId).catch(() => undefined);
+      }
+      state = 'INITIALIZED';
+    }
+    const tss = await api.getTss(auth.token, tssId);
+    save(accountId, s, { tssState: String(tss.state ?? state), tssSerial: String(tss.serial_number ?? '') || null });
+    const after = row(accountId)!;
+    return { configured: true, env: after.env, tss: { id: after.tssId, state: after.tssState, serial: after.tssSerial } };
+  }
 
   app.post<{ Body: { clientId?: unknown } }>('/fiskaly/start', async (req, reply) => {
     const { accountId } = ctx.identity(req);

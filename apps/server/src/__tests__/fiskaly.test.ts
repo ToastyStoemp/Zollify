@@ -112,8 +112,17 @@ function fakeFiskaly() {
       return reply(200, {});
     }
     if (kind === 'client') {
-      if (!t.admin) return reply(401, { message: 'Admin login required' });
+      if (!sub && init.method === 'GET') {
+        const offset = Number(u.searchParams.get('offset') ?? 0);
+        const limit = Number(u.searchParams.get('limit') ?? 100);
+        const all = [...t.clients].map(([_id, serial_number]) => ({ _id, serial_number, state: 'REGISTERED' }));
+        return reply(200, { data: all.slice(offset, offset + limit), count: Math.min(limit, all.length - offset), _type: 'CLIENT_LIST' });
+      }
+      // One admin session per TSS, as fiskaly has: another request's logout ends it.
+      await new Promise((r) => setTimeout(r, 5));
+      if (!t.admin) return reply(401, { code: 'E_ADMIN_NOT_AUTHENTICATED', message: 'administrator authentication required (33)' });
       if (/[/_]/.test(String(body.serial_number))) return reply(400, { message: 'Bad serial' });
+      if ([...t.clients.values()].includes(String(body.serial_number))) return reply(409, { message: 'Client serial_number must be unique for tss' });
       t.clients.set(sub!, String(body.serial_number));
       return reply(200, { _id: sub, serial_number: body.serial_number, state: 'REGISTERED' });
     }
@@ -230,6 +239,22 @@ describe('fiskaly cloud TSE', () => {
     expect(fake.calls.filter((c) => c.includes('/client/')).length).toBe(clientsBefore);
     await call('POST', '/fiskaly/start', { clientId: 'ZOLLIFY-CARBON' });
     expect([...fake.tss.values()][0]!.clients.size).toBe(2);
+  });
+
+  it('registers tills that sign for the first time at the same moment, each once', async () => {
+    const tills = ['ZOLLIFY-A', 'ZOLLIFY-B', 'ZOLLIFY-C', 'ZOLLIFY-A', 'ZOLLIFY-B'];
+    const res = await Promise.all(tills.map((clientId) => call('POST', '/fiskaly/start', { clientId })));
+    expect(res.map((r) => r.statusCode)).toEqual([200, 200, 200, 200, 200]);
+    expect([...[...fake.tss.values()][0]!.clients.values()].sort()).toEqual(['ZOLLIFY-A', 'ZOLLIFY-B', 'ZOLLIFY-C', 'ZOLLIFY-CARBON', 'ZOLLIFY-PHONE1']);
+  });
+
+  it('picks up a till fiskaly already knows instead of registering it again', async () => {
+    // Registered with fiskaly, but the answer never reached Zollify (a timeout, a restart).
+    const t = [...fake.tss.values()][0]!;
+    t.clients.set('lost-client-id', 'ZOLLIFY-LOST');
+    const res = await call('POST', '/fiskaly/start', { clientId: 'ZOLLIFY-LOST' });
+    expect(res.statusCode).toBe(200);
+    expect([...t.txs.values()].at(-1)!.clientId).toBe('lost-client-id');
   });
 
   it('says why when fiskaly cannot be reached, and refuses bad input', async () => {

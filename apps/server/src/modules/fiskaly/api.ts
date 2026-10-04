@@ -110,6 +110,18 @@ export class FiskalyApi {
     await this.call('POST', `/tss/${tssId}/admin/logout`, token, {});
   }
 
+  /** The id fiskaly has for a till's serial number, if the till is registered with the TSS. */
+  async findClient(token: string, tssId: string, serial: string): Promise<string | null> {
+    const limit = 100;
+    for (let offset = 0; ; offset += limit) {
+      const r = await this.call('GET', `/tss/${tssId}/client?limit=${limit}&offset=${offset}`, token);
+      const data = Array.isArray(r.data) ? (r.data as { _id?: unknown; serial_number?: unknown }[]) : [];
+      const hit = data.find((c) => c.serial_number === serial);
+      if (hit) return String(hit._id);
+      if (data.length < limit) return null;
+    }
+  }
+
   /** Registers a till (its serial number) with the TSS. Needs admin auth. */
   async createClient(token: string, tssId: string, clientId: string, serial: string): Promise<void> {
     await this.call('PUT', `/tss/${tssId}/client/${clientId}`, token, { serial_number: serial });

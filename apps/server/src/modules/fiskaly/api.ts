@@ -93,8 +93,8 @@ export class FiskalyApi {
     return this.call('GET', `/tss/${tssId}`, token);
   }
 
-  /** CREATED → UNINITIALIZED can take a while (fiskaly: allow at least 30 s); → INITIALIZED needs admin auth. */
-  async setTssState(token: string, tssId: string, state: 'UNINITIALIZED' | 'INITIALIZED'): Promise<void> {
+  /** CREATED → UNINITIALIZED can take a while (fiskaly: allow at least 30 s); → INITIALIZED and → DISABLED (for good) need admin auth. */
+  async setTssState(token: string, tssId: string, state: 'UNINITIALIZED' | 'INITIALIZED' | 'DISABLED'): Promise<void> {
     await this.call('PATCH', `/tss/${tssId}`, token, { state }, state === 'UNINITIALIZED' ? 60_000 : 15_000);
   }
 

@@ -1,20 +1,25 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildGateway } from '@zollify/server-core';
-import { FiskalyApi } from '../modules/fiskaly/api';
+import { buildGateway, makeSecretBox } from '@zollify/server-core';
+import { FISKALY_BASE, FiskalyApi } from '../modules/fiskaly/api';
 
 /**
  * The fiskaly routes against fiskaly's real TEST environment. Runs only with
  * a TEST key in FISKALY_API_KEY and FISKALY_API_SECRET. Each run creates a
- * new TEST TSS, and fiskaly allows 5 active ones in TEST: disable old ones in
- * the fiskaly dashboard. Behind a proxy, run with NODE_USE_ENV_PROXY=1.
+ * TEST TSS and disables it at the end - fiskaly allows only 5 active TSS in
+ * TEST, and a TSS can only be disabled with its admin PIN, which lives in
+ * this run's database. Behind a proxy, run with NODE_USE_ENV_PROXY=1;
+ * FISKALY_BASE_URL points it at another fiskaly, as for the server.
  */
 
 const KEY = process.env.FISKALY_API_KEY;
 const SECRET = process.env.FISKALY_API_SECRET;
+const JWT_SECRET = 'test-secret-value-long-enough-for-signing';
+const api = new FiskalyApi((url, init) => fetch(url, init), process.env.FISKALY_BASE_URL || FISKALY_BASE);
 const { posServerModule } = await import('../modules/receipts');
 
 describe.skipIf(!KEY || !SECRET)('fiskaly TEST environment', () => {
@@ -31,8 +36,8 @@ describe.skipIf(!KEY || !SECRET)('fiskaly TEST environment', () => {
     app = await buildGateway({
       dataDir,
       moduleStoreDir: join(dataDir, 'modules'),
-      jwtSecret: 'test-secret-value-long-enough-for-signing',
-      serverModules: [posServerModule('test-secret-value-long-enough-for-signing', { fiskaly: new FiskalyApi((url, init) => fetch(url, init)) })],
+      jwtSecret: JWT_SECRET,
+      serverModules: [posServerModule(JWT_SECRET, { fiskaly: api })],
       defaultModules: ['pos'],
       allowedOrigins: [],
       requireHttps: false,
@@ -45,8 +50,34 @@ describe.skipIf(!KEY || !SECRET)('fiskaly TEST environment', () => {
 
   afterAll(async () => {
     await app?.close();
-    rmSync(dataDir, { recursive: true, force: true });
-  });
+    try {
+      await disableTss();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  /** Disables this run's TSS, from wherever its setup got to, with the PUK and PIN kept (encrypted) in the run's database. */
+  async function disableTss(): Promise<void> {
+    const db = new Database(join(dataDir, 'zollify.db'), { readonly: true });
+    const row = db.prepare('SELECT blob, tssId, tssState FROM fiskaly_config').get() as { blob: string; tssId: string | null; tssState: string | null } | undefined;
+    db.close();
+    if (!row?.tssId || row.tssState === 'DISABLED') return;
+    const s = makeSecretBox(JWT_SECRET, 'zollify-module-credentials-v1').decrypt(row.blob) as { apiKey: string; apiSecret: string; adminPuk?: string; adminPin?: string };
+    const { token: t } = await api.auth(s.apiKey, s.apiSecret);
+    const state = String((await api.getTss(t, row.tssId)).state ?? '');
+    if (state === 'DISABLED') return;
+    if (state === 'CREATED') await api.setTssState(t, row.tssId, 'UNINITIALIZED');
+    let pin = s.adminPin;
+    if (!pin) {
+      if (!s.adminPuk) throw new Error(`TSS ${row.tssId} has neither PIN nor PUK - disable it in the fiskaly dashboard.`);
+      pin = '1234567890';
+      await api.setAdminPin(t, row.tssId, s.adminPuk, pin);
+    }
+    await api.adminLogin(t, row.tssId, pin);
+    await api.setTssState(t, row.tssId, 'DISABLED');
+    expect(String((await api.getTss(t, row.tssId)).state)).toBe('DISABLED');
+  }
 
   it('refuses a wrong secret, and takes the right one', async () => {
     const bad = await call('PUT', '/fiskaly', { apiKey: KEY, apiSecret: 'wrong' });

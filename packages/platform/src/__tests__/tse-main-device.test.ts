@@ -123,6 +123,19 @@ describe('a device without a TSE of its own', () => {
     expect(tse.tseState.outages).toEqual([]);
   });
 
+  it('keeps exactly what a cloud TSE on the main device signed', async () => {
+    tse.applyMainTseDevices(['host-a']);
+    await tse.assignTseHost('host-a');
+    const exact = (req: TseRequestMessage) => ({ clientId: String((req as { clientId?: string }).clientId), processType: 'Kassenbeleg-V1', processData: String((req as { processData?: string }).processData), start: '2026-09-12T10:00:00.000Z', finish: '2026-09-12T10:00:05.000Z' });
+    answer = (req) => {
+      if (req.op === 'start') return { ok: true, number: 7, time: Date.now() };
+      if (req.op === 'finish') return { ok: true, signatureCounter: 15, time: Date.now(), signature: 'SIG-A', info: HOST_INFO, exact: exact(req) };
+      return undefined;
+    };
+    const sig = ((await txs.recordSale(sale())).tse as { signed: TseSignature }).signed;
+    expect(sig).toMatchObject({ start: '2026-09-12T10:00:00.000Z', finish: '2026-09-12T10:00:05.000Z', processData: 'Beleg^21.00_0.00_0.00_0.00_0.00^21.00:Unbar', signature: 'SIG-A' });
+  });
+
   it('while its own is out, signs on another as a stand-in, logs the outage, and goes back when it returns', async () => {
     tse.applyMainTseDevices(['host-a', 'host-b']);
     await tse.assignTseHost('host-a');

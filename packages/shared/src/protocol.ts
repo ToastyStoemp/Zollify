@@ -321,6 +321,8 @@ export interface TseResultMessage {
   /** finish */
   signatureCounter?: number;
   signature?: string;
+  /** finish, from a cloud TSE that composes its own signed record (fiskaly): exactly what it signed. */
+  exact?: { clientId: string; processType: string; processData: string; start: string; finish: string };
 }
 
 // ── Admin (owner-only) ───────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSnapshot, SaleEvent } from '@zollify/sdk';
-import type { TseSignature } from '@zollify/shared';
+import type { TseRequestMessage, TseResultMessage, TseSignature } from '@zollify/shared';
 
 /**
  * The fiskaly driver: a device asks the server to sign, under its own till
@@ -48,6 +48,14 @@ const events = await import('../core/sales-events');
 const device = await import('../core/device');
 const tse = await import('../core/tse');
 
+// The live channel, for signing as a main TSE device.
+const sent: TseResultMessage[] = [];
+let deliver: (msg: TseRequestMessage | TseResultMessage) => void = () => {};
+tse.setTseTransport({
+  send: (msg) => (msg.type === 'tse.result' && sent.push(msg), true),
+  on: (handler) => ((deliver = handler), () => {}),
+});
+
 function sale(): SaleEvent {
   return {
     saleId: crypto.randomUUID(),
@@ -68,6 +76,7 @@ beforeEach(async () => {
   events.resetSalesEventCache();
   tse.resetTseCache();
   calls.length = 0;
+  sent.length = 0;
   online = true;
   await events.upsertSalesEvent({ id: 'ev-de', name: 'Leipzig', venue: { country: 'Germany' }, currency: 'EUR', status: 'active', updatedAt: 1 });
   await tse.loadTseSettings();
@@ -104,5 +113,32 @@ describe('the fiskaly driver', () => {
 
   it('reports the cloud TSE as ready in Settings', async () => {
     expect(await tse.refreshTseInfo()).toMatchObject({ serial: 'fiskaly-serial', certified: true });
+  });
+});
+
+describe('a main TSE device with the fiskaly cloud TSE', () => {
+  async function ask(req: { op: TseRequestMessage['op'] } & Record<string, unknown>): Promise<TseResultMessage> {
+    const requestId = crypto.randomUUID();
+    deliver({ type: 'tse.request', to: await device.deviceId(), from: 'phone', requestId, ...req } as TseRequestMessage);
+    for (let i = 0; i < 100; i++) {
+      const r = sent.find((m) => m.requestId === requestId);
+      if (r) return r;
+      await new Promise((ok) => setTimeout(ok, 5));
+    }
+    throw new Error('no answer');
+  }
+
+  it('signs a phone’s sale under the phone’s till, and passes on exactly what fiskaly signed', async () => {
+    await tse.setMainTseDevice(true);
+    const started = await ask({ op: 'start', clientId: 'ZOLLIFY-PHONE2' });
+    expect(started).toMatchObject({ ok: true, to: 'phone', number: 41 });
+    const done = await ask({ op: 'finish', clientId: 'ZOLLIFY-PHONE2', number: 41, processType: 'Kassenbeleg-V1', processData: 'Beleg^21.00_0.00_0.00_0.00_0.00^21.00:Unbar' });
+    expect(done).toMatchObject({
+      ok: true,
+      signature: 'FISKALY-SIG',
+      info: { serial: 'fiskaly-serial', publicKey: 'FISKALY-PUB', algorithm: 'ecdsa-plain-SHA256' },
+      exact: { clientId: 'ZOLLIFY-PHONE2', processData: 'Beleg^21.00_0.00_0.00_0.00_0.00^21.00:Unbar', start: '2026-09-12T10:00:00.000Z', finish: '2026-09-12T10:00:05.000Z' },
+    });
+    expect(calls.filter((c) => c.path !== '/m/pos/fiskaly').map((c) => c.body?.clientId)).toEqual(['ZOLLIFY-PHONE2', 'ZOLLIFY-PHONE2']);
   });
 });

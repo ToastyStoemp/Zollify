@@ -445,7 +445,15 @@ async function serve(msg: TseRequestMessage): Promise<void> {
     }
     if (msg.op === 'finish') {
       const r = await d.finish(String(msg.clientId), Number(msg.number), String(msg.processType), String(msg.processData));
-      return reply({ ok: true, signatureCounter: r.signatureCounter, time: r.time, signature: r.signature, info: tseState.info ?? (tseState.info = await d.info()) });
+      // A cloud TSE names the TSE that signed and says exactly what it signed; pass both on.
+      return reply({
+        ok: true,
+        signatureCounter: r.signatureCounter,
+        time: r.time,
+        signature: r.signature,
+        info: r.info ?? tseState.info ?? (tseState.info = await d.info()),
+        ...(r.exact ? { exact: r.exact } : {}),
+      });
     }
     reply({ ok: false, error: 'Unknown TSE call.' });
   } catch (err) {
@@ -538,7 +546,7 @@ function remoteDriver(): TseDriver {
       // A transaction lives on the TSE that started it.
       if (!via) throw new Error('This transaction was not started on a main TSE device.');
       const r = await call(via, { op: 'finish', clientId, number, processType, processData });
-      return { signatureCounter: Number(r.signatureCounter), time: Number(r.time), signature: String(r.signature), info: infoOf(r) };
+      return { signatureCounter: Number(r.signatureCounter), time: Number(r.time), signature: String(r.signature), info: infoOf(r), ...(r.exact ? { exact: r.exact } : {}) };
     },
   };
 }

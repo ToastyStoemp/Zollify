@@ -103,3 +103,42 @@ export async function fetchHistoricalRate(base: string, target: string, date: st
   const rates = await fetchHistoricalRates(base, target, [date]);
   return rates.get(date) ?? null;
 }
+
+/**
+ * Today's market rate, for charging a card in another currency at the till
+ * (POS's "charge cards in the base currency"). Tries our own `/api/fx/rates`
+ * first, then the keyless lookup above. A booth is often offline, so the last
+ * rate fetched is kept per pair and served when neither answers; `at` says how
+ * old it is so the till can show it.
+ */
+const FX_LATEST_PREFIX = 'zollify.fxlatest.';
+
+export async function fetchLatestRate(base: string, target: string): Promise<{ rate: number; at: number } | null> {
+  const from = base.trim().toUpperCase();
+  const to = target.trim().toUpperCase();
+  if (!from || !to) return null;
+  if (from === to) return { rate: 1, at: Date.now() };
+
+  const key = `${FX_LATEST_PREFIX}${from}:${to}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const rate = (await fetchHistoricalRates(from, to, [today])).get(today) ?? (await fetchExchangeRate(from, to));
+  if (rate != null) {
+    const fresh = { rate, at: Date.now() };
+    try {
+      localStorage.setItem(key, JSON.stringify(fresh));
+    } catch {
+      /* storage blocked - just no offline fallback */
+    }
+    return fresh;
+  }
+  try {
+    const raw = localStorage.getItem(key);
+    const cached = raw ? (JSON.parse(raw) as { rate?: unknown; at?: unknown }) : null;
+    if (cached && typeof cached.rate === 'number' && Number.isFinite(cached.rate) && typeof cached.at === 'number') {
+      return { rate: cached.rate, at: cached.at };
+    }
+  } catch {
+    /* fall through */
+  }
+  return null;
+}

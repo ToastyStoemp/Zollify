@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -148,9 +148,11 @@ export interface SaleEvent {
      */
     method?: 'cash' | 'card' | 'split' | (string & {});
     /** How the total was made up when more than one way paid (a split). */
-    legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
+    legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
     txRef?: string;
     cardBrand?: string;
+    /** The card was charged in another currency than `currency` - see PaymentLeg.settled. */
+    settled?: CardSettlement;
     /** Cash handed over, when the seller counted it; change follows from it. */
     cashReceived?: number;
   };
@@ -436,6 +438,13 @@ export interface Sdk {
 
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */
   diagnostics: { sendLog(reason?: string): Promise<void> };
+
+  /**
+   * Today's market exchange rate: 1 `from` = rate `to`. Falls back to the
+   * last rate this device fetched when offline (`at` says when that was);
+   * null when no rate was ever fetched. Never an event's own pricing rate.
+   */
+  fx: { latest(from: string, to: string): Promise<{ rate: number; at: number } | null> };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

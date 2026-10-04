@@ -28,6 +28,7 @@ import { getTransaction, importTransactions, recentTransactions, revertTransacti
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
+import { fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import {
@@ -289,6 +290,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
+    fx: { latest: (from, to) => fetchLatestRate(from, to) },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

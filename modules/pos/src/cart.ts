@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue';
 import type { SaleEvent, SaleLine } from '@zollify/sdk';
+import type { CardSettlement } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
@@ -55,6 +56,37 @@ export const cart = reactive<CartState>({
 export const isConverting = computed(
   () => cart.exchangeRate !== null && cart.currency !== cart.baseCurrency,
 );
+
+/**
+ * "Charge cards in the base currency" (Settings → Payments). At an event that
+ * prices in a local currency, cards are still taken in the base currency, at
+ * today's market rate - a German booth in Switzerland sells a 30 € painting
+ * for 30 CHF, and the card is charged 32.15 EUR. Cash stays in the local
+ * currency. `rate` is the market rate, 1 base = rate local - never the
+ * event's own pricing rate, which can be a deliberate round 1:1.
+ */
+export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
+export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
+export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
+
+/** Reads the setting and, when it applies, today's rate (or the last one this device saw, offline). */
+export async function loadCardFx(): Promise<void> {
+  cardFx.enabled = (await sdk().config.get<boolean>(CARD_IN_BASE_KEY)) ?? false;
+  if (!cardInBase.value) return;
+  try {
+    // Optional chaining: a shell older than this module has no fx.
+    const latest = await sdk().fx?.latest(cart.baseCurrency, cart.currency);
+    if (latest) Object.assign(cardFx, latest);
+  } catch {
+    /* no rate - a card checkout says so */
+  }
+}
+
+/** What a local-currency amount comes to on the card, in the base currency. Null when not charging cards in base. */
+export function cardSettlement(localAmount: number): CardSettlement | null {
+  if (!cardInBase.value || !cardFx.rate) return null;
+  return { amount: round2(localAmount / cardFx.rate), currency: cart.baseCurrency, rate: cardFx.rate };
+}
 
 /**
  * Converts a base amount into what the customer is actually charged.
@@ -219,7 +251,7 @@ export interface CheckoutPayment {
   /** cash · card · split · or a custom method name (TWINT, PayPal QR…). */
   method: string;
   /** Present for a split; otherwise one leg for the whole amount is implied. */
-  legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
+  legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
   /** Cash handed over, when counted. */
   cashReceived?: number;
   /** Take the card on the configured terminal rather than recording it by hand. */
@@ -272,9 +304,18 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
     let providerName = 'manual';
     let txRef: string | undefined;
     let cardBrand: string | undefined;
+    if (pay.method === 'card' && cardInBase.value && !cardFx.rate) await loadCardFx();
+    const settled = pay.method === 'card' ? cardSettlement(charged) : null;
     if (pay.terminal) {
+      if (cardInBase.value && !settled) {
+        return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Payments.` };
+      }
       const provider = getProvider(pay.terminal.providerId as never);
-      const result = await provider.startPayment({ amount: charged, currency: cart.currency, reference: saleId });
+      const result = await provider.startPayment(
+        settled
+          ? { amount: settled.amount, currency: settled.currency, reference: saleId }
+          : { amount: charged, currency: cart.currency, reference: saleId },
+      );
       if (!result.approved) return { approved: false, error: result.error ?? 'The payment was declined.' };
       providerName = result.provider;
       txRef = result.txRef;
@@ -322,6 +363,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
         cashReceived: pay.cashReceived,
         txRef,
         cardBrand,
+        ...(settled ? { settled } : {}),
       },
     };
 

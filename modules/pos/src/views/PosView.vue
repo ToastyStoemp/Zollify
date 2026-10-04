@@ -13,12 +13,16 @@ import {
   customDiscountCharged,
   localPrice,
   baseTotal,
+  cardFx,
+  cardInBase,
+  cardSettlement,
   cart,
   checkout,
   clear,
   inCart,
   isConverting,
   itemCount,
+  loadCardFx,
   setCustomDiscount,
   setQty,
   subtotal,
@@ -97,6 +101,7 @@ onMounted(async () => {
   cart.roundingIncrement = event?.roundingIncrement ?? 0;
   cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
   cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
+  void loadCardFx();
   void refreshTerminalStatus();
   statusTimer = setInterval(() => void refreshTerminalStatus(), 5000);
 });
@@ -109,6 +114,17 @@ onUnmounted(() => {
 const currency = computed(() => cart.currency);
 const money = (n: number): string => fmtPrice(n, currency.value);
 const price = (pid: string, vid: string | null, base: number): string => money(localPrice(pid, vid, base));
+
+/** "32.15 EUR on the card" for a local amount, when cards are charged in the base currency. */
+function onCard(localAmount: number): string {
+  const s = cardSettlement(localAmount);
+  return s ? fmtPrice(s.amount, s.currency) : '';
+}
+const cardRateLabel = computed(() => {
+  if (!cardFx.rate) return '';
+  const age = Date.now() - cardFx.at > 86_400_000 ? ` · rate from ${new Date(cardFx.at).toLocaleDateString()}` : '';
+  return `1 ${cart.baseCurrency} = ${cardFx.rate.toFixed(4)} ${cart.currency}${age}`;
+});
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const availability = computed(() => {
@@ -563,6 +579,8 @@ function startPayment(method: string): void {
   payment.splitCard = '';
   payment.error = '';
   logSent.value = false;
+  // Keep the card rate current through a long day; a stale one still works offline.
+  if (method === 'card' && cardInBase.value && Date.now() - cardFx.at > 3_600_000) void loadCardFx();
   if (method === 'card' && hasTerminal.value) {
     void beginCardPayment();
     return;
@@ -628,7 +646,12 @@ async function confirmPayment(): Promise<void> {
     legs = [
       { kind: 'cash' as const, amount: Math.max(0, Number(payment.splitCash) || 0) },
       { kind: 'card' as const, amount: Math.max(0, Number(payment.splitCard) || 0) },
-    ].filter((l) => l.amount > 0);
+    ]
+      .filter((l) => l.amount > 0)
+      .map((l) => {
+        const settled = l.kind === 'card' ? cardSettlement(l.amount) : null;
+        return settled ? { ...l, settled } : l;
+      });
   }
   const outcome = await checkout(crypto.randomUUID(), {
     method: payment.method,
@@ -847,6 +870,7 @@ async function cancelPayment(): Promise<void> {
           <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(customDiscountCharged) }}</span></div>
           <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
           <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
+          <div v-if="cardInBase" class="row muted small"><span>Card charges</span><span>{{ onCard(total) || 'no rate yet' }}</span></div>
         </div>
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
@@ -956,6 +980,10 @@ async function cancelPayment(): Promise<void> {
     <ModalShell v-if="payment.phase !== 'idle'" :title="title" @close="cancelPayment">
       <div class="paybody">
         <p class="amount">{{ money(payment.total) }}</p>
+        <p v-if="cardInBase && payment.method === 'card'" class="oncard">
+          <template v-if="onCard(payment.total)"><span>Card: <strong>{{ onCard(payment.total) }}</strong></span><small>{{ cardRateLabel }}</small></template>
+          <template v-else>No {{ cart.baseCurrency }}/{{ cart.currency }} rate on this device yet</template>
+        </p>
 
         <template v-if="payment.phase === 'needsLogin'">
           <p class="warn strong">{{ provider.label }} isn't signed in</p>
@@ -994,6 +1022,7 @@ async function cancelPayment(): Promise<void> {
             <button type="button" class="chip cardc" @click="payment.splitCard = Math.max(0, payment.total - (Number(payment.splitCash) || 0)).toFixed(2)">Card remainder</button>
           </div>
           <p>{{ splitState.label }}: <strong :class="splitState.cls">{{ money(splitState.amount) }}</strong></p>
+          <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
         <template v-else>
@@ -1125,6 +1154,8 @@ async function cancelPayment(): Promise<void> {
 .paybody { display: flex; flex-direction: column; gap: .8rem; text-align: center; }
 .paybody p { margin: 0; }
 .amount { font-size: 2rem; font-weight: 800; letter-spacing: -.01em; }
+.oncard { display: flex; flex-direction: column; margin: -.25rem 0 0; font-size: 1rem; }
+.oncard small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .pulse, .dot.checking, .tile.added { animation: none; } }

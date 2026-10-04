@@ -215,6 +215,20 @@ export interface PaymentLeg {
   txRef?: string;
   cardBrand?: string;
   authCode?: string;
+  /**
+   * What the card was actually charged, when it settled in a different
+   * currency than the sale (cards taken in the base currency at a converted
+   * event). `amount` stays in the sale's currency so legs still add up to the
+   * total; this is the figure on the card slip. `rate`: 1 currency = rate of
+   * the sale's currency, the market rate used at checkout.
+   */
+  settled?: CardSettlement;
+}
+
+export interface CardSettlement {
+  amount: number;
+  currency: string;
+  rate: number;
 }
 
 export interface TxItem {

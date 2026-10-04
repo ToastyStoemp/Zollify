@@ -73,7 +73,7 @@ function closeCard(): void {
 
 const paidWith = computed(() =>
   (tx.value?.payments ?? [])
-    .map((leg) => [leg.provider ?? leg.kind, leg.cardBrand].filter(Boolean).join(' · '))
+    .map((leg) => [leg.provider ?? leg.kind, leg.cardBrand, leg.settled ? `charged ${fmtPrice(leg.settled.amount, leg.settled.currency)}` : ''].filter(Boolean).join(' · '))
     .join(', '),
 );
 

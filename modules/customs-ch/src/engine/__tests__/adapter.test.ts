@@ -6,6 +6,9 @@ const event: SalesEvent = {
   id: 'ev1', name: 'Con', venue: {}, currency: 'CHF', status: 'active', updatedAt: 1,
 };
 
+const claimed = (...ids: string[]): EventStock[] =>
+  ids.map((productId) => ({ eventId: 'ev1', productId, variantId: '', broughtQty: 10, updatedAt: 1 }));
+
 function product(over: Partial<Product>): Product {
   return {
     id: 'p1', title: 'Thing', forSale: true, unlisted: false, price: 10,
@@ -86,7 +89,7 @@ describe('buildCustomsState - Swiss documents declare in the event\'s local curr
       total: 19, currency: 'CHF', baseCurrency: 'EUR', baseTotal: 20,
       items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 1, unitPrice: 19, lineTotal: 19, baseUnitPrice: 20, baseLineTotal: 20 }],
     };
-    const state = buildCustomsState(chfEvent, [product({ price: 20 })], [], [tx]);
+    const state = buildCustomsState(chfEvent, [product({ price: 20 })], claimed('p1'), [tx]);
     expect(state.products[0]!.soldValue).toBe(19);
   });
 });
@@ -104,7 +107,7 @@ describe('buildCustomsState - discounted sales', () => {
         { pid: 'p2', vid: null, title: 'B', qty: 1, unitPrice: 10, lineTotal: 10 },
       ],
     };
-    const state = buildCustomsState(event, [product({ id: 'p1', price: 10 }), product({ id: 'p2', price: 10 })], [], [tx]);
+    const state = buildCustomsState(event, [product({ id: 'p1', price: 10 }), product({ id: 'p2', price: 10 })], claimed('p1', 'p2'), [tx]);
     expect(state.products.find((p) => p.id === 'p1')!.soldValue).toBe(7.5);
     expect(state.products.find((p) => p.id === 'p2')!.soldValue).toBe(7.5);
   });
@@ -152,5 +155,41 @@ describe('buildCustomsState - combining sales from other events (same trip, two 
     expect(p.amount).toBe(4);
     expect(p.soldQty).toBe(3);
     expect(p.soldValue).toBe(30);
+  });
+});
+
+describe('buildCustomsState - selling more than was claimed', () => {
+  const sale = (id: string, qty: number, lineTotal: number, vid: string | null = null): Transaction => ({
+    id, eventId: 'ev1', deviceId: 'd1', timestamp: 1, method: 'cash', payments: [], discounts: [],
+    total: lineTotal, currency: 'CHF', items: [{ pid: 'p1', vid, title: 'Thing', qty, unitPrice: lineTotal / qty, lineTotal }],
+  });
+
+  it('ignores sold units beyond the claimed quantity', () => {
+    const stock: EventStock[] = [{ eventId: 'ev1', productId: 'p1', variantId: '', broughtQty: 2, updatedAt: 1 }];
+    const state = buildCustomsState(event, [product({ price: 10 })], stock, [sale('t1', 2, 20), sale('t2', 1, 10)]);
+    const p = state.products[0]!;
+    expect(p.amount).toBe(2);
+    expect(p.soldQty).toBe(2);
+    expect(p.soldValue).toBe(20);
+  });
+
+  it('counts no sales at all for a product that was never claimed', () => {
+    const state = buildCustomsState(event, [product({ price: 10 })], [], [sale('t1', 1, 10)]);
+    expect(state.products[0]!.soldQty).toBe(0);
+    expect(state.products[0]!.soldValue).toBe(0);
+  });
+
+  it('caps each variant against its own claimed quantity', () => {
+    const stock: EventStock[] = [
+      { eventId: 'ev1', productId: 'p1', variantId: 'v1', broughtQty: 1, updatedAt: 1 },
+      { eventId: 'ev1', productId: 'p1', variantId: 'v2', broughtQty: 5, updatedAt: 1 },
+    ];
+    const p1 = product({ price: 10, variants: [{ id: 'v1', name: 'A' }, { id: 'v2', name: 'B' }] });
+    const state = buildCustomsState(event, [p1], stock, [sale('t1', 3, 30, 'v1'), sale('t2', 2, 20, 'v2')]);
+    const [a, b] = state.products[0]!.variants!;
+    expect(a!.soldQty).toBe(1);
+    expect(a!.soldValue).toBe(10);
+    expect(b!.soldQty).toBe(2);
+    expect(b!.soldValue).toBe(20);
   });
 });

@@ -5,7 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
-import { discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, discountFraction } from '@zollify/customs-core';
 import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
@@ -60,6 +60,9 @@ export function buildCustomsDeState(
       soldByKey.set(key, cur);
     }
   }
+  // Sold more than was claimed for this event? The excess never crossed the
+  // border on this declaration, so it's ignored - see capSoldToBrought.
+  const soldFor = (key: string) => capSoldToBrought(soldByKey.get(key) ?? { qty: 0, value: 0 }, broughtByKey.get(key) ?? 0);
 
   // Documents read best with items of one type together: group by type
   // (catalogue order within), same as customs-ch's adapter - a customs
@@ -80,10 +83,10 @@ export function buildCustomsDeState(
       // justify the extra detail. The packing list wants that detail though
       // (same level as the Swiss import list), so variants are carried too.
       let amount = broughtByKey.get(`${p.id}:`) ?? 0;
-      let sold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
+      let sold = soldFor(`${p.id}:`);
       const variants: CustomsDeVariant[] = p.variants.map((v) => {
         const vAmount = broughtByKey.get(`${p.id}:${v.id}`) ?? 0;
-        const vSold = soldByKey.get(`${p.id}:${v.id}`) ?? { qty: 0, value: 0 };
+        const vSold = soldFor(`${p.id}:${v.id}`);
         // Unlisted variants never count toward the rolled-up total - same rule
         // as an unlisted product, otherwise this total and calcDeProduct's own
         // variant-aware total (which does skip them) disagree.

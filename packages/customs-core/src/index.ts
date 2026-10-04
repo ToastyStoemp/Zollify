@@ -359,3 +359,17 @@ export function discountFraction(tx: Transaction): number {
   const totalDiscount = tx.discounts.reduce((s, d) => s + d.amount, 0);
   return Math.min(1, Math.max(0, totalDiscount / subtotal));
 }
+
+/**
+ * Sales beyond what was claimed for the event never count toward customs
+ * documents - a unit that was never declared as brought can't be declared as
+ * sold either (and it would push the reimport/return figure below zero).
+ * Any excess is simply dropped: qty is capped at the brought quantity, and
+ * value is scaled down by the same share so the declared unit value stays the
+ * average actually charged.
+ */
+export function capSoldToBrought(sold: { qty: number; value: number }, brought: number): { qty: number; value: number } {
+  const cap = Math.max(0, brought);
+  if (sold.qty <= cap) return sold;
+  return { qty: cap, value: sold.qty > 0 ? (sold.value * cap) / sold.qty : 0 };
+}

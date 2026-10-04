@@ -32,7 +32,7 @@ const refreshTtl = (flavor?: string | null): number => (flavor === 'carbon' ? RE
 // After a 2FA login on a device, that device can skip the code for this long.
 const TRUST_TTL = Number(process.env.DEVICE_TRUST_DAYS || 60) * DAY;
 
-interface SessionInfo {
+export interface SessionInfo {
   deviceId?: string | null;
   deviceName?: string | null;
   flavor?: string | null;
@@ -63,7 +63,7 @@ export interface UserRow {
   recoveryCodes?: string | null;
 }
 
-function sha256(s: string): string {
+export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
@@ -103,7 +103,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
   }
 }
 
-async function issueTokens(
+export async function issueTokens(
   app: FastifyInstance,
   db: Database.Database,
   user: UserRow,
@@ -157,7 +157,7 @@ function clearDeviceTrust(db: Database.Database, userId: string): void {
   db.prepare('DELETE FROM trusted_devices WHERE userId = ?').run(userId);
 }
 
-function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
+export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
   if (!deviceId) return;
   db.prepare(
     `INSERT INTO devices (id, accountId, userId, name, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)

@@ -157,6 +157,28 @@ const MIGRATIONS: string[] = [
   // present an already-rotated token and get rejected outright, logging the
   // device out for no reason a user could see or predict.
   `ALTER TABLE refresh_tokens ADD COLUMN rotatedAt INTEGER;`,
+  // v10 - sign in by QR: a signed-out device shows a rotating code, a
+  // signed-in device approves it. See device-link.ts.
+  `
+  CREATE TABLE device_links (
+    id            TEXT PRIMARY KEY,
+    pollHash      TEXT NOT NULL UNIQUE,
+    codeHash      TEXT UNIQUE,
+    prevCodeHash  TEXT UNIQUE,
+    codeIssuedAt  INTEGER NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('pending','approved','denied','consumed')),
+    userId        TEXT REFERENCES users(id) ON DELETE CASCADE,
+    deviceId      TEXT,
+    deviceName    TEXT,
+    flavor        TEXT,
+    ip            TEXT,
+    device        TEXT,
+    geo           TEXT,
+    createdAt     INTEGER NOT NULL,
+    expiresAt     INTEGER NOT NULL
+  );
+  CREATE INDEX idx_device_links_expires ON device_links(expiresAt);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

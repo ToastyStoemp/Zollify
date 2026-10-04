@@ -13,6 +13,7 @@ import { loadModuleStore } from './modules/registry';
 import { mountPublicModules, mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
+import { registerDeviceLinkRoutes } from './device-link';
 import { registerStatic } from './static';
 import { registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
@@ -89,6 +90,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
           'req.body.totp',
           'req.body.recoveryCode',
           'req.body.apiKey',
+          'req.body.pollSecret',
         ],
         remove: true,
       },
@@ -191,6 +193,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
+  registerDeviceLinkRoutes(app, db);
 
   // ── Sync, devices, admin ──────────────────────────────────────────────────
   // These declare their own absolute /api/... paths, so they register on the

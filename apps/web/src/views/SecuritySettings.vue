@@ -193,6 +193,12 @@ onMounted(async () => {
     </article>
 
     <article class="card">
+      <h3>Sign in another device</h3>
+      <p class="hint">Sign a phone or tablet in as you without typing your password on it: choose "Sign in with another device" on its sign-in screen, then scan the code it shows.</p>
+      <router-link :to="{ name: 'link' }" class="btn"><Icon name="scan" :size="14" /> Scan sign-in code</router-link>
+    </article>
+
+    <article class="card">
       <div class="head">
         <h3>Your login sessions</h3>
         <button type="button" class="quiet" @click="loadSessions">Refresh</button>
@@ -254,4 +260,6 @@ h3 { margin: 0; font-size: .95rem; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .form { display: flex; flex-direction: column; gap: .5rem; width: 100%; max-width: 22rem; }
 .signout { align-self: flex-start; }
+.btn { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
+.btn:hover { background: var(--zfy-surface-2, #e9edf1); }
 </style>

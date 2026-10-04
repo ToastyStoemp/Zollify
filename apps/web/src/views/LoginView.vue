@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import {
   applyLogin,
@@ -20,6 +20,7 @@ import {
   startAutoSync,
   startRealtime,
 } from '@zollify/platform';
+import { QrCode } from '@zollify/ui';
 import { loadEnabledModules } from '../boot';
 
 /**
@@ -155,6 +156,109 @@ async function login(): Promise<void> {
   }
 }
 
+// ── Sign in with another device (QR) ─────────────────────────────────────────
+// This device shows a code that rotates every few seconds; a device that is
+// already signed in scans it and approves. Only this device holds the poll
+// secret, so the code on screen can't be used to collect the session.
+
+const qrMode = ref(false);
+const qrValue = ref('');
+const qrState = ref<'waiting' | 'expired' | 'denied'>('waiting');
+let link: { id: string; pollSecret: string } | null = null;
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+const POLL_MS = 2000;
+
+/** The address the QR points at: this server's link screen, so a phone's own camera app can open it too. */
+function qrUrl(code: string): string {
+  const base = native ? getServerUrl().replace(/\/+$/, '') + '/' : `${location.origin}${location.pathname}`;
+  return `${base}#/link?c=${encodeURIComponent(code)}`;
+}
+
+function stopQr(): void {
+  clearTimeout(pollTimer);
+  pollTimer = undefined;
+  link = null;
+}
+
+async function startQr(): Promise<void> {
+  error.value = null;
+  if (!pointAtServer()) return;
+  stopQr();
+  qrMode.value = true;
+  qrState.value = 'waiting';
+  qrValue.value = '';
+  try {
+    const res = await fetch(`${getApiBase()}/auth/link/start`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
+      body: JSON.stringify({ deviceId: myDeviceId || undefined, deviceName: myDeviceName || undefined, flavor: deviceFlavor() }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; pollSecret?: string; code?: string; error?: string };
+    if (!res.ok || !body.id || !body.pollSecret || !body.code) {
+      error.value = body.error ?? 'Could not start sign-in by QR.';
+      qrMode.value = false;
+      return;
+    }
+    link = { id: body.id, pollSecret: body.pollSecret };
+    qrValue.value = qrUrl(body.code);
+    pollTimer = setTimeout(pollQr, POLL_MS);
+  } catch {
+    error.value = 'Could not reach the server. Check your connection and try again.';
+    qrMode.value = false;
+  }
+}
+
+async function pollQr(): Promise<void> {
+  const current = link;
+  if (!current) return;
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}/auth/link/poll`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
+      body: JSON.stringify(current),
+    });
+  } catch {
+    // A dropped request mid-wait isn't the end - try again next tick.
+    if (link === current) pollTimer = setTimeout(pollQr, POLL_MS);
+    return;
+  }
+  // Cancelled, or a fresh code was started while this one was in flight.
+  if (link !== current) return;
+  const body = (await res.json().catch(() => ({}))) as { status?: string; code?: string };
+
+  if (res.ok && body.status === 'approved') {
+    stopQr();
+    busy.value = true;
+    try {
+      await afterLogin(body);
+    } finally {
+      busy.value = false;
+    }
+    return;
+  }
+  if (res.ok && body.status === 'pending') {
+    if (body.code) qrValue.value = qrUrl(body.code);
+    pollTimer = setTimeout(pollQr, POLL_MS);
+    return;
+  }
+  if (res.status >= 500 || res.status === 429) {
+    pollTimer = setTimeout(pollQr, POLL_MS * 2);
+    return;
+  }
+  stopQr();
+  qrState.value = body.status === 'denied' ? 'denied' : 'expired';
+}
+
+function closeQr(): void {
+  stopQr();
+  qrMode.value = false;
+}
+
+onBeforeUnmount(stopQr);
+
 /** Account creation is bot-gated by a proof-of-work challenge solved here before the request. */
 async function register(): Promise<void> {
   error.value = null;
@@ -194,7 +298,22 @@ async function register(): Promise<void> {
 
 <template>
   <div class="login">
-    <form @submit.prevent="mode === 'login' ? login() : register()">
+    <section v-if="qrMode" class="panel qr-panel" aria-live="polite">
+      <h1><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></h1>
+      <template v-if="qrState === 'waiting'">
+        <p class="lede">On a phone or tablet that's already signed in, open <strong>Settings → Account &amp; security → Sign in another device</strong> and scan this code. A phone's camera app works too.</p>
+        <QrCode v-if="qrValue" :value="qrValue" :size="220" label="Sign-in QR code" class="qr" />
+        <span v-else class="qr qr-wait" aria-hidden="true"></span>
+        <p class="hint">{{ busy ? 'Approved - signing in…' : 'The code changes every few seconds. Waiting for approval…' }}</p>
+      </template>
+      <template v-else>
+        <p class="error" role="alert">{{ qrState === 'denied' ? 'The other device declined this sign-in.' : 'This code has expired.' }}</p>
+        <button type="button" class="primary" @click="startQr">Show a new code</button>
+      </template>
+      <button type="button" class="quiet" @click="closeQr">Sign in with a password instead</button>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+    </section>
+    <form v-else class="panel" @submit.prevent="mode === 'login' ? login() : register()">
       <h1><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></h1>
       <p v-if="firstRun" class="hint setup">First run - the account you create now owns this server.</p>
       <div v-if="!firstRun" class="seg" role="tablist">
@@ -212,6 +331,7 @@ async function register(): Promise<void> {
           <label class="inline"><input v-model="remember" type="checkbox" /> <span>Remember this device</span></label>
         </template>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+        <button type="button" class="quiet" :disabled="busy" @click="startQr">Sign in with another device</button>
       </template>
       <template v-else>
         <label v-if="!firstRun"><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" /></label>
@@ -232,7 +352,7 @@ async function register(): Promise<void> {
   padding-top: calc(1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
   padding-bottom: calc(1rem + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
 }
-form { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
+.panel { display: flex; flex-direction: column; gap: .75rem; width: 100%; max-width: 21rem; background: var(--zfy-surface, #fff); padding: 1.5rem; border-radius: 14px; border: 1px solid var(--zfy-line, #d6dde4); }
 h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.02em; display: flex; align-items: center; gap: .5rem; }
 h1 .mark { width: 2rem; height: 2rem; border-radius: 8px; }
 h1 span { color: var(--zfy-accent, #0e7c66); }
@@ -243,4 +363,9 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
 .seg { display: flex; }
 .seg button { flex: 1; }
+.qr-panel { align-items: stretch; text-align: center; }
+.qr-panel h1 { justify-content: center; }
+.lede { margin: 0; font-size: .875rem; text-align: left; }
+.qr { align-self: center; }
+.qr-wait { display: block; width: 220px; height: 220px; border-radius: 12px; background: var(--zfy-bg, #f1f4f6); }
 </style>

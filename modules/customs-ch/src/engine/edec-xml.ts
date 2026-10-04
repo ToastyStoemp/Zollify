@@ -111,7 +111,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
    * a product whose own variants use different materials still gets one
    * position per material rather than folding them together.
    *
-   * permit/vatCode/origin/packaging are taken from whichever product reaches
+   * vatCode/origin/packaging are taken from whichever product reaches
    * a given (HS code, material) key first - real catalogs practically always
    * agree on these for the same code and material (permit/vatCode already
    * both derive from the HS code by default), so this is a rounding
@@ -143,7 +143,10 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
   for (const p of soldProducts) {
     for (const mc of calcProductByMaterial(p)) {
       if (!(mc.soldQty > 0)) continue;
-      const key = `${p.tariffNo || ''}\x00${mc.material}`;
+      // Keyed by the exported code, so 4202.22.10 and 4202.22.90 - the same
+      // line once cut to the subheading - become one position, not two.
+      const key = `${toEdecHsCode(p.tariffNo)}\x00${mc.material}`;
+      const permit = p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo);
       let g = groups.get(key);
       if (!g) {
         g = {
@@ -153,13 +156,15 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
           statValue: 0,
           weightKg: 0,
           titles: [],
-          permit: p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo),
+          permit,
           vatCode: getVatCode(p.vatRate),
           originCc: p.originCountry && p.originCountry.trim() ? p.originCountry.trim().toUpperCase() : dispatchCountry,
           packagingType: p.packagingType || 'CT',
         };
         groups.set(key, g);
       }
+      // A merged line needs a permit if any product in it does.
+      g.permit = Math.max(g.permit, permit);
       g.soldQty += mc.soldQty;
       g.statValue += statValueFor(p, mc.soldQty, mc.soldValue);
       g.weightKg += mc.soldWeightKg;

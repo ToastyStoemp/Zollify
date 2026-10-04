@@ -77,3 +77,32 @@ describe('buildEdecXml - Positionsdaten merged by HS code + material', () => {
     expect(xml).toContain('<description>2 Enamel Pin</description>');
   });
 });
+
+describe('buildEdecXml - commodity code detail', () => {
+  it('cuts the tariff number to the 6-digit HS subheading', () => {
+    const xml = buildEdecXml(state([product({ id: 'a', title: 'Bag', tariffNo: '4202.22.10', material: 'Canvas' })]))!.xml;
+    expect(xml).toContain('<commodityCode>4202.2200</commodityCode>');
+    expect(xml).not.toContain('4202.2210');
+  });
+
+  it('merges products that only differ past the subheading', () => {
+    const xml = buildEdecXml(
+      state([
+        product({ id: 'a', title: 'Tote', tariffNo: '4202.22.10', material: 'Canvas', soldQty: 3, soldValue: 60 }),
+        product({ id: 'b', title: 'Pouch', tariffNo: '4202.22.90', material: 'Canvas', soldQty: 2, soldValue: 20 }),
+      ]),
+    )!.xml;
+    expect(positionCount(xml)).toBe(1);
+    expect(xml).toContain('<statisticalValue>80</statisticalValue>');
+  });
+
+  it('keeps a permit obligation when merging with a product that has none', () => {
+    const xml = buildEdecXml(
+      state([
+        product({ id: 'a', title: 'Tote', tariffNo: '4202.22.10', material: 'Canvas', permitOverride: 0 }),
+        product({ id: 'b', title: 'Pouch', tariffNo: '4202.22.90', material: 'Canvas', permitOverride: 2 }),
+      ]),
+    )!.xml;
+    expect(xml).toContain('<permitObligation>2</permitObligation>');
+  });
+});

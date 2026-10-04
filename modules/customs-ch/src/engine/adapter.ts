@@ -6,7 +6,7 @@
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { toLocalPrice } from '@zollify/shared';
-import { discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, discountFraction } from '@zollify/customs-core';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';
@@ -88,6 +88,9 @@ export function buildCustomsState(
       soldByKey.set(key, cur);
     }
   }
+  // Sold more than was claimed for this event? The excess never crossed the
+  // border on this declaration, so it's ignored - see capSoldToBrought.
+  const soldFor = (key: string) => capSoldToBrought(soldByKey.get(key) ?? { qty: 0, value: 0 }, broughtByKey.get(key) ?? 0);
 
   // Documents read best with items of one type together: group by type
   // (catalogue order within), so a customs officer sees all prints, then all
@@ -101,7 +104,7 @@ export function buildCustomsState(
     .filter((p) => !p.deletedAt)
     .sort((a, b) => (typeRank.get(a.type?.trim() || '￿') ?? 0) - (typeRank.get(b.type?.trim() || '￿') ?? 0))
     .map((p) => {
-      const plainSold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
+      const plainSold = soldFor(`${p.id}:`);
       // Duty + VAT rate follow the HS code (customs tariff table) unless the
       // product carries an explicit override - mirrors how permit is derived,
       // so setting a Tariff no. is enough to fill the rates on every document.
@@ -128,7 +131,7 @@ export function buildCustomsState(
         soldQty: plainSold.qty,
         soldValue: plainSold.value,
         variants: p.variants.map((v) => {
-          const sold = soldByKey.get(`${p.id}:${v.id}`) ?? { qty: 0, value: 0 };
+          const sold = soldFor(`${p.id}:${v.id}`);
           return {
             name: v.name,
             sku: v.sku,

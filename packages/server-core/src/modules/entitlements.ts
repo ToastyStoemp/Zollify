@@ -38,6 +38,20 @@ export function migrateEntitlements(db: Database.Database): void {
       );
     DELETE FROM account_modules WHERE moduleId = 'customs';
   `);
+
+  // customs-ch/customs-de now require the customs-hub module (the one
+  // Customs entry point). Accounts that switched a country module on before
+  // that need the hub on too, or the country module would stop loading.
+  // Safe to run every boot: switching the hub off now switches the country
+  // modules off with it, so "country on, hub off" only exists in old data.
+  db.prepare(`
+    INSERT INTO account_modules (accountId, moduleId, enabled, updatedAt)
+    SELECT DISTINCT accountId, 'customs-hub', 1, ?
+    FROM account_modules
+    WHERE moduleId IN ('customs-ch', 'customs-de') AND enabled = 1
+    ON CONFLICT(accountId, moduleId) DO UPDATE SET enabled = 1, updatedAt = excluded.updatedAt
+    WHERE account_modules.enabled = 0
+  `).run(Date.now());
 }
 
 export function listForAccount(db: Database.Database, accountId: string): AccountModule[] {

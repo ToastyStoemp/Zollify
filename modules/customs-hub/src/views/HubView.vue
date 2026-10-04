@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
+import { sdk } from '../runtime';
 
 interface CountryCard {
   key: string;
@@ -8,6 +9,7 @@ interface CountryCard {
   title: string;
   description: string;
   indexRoute: string;
+  documentsRoute: string;
   declarantPanel: string;
 }
 
@@ -18,6 +20,7 @@ const COUNTRIES: CountryCard[] = [
     title: 'Switzerland',
     description: 'e-dec XML, Forms 11.74 and 11.87, sold/return goods lists, proforma invoices.',
     indexRoute: 'customs-ch:index',
+    documentsRoute: 'customs-ch:documents',
     declarantPanel: 'customs-ch.declarant',
   },
   {
@@ -26,18 +29,36 @@ const COUNTRIES: CountryCard[] = [
     title: 'Germany',
     description: 'Export/re-import packing lists, DEXPDF XML, IAA-Plus filing sheet, proforma invoice.',
     indexRoute: 'customs-de:index',
+    documentsRoute: 'customs-de:documents',
     declarantPanel: 'customs-de.declarant',
   },
 ];
 
 const router = useRouter();
+const route = useRoute();
 const countries = computed(() => COUNTRIES.filter((c) => router.hasRoute(c.indexRoute)));
+
+/**
+ * Set when arriving from an event's "Customs" button: picking a country then
+ * opens that event's paperwork directly instead of the country's event list.
+ */
+const eventId = computed(() => (typeof route.query.event === 'string' ? route.query.event : null));
+const event = computed(() => (eventId.value ? sdk().data.events.get(eventId.value) ?? null : null));
+
+function openTarget(c: CountryCard) {
+  return eventId.value && router.hasRoute(c.documentsRoute)
+    ? { name: c.documentsRoute, params: { eventId: eventId.value } }
+    : { name: c.indexRoute };
+}
 </script>
 
 <template>
   <section class="page customs-hub">
     <header><h1>Customs</h1></header>
-    <p class="lede">Pick a country to open its events and generate paperwork, or jump to its declarant settings.</p>
+    <p v-if="eventId" class="lede">
+      Which country's paperwork do you need<template v-if="event"> for <strong>{{ event.name }}</strong></template>?
+    </p>
+    <p v-else class="lede">Pick a country to open its events and generate paperwork, or jump to its declarant settings.</p>
 
     <p v-if="countries.length === 0" class="empty">
       Neither the Switzerland nor Germany customs module is installed. Add one under Settings → Modules.
@@ -49,7 +70,7 @@ const countries = computed(() => COUNTRIES.filter((c) => router.hasRoute(c.index
         <h2>{{ c.title }}</h2>
         <p class="desc">{{ c.description }}</p>
         <div class="actions">
-          <router-link :to="{ name: c.indexRoute }" class="primary">Open events</router-link>
+          <router-link :to="openTarget(c)" class="primary">{{ eventId ? 'Open documents' : 'Open events' }}</router-link>
           <router-link :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
         </div>
       </article>

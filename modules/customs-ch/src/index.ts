@@ -10,11 +10,11 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-ch',
-  version: '0.1.13',
+  version: '0.1.14',
   sdk: '^0.1.0',
   title: 'Customs (Switzerland)',
   description: 'EDEC XML, Forms 1174 and 1187, proforma invoices and goods lists.',
-  requires: ['catalog'],
+  requires: ['catalog', 'customs-hub'],
   // Helpers work an event; customs paperwork is the account holder's business.
   minRole: 'admin',
 

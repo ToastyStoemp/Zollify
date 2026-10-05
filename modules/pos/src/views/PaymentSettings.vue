@@ -6,13 +6,15 @@ import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { getSetting, setSetting } from '../lib/settings';
+import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
 import { sdk } from '../runtime';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
  * Connect / Pair reader / Log out where the provider supports it, the SumUp
- * affiliate key, the satellite Carbon to hand card payments to, and the
- * extra payment methods shown as buttons on the till.
+ * affiliate key, the satellite Carbon to hand card payments to, whether cards
+ * are charged in the base currency at a converted event, and the extra
+ * payment methods shown as buttons on the till.
  */
 interface Status {
   available: boolean;
@@ -40,6 +42,8 @@ const remoteCarbonId = ref('');
 const carbons = ref<DeviceSummary[]>([]);
 const carbonsError = ref('');
 const customMethods = ref<string[]>([]);
+const cardInBase = ref(false);
+const baseCurrency = computed(() => sdk().data.events.active()?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'EUR');
 const newMethod = ref('');
 
 onMounted(async () => {
@@ -47,6 +51,7 @@ onMounted(async () => {
   pollTimer = setInterval(() => void refreshStatuses(), 5000);
   active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
+  cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
@@ -98,6 +103,12 @@ const ago = (ts: number): string => {
   const h = Math.round(m / 60);
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
+
+async function saveCardInBase(): Promise<void> {
+  await setSetting(CARD_IN_BASE_KEY, cardInBase.value);
+  // The till may already be open: pick up the setting (and a rate) now.
+  void loadCardFx();
+}
 
 async function addMethod(): Promise<void> {
   const name = newMethod.value.trim();
@@ -151,6 +162,15 @@ async function removeMethod(name: string): Promise<void> {
       </div>
     </template>
 
+    <h3>Currency</h3>
+    <label class="toggle">
+      <input v-model="cardInBase" type="checkbox" @change="saveCardInBase" />
+      <span class="main">
+        <span>Charge cards in the base currency ({{ baseCurrency }})</span>
+        <small>At an event priced in a local currency, the card terminal is charged in {{ baseCurrency }} at today's market rate - a painting sold for 30 CHF is charged as about 32 EUR on the card. Cash is still taken in the local currency. Set your terminal to {{ baseCurrency }}.</small>
+      </span>
+    </label>
+
     <h3>Extra payment methods</h3>
     <p class="hint">Extra buttons on the till for payments taken outside the app - TWINT, a PayPal QR code. Sales made with them count as non-cash.</p>
     <ul v-if="customMethods.length" class="methods">
@@ -186,6 +206,8 @@ code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius
 .methods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .methods li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; font-size: .875rem; }
 .methods .quiet { min-height: 1.7rem; font-size: .78rem; }
+.toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
+.toggle input { margin-top: .2rem; }
 .add { display: flex; gap: .4rem; }
 .add input { flex: 1; min-width: 0; }
 </style>

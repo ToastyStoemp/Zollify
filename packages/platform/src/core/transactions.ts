@@ -79,7 +79,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
   // the cash box.
   const method = sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card');
   const legs: PaymentLeg[] = sale.payment.legs?.length
-    ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider }))
+    ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider, ...(l.settled ? { settled: l.settled } : {}) }))
     : [
         {
           kind: method === 'cash' ? 'cash' : 'card',
@@ -87,6 +87,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
           provider: sale.payment.provider,
           txRef: sale.payment.txRef,
           cardBrand: sale.payment.cardBrand,
+          ...(sale.payment.settled ? { settled: sale.payment.settled } : {}),
         },
       ];
 

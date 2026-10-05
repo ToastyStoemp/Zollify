@@ -169,7 +169,8 @@ export interface PublicReceipt {
   lines: { title: string; variant?: string; qty: number; amount: number; /** VAT rate letter, when a sale has more than one. */ vat?: string }[];
   discounts: { name: string; amount: number }[];
   total: number;
-  payments: { label: string; amount: number }[];
+  /** `charged`: what the card took, when it settled in another currency (cards in the base currency). */
+  payments: { label: string; amount: number; charged?: { amount: number; currency: string } }[];
   status: 'paid' | 'voided';
   brand: { logo?: string; footer: string[] };
   /** VAT included per rate, or the exemption the sale was made under. */
@@ -216,7 +217,13 @@ export function publicReceipt(
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
     total: tx.total,
-    payments: (tx.payments ?? []).map((p) => ({ label: paymentLabel(tx, p.kind, p.cardBrand), amount: Number(p.amount) || 0 })),
+    payments: (tx.payments ?? []).map((p) => ({
+      label: paymentLabel(tx, p.kind, p.cardBrand),
+      amount: Number(p.amount) || 0,
+      ...(p.settled && Number.isFinite(Number(p.settled.amount)) && /^[A-Z]{3}$/.test(String(p.settled.currency))
+        ? { charged: { amount: Number(p.settled.amount), currency: String(p.settled.currency) } }
+        : {}),
+    })),
     status: tx.revertedAt ? 'voided' : 'paid',
     brand: {
       // Inline, so the logo needs no URL of its own that could name the account.
@@ -405,7 +412,10 @@ const SCRIPT = String.raw`(function () {
     });
     if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
     if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
-    r.payments.forEach(function (p) { receiptEl.appendChild(row(p.label, money(p.amount, r.currency))); });
+    r.payments.forEach(function (p) {
+      receiptEl.appendChild(row(p.label, money(p.amount, r.currency)));
+      if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
+    });
     receiptEl.appendChild(el('hr'));
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));

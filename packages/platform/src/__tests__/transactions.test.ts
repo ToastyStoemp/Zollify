@@ -135,6 +135,32 @@ describe('recording sales', () => {
     expect(stored?.exchangeRate).toBe(10.77);
   });
 
+  it('keeps what the card was charged when it settled in the base currency', async () => {
+    // A German booth in Switzerland: 30 CHF on the till, 32.15 EUR on the card.
+    const settled = { amount: 32.15, currency: 'EUR', rate: 0.9331 };
+    const single = tx.saleToTransaction(
+      sale({ currency: 'CHF', total: 30, baseCurrency: 'EUR', baseTotal: 30, exchangeRate: 1, payment: { provider: 'mypos-carbon', approved: true, method: 'card', settled } }),
+      'dev',
+    );
+    expect(single.payments).toEqual([expect.objectContaining({ kind: 'card', amount: 30, settled })]);
+
+    const split = tx.saleToTransaction(
+      sale({
+        currency: 'CHF',
+        total: 30,
+        payment: {
+          provider: 'split',
+          approved: true,
+          method: 'split',
+          legs: [{ kind: 'cash', amount: 10 }, { kind: 'card', amount: 20, settled: { amount: 21.43, currency: 'EUR', rate: 0.9331 } }],
+        },
+      }),
+      'dev',
+    );
+    expect(split.payments[0]).not.toHaveProperty('settled');
+    expect(split.payments[1]?.settled?.amount).toBe(21.43);
+  });
+
   it('leaves the conversion fields off an unconverted sale', async () => {
     await tx.recordSale(sale({ saleId: 'home', currency: 'CHF', baseCurrency: 'CHF' }));
 

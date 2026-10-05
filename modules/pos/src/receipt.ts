@@ -241,6 +241,8 @@ export function buildReceiptLines(
     const label =
       leg.kind === 'cash' ? 'Cash' : leg.provider && leg.provider !== 'card' ? leg.provider : 'Card';
     lines.push({ kind: 'text', text: row(label, fmtPrice(leg.amount, tx.currency)) });
+    // Charged on the card in another currency (cards in the base currency).
+    if (leg.settled) lines.push({ kind: 'text', text: row('  charged', fmtPrice(leg.settled.amount, leg.settled.currency)) });
     if (leg.cardBrand || leg.authCode) {
       lines.push({
         kind: 'text',

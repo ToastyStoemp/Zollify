@@ -51,6 +51,12 @@ describe('printed receipt amounts', () => {
     expect(lines.join('\n')).not.toContain('CHF');
   });
 
+  it('prints what the card was charged when it settled in another currency', () => {
+    const lines = text(sale({ method: 'card', total: 30, payments: [{ kind: 'card', amount: 30, settled: { amount: 32.15, currency: 'EUR', rate: 0.9331 } }] }));
+    expect(amountOn(lines, 'Card')).toBe('CHF 30.00');
+    expect(amountOn(lines, 'charged')).toBe('EUR 32.15');
+  });
+
   it('prints a discounted sale as the till showed it: list prices, each discount, the total', () => {
     const lines = text(
       sale({

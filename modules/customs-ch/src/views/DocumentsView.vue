@@ -307,6 +307,9 @@ const openProforma = () => state.value && openHtml(buildProformaHtml(state.value
 const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value), safeName('proforma_eu'));
 const open1174 = () => state.value && openHtml(build1174Html(state.value), safeName('form_1174'));
 const open1187 = () => state.value && openHtml(build1187Html(state.value), safeName('form_1187'));
+/** The Swiss customs office's (BAZG) own e-dec web portal, where the XML is filed. */
+const EDEC_WEB_URL = 'https://e-dec-web.ezv.admin.ch/webdec/main.xhtml';
+
 function exportEdec(): void {
   if (!state.value) return;
   const result = buildEdecXml(state.value);
@@ -394,7 +397,9 @@ const TRANSPORT_MODES = [
           <button type="button" :disabled="pdfBusy" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
           <button type="button" :disabled="pdfBusy" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
           <button type="button" class="primary" @click="exportEdec"><Icon name="download" :size="14" /> e-dec XML</button>
+          <a :href="EDEC_WEB_URL" target="_blank" rel="noopener" class="docs-link"><Icon name="external-link" :size="14" /> Open e-dec web</a>
         </div>
+        <p class="hint">File the export declaration in the customs office's e-dec web portal with the e-dec XML above.</p>
       </article>
 
       <article class="card">
@@ -528,6 +533,8 @@ h2 { margin: 0; font-size: .95rem; }
 .seg.narrow button { min-width: 6rem; }
 .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .5rem; }
 .docs button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; }
+.docs-link { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; font-weight: 500; min-height: 2.5rem; box-sizing: border-box; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; transition: background .12s, border-color .12s; }
+.docs-link:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }

@@ -30,9 +30,9 @@ describe('form 11.74 recipient and user', () => {
     expect(html).not.toContain('c/o');
   });
 
-  it('states the purpose as "ungewisser Verkauf"', () => {
+  it('states the purpose in German and French', () => {
     const html = build1174Html(state({ fullName: 'Phuong Ninjin' }));
-    expect(html).toContain('<span class="fv">ungewisser Verkauf</span>');
+    expect(html).toContain('<span class="fv">ungewisser Verkauf · vente incertaine</span>');
     expect(html).not.toContain('Verkauf an Ausstellungen');
   });
 });

@@ -4,6 +4,7 @@ import type { Product } from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import PricingDialog from './PricingDialog.vue';
+import IncomingPackages from './IncomingPackages.vue';
 import { artistCatalog, assign, consignors, errorText, importFromArtist, products, productsOf, stores, unassign, type CatalogProduct } from '../api';
 import { sdk } from '../runtime';
 
@@ -139,6 +140,7 @@ async function runImport(): Promise<void> {
 
 <template>
   <div class="tab">
+    <IncomingPackages @error="emit('error', $event)" />
     <p v-if="!choices.length" class="empty">Add an artist first, then tag their items here.</p>
     <template v-else>
       <div class="bar">

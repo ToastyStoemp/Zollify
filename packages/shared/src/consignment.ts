@@ -286,6 +286,21 @@ export interface ArtistConsignment {
   setups: SetupMoment[];
   /** Current and coming times the store features this artist. */
   features: StoreFeature[];
+  /** Packages the artist sent this store, newest first. */
+  shipments: {
+    id: string;
+    storeId: string;
+    status: 'sent' | 'received' | 'cancelled';
+    lines: { productId: string; variantId: string; qty: number; title: string }[];
+    received: { productId: string; variantId: string; qty: number }[] | null;
+    note: string;
+    carrier: string;
+    tracking: string;
+    sentAt: number;
+    receivedAt: number | null;
+  }[];
+  /** Restocks, recounts and received packages, newest first. */
+  stockChanges: { id: string; kind: 'restock' | 'recount' | 'package'; storeId: string | null; lines: { productId: string; variantId: string; qty: number }[]; at: number }[];
   /** Coming workshops this artist hosts, with how many places are booked. */
   workshops: { id: string; title: string; storeId: string; date: string; time: string; durationMin: number; capacity: number; booked: number; cancelled: boolean }[];
 }

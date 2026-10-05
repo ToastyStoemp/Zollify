@@ -260,6 +260,28 @@ export interface Pricing {
 export const loadPricing = (consignorId: string): Promise<Pricing> => sdk().http.get(`consignors/${encodeURIComponent(consignorId)}/pricing`);
 export const savePricing = (consignorId: string, pricing: SharePricing): Promise<unknown> => sdk().http.put(`consignors/${encodeURIComponent(consignorId)}/pricing`, pricing);
 
+// ── Stock: restocking and packages ─────────────────────────────────────────
+
+export interface StockLineInput {
+  productId: string;
+  variantId: string;
+  qty: number;
+}
+export type Shipment = ArtistConsignment['shipments'][number] & { consignorId: string };
+const linkPath = (storeAccountId: string, consignorId: string, rest: string): string =>
+  `links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/${rest}`;
+export const restock = (storeAccountId: string, consignorId: string, body: { lines: StockLineInput[]; mode: 'add' | 'set'; storeId: string | null }): Promise<unknown> =>
+  sdk().http.post(linkPath(storeAccountId, consignorId, 'stock'), body);
+export const sendShipment = (
+  storeAccountId: string,
+  consignorId: string,
+  body: { storeId: string; lines: StockLineInput[]; note: string; carrier: string; tracking: string },
+): Promise<unknown> => sdk().http.post(linkPath(storeAccountId, consignorId, 'shipments'), body);
+export const cancelShipment = (storeAccountId: string, consignorId: string, id: string): Promise<unknown> =>
+  sdk().http.del(linkPath(storeAccountId, consignorId, `shipments/${encodeURIComponent(id)}`));
+export const loadShipments = async (): Promise<Shipment[]> => (await sdk().http.get<{ shipments: Shipment[] }>('shipments')).shipments;
+export const receiveShipment = (id: string, lines: StockLineInput[]): Promise<unknown> => sdk().http.post(`shipments/${encodeURIComponent(id)}/receive`, { lines });
+
 export const respondToSetup = (storeAccountId: string, consignorId: string, setupId: string, status: 'confirmed' | 'declined', note = ''): Promise<{ setup: SetupMoment }> =>
   sdk().http.post(`links/${id(storeAccountId)}/${id(consignorId)}/setups/${id(setupId)}/respond`, { status, note });
 export const leaveStore = (storeAccountId: string, consignorId: string): Promise<unknown> =>

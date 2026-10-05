@@ -31,6 +31,7 @@ import {
 import { migratePlanner, plannerForArtist, registerPlanner, rentalsOf } from './consignment-planner';
 import { migrateProgramme, programmeForArtist, registerProgramme, registerProgrammePublic } from './consignment-programme';
 import { followArtistChanges, migrateSharing, registerSharing, syncShared } from './consignment-sharing';
+import { migrateStock, registerStock, stockForArtist } from './consignment-stock';
 
 /**
  * Consignment - the server half.
@@ -198,6 +199,7 @@ export const consignmentServerModule: ServerModule = {
     migratePlanner(db);
     migrateProgramme(db);
     migrateSharing(db);
+    migrateStock(db);
   },
 
   /** An artist's devices changed products: stores sharing them follow. */
@@ -220,6 +222,7 @@ export const consignmentServerModule: ServerModule = {
     registerPlanner(app, ctx);
     registerProgramme(app, ctx);
     registerSharing(app, ctx);
+    registerStock(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 
@@ -417,14 +420,14 @@ export const consignmentServerModule: ServerModule = {
         };
         // The owner switched consignment off: the link stays, the sharing stops.
         if (!isEnabled(db, row.accountId, MODULE_ID)) {
-          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
+          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], shipments: [], stockChanges: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
           continue;
         }
         const programme = programmeForArtist(db, row.accountId, row.id);
         const planner = plannerForArtist(db, row.accountId, row.id);
         // Every store the artist hears about must have a name on their side.
         const mentioned = [...programme.features.flatMap((f) => f.storeIds), ...programme.workshops.map((w) => w.storeId), ...planner.rentals.map((r) => r.storeId), ...planner.setups.map((s) => s.storeId)];
-        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme });
+        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme, ...stockForArtist(db, row.accountId, row.id) });
       }
       return { links: out };
     });

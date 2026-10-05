@@ -15,7 +15,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'consignment',
-  version: '0.5.0',
+  version: '0.6.0',
   sdk: '^0.1.0',
   title: 'Consignment',
   description: 'Sell work by consignment artists across your stores and settle what each is owed - or follow your own work in other stores.',

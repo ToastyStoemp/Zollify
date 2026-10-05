@@ -5,6 +5,7 @@ import type { SetupMoment } from '@zollify/shared';
 import { commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import ShareItems from './ShareItems.vue';
+import StockDialog from './StockDialog.vue';
 import { acceptCode, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
 import { sdk } from '../runtime';
 
@@ -54,6 +55,14 @@ async function leave(l: ArtistConsignment): Promise<void> {
 }
 
 const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
+/** Restocking or announcing a package for one store. */
+const stocking = ref<{ link: ArtistConsignment; mode: 'restock' | 'package' } | null>(null);
+function stockDone(message: string): void {
+  sdk().ui.toast(message, { kind: 'success', timeoutMs: 6000 });
+  void refresh();
+}
+const sentCount = (l: ArtistConsignment): number => (l.shipments ?? []).filter((s) => s.status === 'sent').length;
+
 /** The store whose sharing is open, if any. */
 const sharing = ref<ArtistConsignment | null>(null);
 const sharingChanged = ref(false);
@@ -113,6 +122,8 @@ function commissionLine(l: ArtistConsignment): string {
         </div>
         <span class="grow" />
         <button v-if="!l.paused" type="button" @click="sharing = l"><Icon name="tag" :size="14" /> Share items</button>
+        <button v-if="!l.paused && l.items.length" type="button" @click="stocking = { link: l, mode: 'restock' }"><Icon name="layers" :size="14" /> Restock</button>
+        <button v-if="!l.paused && l.items.length" type="button" @click="stocking = { link: l, mode: 'package' }"><Icon name="truck" :size="14" /> Send a package<em v-if="sentCount(l)" class="badge">{{ sentCount(l) }}</em></button>
         <button type="button" class="quiet" @click="leave(l)">Unlink</button>
       </header>
 
@@ -220,6 +231,10 @@ function commissionLine(l: ArtistConsignment): string {
         </details>
       </template>
     </article>
+    <ModalShell v-if="stocking" :title="stocking.mode === 'restock' ? `Restock at ${stocking.link.storeAccountName}` : `Package for ${stocking.link.storeAccountName}`" @close="stocking = null">
+      <StockDialog :link="stocking.link" :mode="stocking.mode" @done="stockDone" @close="stocking = null" />
+    </ModalShell>
+
     <ModalShell v-if="sharing" :title="`Share with ${sharing.storeAccountName}`" @close="closeSharing">
       <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" />
       <template #footer><div class="foot"><button type="button" class="primary" @click="closeSharing">Done</button></div></template>
@@ -241,6 +256,8 @@ function commissionLine(l: ArtistConsignment): string {
 .card header { display: flex; align-items: flex-start; gap: .6rem; }
 .card header button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
 .foot { display: flex; justify-content: flex-end; }
+.badge { font-style: normal; font-size: .66rem; padding: 0 .35rem; border-radius: 999px; background: var(--zfy-signal-soft, #e4ecf6); }
+.card header { flex-wrap: wrap; }
 .grow { flex: 1; }
 .setups { display: flex; flex-direction: column; gap: .5rem; padding: .7rem .8rem; border-radius: 10px; background: var(--zfy-signal-soft, #e4ecf6); }
 .setups h3 { margin: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }

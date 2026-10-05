@@ -254,10 +254,18 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
       g.qty += c.amount || 0;
       g.weightKg += c.totalWeightKg;
       if (c.totalValue != null) g.value += c.totalValue;
-      const retQty = Math.max(0, (c.amount || 0) - (c.soldQty || 0));
-      g.retQty += retQty;
-      g.retWeightKg += Math.round(retQty * ((p.weightG as number) || 0)) / 1000;
-      if (c.effectiveUnitPrice != null) g.retValue += Math.round(c.effectiveUnitPrice * retQty);
+      // The return goods list's own figures (calcReturnStats), so 11.74/11.87
+      // match it: each listed variant at its own price and weight. The
+      // product-wide average price used before undervalued a product whose
+      // cheap variants sold and dear ones came home (A 5x10 sold out, B 5x20
+      // returned: list 100, form 75), and weighed variants at the parent's
+      // weight.
+      const r = calcReturnStats(p);
+      if (r.retQty > 0) {
+        g.retQty += r.retQty;
+        g.retWeightKg += r.retWkg;
+        if (r.retVal != null) g.retValue += r.retVal;
+      }
       if (c.totalValue != null && c.totalValue > maxVal && p.tariffNo) {
         maxVal = c.totalValue;
         tariffNo = p.tariffNo;

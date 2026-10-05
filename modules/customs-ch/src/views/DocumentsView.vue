@@ -24,6 +24,7 @@ import {
 import { DECLARANT_KEY } from './declarant';
 import { sdk } from '../runtime';
 import { setEventLink } from '@zollify/customs-core';
+import { EDEC_WEB_URL, autoCompanyCode as autoCodeFor } from '../bundle';
 
 /**
  * One event's customs paperwork - ZollTool's screen. Everything typed here is
@@ -185,16 +186,7 @@ const combinedEventsSummary = computed(() =>
 );
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
-const autoCompanyCode = computed(() => {
-  const name = (artist.value.companyName || artist.value.fullName || '').trim();
-  if (!name) return '';
-  const words = name.split(/\s+/).filter(Boolean);
-  const raw = words.length > 1 ? words.map((w) => w[0]).join('') : name.slice(0, 3);
-  return raw
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 6);
-});
+const autoCompanyCode = computed(() => autoCodeFor(artist.value));
 const effectiveCompanyCode = computed(() => companyCode.value.trim() || autoCompanyCode.value);
 
 // ── Live state for the generators ───────────────────────────────────────────
@@ -394,7 +386,9 @@ const TRANSPORT_MODES = [
           <button type="button" :disabled="pdfBusy" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
           <button type="button" :disabled="pdfBusy" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
           <button type="button" class="primary" @click="exportEdec"><Icon name="download" :size="14" /> e-dec XML</button>
+          <a :href="EDEC_WEB_URL" target="_blank" rel="noopener" class="docs-link"><Icon name="external-link" :size="14" /> Open e-dec web</a>
         </div>
+        <p class="hint">File the export declaration in the customs office's e-dec web portal with the e-dec XML above.</p>
       </article>
 
       <article class="card">
@@ -528,6 +522,8 @@ h2 { margin: 0; font-size: .95rem; }
 .seg.narrow button { min-width: 6rem; }
 .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .5rem; }
 .docs button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; }
+.docs-link { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; font-weight: 500; min-height: 2.5rem; box-sizing: border-box; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; transition: background .12s, border-color .12s; }
+.docs-link:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }

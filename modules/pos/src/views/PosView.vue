@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, splitCashPortionAmounts } from '@zollify/shared';
+import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -871,6 +871,8 @@ const sellerAccount = ref(sdk().account());
 const offSeller = sdk().onAccountChange((a) => (sellerAccount.value = a));
 onUnmounted(offSeller);
 const canLock = computed(() => sdk().lock?.available() ?? false);
+/** Staff see the day's takings only when the owner allows it. */
+const showTotals = computed(() => seesSalesTotals(sellerAccount.value));
 const seller = computed(() => (sellerAccount.value?.email ?? '').split('@')[0] ?? '');
 function lockTill(): void {
   void sdk().lock?.lock();
@@ -885,7 +887,7 @@ function lockTill(): void {
         <div class="event">
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
-          <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
+          <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>

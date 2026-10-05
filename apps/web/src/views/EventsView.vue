@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, toLocalPrice, type EventVat } from '@zollify/shared';
+import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -31,6 +31,8 @@ import {
 const account = currentAccount;
 const router = useRouter();
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Staff see takings only when the owner allows it (Settings → Team). */
+const showTotals = computed(() => seesSalesTotals(account.value));
 const isHelper = computed(() => (account.value?.allowedEventIds?.length ?? 0) > 0);
 const baseCurrency = computed(() => account.value?.profile.defaultCurrency ?? 'CHF');
 const error = ref<string | null>(null);
@@ -382,7 +384,7 @@ async function save(): Promise<void> {
             <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
-          <p class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active'" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>

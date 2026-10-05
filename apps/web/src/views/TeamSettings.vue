@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, visibleEvents } from '@zollify/platform';
+import { authFetch, currentAccount, updateProfile, visibleEvents } from '@zollify/platform';
 import BadgeDialog from './BadgeDialog.vue';
 
 /**
@@ -117,6 +117,21 @@ function when(ts: number | null): string {
 // Staff badges: an admin prints them for anyone who does not outrank them.
 const badgeFor = ref<TeamUser | null>(null);
 const canBadge = (u: TeamUser): boolean => u.role !== 'owner' || currentAccount.value?.role === 'owner';
+
+// Whether staff see sales totals - takings, stats, what the cash box should hold.
+const staffTotals = computed(() => currentAccount.value?.profile.staffSeesTotals === true);
+const savingTotals = ref(false);
+async function setStaffTotals(on: boolean): Promise<void> {
+  savingTotals.value = true;
+  error.value = null;
+  try {
+    await updateProfile({ staffSeesTotals: on });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save that.';
+  } finally {
+    savingTotals.value = false;
+  }
+}
 </script>
 
 <template>
@@ -132,6 +147,14 @@ const canBadge = (u: TeamUser): boolean => u.role !== 'owner' || currentAccount.
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <BadgeDialog v-if="badgeFor" :user-id="badgeFor.id" :email="badgeFor.email" @close="badgeFor = null" />
+
+    <label class="totals-toggle">
+      <input type="checkbox" :checked="staffTotals" :disabled="savingTotals" @change="setStaffTotals(($event.target as HTMLInputElement).checked)" />
+      <span>
+        <strong>Staff can see sales totals</strong>
+        <small>Takings on Home and the till, History's figures and exports, event totals, and the expected cash in Cash up. Off, staff see only their own sales one by one and cash up blind: they count the box, you compare.</small>
+      </span>
+    </label>
 
     <h3>People</h3>
     <ul class="list">
@@ -203,6 +226,10 @@ const canBadge = (u: TeamUser): boolean => u.role !== 'owner' || currentAccount.
 </template>
 
 <style scoped>
+.totals-toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .75rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); cursor: pointer; }
+.totals-toggle input { margin-top: .2rem; }
+.totals-toggle span { display: flex; flex-direction: column; gap: .15rem; font-size: .875rem; }
+.totals-toggle small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .team { display: flex; flex-direction: column; gap: .75rem; max-width: 40rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }

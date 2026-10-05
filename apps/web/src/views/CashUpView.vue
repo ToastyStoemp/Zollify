@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { CURRENCY_COINS, denominationsFor, fmtPrice, round2 } from '@zollify/shared';
+import { CURRENCY_COINS, denominationsFor, fmtPrice, round2, seesSalesTotals } from '@zollify/shared';
 import {
   activeEventId,
   currentAccount,
@@ -48,6 +48,12 @@ watch(
 );
 
 const isStaff = computed(() => currentAccount.value?.role === 'member');
+/**
+ * Without the owner's leave to see totals, staff cash up blind: they count
+ * the box and hand over the figure, and only the owner sees what it should
+ * have been.
+ */
+const blind = computed(() => !seesSalesTotals(currentAccount.value));
 /** '' = everyone; otherwise a user id. Staff are always themselves. */
 const seller = ref<string>(isStaff.value ? (currentAccount.value?.userId ?? '') : '');
 // On a shared till the person changes under this screen: staff always see their own.
@@ -157,7 +163,8 @@ function isCoin(value: number): boolean {
     <p v-if="!eventId" class="empty">Pick an event to cash up.</p>
 
     <template v-else>
-      <ul class="totals">
+      <p v-if="blind" class="hint">Count the box and give the counted total to the owner - takings and the expected amount are kept for them.</p>
+      <ul v-if="!blind" class="totals">
         <li>
           <span class="label">Cash taken</span>
           <strong>{{ fmtPrice(takings.cash, currency) }}</strong>
@@ -202,6 +209,7 @@ function isCoin(value: number): boolean {
           <dt>Counted</dt>
           <dd>{{ fmtPrice(countedTotal, currency) }}</dd>
 
+          <template v-if="!blind">
           <dt>Expected</dt>
           <dd>{{ fmtPrice(expected, currency) }}</dd>
 
@@ -215,6 +223,7 @@ function isCoin(value: number): boolean {
             <template v-else-if="variance > 0"> · over</template>
             <template v-else> · short</template>
           </dd>
+          </template>
         </dl>
       </div>
     </template>

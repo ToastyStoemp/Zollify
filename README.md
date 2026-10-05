@@ -209,7 +209,10 @@ consign*), or send a package that only reaches the shelf once the store
 confirms what arrived. The till groups a store's items by artist, then by
 type, and labels can carry the artist's name. Staff accounts (role *member*)
 ring up sales and cash up as themselves, but cannot see or change artists,
-commissions, payouts or reports.
+commissions, payouts or reports. Sales totals are the owner's too unless an admin
+switches on *Staff can see sales totals* (Settings → Team): until then staff
+see their own sales one by one, no takings, stats or exports, and cash up
+blind - they count the box, the owner compares.
 
 *Shared tills* - several people of one account can use one device at once.
 The device stays signed in as whoever set it up; under Settings → This device

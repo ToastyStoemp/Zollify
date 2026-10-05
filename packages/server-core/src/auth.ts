@@ -97,6 +97,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
+      staffSeesTotals: parsed.staffSeesTotals === true,
     };
   } catch {
     return emptyProfile();

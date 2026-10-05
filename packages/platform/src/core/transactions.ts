@@ -72,7 +72,9 @@ export function saleToTransaction(
   consignorOf: (productId: string) => string | undefined = () => undefined,
 ): Transaction {
   const items: TxItem[] = sale.lines.map((line) => ({
-    ...withConsignor(consignorOf(line.productId)),
+    ...withConsignor(line.consignorId ?? consignorOf(line.productId)),
+    ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
+    ...(line.ref ? { ref: { moduleId: line.ref.moduleId, kind: line.ref.kind, id: line.ref.id } } : {}),
     pid: line.productId,
     vid: line.variantId ?? null,
     title: line.name,

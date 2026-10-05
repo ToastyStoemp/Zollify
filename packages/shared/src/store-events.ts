@@ -55,6 +55,11 @@ export const WorkshopInputSchema = z.object({
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/),
   /** An artist running it, who is told and sees it on their side. */
   hostConsignorId: z.string().min(1).max(80).nullable().default(null),
+  /**
+   * The host's share of each place sold at the till, in percent; the store
+   * keeps the rest. 0 = all the store's. Shows on the host's statement.
+   */
+  hostSharePct: z.number().min(0).max(100).default(0),
   /** Listed on the public page. */
   published: z.boolean().default(true),
   /** Taking sign-ups right now. */
@@ -83,6 +88,8 @@ export interface Signup {
   paid: boolean;
   /** 'public' = the sign-up page; 'store' = added by the store. */
   source: 'public' | 'store';
+  /** Paid through the till: a recorded, not reverted, sale settles this sign-up. Derived, never stored. */
+  paidAtTill?: boolean;
   createdAt: number;
   cancelledAt: number | null;
 }
@@ -136,6 +143,14 @@ export function promoteFromWaitlist(
     out.push(s.id);
   }
   return out;
+}
+
+/** What a till sale line for a sign-up refers to (TxItem.ref.kind). */
+export const SIGNUP_REF_KIND = 'workshop-signup';
+
+/** The split a workshop place sold at the till carries: who shares it, and what the store keeps. */
+export function workshopLineSplit(w: Pick<Workshop, 'hostConsignorId' | 'hostSharePct'>): { consignorId?: string; commissionPct?: number } {
+  return w.hostConsignorId && w.hostSharePct > 0 ? { consignorId: w.hostConsignorId, commissionPct: 100 - w.hostSharePct } : {};
 }
 
 /** Whether a feature is running on a day. */

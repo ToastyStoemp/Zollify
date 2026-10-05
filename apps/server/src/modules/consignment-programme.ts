@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   FeatureInputSchema,
   SignupInputSchema,
+  SIGNUP_REF_KIND,
   WorkshopInputSchema,
   placeSignup,
   promoteFromWaitlist,
@@ -67,6 +68,22 @@ function signupsOf(db: Database.Database, accountId: string, workshopId: string)
   return (db.prepare('SELECT doc FROM consignment_signups WHERE accountId = ? AND workshopId = ? ORDER BY createdAt').all(accountId, workshopId) as { doc: string }[]).map(
     (r) => JSON.parse(r.doc) as Signup,
   );
+}
+
+/**
+ * Sign-ups with `paidAtTill` filled in from the till's own records: a sale
+ * line that refers to the sign-up and was not reverted. Derived every time,
+ * so a refund at the till un-pays it with no extra step, and an offline sale
+ * counts the moment it syncs.
+ */
+function withTillPayments(db: Database.Database, accountId: string, signups: Signup[]): Signup[] {
+  if (!signups.length) return signups;
+  const paid = new Set<string>();
+  for (const tx of replay(db, accountId).transactions) {
+    if (tx.revertedAt || tx.revertedBy) continue;
+    for (const item of tx.items) if (item.ref?.moduleId === 'consignment' && item.ref.kind === SIGNUP_REF_KIND) paid.add(item.ref.id);
+  }
+  return signups.map((s) => ({ ...s, paidAtTill: paid.has(s.id) }));
 }
 
 function saveSignup(db: Database.Database, accountId: string, s: Signup, tokenHash?: string): void {
@@ -318,7 +335,29 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
   app.get<{ Params: { id: string } }>('/workshops/:id/signups', async (req, reply) => {
     const who = ctx.identity(req);
     if (!get<Workshop>(db, who.accountId, 'workshops', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-    return { signups: signupsOf(db, who.accountId, req.params.id) };
+    return { signups: withTillPayments(db, who.accountId, signupsOf(db, who.accountId, req.params.id)) };
+  });
+
+  /**
+   * What the till at a store can take payment for: its workshops from a
+   * month back on, and who on them is booked but has not paid yet.
+   */
+  app.get<{ Querystring: { storeId?: string } }>('/till/workshops', async (req) => {
+    const who = ctx.identity(req);
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    const workshops = list<Workshop>(db, who.accountId, 'workshops')
+      .filter((w) => w.storeId === req.query.storeId && !w.cancelledAt && w.date >= since)
+      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+    return {
+      workshops: workshops.map((w) => {
+        const signups = withTillPayments(db, who.accountId, signupsOf(db, who.accountId, w.id));
+        return {
+          ...w,
+          booked: seatsTaken(signups),
+          unpaid: signups.filter((s) => s.status === 'booked' && !s.paid && !s.paidAtTill),
+        };
+      }),
+    };
   });
 
   /** The store books someone itself - a phone call, someone at the counter. */

@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue';
-import type { SaleEvent, SaleLine } from '@zollify/sdk';
+import type { SaleEvent, SaleLine, SaleLineRef, TillLine } from '@zollify/sdk';
 import type { CardSettlement } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
@@ -19,6 +19,10 @@ export interface CartLine extends SaleLine {
   variantLabel: string | null;
   /** Product.type - some discount rules target a whole type rather than ids. */
   type?: string;
+  /** Added by another module (a workshop place, say): its quantity is not the seller's to change. */
+  fixed?: boolean;
+  /** That module's key for the line, so the same thing is never added twice. */
+  key?: string;
 }
 
 interface CartState {
@@ -223,6 +227,7 @@ export function addLine(
 export function setQty(lineId: string, qty: number): void {
   const line = cart.lines.find((l) => l.lineId === lineId);
   if (!line) return;
+  if (line.fixed && qty > 0) return;
   if (qty <= 0) {
     removeLine(lineId);
     return;
@@ -280,6 +285,34 @@ export function addMisc(title: string, unitPrice: number, qty: number): void {
     lineTotal: (Math.round(unitPrice * 100) * qty) / 100,
     taxRate: null,
   });
+}
+
+/**
+ * A line another module put on the till - a workshop place, a booking. Not a
+ * catalogue item: no stock, and no rule discounts reach it (they match
+ * catalogue products only), though a manual discount still spreads over it.
+ * The same key twice keeps one line.
+ */
+export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }): boolean {
+  if (cart.lines.some((l) => l.key === line.key)) return true;
+  cart.lines.push({
+    lineId: `l${++lineSeq}`,
+    productId: `module:${line.key}`,
+    variantId: null,
+    variantLabel: null,
+    sku: null,
+    name: line.name,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+    taxRate: null,
+    fixed: true,
+    key: line.key,
+    ...(line.consignorId ? { consignorId: line.consignorId } : {}),
+    ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
+    ...(line.ref ? { ref: line.ref } : {}),
+  });
+  return true;
 }
 
 /**
@@ -344,7 +377,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
-      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.

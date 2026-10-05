@@ -217,3 +217,46 @@ describe('workshops', () => {
     expect(script.body).toContain('function solve(');
   });
 });
+
+describe('paying for a workshop at the till', () => {
+  let signupId = '';
+  const sale = (opId: string, type: string, payload: unknown) =>
+    app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(store), payload: { deviceId: 'till', ops: [{ opId, deviceId: 'till', ts: 1, type, payload }] } });
+
+  it('lists who still owes, for the store the till is at', async () => {
+    await call(store, 'PUT', '/workshops/w2', { storeId: 'zh', title: 'Bookbinding', date: day, time: '10:00', capacity: 6, price: 50, currency: 'CHF', hostConsignorId: 'ana', hostSharePct: 70 });
+    signupId = (await call(store, 'POST', '/workshops/w2/signups', { name: 'Kim', seats: 2 })).json().signup.id;
+    const res = (await call(store, 'GET', '/till/workshops?storeId=zh')).json();
+    const w2 = res.workshops.find((w: { id: string }) => w.id === 'w2');
+    expect(w2.unpaid.map((s: Signup) => s.name)).toEqual(['Kim']);
+    expect((await call(store, 'GET', '/till/workshops?storeId=fair')).json().workshops).toEqual([]);
+  });
+
+  it('a sale referring to the sign-up pays it, and gives the host their share', async () => {
+    await sale('op-till-sale-00000001', 'tx.create', {
+      id: 'tw1',
+      eventId: 'zh',
+      deviceId: 'till',
+      timestamp: Date.now(),
+      method: 'cash',
+      payments: [],
+      items: [{ pid: 'module:signup:x', vid: null, title: 'Bookbinding · Kim', qty: 2, unitPrice: 50, lineTotal: 100, consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: signupId } }],
+      discounts: [],
+      total: 100,
+      currency: 'CHF',
+    });
+    const w2 = (await call(store, 'GET', '/till/workshops?storeId=zh')).json().workshops.find((w: { id: string }) => w.id === 'w2');
+    expect(w2.unpaid).toEqual([]);
+    const list = (await call(store, 'GET', '/workshops/w2/signups')).json().signups as Signup[];
+    expect(list[0]).toMatchObject({ name: 'Kim', paid: false, paidAtTill: true });
+
+    const ana = (await call(store, 'GET', '/statement')).json().statements.find((s: { consignorId: string }) => s.consignorId === 'ana');
+    expect(ana.totals[0]).toMatchObject({ gross: 100, commission: 30, artistShare: 70 });
+  });
+
+  it('a refund at the till un-pays it again', async () => {
+    await sale('op-till-revert-0000001', 'tx.revert', { id: 'tw1', revertedAt: Date.now() });
+    const list = (await call(store, 'GET', '/workshops/w2/signups')).json().signups as Signup[];
+    expect(list[0]?.paidAtTill).toBe(false);
+  });
+});

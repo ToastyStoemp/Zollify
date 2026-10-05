@@ -7,10 +7,12 @@ import {
   type Logger,
   type NavItem,
   type RouteDef,
+  type SaleLineRef,
   type Sdk,
   type SettingsPanel,
   type ShellUi,
   type StoreSchema,
+  type TillLine,
   type Unsubscribe,
 } from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
@@ -179,6 +181,9 @@ const coreData: import('@zollify/sdk').DataApi = {
 const CONFIG_STORE = 'config';
 const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 
+/** The open till, when there is one - the module that sells registers here. */
+let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
+
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
   const subscriptions: Unsubscribe[] = [];
   let ownDb: Dexie | null = null;
@@ -285,6 +290,29 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       sendPayment: (msg) => sendPaymentMessage(msg),
       onPayment: (handler) => {
         const off = onPaymentMessage(handler);
+        subscriptions.push(off);
+        return off;
+      },
+    },
+    till: {
+      action(action) {
+        guard();
+        services.contributions.addTillAction(moduleId, action);
+      },
+      actions: () => [...services.contributions.tillActions].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label)),
+      addLine(line) {
+        guard();
+        if (!tillReceiver) return false;
+        // The ref names the module that added the line - never one it chose.
+        const { ref, ...rest } = line;
+        return tillReceiver({ ...rest, ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}) });
+      },
+      onAddLine(handler) {
+        guard();
+        tillReceiver = handler;
+        const off = () => {
+          if (tillReceiver === handler) tillReceiver = null;
+        };
         subscriptions.push(off);
         return off;
       },

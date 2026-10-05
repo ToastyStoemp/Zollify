@@ -145,6 +145,7 @@ const workshop = reactive({
   capacity: '8',
   price: '0',
   hostConsignorId: '',
+  hostSharePct: '0',
   published: true,
   signupsOpen: true,
   waitlist: true,
@@ -152,8 +153,8 @@ const workshop = reactive({
 function openWorkshop(w?: WorkshopRow): void {
   workshopId.value = w?.id ?? null;
   Object.assign(workshop, w
-    ? { storeId: w.storeId, title: w.title, description: w.description, date: w.date, time: w.time, durationMin: String(w.durationMin), capacity: String(w.capacity), price: String(w.price), hostConsignorId: w.hostConsignorId ?? '', published: w.published, signupsOpen: w.signupsOpen, waitlist: w.waitlist }
-    : { storeId: stores.value[0]?.id ?? '', title: '', description: '', date: addDays(now, 14), time: '18:00', durationMin: '120', capacity: '8', price: '0', hostConsignorId: '', published: true, signupsOpen: true, waitlist: true });
+    ? { storeId: w.storeId, title: w.title, description: w.description, date: w.date, time: w.time, durationMin: String(w.durationMin), capacity: String(w.capacity), price: String(w.price), hostConsignorId: w.hostConsignorId ?? '', hostSharePct: String(w.hostSharePct ?? 0), published: w.published, signupsOpen: w.signupsOpen, waitlist: w.waitlist }
+    : { storeId: stores.value[0]?.id ?? '', title: '', description: '', date: addDays(now, 14), time: '18:00', durationMin: '120', capacity: '8', price: '0', hostConsignorId: '', hostSharePct: '0', published: true, signupsOpen: true, waitlist: true });
   workshopOpen.value = true;
 }
 async function submitWorkshop(): Promise<void> {
@@ -172,6 +173,7 @@ async function submitWorkshop(): Promise<void> {
       price: Math.max(0, parseFloat(workshop.price) || 0),
       currency: existing?.currency ?? currency.value,
       hostConsignorId: workshop.hostConsignorId || null,
+      hostSharePct: workshop.hostConsignorId ? Math.min(100, Math.max(0, parseFloat(workshop.hostSharePct) || 0)) : 0,
       published: workshop.published,
       signupsOpen: workshop.signupsOpen,
       waitlist: workshop.waitlist,
@@ -249,7 +251,7 @@ const csvCell = (v: unknown): string => {
 };
 async function exportSignups(): Promise<void> {
   const w = listFor.value!;
-  const rows = [['Name', 'Email', 'Places', 'Status', 'Paid', 'Note', 'Signed up'], ...signups.value.map((s) => [s.name, s.email, s.seats, s.status, s.paid ? 'yes' : '', s.note, new Date(s.createdAt).toISOString().slice(0, 16).replace('T', ' ')])];
+  const rows = [['Name', 'Email', 'Places', 'Status', 'Paid', 'Note', 'Signed up'], ...signups.value.map((s) => [s.name, s.email, s.seats, s.status, s.paidAtTill ? 'at till' : s.paid ? 'yes' : '', s.note, new Date(s.createdAt).toISOString().slice(0, 16).replace('T', ' ')])];
   await sdk().ui.saveFile(`${w.title.replace(/[^\w-]+/g, '-').toLowerCase()}-${w.date}.csv`, rows.map((r) => r.map(csvCell).join(',')).join('\n'), 'text/csv');
 }
 </script>
@@ -387,14 +389,21 @@ async function exportSignups(): Promise<void> {
           <label><span>Places</span><input v-model="workshop.capacity" type="number" min="1" step="1" inputmode="numeric" /></label>
           <label><span>Price per place ({{ currency }}, 0 = free)</span><input v-model="workshop.price" type="number" min="0" step="0.5" inputmode="decimal" /></label>
         </div>
-        <label><span>Run by</span>
-          <select v-model="workshop.hostConsignorId"><option value="">The store</option><option v-for="a in artists" :key="a.id" :value="a.id">{{ a.name }}</option></select>
-        </label>
+        <div :class="workshop.hostConsignorId ? 'two' : ''">
+          <label><span>Run by</span>
+            <select v-model="workshop.hostConsignorId"><option value="">The store</option><option v-for="a in artists" :key="a.id" :value="a.id">{{ a.name }}</option></select>
+          </label>
+          <label v-if="workshop.hostConsignorId"><span>Host's share of each place, %</span><input v-model="workshop.hostSharePct" type="number" min="0" max="100" step="5" inputmode="numeric" /></label>
+        </div>
+        <p v-if="workshop.hostConsignorId" class="hint">
+          <template v-if="Number(workshop.hostSharePct) > 0">Of each place paid at the till, {{ nameOf(workshop.hostConsignorId) }} gets {{ workshop.hostSharePct }}% - it goes on their statement like a sale of their work. The store keeps the rest.</template>
+          <template v-else>0% = the store keeps all of the ticket money.</template>
+        </p>
         <label><span>Description</span><textarea v-model="workshop.description" rows="4" placeholder="What people make, what to bring, who it is for." /></label>
         <label class="check"><input v-model="workshop.published" type="checkbox" /> Show on the public page</label>
         <label class="check"><input v-model="workshop.signupsOpen" type="checkbox" /> Taking sign-ups</label>
         <label class="check"><input v-model="workshop.waitlist" type="checkbox" /> Waitlist when full</label>
-        <p class="hint">People pay at the store - mark them paid in the sign-up list. <template v-if="workshopId">Changing the date or time emails everyone signed up.</template></p>
+        <p class="hint">People pay at the store: take payment from the till (+ Workshop), or tick them paid in the sign-up list. <template v-if="workshopId">Changing the date or time emails everyone signed up.</template></p>
       </div>
       <template #footer>
         <div class="footer">
@@ -423,7 +432,8 @@ async function exportSignups(): Promise<void> {
               <small v-if="s.note" class="note">“{{ s.note }}”</small>
             </div>
             <template v-if="s.status !== 'cancelled' && !listFor.cancelledAt">
-              <label v-if="s.status === 'booked' && listFor.price > 0" class="check"><input type="checkbox" :checked="s.paid" @change="setPaid(s, ($event.target as HTMLInputElement).checked)" /> paid</label>
+              <span v-if="s.status === 'booked' && s.paidAtTill" class="pill booked">paid at till</span>
+              <label v-else-if="s.status === 'booked' && listFor.price > 0" class="check"><input type="checkbox" :checked="s.paid" @change="setPaid(s, ($event.target as HTMLInputElement).checked)" /> paid</label>
               <button v-if="s.status === 'waitlist'" type="button" @click="bookNow(s)">Book</button>
               <button type="button" class="quiet" @click="cancelSignup(s)">Cancel</button>
             </template>

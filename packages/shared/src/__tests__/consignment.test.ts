@@ -54,6 +54,11 @@ describe('consignment', () => {
     expect(lines).toHaveLength(2);
   });
 
+  it('uses a split set on the line itself over the artist commission', () => {
+    const l = consignmentLines([tx('t1', 'zurich', [{ ...item('workshop:w1', 90, 'ana', 2), commissionPct: 30 }])], [ana])[0]!;
+    expect([l.commissionPct, l.commission, l.artistShare]).toEqual([30, 27, 63]);
+  });
+
   it('leaves reverted sales and unknown artists out', () => {
     const lines = consignmentLines(
       [tx('t1', 'bern', [item('a', 20, 'ana')], { revertedAt: 5 }), tx('t2', 'bern', [item('b', 20, 'ghost')])],

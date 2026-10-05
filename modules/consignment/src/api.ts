@@ -198,6 +198,8 @@ export const loadSignups = async (workshopId: string): Promise<Signup[]> =>
   (await sdk().http.get<{ signups: Signup[] }>(`workshops/${encodeURIComponent(workshopId)}/signups`)).signups;
 export const addSignup = (workshopId: string, input: { name: string; email: string; seats: number; note: string; paid: boolean }): Promise<{ signup: Signup; emailed: boolean }> =>
   sdk().http.post(`workshops/${encodeURIComponent(workshopId)}/signups`, input);
+export const tillWorkshops = async (storeId: string): Promise<(Workshop & { booked: number; unpaid: Signup[] })[]> =>
+  (await sdk().http.get<{ workshops: (Workshop & { booked: number; unpaid: Signup[] })[] }>(`till/workshops?storeId=${encodeURIComponent(storeId)}`)).workshops;
 export const updateSignup = (id: string, patch: { paid?: boolean; status?: 'booked' | 'cancelled' }): Promise<{ signup: Signup; promoted: number }> =>
   sdk().http.put(`signups/${encodeURIComponent(id)}`, patch);
 

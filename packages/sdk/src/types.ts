@@ -101,6 +101,43 @@ export interface SaleLine {
    */
   lineTotal: number;
   taxRate: number | null;
+  /** Consignment artist this line's money is shared with; absent = read from the product. */
+  consignorId?: string;
+  /** Percent of the line the store keeps when `consignorId` is set; absent = the artist's usual commission. */
+  commissionPct?: number;
+  /** What the line pays for, when a module added it to the till - see TillApi. */
+  ref?: SaleLineRef;
+}
+
+/** Ties a sale line back to the module record it settles, e.g. a workshop booking. */
+export interface SaleLineRef {
+  /** Stamped by the host with the module that added the line; a module cannot claim another's. */
+  moduleId: string;
+  kind: string;
+  id: string;
+}
+
+/** A button a module adds to the till, opening one of its own screens over it. */
+export interface TillAction {
+  id: string;
+  label: string;
+  icon?: string;
+  /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
+  component: ComponentLoader;
+  order?: number;
+}
+
+/** Something a module puts in the till's cart that is not a catalogue product - a workshop place, say. */
+export interface TillLine {
+  /** Unique per thing being paid for; adding the same key twice keeps one line. */
+  key: string;
+  name: string;
+  /** Fixed: the seller cannot change it at the till. */
+  qty: number;
+  unitPrice: number;
+  consignorId?: string;
+  commissionPct?: number;
+  ref?: { kind: string; id: string };
 }
 
 /**
@@ -440,6 +477,22 @@ export interface Sdk {
     devices(): Promise<DeviceSummary[]>;
     sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage): boolean;
     onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;
+  };
+
+  /**
+   * The till. A module contributes buttons to it and puts its own lines in
+   * the cart; the till (POS) registers itself as the receiver while open.
+   * The sale those lines end up in is recorded like any other, with each
+   * line's `ref` kept, so the module can tell later what was paid.
+   */
+  till: {
+    action(action: TillAction): void;
+    /** Actions every module contributed, in order - read by the till. */
+    actions(): (TillAction & { moduleId: string })[];
+    /** False when no till is open to take it (or it refused, e.g. no active event). */
+    addLine(line: TillLine): boolean;
+    /** The till's side: receive lines modules add. Only one till listens at a time. */
+    onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
   };
 
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */

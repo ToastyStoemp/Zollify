@@ -291,6 +291,10 @@ export interface TxItem {
    * for sales already made.
    */
   consignorId?: string;
+  /** Percent the store kept on this line, when it was set for the line itself (e.g. a workshop's own split). */
+  commissionPct?: number;
+  /** The module record this line paid for - e.g. a workshop booking. */
+  ref?: { moduleId: string; kind: string; id: string };
 }
 
 export interface TxDiscount {

@@ -14,7 +14,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'consignment',
-  version: '0.3.0',
+  version: '0.4.0',
   sdk: '^0.1.0',
   title: 'Consignment',
   description: 'Sell work by consignment artists across your stores and settle what each is owed - or follow your own work in other stores.',
@@ -26,6 +26,8 @@ export default defineModule({
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'Consignment', component: () => import('./views/ConsignmentView.vue') });
     sdk.nav.add({ routeName: 'index', group: 'books', label: 'Consignment', icon: 'users', order: 140 });
+    // Taking payment for a workshop place, right at the till.
+    sdk.till.action({ id: 'workshops', label: 'Workshop', icon: 'calendar', component: () => import('./views/TillWorkshops.vue') });
     sdk.log.info('consignment module ready');
   },
 

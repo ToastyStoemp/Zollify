@@ -118,7 +118,8 @@ export function consignmentLines(
     for (const item of tx.items) {
       const consignor = item.consignorId ? byId.get(item.consignorId) : undefined;
       if (!consignor) continue;
-      const pct = commissionFor(consignor, tx.eventId);
+      // A line can carry its own split (a workshop's); otherwise the artist's usual commission.
+      const pct = typeof item.commissionPct === 'number' ? item.commissionPct : commissionFor(consignor, tx.eventId);
       const grossMinor = toMinor(item.baseLineTotal ?? item.lineTotal);
       const commissionMinor = Math.round((grossMinor * pct) / 100);
       out.push({

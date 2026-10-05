@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
 import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
-import type { SaleEvent } from '@zollify/sdk';
+import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addLine,
   addMisc,
+  addModuleLine,
   appliedDiscounts,
   chargeTotals,
   customDiscountCharged,
@@ -470,6 +471,21 @@ function applyDiscount(): void {
   showDiscount.value = false;
 }
 
+// ── What other modules add to the till (a workshop place, say) ─────────────
+const tillActions = computed(() => sdk().till.actions());
+const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
+function runAction(action: TillAction): void {
+  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
+}
+const offTill = sdk().till.onAddLine((line) => {
+  if (!activeEvent.value) {
+    toast('Pick an active event first (Events).', 'bad');
+    return false;
+  }
+  return addModuleLine(line);
+});
+onUnmounted(offTill);
+
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });
 function openMisc(): void {
@@ -853,7 +869,12 @@ async function cancelPayment(): Promise<void> {
         <ul v-else>
           <li v-for="l in lines" :key="l.lineId">
             <div class="row"><span class="name">{{ l.name }}</span><strong>{{ money(l.chargedTotal) }}</strong></div>
-            <div class="row qty">
+            <div v-if="l.fixed" class="row qty">
+              <span>× {{ l.qty }}</span>
+              <small>à {{ money(l.chargedUnit) }}</small>
+              <button type="button" class="quiet" :aria-label="`Remove ${l.name}`" @click="setQty(l.lineId, 0)">Remove</button>
+            </div>
+            <div v-else class="row qty">
               <button type="button" :aria-label="`One fewer ${l.name}`" @click="setQty(l.lineId, l.qty - 1)">−</button>
               <span>{{ l.qty }}</span>
               <button type="button" :aria-label="`One more ${l.name}`" @click="setQty(l.lineId, l.qty + 1)">+</button>
@@ -875,6 +896,7 @@ async function cancelPayment(): Promise<void> {
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
           <button type="button" @click="openMisc">+ Misc item</button>
+          <button v-for="a in tillActions" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
@@ -939,6 +961,11 @@ async function cancelPayment(): Promise<void> {
       </div>
       <p class="hint">Point the camera at a barcode.</p>
       <p v-if="scannerInfo" class="hint mono">{{ scannerInfo }}</p>
+    </ModalShell>
+
+    <!-- ── A screen another module put on the till ───────────────────────── -->
+    <ModalShell v-if="openAction" :title="openAction.action.label" @close="openAction = null">
+      <component :is="openAction.view" @close="openAction = null" />
     </ModalShell>
 
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
@@ -1133,7 +1160,7 @@ async function cancelPayment(): Promise<void> {
 .sums { display: flex; flex-direction: column; gap: .15rem; font-variant-numeric: tabular-nums; }
 .row.total { font-size: 1.05rem; font-weight: 700; }
 .row.small { font-size: .78rem; }
-.tools { display: flex; gap: .4rem; }
+.tools { display: flex; gap: .4rem; flex-wrap: wrap; }
 .tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
 .pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }

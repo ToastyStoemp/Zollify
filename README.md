@@ -186,6 +186,18 @@ moments**: the artist gets an in-app notification on their linked account and
 an email with a calendar file, confirms or declines from *Where I consign*, and
 the store hears back the same way.
 
+**Store events** plan what happens in the shops besides selling. *Artist of the
+month* features an artist at one or more stores for a date range, optionally
+with a discount: it is an ordinary core discount rule, limited to the artist's
+items (`consignorIds`), the dates (`validFrom`/`validUntil`) and the stores
+(`eventIds`), so every till applies it by itself, offline too. *Workshops* take
+sign-ups on a public page, `/p/consignment/s/<token>` (the owner can replace
+the token to retire a link): capacity, a waitlist that moves up in order when
+someone cancels, a confirmation email with a calendar file and a personal
+cancel link, and a notification to the store. People pay at the store; the
+sign-up list marks who has. Signing up costs a proof-of-work and is rate
+limited, like the online receipt.
+
 *Notifications and email* - platform features any server module can use
 through its context: `ctx.notify(accountId, …)` puts a note under the shell's
 bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when

@@ -172,8 +172,33 @@ export interface DiscountRule {
   tierContinue?: boolean;
   /** Don't show the derived "+N" quick-add chips on POS product cards. */
   hideQuickAdd?: boolean;
+  /** Consignment artists whose items the rule applies to (Product.consignorId). */
+  consignorIds?: string[];
+  /** First day the till applies the rule (yyyy-mm-dd, inclusive); absent = always. */
+  validFrom?: string;
+  /** Last day the till applies the rule (yyyy-mm-dd, inclusive); absent = always. */
+  validUntil?: string;
+  /** Only at these events or stores; absent/empty = everywhere. */
+  eventIds?: string[];
+  /** Set when a module maintains the rule (e.g. 'consignment' for an artist-of-the-month discount). */
+  managedBy?: string;
   updatedAt: number;
   deletedAt?: number;
+}
+
+/**
+ * Whether a rule applies at the till today, at this event. The rows stay in
+ * the catalogue either way; only where and when they are charged is limited.
+ */
+export function discountAppliesAt(
+  rule: Pick<DiscountRule, 'validFrom' | 'validUntil' | 'eventIds'>,
+  day: string,
+  eventId: string | null,
+): boolean {
+  if (rule.validFrom && day < rule.validFrom) return false;
+  if (rule.validUntil && day > rule.validUntil) return false;
+  if (rule.eventIds?.length && (!eventId || !rule.eventIds.includes(eventId))) return false;
+  return true;
 }
 
 /**

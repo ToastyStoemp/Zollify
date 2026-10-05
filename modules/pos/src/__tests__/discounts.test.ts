@@ -267,3 +267,15 @@ describe('distributeTotal', () => {
     expect(lines[1]!.lineTotal).toBe(7.5);
   });
 });
+
+describe('artist-targeted rules', () => {
+  it('takes a percent off every item by the artist, and nothing else', () => {
+    const lines = [
+      { ...line('print', null, 2, 30), consignorId: 'ana' },
+      { ...line('vase', null, 1, 80), consignorId: 'leo' },
+      line('mug', null, 1, 12),
+    ];
+    const [hit] = computeRuleDiscounts(lines, [rule({ type: 'nth_pct', nth: 1, percent: 20, productIds: [], consignorIds: ['ana'] })]);
+    expect(hit?.amount).toBeCloseTo(12);
+  });
+});

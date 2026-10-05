@@ -21,7 +21,7 @@ const sign = (payload: string): string => b64url(createHmac('sha256', secret()).
  * cheaper difficulty than registration, so without the purpose in the signed
  * payload a receipt challenge would be a discount on signing up.
  */
-export type ChallengePurpose = 'register' | 'receipt';
+export type ChallengePurpose = 'register' | 'receipt' | 'signup';
 
 export function issueChallenge(
   purpose: ChallengePurpose = 'register',

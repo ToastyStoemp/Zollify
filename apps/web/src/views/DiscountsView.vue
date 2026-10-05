@@ -178,7 +178,7 @@ async function remove(rule: DiscountRule): Promise<void> {
 
 function summary(d: DiscountRule): string {
   if (d.type === 'bxgy') return `Buy ${d.buyQty}, get ${d.freeQty} free`;
-  if (d.type === 'nth_pct') return `Every ${d.nth} items, cheapest is ${d.percent}% off`;
+  if (d.type === 'nth_pct') return d.nth === 1 ? `${d.percent}% off` : `Every ${d.nth} items, cheapest is ${d.percent}% off`;
   if (d.type === 'combo') return `Bundle: −${fmtPrice(d.comboDiscountAmount ?? 0, currency.value)} when all present`;
   return (d.tiers ?? []).map((t) => `${t.qty} for ${t.total}`).join(' · ') || 'Tiered';
 }
@@ -187,8 +187,18 @@ function targets(d: DiscountRule): string {
   if (d.productTypes?.length) parts.push(`type ${d.productTypes.join(', ')}`);
   const count = d.productIds.length + (d.variantIds?.length ?? 0);
   if (count) parts.push(`${count} product${count === 1 ? '' : 's'}`);
+  if (d.consignorIds?.length) parts.push(`${d.consignorIds.length === 1 ? 'one artist' : `${d.consignorIds.length} artists`}' work`);
   return parts.join(' + ') || 'no targets';
 }
+/** When and where a rule is limited to, if at all. */
+function scope(d: DiscountRule): string {
+  const parts: string[] = [];
+  if (d.validFrom || d.validUntil) parts.push(`${d.validFrom ?? '…'} to ${d.validUntil ?? '…'}`);
+  if (d.eventIds?.length) parts.push(`${d.eventIds.length} venue${d.eventIds.length === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+/** A rule a module maintains is edited where it came from, or this form would drop what it cannot show. */
+const MANAGED: Record<string, string> = { consignment: 'Consignment → Store events' };
 </script>
 
 <template>
@@ -206,11 +216,16 @@ function targets(d: DiscountRule): string {
     <p v-if="!allDiscounts.length" class="empty">No discount rules yet. Bundle deals like "buy 2 get 1 free" or "3 for 25" go here.</p>
     <ul v-else class="list">
       <li v-for="d in allDiscounts" :key="d.id">
-        <button type="button" class="row" @click="openEdit(d)">
+        <div v-if="d.managedBy" class="row managed">
           <strong>{{ d.name }}</strong>
-          <span>{{ summary(d) }} · {{ targets(d) }}</span>
+          <span>{{ summary(d) }} · {{ targets(d) }}<template v-if="scope(d)"> · {{ scope(d) }}</template></span>
+          <small>Set under {{ MANAGED[d.managedBy] ?? d.managedBy }}</small>
+        </div>
+        <button v-else type="button" class="row" @click="openEdit(d)">
+          <strong>{{ d.name }}</strong>
+          <span>{{ summary(d) }} · {{ targets(d) }}<template v-if="scope(d)"> · {{ scope(d) }}</template></span>
         </button>
-        <button type="button" class="quiet danger" @click="remove(d)">Remove</button>
+        <button v-if="!d.managedBy" type="button" class="quiet danger" @click="remove(d)">Remove</button>
       </li>
     </ul>
 
@@ -299,6 +314,8 @@ function targets(d: DiscountRule): string {
 .row:hover { background: var(--zfy-bg, #f1f4f6); }
 .row strong { font-size: .95rem; }
 .row span { font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.row.managed:hover { background: none; }
+.row small { font-size: .74rem; color: var(--zfy-accent-ink, #0a5a4a); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.inline { flex-direction: row; align-items: center; gap: .45rem; }

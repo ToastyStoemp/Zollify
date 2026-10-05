@@ -7,16 +7,18 @@ import ItemsTab from './ItemsTab.vue';
 import StatementTab from './StatementTab.vue';
 import MyStoresTab from './MyStoresTab.vue';
 import PlannerTab from './PlannerTab.vue';
+import ProgrammeTab from './ProgrammeTab.vue';
 
 /**
- * Consignment. The first four tabs are the store owner's: who the artists
+ * Consignment. The first five tabs are the store owner's: who the artists
  * are and which stores carry them, which items are theirs, who rents which
- * space and when they come in to set up, and what each is owed. "Where I
+ * space and when they come in to set up, what happens in the stores
+ * (featured artists, workshops), and what each artist is owed. "Where I
  * consign" is the artist's side - the stores this account's own work sells
  * in. An account can be both.
  */
-type Tab = 'artists' | 'items' | 'planner' | 'statement' | 'mine';
-const TABS: Tab[] = ['artists', 'items', 'planner', 'statement', 'mine'];
+type Tab = 'artists' | 'items' | 'planner' | 'programme' | 'statement' | 'mine';
+const TABS: Tab[] = ['artists', 'items', 'planner', 'programme', 'statement', 'mine'];
 const tab = ref<Tab>('artists');
 
 /** A notification links to a tab ("/m/consignment?tab=mine"); the shell uses hash routes. */
@@ -58,6 +60,7 @@ const tabs = computed<{ id: Tab; label: string; badge?: number }[]>(() => [
   { id: 'artists', label: 'Artists', badge: active.value },
   { id: 'items', label: 'Items' },
   { id: 'planner', label: 'Planner' },
+  { id: 'programme', label: 'Store events' },
   { id: 'statement', label: 'Statement' },
   { id: 'mine', label: 'Where I consign' },
 ]);
@@ -85,6 +88,7 @@ function showItems(consignorId: string): void {
       <ArtistsTab v-if="tab === 'artists'" :key="revision" @error="error = $event" @items="showItems" />
       <ItemsTab v-else-if="tab === 'items'" :key="revision" v-model:consignor="focus" @error="error = $event" />
       <PlannerTab v-else-if="tab === 'planner'" :key="revision" @error="error = $event" />
+      <ProgrammeTab v-else-if="tab === 'programme'" :key="revision" @error="error = $event" />
       <StatementTab v-else-if="tab === 'statement'" :key="revision" @error="error = $event" />
       <MyStoresTab v-else :key="revision" @error="error = $event" />
     </template>

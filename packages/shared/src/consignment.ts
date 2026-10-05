@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { StoreFeature } from './store-events';
 import type { SalesEvent, Transaction } from './types';
 
 /**
@@ -282,6 +283,10 @@ export interface ArtistConsignment {
   rentals: (ConsignmentRental & { spaceName: string })[];
   /** Setup moments, soonest first; cancelled ones stay so the artist sees the change. */
   setups: SetupMoment[];
+  /** Current and coming times the store features this artist. */
+  features: StoreFeature[];
+  /** Coming workshops this artist hosts, with how many places are booked. */
+  workshops: { id: string; title: string; storeId: string; date: string; time: string; durationMin: number; capacity: number; booked: number; cancelled: boolean }[];
 }
 
 // ── Planner: rented space and setup moments ─────────────────────────────────

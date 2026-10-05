@@ -234,7 +234,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   );
 
   // Public halves: no session, resolved by the module from a slug or token.
-  mountPublicModules(app, db, opts.serverModules);
+  mountPublicModules(app, db, opts.serverModules, { notify, mail });
 
   app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 

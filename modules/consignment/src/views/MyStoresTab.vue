@@ -133,6 +133,14 @@ function commissionLine(l: ArtistConsignment): string {
           </div>
         </section>
 
+        <p v-for="f in l.features" :key="f.id" class="featured">
+          <Icon name="sparkles" :size="14" />
+          <span><strong>{{ f.title || 'Artist of the month' }}</strong> · {{ f.startDate }} to {{ f.endDate }} at {{ f.storeIds.map((id) => venueName(l, id)).join(', ') }}<template v-if="f.discountPct"> · your work is {{ f.discountPct }}% off at the till</template></span>
+        </p>
+        <p v-for="w in l.workshops" :key="w.id" class="rental">
+          <Icon name="calendar" :size="13" />
+          <span><strong>{{ w.title }}</strong> - you're hosting · {{ fmtDay(w.date) }} {{ w.time }} at {{ venueName(l, w.storeId) }} · <template v-if="w.cancelled">cancelled</template><template v-else>{{ w.booked }} of {{ w.capacity }} booked</template></span>
+        </p>
         <p v-for="r in currentRentals(l)" :key="r.id" class="rental">
           <Icon name="layers" :size="13" />
           <span><strong>{{ r.spaceName }}</strong> at {{ venueName(l, r.storeId) }} · {{ r.startDate }} to {{ rentalEnd(r) }} · {{ fmtPrice(r.monthlyFee, r.currency) }}/month{{ r.deductFromSales ? ', taken off your sales' : '' }}<template v-if="rentalStatus(r, now) === 'upcoming'"> · starts {{ r.startDate }}</template></span>
@@ -232,6 +240,7 @@ function commissionLine(l: ArtistConsignment): string {
 .pill { font-size: .64rem; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; border-radius: 999px; padding: .12rem .45rem; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); }
 .pill.confirmed { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .pill.scheduled { background: var(--zfy-warning, #e0a63a); color: #1a2230; }
+.featured { margin: 0; font-size: .86rem; display: flex; align-items: center; gap: .4rem; padding: .5rem .7rem; border-radius: 10px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .rental { margin: 0; font-size: .84rem; display: flex; align-items: center; gap: .35rem; }
 .venues { margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); display: flex; align-items: center; gap: .3rem; }
 .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: .5rem; }

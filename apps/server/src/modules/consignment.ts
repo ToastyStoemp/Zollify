@@ -29,6 +29,7 @@ import {
   type ServerModule,
 } from '@zollify/server-core';
 import { migratePlanner, plannerForArtist, registerPlanner, rentalsOf } from './consignment-planner';
+import { migrateProgramme, programmeForArtist, registerProgramme, registerProgrammePublic } from './consignment-programme';
 
 /**
  * Consignment - the server half.
@@ -191,11 +192,16 @@ export const consignmentServerModule: ServerModule = {
   migrate: (db) => {
     migrate(db);
     migratePlanner(db);
+    migrateProgramme(db);
   },
+
+  /** The store's public events-and-workshops page, and cancelling a place on it. */
+  publicRoutes: (ctx) => async (app) => registerProgrammePublic(app, ctx),
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;
     registerPlanner(app, ctx);
+    registerProgramme(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 
@@ -388,10 +394,14 @@ export const consignmentServerModule: ServerModule = {
         };
         // The owner switched consignment off: the link stays, the sharing stops.
         if (!isEnabled(db, row.accountId, MODULE_ID)) {
-          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
+          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
           continue;
         }
-        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }), ...plannerForArtist(db, row.accountId, row.id) });
+        const programme = programmeForArtist(db, row.accountId, row.id);
+        const planner = plannerForArtist(db, row.accountId, row.id);
+        // Every store the artist hears about must have a name on their side.
+        const mentioned = [...programme.features.flatMap((f) => f.storeIds), ...programme.workshops.map((w) => w.storeId), ...planner.rentals.map((r) => r.storeId), ...planner.setups.map((s) => s.storeId)];
+        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme });
       }
       return { links: out };
     });
@@ -412,6 +422,7 @@ function artistView(
   db: Database.Database,
   storeAccountId: string,
   consignor: Pick<Consignor, 'id' | 'commissionPct' | 'storeCommission' | 'storeIds'>,
+  alsoVenues: string[] = [],
 ): Pick<ArtistConsignment, 'venues' | 'items' | 'lines' | 'payouts' | 'statement'> {
   const { events, products, transactions, inventory } = replay(db, storeAccountId);
   const lines = consignmentLines(transactions, [consignor]);
@@ -419,7 +430,7 @@ function artistView(
   const byId = new Map(events.map((e) => [e.id, e]));
 
   const assigned = consignor.storeIds.filter((id) => byId.get(id) && !byId.get(id)!.deletedAt);
-  const venueIds = [...new Set([...assigned, ...lines.map((l) => l.storeId)])];
+  const venueIds = [...new Set([...assigned, ...lines.map((l) => l.storeId), ...alsoVenues.filter((id) => byId.has(id))])];
 
   const items: ConsignedItem[] = [];
   for (const p of products.filter((p) => p.consignorId === consignor.id)) {

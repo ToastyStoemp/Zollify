@@ -1,6 +1,12 @@
 import { computed, ref } from 'vue';
 import {
+  featureRuleId,
   isStore,
+  type FeatureInput,
+  type Signup,
+  type StoreFeature,
+  type Workshop,
+  type WorkshopInput,
   type ArtistConsignment,
   type ConsignmentLine,
   type ConsignmentPayout,
@@ -127,6 +133,85 @@ export function deliveryText(name: string, d: Delivery | null | undefined): stri
   if (d.emailSkipped === 'not_configured') text += ' No email sent: this server has no email set up.';
   if (d.emailSkipped === 'failed') text += ' The email could not be sent.';
   return text;
+}
+
+// ── Store events: artist of the month, workshops ───────────────────────────
+
+export type WorkshopRow = Workshop & { booked: number; waiting: number; signups: number };
+export interface Programme {
+  features: StoreFeature[];
+  workshops: WorkshopRow[];
+  /** Path of the public sign-up page, on this server. */
+  publicPath: string;
+  emailEnabled: boolean;
+}
+
+export const loadProgramme = (): Promise<Programme> => sdk().http.get<Programme>('programme');
+export const newPublicLink = (): Promise<{ publicPath: string }> => sdk().http.post('programme/link');
+
+/**
+ * Saves a feature and keeps its till discount in step: one core discount rule
+ * per feature, found by a fixed id, limited to the feature's dates and stores
+ * and to the artist's items. It is an ordinary rule, so it syncs to every till
+ * and keeps working offline.
+ */
+export async function saveFeature(id: string, input: FeatureInput): Promise<{ feature: StoreFeature; delivery: Delivery | null }> {
+  const res = await sdk().http.put<{ feature: StoreFeature; delivery: Delivery | null }>(`features/${encodeURIComponent(id)}`, input);
+  await syncFeatureDiscount(id, res.feature);
+  return res;
+}
+export async function deleteFeature(featureId: string): Promise<void> {
+  await sdk().http.del(`features/${encodeURIComponent(featureId)}`);
+  await syncFeatureDiscount(featureId, null);
+}
+async function syncFeatureDiscount(featureId: string, f: StoreFeature | null): Promise<void> {
+  const ruleId = featureRuleId(featureId);
+  const discounts = sdk().data.discounts;
+  if (!f || !f.discountPct) {
+    if (discounts.get(ruleId)) await discounts.remove(ruleId);
+    return;
+  }
+  const artist = consignors.value.find((c) => c.id === f.consignorId)?.name ?? 'Featured artist';
+  await discounts.upsert({
+    id: ruleId,
+    // Shown on receipts.
+    name: `${f.title || 'Artist of the month'}: ${artist} ${f.discountPct}% off`,
+    type: 'nth_pct',
+    nth: 1,
+    percent: f.discountPct,
+    productIds: [],
+    variantIds: [],
+    consignorIds: [f.consignorId],
+    validFrom: f.startDate,
+    validUntil: f.endDate,
+    eventIds: [...f.storeIds],
+    managedBy: 'consignment',
+    updatedAt: Date.now(),
+  });
+}
+
+export const saveWorkshop = (id: string, input: WorkshopInput): Promise<{ workshop: WorkshopRow; promoted: number; delivery: Delivery | null }> =>
+  sdk().http.put(`workshops/${encodeURIComponent(id)}`, input);
+export const cancelWorkshop = (id: string): Promise<{ told: number }> => sdk().http.post(`workshops/${encodeURIComponent(id)}/cancel`);
+export const deleteWorkshop = (id: string): Promise<unknown> => sdk().http.del(`workshops/${encodeURIComponent(id)}`);
+export const loadSignups = async (workshopId: string): Promise<Signup[]> =>
+  (await sdk().http.get<{ signups: Signup[] }>(`workshops/${encodeURIComponent(workshopId)}/signups`)).signups;
+export const addSignup = (workshopId: string, input: { name: string; email: string; seats: number; note: string; paid: boolean }): Promise<{ signup: Signup; emailed: boolean }> =>
+  sdk().http.post(`workshops/${encodeURIComponent(workshopId)}/signups`, input);
+export const updateSignup = (id: string, patch: { paid?: boolean; status?: 'booked' | 'cancelled' }): Promise<{ signup: Signup; promoted: number }> =>
+  sdk().http.put(`signups/${encodeURIComponent(id)}`, patch);
+
+/**
+ * The public page's full address. The app may run from a WebView whose own
+ * origin is not the server's, so it is taken from the receipt link the host
+ * already builds against the server.
+ */
+export function publicUrl(path: string): string {
+  try {
+    return new URL(path, sdk().display.receiptUrl('x')).toString();
+  } catch {
+    return path;
+  }
 }
 
 // ── The artist's side ──────────────────────────────────────────────────────

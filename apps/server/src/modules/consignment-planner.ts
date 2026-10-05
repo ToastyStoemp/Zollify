@@ -31,7 +31,7 @@ import { MODULE_ID, accountName, consignorRow, parseDoc, replay, type ConsignorR
  * back the same way.
  */
 
-type Coll = 'spaces' | 'rentals' | 'setups';
+export type Coll = 'spaces' | 'rentals' | 'setups' | 'features' | 'workshops';
 
 export function migratePlanner(db: Database.Database): void {
   db.exec(`
@@ -50,7 +50,7 @@ export function migratePlanner(db: Database.Database): void {
 
 // ── Storage ─────────────────────────────────────────────────────────────────
 
-function list<T>(db: Database.Database, accountId: string, coll: Coll, consignorId?: string): T[] {
+export function list<T>(db: Database.Database, accountId: string, coll: Coll, consignorId?: string): T[] {
   const rows = (
     consignorId
       ? db.prepare('SELECT doc FROM consignment_planner WHERE accountId = ? AND coll = ? AND consignorId = ?').all(accountId, coll, consignorId)
@@ -59,21 +59,21 @@ function list<T>(db: Database.Database, accountId: string, coll: Coll, consignor
   return rows.map((r) => JSON.parse(r.doc) as T);
 }
 
-function get<T>(db: Database.Database, accountId: string, coll: Coll, id: string): T | undefined {
+export function get<T>(db: Database.Database, accountId: string, coll: Coll, id: string): T | undefined {
   const row = db.prepare('SELECT doc FROM consignment_planner WHERE accountId = ? AND coll = ? AND id = ?').get(accountId, coll, id) as
     | { doc: string }
     | undefined;
   return row ? (JSON.parse(row.doc) as T) : undefined;
 }
 
-function put(db: Database.Database, accountId: string, coll: Coll, doc: { id: string; updatedAt: number; consignorId?: string }): void {
+export function put(db: Database.Database, accountId: string, coll: Coll, doc: { id: string; updatedAt: number; consignorId?: string }): void {
   db.prepare(
     `INSERT INTO consignment_planner (accountId, coll, id, consignorId, doc, updatedAt) VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(accountId, coll, id) DO UPDATE SET consignorId = excluded.consignorId, doc = excluded.doc, updatedAt = excluded.updatedAt`,
   ).run(accountId, coll, doc.id, doc.consignorId ?? null, JSON.stringify(doc), doc.updatedAt);
 }
 
-const remove = (db: Database.Database, accountId: string, coll: Coll, id: string): number =>
+export const remove = (db: Database.Database, accountId: string, coll: Coll, id: string): number =>
   db.prepare('DELETE FROM consignment_planner WHERE accountId = ? AND coll = ? AND id = ?').run(accountId, coll, id).changes;
 
 const bySoonest = (a: SetupMoment, b: SetupMoment): number => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`);
@@ -95,34 +95,44 @@ export const rentalsOf = (db: Database.Database, accountId: string): Consignment
 // ── Telling people ──────────────────────────────────────────────────────────
 
 /** The address an account's notices go to: its owner, or failing that an admin. */
-function accountEmail(db: Database.Database, accountId: string): string | null {
+export function accountEmail(db: Database.Database, accountId: string): string | null {
   const row = db
     .prepare("SELECT email FROM users WHERE accountId = ? AND role IN ('owner','admin') ORDER BY role = 'owner' DESC, createdAt LIMIT 1")
     .get(accountId) as { email: string } | undefined;
   return row?.email ?? null;
 }
 
-function storeOf(db: Database.Database, accountId: string, storeId: string): SalesEvent | undefined {
+export function storeOf(db: Database.Database, accountId: string, storeId: string): SalesEvent | undefined {
   return replay(db, accountId).events.find((e) => e.id === storeId && !e.deletedAt);
 }
 
-const fmtWhen = (s: Pick<SetupMoment, 'date' | 'time' | 'durationMin'>): string => {
+export const fmtWhen = (s: Pick<SetupMoment, 'date' | 'time' | 'durationMin'>): string => {
   const d = new Date(`${s.date}T00:00:00Z`);
   const day = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
   return `${day} at ${s.time} (${s.durationMin} min)`;
 };
 
-const address = (e: SalesEvent | undefined): string =>
+export const address = (e: SalesEvent | undefined): string =>
   [e?.venue?.street, [e?.venue?.postcode, e?.venue?.city].filter(Boolean).join(' '), e?.venue?.country].filter(Boolean).join(', ');
 
-const icsText = (s: string): string => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+export const icsText = (s: string): string => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 
-/** A calendar entry for a setup. Floating local time: the store and artist meet on the store's clock. */
-export function setupIcs(setup: SetupMoment, storeName: string, where: string): string {
-  const [h, m] = setup.time.split(':').map(Number) as [number, number];
-  const [y, mo, d] = setup.date.split('-').map(Number) as [number, number, number];
+/** A calendar entry. Floating local time: everyone meets on the store's clock. */
+export function buildIcs(e: {
+  uid: string;
+  /** Must rise with every change, so a calendar replaces the old entry. */
+  sequence: number;
+  date: string;
+  time: string;
+  durationMin: number;
+  summary: string;
+  location?: string;
+  description?: string;
+}): string {
+  const [h, m] = e.time.split(':').map(Number) as [number, number];
+  const [y, mo, d] = e.date.split('-').map(Number) as [number, number, number];
   const start = new Date(Date.UTC(y, mo - 1, d, h, m));
-  const end = new Date(start.getTime() + setup.durationMin * 60_000);
+  const end = new Date(start.getTime() + e.durationMin * 60_000);
   const local = (t: Date): string => t.toISOString().replace(/[-:]/g, '').slice(0, 15);
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
   return [
@@ -131,19 +141,35 @@ export function setupIcs(setup: SetupMoment, storeName: string, where: string): 
     'PRODID:-//Zollify//Consignment//EN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
-    `UID:${setup.id}@zollify`,
-    // Rises with every reschedule, so a calendar replaces the old entry.
-    `SEQUENCE:${Math.floor(setup.updatedAt / 1000) - Math.floor(setup.createdAt / 1000)}`,
+    `UID:${e.uid}@zollify`,
+    `SEQUENCE:${e.sequence}`,
     `DTSTAMP:${stamp}`,
     `DTSTART:${local(start)}`,
     `DTEND:${local(end)}`,
-    `SUMMARY:${icsText(`Setup at ${storeName}`)}`,
-    ...(where ? [`LOCATION:${icsText(where)}`] : []),
-    ...(setup.note ? [`DESCRIPTION:${icsText(setup.note)}`] : []),
+    `SUMMARY:${icsText(e.summary)}`,
+    ...(e.location ? [`LOCATION:${icsText(e.location)}`] : []),
+    ...(e.description ? [`DESCRIPTION:${icsText(e.description)}`] : []),
     'END:VEVENT',
     'END:VCALENDAR',
     '',
   ].join('\r\n');
+}
+
+/** Seconds since creation - rises with every edit, which is all SEQUENCE needs. */
+export const icsSequence = (doc: { createdAt: number; updatedAt: number }): number => Math.floor(doc.updatedAt / 1000) - Math.floor(doc.createdAt / 1000);
+
+/** A calendar entry for a setup. */
+export function setupIcs(setup: SetupMoment, storeName: string, where: string): string {
+  return buildIcs({
+    uid: setup.id,
+    sequence: icsSequence(setup),
+    date: setup.date,
+    time: setup.time,
+    durationMin: setup.durationMin,
+    summary: `Setup at ${storeName}`,
+    location: where,
+    description: setup.note,
+  });
 }
 
 /**
@@ -151,7 +177,7 @@ export function setupIcs(setup: SetupMoment, storeName: string, where: string): 
  * (whatever modules it runs - the bell is the shell's), and an email to the
  * address the store has for them, else their account's.
  */
-async function tellArtist(
+export async function tellArtist(
   ctx: ModuleContext,
   storeAccountId: string,
   row: ConsignorRow,

@@ -35,6 +35,10 @@ export interface ModuleContext {
 export interface PublicModuleContext {
   db: Database.Database;
   isEnabled(accountId: string): boolean;
+  /** Raises an in-app notification for an account - e.g. "someone signed up". */
+  notify: Notify;
+  /** Outgoing email, e.g. a confirmation to whoever just signed up. */
+  mail: Mailer;
 }
 
 export interface ServerModule {
@@ -118,10 +122,20 @@ export function mountServerModules(
  * app-wide `same-origin` resource policy and closed CORS would refuse. Nothing
  * under `/p/` carries a session, so the wider exposure costs nothing.
  */
-export function mountPublicModules(app: FastifyInstance, db: Database.Database, modules: ServerModule[]): void {
+export function mountPublicModules(
+  app: FastifyInstance,
+  db: Database.Database,
+  modules: ServerModule[],
+  services: Pick<PublicModuleContext, 'notify' | 'mail'>,
+): void {
   for (const mod of modules) {
     if (!mod.publicRoutes) continue;
-    const ctx: PublicModuleContext = { db, isEnabled: (accountId) => isEnabled(db, accountId, mod.id) };
+    const ctx: PublicModuleContext = {
+      db,
+      isEnabled: (accountId) => isEnabled(db, accountId, mod.id),
+      notify: (accountId, n) => services.notify(accountId, { ...n, moduleId: mod.id }),
+      mail: services.mail,
+    };
     void app.register(
       async (scope) => {
         scope.addHook('onSend', async (_req, reply) => {

@@ -126,6 +126,9 @@ const discountLines = computed<DiscountCartLine[]>(() =>
     title: line.name,
     variantLabel: line.variantLabel,
     type: line.type,
+    // Read live from the catalogue, so a cart started before an artist's
+    // discount began still gets it.
+    consignorId: sdk().data.products.get(line.productId)?.consignorId,
     qty: line.qty,
     unitPrice: line.unitPrice,
     lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,

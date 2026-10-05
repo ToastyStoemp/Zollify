@@ -9,6 +9,8 @@ export interface CartLine {
   variantLabel: string | null;
   /** Product type (Product.type) - used by type-targeted discount rules. */
   type?: string;
+  /** Consignment artist (Product.consignorId) - used by artist-targeted rules. */
+  consignorId?: string;
   qty: number;
   unitPrice: number;
   lineTotal: number;
@@ -29,6 +31,7 @@ function ruleTargetsLine(rule: DiscountRule, line: CartLine): boolean {
   if (rule.productIds.includes(line.pid)) return true;
   if (line.vid && rule.variantIds.includes(`${line.pid}:${line.vid}`)) return true;
   if (line.type && rule.productTypes?.includes(line.type)) return true;
+  if (line.consignorId && rule.consignorIds?.includes(line.consignorId)) return true;
   return false;
 }
 
@@ -81,7 +84,7 @@ export function computeRuleDiscounts(lines: CartLine[], rules: DiscountRule[]): 
   const results: RuleDiscountResult[] = [];
   for (const rule of rules) {
     if (rule.deletedAt) continue;
-    if (!rule.productIds.length && !rule.variantIds.length && !rule.productTypes?.length) continue;
+    if (!rule.productIds.length && !rule.variantIds.length && !rule.productTypes?.length && !rule.consignorIds?.length) continue;
 
     if (rule.type === 'combo') {
       const amount = computeComboDiscount(lines, rule);

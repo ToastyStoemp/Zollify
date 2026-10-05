@@ -50,6 +50,11 @@ watch(
 const isStaff = computed(() => currentAccount.value?.role === 'member');
 /** '' = everyone; otherwise a user id. Staff are always themselves. */
 const seller = ref<string>(isStaff.value ? (currentAccount.value?.userId ?? '') : '');
+// On a shared till the person changes under this screen: staff always see their own.
+watch(
+  () => currentAccount.value?.userId,
+  () => (seller.value = isStaff.value ? (currentAccount.value?.userId ?? '') : ''),
+);
 const sellers = computed(() => {
   const seen = new Map<string, string>();
   for (const tx of recentTransactions.value) if (tx.eventId === eventId.value && tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');

@@ -51,6 +51,9 @@ export {
   clearSession,
   signOut,
   authFetch,
+  deviceFetch,
+  getDeviceAccount,
+  activePersonId,
   refreshAccessToken,
   configureApiBase,
   getApiBase,
@@ -67,3 +70,19 @@ export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './
 export { nativeHeaders } from './session';
 export { selfUpdates, currentAppVersion, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
 export { notifyShellUpdateReady, checkAndQueueShellUpdate, announceShellUpdate, currentShellVersion, checkShellUpdate, queueShellUpdate, shellUpdateQueued, reloadShellNow, type ShellUpdateCheck } from './shell-updates';
+export {
+  tillSettings,
+  tillLocked,
+  tillPeople,
+  refreshTillPeople,
+  addTillPerson,
+  removeTillPerson,
+  setOwnPin,
+  unlockTill,
+  lockTill,
+  saveTillSettings,
+  startTillLock,
+  noteSale,
+  type TillPerson,
+  type TillSettings,
+} from './till-lock';

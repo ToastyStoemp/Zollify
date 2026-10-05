@@ -155,6 +155,7 @@ async function save(): Promise<void> {
 function when(ts: number): string {
   return ts ? new Date(ts).toLocaleString() : 'never';
 }
+import SharedTillSettings from './SharedTillSettings.vue';
 </script>
 
 <template>
@@ -191,6 +192,8 @@ function when(ts: number): string {
         <span class="body"><span class="label">Receipt QR code</span><span class="sub">The customer scans it for their receipt online. Shows the receipt only - never other sales or your stock.</span></span>
       </label>
     </div>
+
+    <SharedTillSettings />
 
     <h3>Appearance</h3>
     <div class="themes" role="radiogroup" aria-label="Theme">

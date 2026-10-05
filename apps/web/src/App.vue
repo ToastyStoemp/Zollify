@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
   currentAccount,
+  getDeviceAccount,
   loadNotifications,
+  lockTill,
+  tillLocked,
+  tillSettings,
   markNotificationsRead,
   notifications,
   pendingCount,
@@ -18,6 +22,7 @@ import {
 } from '@zollify/platform';
 import { booted, contributions, events, signOutAndReload } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
+import LockScreen from './views/LockScreen.vue';
 import { Icon, ModalShell } from '@zollify/ui';
 import type { AppNotification } from '@zollify/shared';
 
@@ -256,7 +261,11 @@ const fmtAgo = (ms: number): string => {
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
-              <button type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
+              <div v-if="tillSettings.enabled" class="till-row">
+                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="door-open" :size="13" /> Lock till</button>
+                <span v-if="account.userId !== getDeviceAccount()?.userId" class="hint">on {{ getDeviceAccount()?.email }}'s device</span>
+              </div>
+              <button v-else type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
               <div class="build">build {{ build }}</div>
             </div>
           </footer>
@@ -302,6 +311,9 @@ const fmtAgo = (ms: number): string => {
         <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount || unreadNotifications" class="badge"></i></router-link>
       </div>
     </nav>
+
+    <!-- A shared till: nobody uses it until they say who they are. -->
+    <LockScreen v-if="account && tillLocked && !settingUp" />
 
     <ModalShell v-if="bellOpen" title="Notifications" @close="bellOpen = false">
       <p v-if="!notifications.length" class="bell-empty">Nothing yet. Notes from stores and artists you work with land here.</p>
@@ -401,6 +413,9 @@ nav { flex: 1; }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
+.who .till-row { display: flex; flex-direction: column; gap: .1rem; }
+.who .till-row .switch { display: inline-flex; align-items: center; gap: .3rem; }
+.who .till-row .hint { font-size: .72rem; }
 .who .switch { align-self: flex-start; padding: 0; min-height: 0; border: 0; color: var(--zfy-accent-ink); font-size: .78rem; font-weight: 600; margin-top: .15rem; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
 /* Capped and centered so a page with no width opinion of its own doesn't

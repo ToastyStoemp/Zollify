@@ -23,3 +23,6 @@ export interface Op {
   type: OpType;
   payload: unknown;
 }
+
+/** The changes staff (role member) may make; the server drops anything else they push. */
+export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set'];

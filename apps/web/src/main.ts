@@ -21,12 +21,13 @@ import {
   refreshPendingCount,
   startAutoSync,
   startRealtime,
+  startTillLock,
 } from '@zollify/platform';
 import '@zollify/ui/tokens.css';
 import './styles.css';
 import App from './App.vue';
 import { router } from './router';
-import { connectRouter, loadEnabledModules, markBooted } from './boot';
+import { connectRouter, followTillPerson, loadEnabledModules, markBooted } from './boot';
 
 // Before anything renders, so the first frame is already the right theme.
 applyStoredTheme();
@@ -60,6 +61,7 @@ async function wireBackButton(): Promise<void> {
 
 async function start(): Promise<void> {
   connectRouter(router);
+  followTillPerson(router);
   void wireBackButton();
   const ready = boot();
   createApp(App).use(router).mount('#app');
@@ -92,6 +94,8 @@ async function boot(): Promise<void> {
   if (getAccount()) {
     startAutoSync();
     startRealtime();
+    // A shared till opens locked: whoever is there says who they are first.
+    startTillLock();
   }
   markBooted();
   // Confirms this boot to the shell-content updater before anything else -

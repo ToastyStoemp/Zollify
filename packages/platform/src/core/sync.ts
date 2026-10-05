@@ -11,9 +11,9 @@ import type {
   InventoryItem,
   ProductMerge,
 } from '@zollify/shared';
-import { openCoreDb } from './db';
-import { getAccount } from '../session';
-import { authFetch } from '../session';
+import { openCoreDb, type OutboxOp } from './db';
+import { STAFF_OP_TYPES } from '@zollify/shared';
+import { authFetchAs, deviceFetch, getAccount, getDeviceAccount, personSession } from '../session';
 import { deviceFlavor, deviceId, deviceName } from './device';
 import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
@@ -266,31 +266,51 @@ const PUSH_MAX_BYTES = 4 * 1024 * 1024;
 async function push(): Promise<number> {
   let accepted = 0;
   const deviceInfo = { deviceId: await deviceId(), deviceName: await deviceName(), flavor: deviceFlavor() };
+  const device = getDeviceAccount();
+  // On a shared till each person's changes go up with their own token, so the
+  // server applies their role and credits their sales. A change by someone
+  // whose session is gone goes up as the device - the server still credits a
+  // sale to a colleague added to this device - unless the device's own user
+  // may not make that change: then it waits for that person to unlock again.
+  const pusherOf = (op: OutboxOp): string | null | undefined => {
+    if (!op.userId || !device || op.userId === device.userId) return null;
+    if (personSession(op.userId)?.token) return op.userId;
+    if (device.role !== 'member' || STAFF_OP_TYPES.includes(op.type)) return null;
+    return undefined;
+  };
   for (let round = 0; round < 50; round++) {
-    const pending = await unsyncedOps();
+    const pending = (await unsyncedOps()).map((op) => ({ op, by: pusherOf(op) })).filter((p) => p.by !== undefined);
     if (!pending.length) break;
+    const by = pending[0]!.by as string | null;
 
     // Strip the local bookkeeping columns; the server validates against the
     // wire schema and would reject the extras.
-    const batch: typeof pending = [];
+    const batch: OutboxOp[] = [];
     let bytes = 0;
-    for (const op of pending) {
+    for (const { op, by: who } of pending) {
+      if (who !== by) continue;
       const size = JSON.stringify(op.payload).length + 200;
-      if (batch.length && bytes + size > PUSH_MAX_BYTES) break;
+      if (batch.length && (bytes + size > PUSH_MAX_BYTES || batch.length >= 500)) break;
       batch.push(op);
       bytes += size;
     }
 
-    const res = (await authFetch('/sync/push', {
-      method: 'POST',
-      body: JSON.stringify({ ...deviceInfo, ops: batch.map(({ seq: _seq, synced: _synced, ...wire }) => wire) }),
-    })) as PushResponse;
+    let res: PushResponse;
+    try {
+      res = (await authFetchAs(by, '/sync/push', {
+        method: 'POST',
+        body: JSON.stringify({ ...deviceInfo, ops: batch.map(({ seq: _seq, synced: _synced, userId: _userId, ...wire }) => wire) }),
+      })) as PushResponse;
+    } catch (err) {
+      // That person's session ended mid-push: their changes go round again as the device.
+      if (by && !personSession(by)) continue;
+      throw err;
+    }
 
     // Marked synced whether accepted or duplicate: a duplicate means the server
     // already has it, which is exactly what we were trying to achieve.
     await markSynced(batch.map((op) => op.seq!).filter((seq) => typeof seq === 'number'));
     accepted += res.accepted;
-    if (batch.length === pending.length) break;
   }
   return accepted;
 }
@@ -324,7 +344,7 @@ async function drain(first: PullResponse, since: number, query: string): Promise
       if (track) syncProgress.value = { done: Math.min(total, cursor - since), total };
       if (cursor >= page.latestSeq) break;
       await writeCursor(cursor, page.epoch ?? 0);
-      page = (await authFetch(`/sync/pull?since=${cursor}${query}`)) as PullResponse;
+      page = (await deviceFetch(`/sync/pull?since=${cursor}${query}`)) as PullResponse;
     }
   } finally {
     if (track) syncProgress.value = null;
@@ -342,7 +362,7 @@ async function pull(): Promise<number> {
   if (since === 0) syncProgress.value = { done: 0, total: 0 };
   let res: PullResponse;
   try {
-    res = (await authFetch(`/sync/pull?since=${since}${query}`)) as PullResponse;
+    res = (await deviceFetch(`/sync/pull?since=${since}${query}`)) as PullResponse;
   } catch (err) {
     syncProgress.value = null;
     throw err;
@@ -362,7 +382,7 @@ async function pull(): Promise<number> {
       await Promise.all([db.products.clear(), db.events.clear(), db.eventStock.clear()]);
     });
     await writeCursor(0, serverEpoch);
-    const fresh = (await authFetch('/sync/pull?since=0')) as PullResponse;
+    const fresh = (await deviceFetch('/sync/pull?since=0')) as PullResponse;
     const result = await drain(fresh, 0, '');
     await writeCursor(result.cursor, fresh.epoch ?? serverEpoch);
     return result.applied;

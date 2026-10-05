@@ -462,6 +462,13 @@ export interface Sdk {
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
 
   /**
+   * A shared till: several people unlock this device with their own PIN.
+   * `available()` is true when this device has it switched on; `lock()` hands
+   * the till back to the lock screen, where the next person says who they are.
+   */
+  lock: { available(): boolean; lock(): Promise<void> };
+
+  /**
    * Customer display: publish what this register's cart looks like right now.
    * `afterSale` is what this device's owner chose to show once a sale is paid
    * (device-local, set under Settings → This device); `receiptUrl` turns a

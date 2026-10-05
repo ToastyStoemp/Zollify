@@ -14,6 +14,7 @@ import { moduleServices, mountPublicModules, mountServerModules, type ModuleServ
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
 import { registerDeviceLinkRoutes } from './device-link';
+import { registerDeviceUserRoutes } from './device-users';
 import { registerStatic } from './static';
 import { appendOps, registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
@@ -198,6 +199,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerRefreshCookie(app, { secure: opts.requireHttps });
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
   registerDeviceLinkRoutes(app, db);
+  registerDeviceUserRoutes(app, db, opts.jwtSecret);
 
   // ── Sync, devices, admin ──────────────────────────────────────────────────
   // These declare their own absolute /api/... paths, so they register on the

@@ -2,7 +2,7 @@ import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
+import { PushRequestSchema, STAFF_OP_TYPES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
@@ -41,7 +41,7 @@ export function appendOps(db: Database.Database, rooms: Rooms, accountId: string
  * The catalogue, prices, discounts, events and settings are the owner's and
  * admins'. Their screens already hide those; this is the guarantee.
  */
-const STAFF_TYPES = new Set(['tx.create', 'tx.revert', 'stock.set']);
+const STAFF_TYPES = new Set(STAFF_OP_TYPES);
 
 export function registerSyncRoutes(
   app: FastifyInstance,
@@ -114,7 +114,7 @@ export function registerSyncRoutes(
     const allowed = restrictionFor(claims.sub);
     const scoped = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;
     const staff = claims.role === 'member';
-    const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff));
+    const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff, deviceId));
     const dropped = rawOps.length - ops.length;
     if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
 
@@ -211,12 +211,25 @@ const emailOf = (db: Database.Database, userId: string): string | null =>
  * Who made a sale is the signed-in user who pushed it - never what the
  * device claimed. Staff are stamped always; an admin's own sales too, except
  * an import of old sales that already name someone.
+ *
+ * On a shared till the push can come from someone else than the seller (the
+ * person who rang it up locked the till before it synced). A sale naming a
+ * colleague who was added to this very device, with their password, keeps
+ * that name.
  */
-function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff: boolean): WireOp {
+function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff: boolean, deviceId: string): WireOp {
   if (op.type !== 'tx.create' || !op.payload || typeof op.payload !== 'object') return op;
   const payload = op.payload as { soldBy?: { userId?: string } };
-  if (!staff && payload.soldBy?.userId) return op;
+  const named = payload.soldBy?.userId;
+  if (named && named !== claims.sub && boundToDevice(db, claims.accountId, deviceId, named)) {
+    return { ...op, payload: { ...payload, soldBy: { userId: named, email: emailOf(db, named) } } };
+  }
+  if (!staff && named) return op;
   return { ...op, payload: { ...payload, soldBy: { userId: claims.sub, email: emailOf(db, claims.sub) } } };
+}
+
+function boundToDevice(db: Database.Database, accountId: string, deviceId: string, userId: string): boolean {
+  return !!db.prepare('SELECT 1 FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(accountId, deviceId, userId);
 }
 
 /**

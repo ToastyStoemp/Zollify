@@ -44,7 +44,7 @@ export interface SessionInfo {
 // A valid argon2id hash of a throwaway value. Verified against on login when the
 // email is unknown, so a missing user costs the same time as a wrong password -
 // closing the timing side-channel that would otherwise reveal which emails exist.
-const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
+export const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
 
 export interface JwtClaims {
   sub: string;
@@ -103,6 +103,12 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
   }
 }
 
+/** A bare access token, for a person unlocking a shared till: no refresh token, see device-users.ts. */
+export function issueAccessToken(app: FastifyInstance, user: Pick<UserRow, 'id' | 'accountId' | 'role'>): string {
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role };
+  return app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
+}
+
 export async function issueTokens(
   app: FastifyInstance,
   db: Database.Database,
@@ -155,6 +161,27 @@ function deviceTrusted(db: Database.Database, userId: string, deviceId: string |
 }
 function clearDeviceTrust(db: Database.Database, userId: string): void {
   db.prepare('DELETE FROM trusted_devices WHERE userId = ?').run(userId);
+}
+
+/**
+ * A user's second factor: an authenticator code, or one of their single-use
+ * recovery codes (which is spent). Only call it for users with 2FA on.
+ */
+export function checkSecondFactor(
+  db: Database.Database,
+  box: { decrypt<T>(s: string): T },
+  user: UserRow,
+  rawCode: unknown,
+): 'ok' | 'recovery' | 'missing' | 'invalid' {
+  const code = String(rawCode ?? '').trim();
+  if (!code) return 'missing';
+  if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) return 'ok';
+  const codes: string[] = JSON.parse(user.recoveryCodes ?? '[]');
+  const idx = codes.indexOf(hashRecovery(code));
+  if (idx < 0) return 'invalid';
+  codes.splice(idx, 1); // recovery codes are single-use
+  db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes), user.id);
+  return 'recovery';
 }
 
 export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
@@ -331,18 +358,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // Second factor, unless this device is already trusted from a prior 2FA login.
     let usedRecovery = false;
     if (has2fa(user) && !deviceTrusted(db, user.id, deviceId, b.trustToken)) {
-      const code = String(b.code ?? '').trim();
-      if (!code) return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
-      if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) {
-        /* valid TOTP */
-      } else {
-        const codes: string[] = JSON.parse(user.recoveryCodes ?? '[]');
-        const idx = codes.indexOf(hashRecovery(code));
-        if (idx < 0) return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
-        codes.splice(idx, 1); // recovery codes are single-use
-        db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes), user.id);
-        usedRecovery = true;
-      }
+      const second = checkSecondFactor(db, box, user, b.code);
+      if (second === 'missing') return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
+      if (second === 'invalid') return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
+      usedRecovery = second === 'recovery';
     }
 
     db.prepare('UPDATE users SET lastLoginAt = ? WHERE id = ?').run(Date.now(), user.id);

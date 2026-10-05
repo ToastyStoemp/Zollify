@@ -195,6 +195,24 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_notifications_account ON notifications(accountId, createdAt);
   `,
+  // v12 - shared tills: a personal PIN per user, and the people added to a
+  // device who unlock it with their PIN. See device-users.ts.
+  `
+  ALTER TABLE users ADD COLUMN pinHash TEXT;
+  CREATE TABLE device_users (
+    accountId     TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    deviceId      TEXT NOT NULL,
+    userId        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    grantHash     TEXT NOT NULL,
+    failures      INTEGER NOT NULL DEFAULT 0,
+    lockedUntil   INTEGER NOT NULL DEFAULT 0,
+    unlockedUntil INTEGER NOT NULL DEFAULT 0,
+    lastUnlockAt  INTEGER,
+    createdAt     INTEGER NOT NULL,
+    PRIMARY KEY (deviceId, userId)
+  );
+  CREATE INDEX idx_device_users_account ON device_users(accountId);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

@@ -211,6 +211,20 @@ type, and labels can carry the artist's name. Staff accounts (role *member*)
 ring up sales and cash up as themselves, but cannot see or change artists,
 commissions, payouts or reports.
 
+*Shared tills* - several people of one account can use one device at once.
+The device stays signed in as whoever set it up; under Settings → This device
+→ Shared till it locks with a PIN. Each colleague is added once from the lock
+screen with their own email and password (and 2FA code), and from then on taps
+their name and enters their personal PIN. The server checks the PIN, counts
+wrong guesses (a few minutes' lockout after 5, removed from the device after
+10) and hands the device a short-lived token for that person, so their role
+applies - staff stay staff on the owner's device - and their sales are
+credited to them, even when they sync after someone else took over. The till
+locks from its header or the sidebar, after a set idle time, or after each
+sale. Offline, someone who unlocked online once can still unlock, if they do
+not outrank the device's own user: they then act with the device's access, so
+a PIN check kept on the device never opens more than the device already could.
+
 **Fees and reports.** A store can charge an artist a fee - a missed setup
 (straight from the planner), not responding, late stock, handling, damage -
 which comes off their balance; the artist is told by notification and email,

@@ -35,10 +35,17 @@ export function fmtWeightKg(kg: NumLike): string {
 
 // ── Country / code helpers ──────────────────────────────────────────────────
 
-/** "4911.91.00" → "4911.9100" */
+/**
+ * e-dec's commodity code, cut to the 6-digit HS subheading and padded:
+ * "4202.22.10" → "4202.2200", "4911.91.00" → "4911.9100". The national
+ * digits past the subheading are more detail than the export declaration
+ * should carry. Anything with fewer than 6 digits is passed through as typed.
+ */
 export function toEdecHsCode(code: string | undefined): string {
   if (!code) return '';
-  return code.replace(/^(\d{4})\.(\d{2})\.(\d{2})$/, '$1.$2$3');
+  const digits = code.replace(/\D/g, '');
+  if (digits.length < 6) return code.trim();
+  return `${digits.slice(0, 4)}.${digits.slice(4, 6)}00`;
 }
 
 export function getPermitObligation(tariffNo: string | undefined): number {

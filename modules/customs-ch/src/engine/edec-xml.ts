@@ -3,6 +3,7 @@ import {
   calcProductByMaterial,
   countryToCode,
   escapeXml,
+  getNonCustomsLawObligation,
   getPermitObligation,
   getVatCode,
   parsePostCodeCity,
@@ -126,6 +127,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     weightKg: number;
     titles: string[];
     permit: number;
+    nonCustomsLaw: number;
     vatCode: number;
     originCc: string;
     packagingType: string;
@@ -146,7 +148,10 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
       // Keyed by the exported code, so 4202.22.10 and 4202.22.90 - the same
       // line once cut to the subheading - become one position, not two.
       const key = `${toEdecHsCode(p.tariffNo)}\x00${mc.material}`;
+      // A product's own override sets both, as before; otherwise each comes
+      // from the HS table on its own (they can differ - see HsCode).
       const permit = p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo);
+      const nonCustomsLaw = p.permitOverride != null ? p.permitOverride : getNonCustomsLawObligation(p.tariffNo);
       let g = groups.get(key);
       if (!g) {
         g = {
@@ -157,6 +162,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
           weightKg: 0,
           titles: [],
           permit,
+          nonCustomsLaw,
           vatCode: getVatCode(p.vatRate),
           originCc: p.originCountry && p.originCountry.trim() ? p.originCountry.trim().toUpperCase() : dispatchCountry,
           packagingType: p.packagingType || 'CT',
@@ -165,6 +171,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
       }
       // A merged line needs a permit if any product in it does.
       g.permit = Math.max(g.permit, permit);
+      g.nonCustomsLaw = Math.max(g.nonCustomsLaw, nonCustomsLaw);
       g.soldQty += mc.soldQty;
       g.statValue += statValueFor(p, mc.soldQty, mc.soldValue);
       g.weightKg += mc.soldWeightKg;
@@ -190,7 +197,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     lines.push(`        <grossMass>${weightKg}</grossMass>`);
     lines.push(`        <netMass>${weightKg}</netMass>`);
     lines.push(`        <permitObligation>${g.permit}</permitObligation>`);
-    lines.push(`        <nonCustomsLawObligation>${g.permit}</nonCustomsLawObligation>`);
+    lines.push(`        <nonCustomsLawObligation>${g.nonCustomsLaw}</nonCustomsLawObligation>`);
     lines.push(`        <statistic>`);
     lines.push(`          <customsClearanceType>1</customsClearanceType>`);
     lines.push(`          <commercialGood>1</commercialGood>`);

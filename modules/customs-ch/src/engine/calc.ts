@@ -56,6 +56,14 @@ export function getPermitObligation(tariffNo: string | undefined): number {
   return 0;
 }
 
+/** e-dec nonCustomsLawObligation for a tariff number - the permit's value unless the HS table says otherwise. */
+export function getNonCustomsLawObligation(tariffNo: string | undefined): number {
+  if (!tariffNo) return 0;
+  const hsEntry = HS_CODES.find((h) => h.code === tariffNo);
+  if (hsEntry) return hsEntry.nonCustomsLaw ?? (hsEntry.permit || 0);
+  return getPermitObligation(tariffNo);
+}
+
 export function getVatCode(vatRate: NumLike): number {
   if (vatRate != null && parseFloat(vatRate as string) <= 2.7) return 2;
   return 1;

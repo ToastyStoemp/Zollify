@@ -1,12 +1,54 @@
 import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
-import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp } from '@zollify/shared';
+import { randomUUID } from 'node:crypto';
+import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
 
-export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, rooms: Rooms): void {
+/** A change the server itself makes to an account's data, on a module's behalf. */
+export interface ServerOpInput {
+  type: WireOp['type'];
+  payload: unknown;
+}
+
+/**
+ * Appends ops to an account's log as if a device had pushed them, then rings
+ * the account's devices so they pull. Used where the server acts for someone
+ * else - an artist restocking their shelf in a store's account, say. Each op
+ * gets a fresh id and the device id `server:<origin>`, so it is always clear
+ * in the log what the server wrote.
+ */
+export function appendOps(db: Database.Database, rooms: Rooms, accountId: string, origin: string, ops: ServerOpInput[]): number {
+  if (!ops.length) return 0;
+  const deviceId = `server:${origin}`;
+  const latest = db.transaction(() => {
+    let seq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM ops WHERE accountId = ?').get(accountId) as { m: number }).m;
+    const insert = db.prepare('INSERT INTO ops (accountId, seq, opId, deviceId, ts, type, payload, receivedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const op of ops) {
+      seq++;
+      insert.run(accountId, seq, `srv-${randomUUID()}`, deviceId, Date.now(), op.type, JSON.stringify(op.payload ?? null), Date.now());
+    }
+    return seq;
+  })();
+  rooms.nudge(accountId, latest);
+  return ops.length;
+}
+
+/**
+ * What a plain member - store staff - may change: sales, refunds and claims.
+ * The catalogue, prices, discounts, events and settings are the owner's and
+ * admins'. Their screens already hide those; this is the guarantee.
+ */
+const STAFF_TYPES = new Set(['tx.create', 'tx.revert', 'stock.set']);
+
+export function registerSyncRoutes(
+  app: FastifyInstance,
+  db: Database.Database,
+  rooms: Rooms,
+  onOps: (accountId: string, ops: WireOp[]) => void = () => {},
+): void {
   const insertOp = db.prepare(
     `INSERT OR IGNORE INTO ops (accountId, seq, opId, deviceId, ts, type, payload, receivedAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -70,9 +112,11 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     // Disallowed ops are DROPPED (not stored), never rejected with 403 - a 403
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
-    const ops = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;
+    const scoped = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;
+    const staff = claims.role === 'member';
+    const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff));
     const dropped = rawOps.length - ops.length;
-    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside helper event scope');
+    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
 
     let accepted = 0;
     let txCount = 0;
@@ -104,6 +148,11 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
       bumpMetric(db, claims.accountId, 'opsReceived', accepted);
       if (txCount > 0) bumpMetric(db, claims.accountId, 'txCount', txCount);
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
+      try {
+        onOps(claims.accountId, ops);
+      } catch (err) {
+        req.log.error({ err }, 'a module failed to handle pushed ops');
+      }
     }
     return result;
   });
@@ -153,6 +202,21 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     const response: PullResponse = { ops, latestSeq, epoch, ...(skipDevice && rows.length < limit ? { caughtUp: true } : {}) };
     return sendJson(req.headers['accept-encoding'], reply, response);
   });
+}
+
+const emailOf = (db: Database.Database, userId: string): string | null =>
+  (db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined)?.email ?? null;
+
+/**
+ * Who made a sale is the signed-in user who pushed it - never what the
+ * device claimed. Staff are stamped always; an admin's own sales too, except
+ * an import of old sales that already name someone.
+ */
+function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff: boolean): WireOp {
+  if (op.type !== 'tx.create' || !op.payload || typeof op.payload !== 'object') return op;
+  const payload = op.payload as { soldBy?: { userId?: string } };
+  if (!staff && payload.soldBy?.userId) return op;
+  return { ...op, payload: { ...payload, soldBy: { userId: claims.sub, email: emailOf(db, claims.sub) } } };
 }
 
 /**

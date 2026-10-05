@@ -135,7 +135,12 @@ const withConsignor = (consignorId: string | undefined): Pick<TxItem, 'consignor
 
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
-  const tx = toPlain(saleToTransaction(sale, await deviceId(), (id) => getProduct(id)?.consignorId));
+  const who = getAccount();
+  const tx = toPlain({
+    ...saleToTransaction(sale, await deviceId(), (id) => getProduct(id)?.consignorId),
+    // The server stamps this too, from the signed-in user; this copy is so the till that made the sale knows without a round trip.
+    ...(who ? { soldBy: { userId: who.userId, email: who.email } } : {}),
+  });
 
   await db.transactions.put(tx);
   transactions.set(tx.id, tx);

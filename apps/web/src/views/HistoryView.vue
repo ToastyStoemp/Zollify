@@ -97,6 +97,13 @@ const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
 
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
+/** '' = everyone; otherwise the user id that rang the sale up. */
+const sellerFilter = ref('');
+const sellerOptions = computed(() => {
+  const seen = new Map<string, string>();
+  for (const tx of scoped.value) if (tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
+  return [...seen.entries()].map(([id, email]) => ({ id, email })).sort((a, b) => a.email.localeCompare(b.email));
+});
 const showReverted = ref(false);
 const txSearch = ref('');
 const methodOptions = computed(() => {
@@ -115,6 +122,7 @@ const visible = computed(() => {
     (tx) =>
       (showReverted.value || !tx.revertedAt) &&
       (methodFilter.value === 'all' || tx.method === methodFilter.value) &&
+      (!sellerFilter.value || tx.soldBy?.userId === sellerFilter.value) &&
       (!q || matchesSearch(tx, q)),
   );
 });
@@ -496,6 +504,10 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       <div class="seg">
         <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ m }}</button>
       </div>
+      <select v-if="sellerOptions.length > 1" v-model="sellerFilter" aria-label="Sold by">
+        <option value="">Everyone</option>
+        <option v-for="s in sellerOptions" :key="s.id" :value="s.id">{{ s.email }}</option>
+      </select>
       <label class="inline"><input v-model="showReverted" type="checkbox" /> <span>Show reverted</span></label>
     </div>
 
@@ -508,7 +520,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <span v-if="allMode" class="chip">{{ eventName(tx.eventId) }}</span>
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
-          <span class="muted time">{{ fmtTime(tx.timestamp) }}</span>
+          <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && sellerOptions.length > 1"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
           <router-link v-if="hasRoute('pos:receipt')" :to="{ name: 'pos:receipt', params: { saleId: tx.id } }" class="quiet icon" aria-label="Receipt"><Icon name="printer" :size="16" /></router-link>
           <button v-if="canRevert && !tx.revertedAt" type="button" class="quiet danger" @click="revertId = tx.id">Revert</button>
         </div>

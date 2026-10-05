@@ -102,7 +102,7 @@ async function setScope(user: TeamUser, eventIds: string[]): Promise<void> {
 
 function scopeLabel(user: TeamUser): string {
   if (user.role !== 'member') return 'Full access';
-  if (!user.allowedEventIds?.length) return 'Full access';
+  if (!user.allowedEventIds?.length) return 'Staff · sells, counts own cash';
   const names = user.allowedEventIds.map(
     (id) => visibleEvents.value.find((e) => e.id === id)?.name ?? 'removed event',
   );
@@ -118,9 +118,10 @@ function when(ts: number | null): string {
   <section class="team">
     <h2>Team</h2>
     <p class="hint">
-      Invite someone by sending them a code. A member limited to specific events is a
-      <strong>helper</strong>: they only see and sync those events, and catalogue prices are
-      restricted for them.
+      Invite someone by sending them a code. <strong>Staff</strong> sell at the till and cash up
+      their own drawer - each sale records who made it - but cannot change products, prices,
+      discounts, events or settings. Staff limited to specific events are <strong>helpers</strong>:
+      they only see and sync those events. <strong>Admins</strong> run the store with you.
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -147,14 +148,14 @@ function when(ts: number | null): string {
       <label>
         <span>Role</span>
         <select v-model="inviteRole">
-          <option value="member">Member</option>
+          <option value="member">Staff</option>
           <option v-if="isOwner" value="admin">Admin</option>
         </select>
       </label>
 
       <fieldset v-if="inviteRole === 'member'">
         <legend>Limit to events (optional)</legend>
-        <p class="hint">Leave all unticked for full access.</p>
+        <p class="hint">Leave all unticked for staff who work every store and event.</p>
         <label v-for="event in visibleEvents" :key="event.id" class="inline">
           <input
             type="checkbox"

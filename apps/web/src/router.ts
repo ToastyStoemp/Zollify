@@ -22,7 +22,7 @@ export const router: Router = createRouter({
     { path: '/history', name: 'history', component: () => import('./views/HistoryView.vue') },
     { path: '/prices/:eventId', name: 'prices', component: () => import('./views/PricesView.vue'), meta: { minRole: 'admin' } },
     { path: '/display', name: 'display', component: () => import('./views/DisplayView.vue'), meta: { bare: true } },
-    { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue'), meta: { minRole: 'admin' } },
+    { path: '/cashup', name: 'cashup', component: () => import('./views/CashUpView.vue') },
     { path: '/link', name: 'link', component: () => import('./views/LinkDeviceView.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/SettingsView.vue') },
     { path: '/modules', redirect: { name: 'settings', query: { panel: 'core.modules' } } },

@@ -3,6 +3,8 @@ import type Database from 'better-sqlite3';
 import { isEnabled } from './entitlements';
 import type { Mailer } from '../mailer';
 import type { Notify } from '../notifications';
+import type { ServerOpInput } from '../routes/sync';
+import type { WireOp } from '@zollify/shared';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -18,13 +20,23 @@ export interface RequestIdentity {
  * than being trusted to derive it - a module never reads the raw token, and
  * never chooses which account it is acting for.
  */
-export interface ModuleContext {
+/** What every part of a server module gets, signed in or not. */
+export interface ModuleServices {
   db: Database.Database;
-  identity(req: FastifyRequest): RequestIdentity;
   /** Raises an in-app notification for an account (shown under the bell). */
   notify: Notify;
   /** Outgoing email; `mail.enabled` is false on a server without SMTP. */
   mail: Mailer;
+  /**
+   * Writes changes into an account's synced data, as the server, and rings
+   * its devices. For acting on someone's behalf across accounts - an artist
+   * restocking their shelf in a store, say. Returns how many were written.
+   */
+  writeOps(accountId: string, ops: ServerOpInput[]): number;
+}
+
+export interface ModuleContext extends ModuleServices {
+  identity(req: FastifyRequest): RequestIdentity;
 }
 
 /**
@@ -32,13 +44,8 @@ export interface ModuleContext {
  * module resolves which account a request is for from its own data (a slug, a
  * token) and must check `isEnabled` before serving anything for it.
  */
-export interface PublicModuleContext {
-  db: Database.Database;
+export interface PublicModuleContext extends ModuleServices {
   isEnabled(accountId: string): boolean;
-  /** Raises an in-app notification for an account - e.g. "someone signed up". */
-  notify: Notify;
-  /** Outgoing email, e.g. a confirmation to whoever just signed up. */
-  mail: Mailer;
 }
 
 export interface ServerModule {
@@ -55,6 +62,26 @@ export interface ServerModule {
    * resource-isolation headers for this prefix only.
    */
   publicRoutes?: (ctx: PublicModuleContext) => FastifyPluginAsync;
+  /**
+   * Called after an account's devices pushed ops, for accounts with the
+   * module switched on - so a module can follow changes as they happen
+   * (an artist editing a product a store shares, say). Must not throw.
+   */
+  onOps?(ctx: ModuleServices, accountId: string, ops: WireOp[]): void;
+}
+
+/** Builds the per-module services: notifications carry the module's id, server writes its name. */
+export function moduleServices(
+  mod: Pick<ServerModule, 'id'>,
+  db: Database.Database,
+  base: { notify: Notify; mail: Mailer; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
+): ModuleServices {
+  return {
+    db,
+    notify: (accountId, n) => base.notify(accountId, { ...n, moduleId: mod.id }),
+    mail: base.mail,
+    writeOps: (accountId, ops) => base.writeOps(accountId, mod.id, ops),
+  };
 }
 
 const RANK: Record<Role, number> = { member: 0, admin: 1, owner: 2 };
@@ -72,7 +99,7 @@ export function mountServerModules(
   db: Database.Database,
   modules: ServerModule[],
   identity: (req: FastifyRequest) => RequestIdentity,
-  services: Pick<ModuleContext, 'notify' | 'mail'>,
+  services: (mod: ServerModule) => ModuleServices,
 ): void {
   for (const mod of modules) {
     try {
@@ -105,9 +132,7 @@ export function mountServerModules(
           return undefined;
         });
 
-        // Notifications a module raises carry its id, so the bell can say where they came from.
-        const notify: Notify = (accountId, n) => services.notify(accountId, { ...n, moduleId: mod.id });
-        await scope.register(mod.routes({ db, identity, notify, mail: services.mail }));
+        await scope.register(mod.routes({ ...services(mod), identity }));
       },
       { prefix: `/m/${mod.id}` },
     );
@@ -126,16 +151,11 @@ export function mountPublicModules(
   app: FastifyInstance,
   db: Database.Database,
   modules: ServerModule[],
-  services: Pick<PublicModuleContext, 'notify' | 'mail'>,
+  services: (mod: ServerModule) => ModuleServices,
 ): void {
   for (const mod of modules) {
     if (!mod.publicRoutes) continue;
-    const ctx: PublicModuleContext = {
-      db,
-      isEnabled: (accountId) => isEnabled(db, accountId, mod.id),
-      notify: (accountId, n) => services.notify(accountId, { ...n, moduleId: mod.id }),
-      mail: services.mail,
-    };
+    const ctx: PublicModuleContext = { ...services(mod), isEnabled: (accountId) => isEnabled(db, accountId, mod.id) };
     void app.register(
       async (scope) => {
         scope.addHook('onSend', async (_req, reply) => {

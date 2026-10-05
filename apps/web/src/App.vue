@@ -54,7 +54,7 @@ const SECTIONS: { id: Group; icon: string }[] = [
 
 const coreNav: Entry[] = [
   { routeName: 'history', label: 'History', icon: 'clock', group: 'selling', order: 110 },
-  { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115, minRole: 'admin' },
+  { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115 },
   { routeName: 'catalog', label: 'Products', icon: 'package', group: 'stock', order: 20 },
   { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
   { routeName: 'discounts', label: 'Discounts', icon: 'tag', group: 'stock', order: 30, minRole: 'admin' },

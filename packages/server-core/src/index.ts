@@ -38,10 +38,12 @@ export {
   type PublicModuleContext,
   type ServerModule,
   type ModuleContext,
+  type ModuleServices,
   type RequestIdentity,
   type Role,
 } from './modules/mount';
 export { registerModuleRoutes } from './routes/modules';
+export { appendOps, type ServerOpInput } from './routes/sync';
 export { createMailer, isPlainEmail, type Mailer, type MailMessage } from './mailer';
 export { createNotifier, type Notify, type NotificationInput } from './notifications';
 export { registerRefreshCookie, REFRESH_COOKIE, type RefreshCookieOptions } from './refresh-cookie';

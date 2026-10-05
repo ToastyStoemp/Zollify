@@ -16,6 +16,9 @@ import {
  * in the box, how much actually is, and what is the difference. Card takings
  * are shown for completeness but never counted - the terminal's own settlement
  * is the authority there, not this screen.
+ *
+ * With staff on separate accounts each person counts their own drawer: staff
+ * see only their own sales here, owners and admins can pick anyone or all.
  */
 
 const eventId = ref<string>(activeEventId.value ?? visibleEvents.value[0]?.id ?? '');
@@ -44,8 +47,18 @@ watch(
   },
 );
 
+const isStaff = computed(() => currentAccount.value?.role === 'member');
+/** '' = everyone; otherwise a user id. Staff are always themselves. */
+const seller = ref<string>(isStaff.value ? (currentAccount.value?.userId ?? '') : '');
+const sellers = computed(() => {
+  const seen = new Map<string, string>();
+  for (const tx of recentTransactions.value) if (tx.eventId === eventId.value && tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
+  return [...seen.entries()].map(([id, email]) => ({ id, email })).sort((a, b) => a.email.localeCompare(b.email));
+});
+const bySeller = (tx: { soldBy?: { userId: string } }): boolean => !seller.value || tx.soldBy?.userId === seller.value;
+
 const sales = computed(() =>
-  recentTransactions.value.filter((tx) => tx.eventId === eventId.value && !tx.revertedAt),
+  recentTransactions.value.filter((tx) => tx.eventId === eventId.value && !tx.revertedAt && bySeller(tx)),
 );
 
 const currency = computed(
@@ -73,7 +86,7 @@ const takings = computed(() => {
 const reverted = computed(() =>
   round2(
     recentTransactions.value
-      .filter((tx) => tx.eventId === eventId.value && tx.revertedAt)
+      .filter((tx) => tx.eventId === eventId.value && tx.revertedAt && bySeller(tx))
       .reduce((n, tx) => n + tx.total, 0),
   ),
 );
@@ -126,6 +139,14 @@ function isCoin(value: number): boolean {
           </option>
         </select>
       </label>
+      <label v-if="!isStaff && sellers.length" class="scope">
+        <span>Sold by</span>
+        <select v-model="seller">
+          <option value="">Everyone</option>
+          <option v-for="s in sellers" :key="s.id" :value="s.id">{{ s.email }}</option>
+        </select>
+      </label>
+      <p v-else-if="isStaff" class="hint">Your sales only - {{ currentAccount?.email }}.</p>
     </header>
 
     <p v-if="!eventId" class="empty">Pick an event to cash up.</p>
@@ -201,6 +222,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 .scope { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
+.hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .82rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .75rem; flex-wrap: wrap; }
 .totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .9rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 9rem; }

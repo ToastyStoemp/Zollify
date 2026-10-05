@@ -342,6 +342,8 @@ export interface Transaction {
   asCharged?: AsCharged;
   /** VAT as applied at the time of the sale - see SaleTax. Absent on sales made before VAT was tracked. */
   tax?: SaleTax;
+  /** Who rang it up - set by the server from the signed-in user, so staff cash-ups add up per person. */
+  soldBy?: { userId: string; email: string | null };
 }
 
 export interface AsCharged {

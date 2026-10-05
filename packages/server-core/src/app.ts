@@ -8,14 +8,14 @@ import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
-import { listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
+import { isEnabled, listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
-import { mountPublicModules, mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
+import { moduleServices, mountPublicModules, mountServerModules, type ModuleServices, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
 import { registerDeviceLinkRoutes } from './device-link';
 import { registerStatic } from './static';
-import { registerSyncRoutes } from './routes/sync';
+import { appendOps, registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
@@ -204,12 +204,23 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // root instance rather than inside the /api scope below.
 
   const rooms = new Rooms();
-  registerSyncRoutes(app, db, rooms);
+  const notify = createNotifier(db, rooms);
+  const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
+  // One set of services per module, built once: notifications carry its id, server writes its name.
+  const servicesByModule = new Map<string, ModuleServices>();
+  const services = (mod: ServerModule): ModuleServices => {
+    let s = servicesByModule.get(mod.id);
+    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
+    return s;
+  };
+  registerSyncRoutes(app, db, rooms, (accountId, ops) => {
+    for (const mod of opts.serverModules) {
+      if (mod.onOps && isEnabled(db, accountId, mod.id)) mod.onOps(services(mod), accountId, ops);
+    }
+  });
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
   registerNotificationRoutes(app, db);
-  const notify = createNotifier(db, rooms);
-  const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
@@ -228,13 +239,13 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     async (api) => {
       api.addHook('onRequest', app.authenticate);
       registerModuleRoutes(api, db, store, identity, opts.moduleStoreDir);
-      mountServerModules(api, db, opts.serverModules, identity, { notify, mail });
+      mountServerModules(api, db, opts.serverModules, identity, services);
     },
     { prefix: '/api' },
   );
 
   // Public halves: no session, resolved by the module from a slug or token.
-  mountPublicModules(app, db, opts.serverModules, { notify, mail });
+  mountPublicModules(app, db, opts.serverModules, services);
 
   app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 

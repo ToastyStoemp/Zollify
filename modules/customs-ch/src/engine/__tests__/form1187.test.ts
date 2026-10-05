@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CustomsProduct, CustomsState } from '../model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from '../model';
 import { build1187Html } from '../form1187';
+import { calcReturnStats, compute1174Groups, hasCustomsInfo } from '../calc';
 
 function product(over: Partial<CustomsProduct>): CustomsProduct {
   return {
@@ -43,5 +44,51 @@ describe('form 11.87 field 14 - return goods description', () => {
     });
     const html = build1187Html(state([soldOut]));
     expect(html).not.toContain('Sold Out Print');
+  });
+});
+
+describe('form 11.87 / 11.74 return totals match the return goods list', () => {
+  /** What the return goods list totals: per product, per listed variant at its own price. */
+  function returnListTotals(products: CustomsProduct[]) {
+    let qty = 0, value = 0, weightKg = 0;
+    for (const p of products) {
+      if (!hasCustomsInfo(p)) continue;
+      const r = calcReturnStats(p);
+      if (r.retQty <= 0) continue;
+      qty += r.retQty;
+      weightKg += r.retWkg;
+      value += r.retVal ?? 0;
+    }
+    return { qty, value, weightKg };
+  }
+
+  const mixedPrices = product({
+    id: 'mix', title: 'Print', amount: 0, soldQty: 0, soldValue: 0,
+    variants: [
+      // Sells out at 10 each; the 20-each variant comes home untouched.
+      { name: 'Small', price: 10, weightG: 50, amount: 5, soldQty: 5, soldValue: 50 },
+      { name: 'Large', price: 20, weightG: 200, amount: 5, soldQty: 0, soldValue: 0 },
+      // Unlisted: left off customs documents entirely.
+      { name: 'Proof', price: 99, weightG: 500, amount: 3, soldQty: 0, soldValue: 0, unlisted: true },
+    ],
+  });
+  const flat = product({ id: 'flat', title: 'Sticker', tariffNo: '3919.90.00', price: 3, amount: 20, soldQty: 15, soldValue: 45 });
+  const hidden = product({ id: 'hid', title: 'Secret', unlisted: true, price: 50, amount: 4, soldQty: 0, soldValue: 0 });
+
+  it('sums the same return quantity, value and weight', () => {
+    const products = [mixedPrices, flat, hidden];
+    const { g1, g2 } = compute1174Groups(state(products));
+    const list = returnListTotals(products);
+    expect(g1.retQty + g2.retQty).toBe(list.qty);
+    expect(g1.retValue + g2.retValue).toBe(list.value);
+    expect(Math.round((g1.retWeightKg + g2.retWeightKg) * 1000)).toBe(Math.round(list.weightKg * 1000));
+  });
+
+  it('leaves unlisted products and variants out', () => {
+    const html = build1187Html(state([mixedPrices, flat, hidden]));
+    expect(html).not.toContain('Secret');
+    const { g1, g2 } = compute1174Groups(state([mixedPrices]));
+    expect(g1.retQty + g2.retQty).toBe(5);
+    expect(g1.retValue + g2.retValue).toBe(100);
   });
 });

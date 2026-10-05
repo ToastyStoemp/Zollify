@@ -1,5 +1,5 @@
 /** Formular 11.87 (temporary admission / conclusion) - exact port of legacy print1187() (golden-tested). */
-import { calcProduct, compute1174Groups, countryToCode } from './calc';
+import { calcReturnStats, compute1174Groups, countryToCode } from './calc';
 import { COUNTRY_BY_CODE } from './data';
 import type { CustomsState } from './model';
 
@@ -123,17 +123,12 @@ body { font-family: Arial, Helvetica, sans-serif; font-size: 6pt; color: #000; b
 }`;
 
   // Build field 14 description: titles of products not completely sold out.
-  // p.amount/p.soldQty are the raw, non-variant-aware fields - always 0 for a
-  // variant product (its stock lives on each variant, not the parent), which
-  // silently dropped every variant product with real remaining stock from
-  // this list. calcProduct() sums across variants the same way the group
-  // totals above already do.
+  // Same rule as the return goods list and the group totals above
+  // (calcReturnStats): stock lives on each listed variant, not the parent's
+  // flat amount/soldQty, and unlisted variants never count.
   const allRetProds = [...(g1prods || []), ...(hasG2 ? g2prods || [] : [])];
   const allRetTitles = allRetProds
-    .filter((p) => {
-      const c = calcProduct(p);
-      return Math.max(0, c.amount - c.soldQty) > 0;
-    })
+    .filter((p) => calcReturnStats(p).retQty > 0)
     .map((p) => p.title)
     .filter(Boolean)
     .join(', ');

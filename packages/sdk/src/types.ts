@@ -464,9 +464,11 @@ export interface Sdk {
   /**
    * A shared till: several people unlock this device with their own PIN.
    * `available()` is true when this device has it switched on; `lock()` hands
-   * the till back to the lock screen, where the next person says who they are.
+   * the till back to the lock screen, where the next person says who they are;
+   * `badge(code)` hands the till to the owner of a scanned staff badge (see
+   * `isStaffBadge` in @zollify/shared) and throws when the badge is refused.
    */
-  lock: { available(): boolean; lock(): Promise<void> };
+  lock: { available(): boolean; lock(): Promise<void>; badge(code: string): Promise<void> };
 
   /**
    * Customer display: publish what this register's cart looks like right now.

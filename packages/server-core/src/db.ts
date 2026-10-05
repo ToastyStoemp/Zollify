@@ -213,6 +213,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_device_users_account ON device_users(accountId);
   `,
+  // v13 - staff badges: a barcode per user that unlocks a shared till they
+  // were added to. Looked up by hash; kept encrypted so it can be reprinted.
+  `
+  ALTER TABLE users ADD COLUMN badgeHash TEXT;
+  ALTER TABLE users ADD COLUMN badgeBox TEXT;
+  ALTER TABLE users ADD COLUMN badgeIssuedAt INTEGER;
+  CREATE UNIQUE INDEX idx_users_badge ON users(badgeHash) WHERE badgeHash IS NOT NULL;
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

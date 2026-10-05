@@ -1,10 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
 import argon2 from 'argon2';
 import type Database from 'better-sqlite3';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { DUMMY_HASH, checkSecondFactor, issueAccessToken, toAuthUser, type JwtClaims, type UserRow } from './auth';
 import { makeSecretBox } from './secretbox';
+import { STAFF_BADGE_PATTERN } from '@zollify/shared';
 
 /**
  * Shared tills: several people of one account on one device, each unlocking
@@ -21,6 +22,12 @@ import { makeSecretBox } from './secretbox';
  * PIN alone is useless off the device, and a grant without the PIN gets
  * nothing. Wrong PINs lock the person out of this device for a while, and
  * eventually remove them from it, so a 4-digit PIN cannot be walked.
+ *
+ * A staff badge - a barcode on a card - can stand in for the name and PIN:
+ * scanning it unlocks as its owner, on devices they were added to. A device
+ * can still ask for the PIN after the badge. Badges are long random codes,
+ * stored hashed for lookup and encrypted for reprinting; a new one replaces
+ * the old.
  *
  * Refusals are 403, never 401: a client treats 401 as an expired token and
  * retries, which would count one wrong PIN twice.
@@ -53,6 +60,21 @@ interface Binding {
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
+/**
+ * Badge codes: "ZS" and 22 characters from an alphabet without look-alikes,
+ * about 110 bits - unguessable, and short enough for a Code 128 barcode on a
+ * card. Scanners and keyboards may change case or drop the dash.
+ */
+const BADGE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newBadgeCode(): string {
+  const bytes = randomBytes(22);
+  return `ZS-${[...bytes].map((b) => BADGE_ALPHABET[b % 32]).join('')}`;
+}
+const normaliseBadge = (code: string): string => {
+  const c = code.trim().toUpperCase().replace(/-/g, '');
+  return `ZS-${c.slice(2)}`;
+};
+
 const AddBody = z.object({
   deviceId: z.string().min(1).max(100),
   email: z.string().trim().min(3).max(200),
@@ -63,6 +85,12 @@ const AddBody = z.object({
 const UnlockBody = z.object({ deviceId: z.string().min(1).max(100), userId: z.string().min(1).max(100), pin: z.string().max(20), grant: z.string().max(200).optional() });
 const RenewBody = z.object({ deviceId: z.string().min(1).max(100), userId: z.string().min(1).max(100), grant: z.string().min(1).max(200) });
 const LockBody = z.object({ deviceId: z.string().min(1).max(100), userId: z.string().min(1).max(100) });
+const BadgeUnlockBody = z.object({
+  deviceId: z.string().min(1).max(100),
+  code: z.string().trim().regex(STAFF_BADGE_PATTERN),
+  grants: z.record(z.string().max(100), z.string().max(200)).default({}),
+  pin: z.string().max(20).optional(),
+});
 const PinBody = z.object({ password: z.string().min(1).max(500), pin: PIN.nullable() });
 
 export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string): void {
@@ -166,17 +194,15 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
   // ── Unlocking ─────────────────────────────────────────────────────────────
 
   /**
-   * Name and PIN. For the device session's own user this only checks the PIN;
-   * for anyone added to the device it returns their own access token.
+   * Unlocks the device as one person. `pin` null means a badge alone was
+   * enough (the device does not ask for the PIN after a badge). For the
+   * device session's own user this only checks; for anyone added to the
+   * device it returns their own access token.
    */
-  app.post('/api/auth/unlock', { ...auth, ...PIN_RATE_LIMIT }, async (req, reply) => {
-    const claims = req.user as JwtClaims;
-    const body = UnlockBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'Invalid request' });
-    const { deviceId, userId, pin, grant } = body.data;
+  async function unlockAs(claims: JwtClaims, deviceId: string, userId: string, grant: string | undefined, pin: string | null, reply: FastifyReply) {
     const now = Date.now();
-
     if (userId === claims.sub) {
+      if (pin === null) return { ok: true, userId };
       const key = `${deviceId}:${userId}`;
       const miss = selfMisses.get(key);
       if (miss && miss.until > now) return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: miss.until });
@@ -187,29 +213,89 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
         return reply.code(403).send({ error: 'Wrong PIN.' });
       }
       selfMisses.delete(key);
-      return { ok: true };
+      return { ok: true, userId };
     }
 
     const b = binding(claims.accountId, deviceId, userId);
-    if (!b || !grant || sha256(grant) !== b.grantHash) return reply.code(404).send({ error: 'Not on this device - add them again.', removed: true });
-    if (b.lockedUntil > now) return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: b.lockedUntil });
+    if (!b || !grant || sha256(grant) !== b.grantHash) return reply.code(404).send({ error: 'Not on this device - add them again.', removed: true, userId });
     const user = userById(userId);
-    if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Not on this device - add them again.', removed: true });
+    if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Not on this device - add them again.', removed: true, userId });
 
-    if (!(await pinOk(user.pinHash, pin))) {
-      const failures = b.failures + 1;
-      if (failures >= REMOVE_AFTER) {
-        db.prepare('DELETE FROM device_users WHERE deviceId = ? AND userId = ?').run(deviceId, userId);
-        return reply.code(404).send({ error: 'Too many wrong PINs - sign in with your password to add yourself again.', removed: true });
+    if (pin !== null) {
+      if (b.lockedUntil > now) return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: b.lockedUntil });
+      if (!(await pinOk(user.pinHash, pin))) {
+        const failures = b.failures + 1;
+        if (failures >= REMOVE_AFTER) {
+          db.prepare('DELETE FROM device_users WHERE deviceId = ? AND userId = ?').run(deviceId, userId);
+          return reply.code(404).send({ error: 'Too many wrong PINs - sign in with your password to add yourself again.', removed: true, userId });
+        }
+        const lockedUntil = failures % LOCKOUT_AFTER === 0 ? now + LOCKOUT_MS : 0;
+        db.prepare('UPDATE device_users SET failures = ?, lockedUntil = ? WHERE deviceId = ? AND userId = ?').run(failures, lockedUntil, deviceId, userId);
+        return lockedUntil
+          ? reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil })
+          : reply.code(403).send({ error: 'Wrong PIN.' });
       }
-      const lockedUntil = failures % LOCKOUT_AFTER === 0 ? now + LOCKOUT_MS : 0;
-      db.prepare('UPDATE device_users SET failures = ?, lockedUntil = ? WHERE deviceId = ? AND userId = ?').run(failures, lockedUntil, deviceId, userId);
-      return lockedUntil
-        ? reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil })
-        : reply.code(403).send({ error: 'Wrong PIN.' });
     }
     db.prepare('UPDATE device_users SET failures = 0, lockedUntil = 0, unlockedUntil = ?, lastUnlockAt = ? WHERE deviceId = ? AND userId = ?').run(now + UNLOCK_MS, now, deviceId, userId);
     return { accessToken: issueAccessToken(app, user), user: toAuthUser(db, user) };
+  }
+
+  /** Name and PIN. */
+  app.post('/api/auth/unlock', { ...auth, ...PIN_RATE_LIMIT }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    const body = UnlockBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'Invalid request' });
+    return unlockAs(claims, body.data.deviceId, body.data.userId, body.data.grant, body.data.pin, reply);
+  });
+
+  /**
+   * A scanned staff badge. The device sends its grants, since it does not
+   * know whose badge it is until the server says; a badge only works for
+   * someone added to this device (or the device's own user), and with `pin`
+   * the PIN is checked too, as for a name-and-PIN unlock.
+   */
+  app.post('/api/auth/unlock-badge', { ...auth, ...PIN_RATE_LIMIT }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    const body = BadgeUnlockBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'Invalid request' });
+    const user = db.prepare('SELECT id, accountId FROM users WHERE badgeHash = ?').get(sha256(normaliseBadge(body.data.code))) as { id: string; accountId: string } | undefined;
+    if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Unknown badge - it may have been replaced.' });
+    return unlockAs(claims, body.data.deviceId, user.id, body.data.grants[user.id], body.data.pin ?? null, reply);
+  });
+
+  // ── Badges ────────────────────────────────────────────────────────────────
+
+  /** Your own badge, or - for an admin - a colleague's who does not outrank them. */
+  const badgeTarget = (claims: JwtClaims, userId: string) => {
+    const target = userById(userId);
+    if (!target || target.accountId !== claims.accountId) return null;
+    if (target.id === claims.sub) return target;
+    if (claims.role === 'member' || (target.role === 'owner' && claims.role !== 'owner')) return null;
+    return target;
+  };
+
+  app.get<{ Params: { userId: string } }>('/api/users/:userId/badge', auth, async (req, reply) => {
+    const target = badgeTarget(req.user as JwtClaims, req.params.userId);
+    if (!target) return reply.code(404).send({ error: 'No such person.' });
+    const row = db.prepare('SELECT badgeBox, badgeIssuedAt FROM users WHERE id = ?').get(target.id) as { badgeBox: string | null; badgeIssuedAt: number | null };
+    return { code: row.badgeBox ? box.decrypt<string>(row.badgeBox) : null, issuedAt: row.badgeIssuedAt, email: target.email };
+  });
+
+  /** A new badge; the old one stops working. */
+  app.post<{ Params: { userId: string } }>('/api/users/:userId/badge', auth, async (req, reply) => {
+    const target = badgeTarget(req.user as JwtClaims, req.params.userId);
+    if (!target) return reply.code(404).send({ error: 'No such person.' });
+    const code = newBadgeCode();
+    const now = Date.now();
+    db.prepare('UPDATE users SET badgeHash = ?, badgeBox = ?, badgeIssuedAt = ? WHERE id = ?').run(sha256(code), box.encrypt(code), now, target.id);
+    return reply.code(201).send({ code, issuedAt: now, email: target.email });
+  });
+
+  app.delete<{ Params: { userId: string } }>('/api/users/:userId/badge', auth, async (req, reply) => {
+    const target = badgeTarget(req.user as JwtClaims, req.params.userId);
+    if (!target) return reply.code(404).send({ error: 'No such person.' });
+    db.prepare('UPDATE users SET badgeHash = NULL, badgeBox = NULL, badgeIssuedAt = NULL WHERE id = ?').run(target.id);
+    return { ok: true };
   });
 
   /** A fresh token for someone who is still unlocked (or just locked, so their sales can sync). */

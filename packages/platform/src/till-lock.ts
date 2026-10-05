@@ -40,9 +40,13 @@ export interface TillSettings {
   idleMinutes: number;
   /** Lock shortly after each sale, for a till that changes hands all the time. */
   lockAfterSale: boolean;
+  /** A scanned staff badge still asks for the PIN - for when a card could be lost or copied. */
+  badgeNeedsPin: boolean;
 }
 
-const DEFAULTS: TillSettings = { enabled: false, idleMinutes: 5, lockAfterSale: false };
+const DEFAULTS: TillSettings = { enabled: false, idleMinutes: 5, lockAfterSale: false, badgeNeedsPin: false };
+/** A badge scanned while the device asks for the PIN as well: the lock screen asks for it. */
+export const pendingBadge = ref<string | null>(null);
 const AFTER_SALE_MS = 15_000;
 
 export const tillSettings = ref<TillSettings>({ ...DEFAULTS });
@@ -92,6 +96,9 @@ function forgetOffline(userId: string): void {
   const next = { ...offlineChecks() };
   delete next[userId];
   write('offline', next);
+  const badges = { ...offlineBadges() };
+  delete badges[userId];
+  write('badges', badges);
 }
 const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 async function derive(pin: string, salt: string): Promise<string> {
@@ -111,6 +118,7 @@ async function rememberOffline(snapshot: AccountSnapshot, pin: string): Promise<
 }
 /** True when the PIN matches the check left on this device; throws once too many wrong ones were tried. */
 async function offlineUnlock(userId: string, pin: string): Promise<AccountSnapshot | null> {
+  // Throws on a wrong PIN; null when this person never unlocked online here.
   const check = offlineChecks()[userId];
   if (!check) return null;
   if (check.misses >= OFFLINE_MISSES) throw new Error('Too many wrong PINs - unlocking needs a connection now.');
@@ -122,6 +130,36 @@ async function offlineUnlock(userId: string, pin: string): Promise<AccountSnapsh
   return check.snapshot;
 }
 const isOffline = (err: unknown): boolean => !(err as HttpError).status;
+
+// Offline badge checks: a badge is a long random code, so a salted hash is
+// enough (no slow derivation). Kept under the same rule as PIN checks.
+interface OfflineBadge {
+  salt: string;
+  hash: string;
+}
+const offlineBadges = (): Record<string, OfflineBadge> => read<Record<string, OfflineBadge>>('badges', {});
+const badgeKey = (code: string): string => code.trim().toUpperCase().replace(/-/g, '');
+async function sha(text: string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
+}
+async function rememberOfflineBadge(snapshot: AccountSnapshot, code: string): Promise<void> {
+  const device = getDeviceAccount();
+  const next = { ...offlineBadges() };
+  delete next[snapshot.userId];
+  if (device && ROLE_RANK[snapshot.role] <= ROLE_RANK[device.role]) {
+    try {
+      const salt = hex(crypto.getRandomValues(new Uint8Array(16)).buffer);
+      next[snapshot.userId] = { salt, hash: await sha(salt + badgeKey(code)) };
+    } catch {
+      // No WebCrypto: offline badges are not offered.
+    }
+  }
+  write('badges', next);
+}
+async function offlineBadgeOwner(code: string): Promise<string | null> {
+  for (const [userId, b] of Object.entries(offlineBadges())) if ((await sha(b.salt + badgeKey(code))) === b.hash) return userId;
+  return null;
+}
 
 // ── People ──────────────────────────────────────────────────────────────────
 
@@ -195,9 +233,7 @@ export async function unlockTill(userId: string, pin: string): Promise<void> {
       if (isOffline(err)) {
         const known = await offlineUnlock(userId, pin);
         if (!known) throw new Error('No connection - this person has to unlock online once before it works offline.');
-        // Acting with the device's access, so shown with no more than the device's role.
-        const role = ROLE_RANK[known.role] <= ROLE_RANK[device.role] ? known.role : device.role;
-        setActivePerson({ snapshot: { ...known, role, accountName: device.accountName, profile: device.profile }, token: null, expiresAt: Number.MAX_SAFE_INTEGER, grant });
+        activateOffline(known, grant);
       } else {
         if ((err as HttpError).body && ((err as HttpError).body as { removed?: boolean }).removed) {
           setGrant(userId, null);
@@ -207,10 +243,102 @@ export async function unlockTill(userId: string, pin: string): Promise<void> {
       }
     }
   }
+  unlocked();
+}
+
+/** Unlocked without a connection: acting with the device's access, so shown with no more than the device's role. */
+function activateOffline(known: AccountSnapshot, grant: string): void {
+  const device = getDeviceAccount()!;
+  const role = ROLE_RANK[known.role] <= ROLE_RANK[device.role] ? known.role : device.role;
+  setActivePerson({ snapshot: { ...known, role, accountName: device.accountName, profile: device.profile }, token: null, expiresAt: Number.MAX_SAFE_INTEGER, grant });
+}
+
+function unlocked(): void {
   tillLocked.value = false;
+  pendingBadge.value = null;
   lastActivity = Date.now();
   deadline = 0;
 }
+
+/**
+ * Unlocks the till with a scanned staff badge - and the PIN, when this device
+ * asks for it after a badge. Throws the server's refusal for the lock screen.
+ */
+export async function unlockWithBadge(code: string, pin?: string): Promise<void> {
+  const device = getDeviceAccount();
+  if (!device) throw new Error('This device is signed out.');
+  try {
+    const res = (await deviceFetch('/auth/unlock-badge', {
+      method: 'POST',
+      body: JSON.stringify({ deviceId: await deviceId(), code: code.trim(), grants: grants(), ...(pin ? { pin } : {}) }),
+    })) as { ok?: boolean; userId?: string; accessToken?: string; user?: TokenResponse['user'] };
+    if (res.accessToken && res.user) {
+      const session = personFrom({ accessToken: res.accessToken, user: res.user }, grants()[res.user.id] ?? '');
+      setActivePerson(session);
+      void rememberOfflineBadge(session.snapshot, code);
+      if (pin) void rememberOffline(session.snapshot, pin);
+    } else {
+      setActivePerson(null);
+      void rememberOfflineBadge(device, code);
+      if (pin) void rememberOffline(device, pin);
+    }
+  } catch (err) {
+    if (!isOffline(err)) {
+      const body = ((err as HttpError).body ?? {}) as { removed?: boolean; userId?: string };
+      if (body.removed && body.userId) {
+        setGrant(body.userId, null);
+        void refreshTillPeople().catch(() => undefined);
+      }
+      throw err;
+    }
+    const owner = await offlineBadgeOwner(code);
+    if (!owner) throw new Error('No connection - this badge has to be used online once before it works offline.');
+    if (pin && !(await offlineUnlock(owner, pin))) throw new Error('No connection - unlocking needs the PIN check from an earlier online unlock.');
+    if (owner === device.userId) setActivePerson(null);
+    else {
+      const person = tillPeople.value.find((p) => p.userId === owner);
+      const known: AccountSnapshot | null = offlineChecks()[owner]?.snapshot ?? (person ? { ...device, userId: person.userId, email: person.email, role: person.role } : null);
+      const grant = grants()[owner];
+      if (!known || !grant) throw new Error('Not on this device - add them again.');
+      activateOffline(known, grant);
+    }
+  }
+  unlocked();
+}
+
+/**
+ * A badge scanned while the till is in use: hands it to the badge's owner.
+ * The person handing over is locked out first, so their sales sync under
+ * their own name.
+ */
+export async function switchByBadge(code: string): Promise<void> {
+  if (!tillSettings.value.enabled) return;
+  if (tillSettings.value.badgeNeedsPin) {
+    await lockTill();
+    pendingBadge.value = code;
+    return;
+  }
+  const previous = getAccount();
+  const device = getDeviceAccount();
+  await syncNow().catch(() => undefined);
+  await unlockWithBadge(code);
+  if (previous && device && previous.userId !== device.userId && previous.userId !== getAccount()?.userId) {
+    void deviceFetch('/auth/lock', { method: 'POST', body: JSON.stringify({ deviceId: await deviceId(), userId: previous.userId }) }).catch(() => undefined);
+  }
+}
+
+// ── Badges ──────────────────────────────────────────────────────────────────
+
+export interface StaffBadge {
+  code: string | null;
+  issuedAt: number | null;
+  email: string;
+}
+export const loadBadge = (userId: string): Promise<StaffBadge> => authFetch(`/users/${encodeURIComponent(userId)}/badge`) as Promise<StaffBadge>;
+export const issueBadge = (userId: string): Promise<StaffBadge> => authFetch(`/users/${encodeURIComponent(userId)}/badge`, { method: 'POST', body: '{}' }) as Promise<StaffBadge>;
+export const revokeBadge = async (userId: string): Promise<void> => {
+  await authFetch(`/users/${encodeURIComponent(userId)}/badge`, { method: 'DELETE' });
+};
 
 /**
  * Locks the till. Whatever the person did is pushed first, under their own

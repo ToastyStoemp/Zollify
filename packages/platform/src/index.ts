@@ -83,6 +83,13 @@ export {
   saveTillSettings,
   startTillLock,
   noteSale,
+  pendingBadge,
+  unlockWithBadge,
+  switchByBadge,
+  loadBadge,
+  issueBadge,
+  revokeBadge,
+  type StaffBadge,
   type TillPerson,
   type TillSettings,
 } from './till-lock';

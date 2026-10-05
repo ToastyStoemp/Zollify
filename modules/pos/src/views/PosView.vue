@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, isStore, round2, splitCashPortionAmounts } from '@zollify/shared';
+import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -281,6 +281,16 @@ const justAddedId = ref<string | null>(null);
 let justAddedTimer: ReturnType<typeof setTimeout> | undefined;
 
 function submitSearch(): void {
+  // A staff badge, from a handheld scanner or the camera: hand the till over.
+  if (isStaffBadge(search.value) && canLock.value) {
+    const code = search.value.trim();
+    search.value = '';
+    void sdk()
+      .lock.badge(code)
+      .then(() => toast(`Selling as ${seller.value}.`, 'ok'))
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : 'That badge was not accepted.', 'bad'));
+    return;
+  }
   const match = findSearchMatch(products.value, search.value);
   if (!match) {
     const code = search.value.trim();

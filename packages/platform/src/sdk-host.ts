@@ -20,7 +20,7 @@ import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
-import { lockTill, tillSettings } from './till-lock';
+import { lockTill, switchByBadge, tillSettings } from './till-lock';
 import {
   allProducts,
   deleteProduct,
@@ -274,7 +274,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     data: coreData,
 
     account: () => getAccount(),
-    lock: { available: () => tillSettings.value.enabled, lock: () => lockTill() },
+    lock: { available: () => tillSettings.value.enabled, lock: () => lockTill(), badge: (code) => switchByBadge(code) },
 
     onAccountChange(handler) {
       guard();

@@ -26,3 +26,11 @@ export interface Op {
 
 /** The changes staff (role member) may make; the server drops anything else they push. */
 export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set'];
+
+/**
+ * A staff badge as a scanner reads it: "ZS", an optional dash, then 22
+ * characters without look-alikes. Scanned at a shared till, it unlocks as
+ * the badge's owner.
+ */
+export const STAFF_BADGE_PATTERN = /^ZS-?[A-HJ-NP-Z2-9]{22}$/i;
+export const isStaffBadge = (code: string): boolean => STAFF_BADGE_PATTERN.test(code.trim());

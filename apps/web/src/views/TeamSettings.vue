@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { authFetch, currentAccount, visibleEvents } from '@zollify/platform';
+import BadgeDialog from './BadgeDialog.vue';
 
 /**
  * Team management.
@@ -112,6 +113,10 @@ function scopeLabel(user: TeamUser): string {
 function when(ts: number | null): string {
   return ts ? new Date(ts).toLocaleDateString() : 'never';
 }
+
+// Staff badges: an admin prints them for anyone who does not outrank them.
+const badgeFor = ref<TeamUser | null>(null);
+const canBadge = (u: TeamUser): boolean => u.role !== 'owner' || currentAccount.value?.role === 'owner';
 </script>
 
 <template>
@@ -126,6 +131,8 @@ function when(ts: number | null): string {
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
+    <BadgeDialog v-if="badgeFor" :user-id="badgeFor.id" :email="badgeFor.email" @close="badgeFor = null" />
+
     <h3>People</h3>
     <ul class="list">
       <li v-for="user in users" :key="user.id">
@@ -133,6 +140,7 @@ function when(ts: number | null): string {
           <strong>{{ user.email }}</strong>
           <span>{{ user.role }} · {{ scopeLabel(user) }} · last seen {{ when(user.lastLoginAt) }}</span>
         </div>
+        <button v-if="canBadge(user)" type="button" @click="badgeFor = user">Badge</button>
         <button
           v-if="user.role === 'member' && user.allowedEventIds?.length"
           type="button"

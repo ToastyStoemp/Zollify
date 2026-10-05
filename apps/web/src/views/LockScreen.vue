@@ -1,13 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
 import type { HttpError } from '@zollify/sdk';
-import { addTillPerson, getDeviceAccount, refreshTillPeople, setOwnPin, tillPeople, unlockTill, type TillPerson } from '@zollify/platform';
+import { addTillPerson, getDeviceAccount, pendingBadge, refreshTillPeople, setOwnPin, tillPeople, tillSettings, unlockTill, unlockWithBadge, type TillPerson } from '@zollify/platform';
+import { isStaffBadge } from '@zollify/shared';
+import { cameraScanSupported, startCameraScan } from '../camera-scan';
 import { Icon } from '@zollify/ui';
 import { signOutAndReload } from '../boot';
 
 /**
  * The shared till's lock screen: who is at the till? Tap your name, enter
- * your PIN, and the app is yours - your role, your sales, your cash.
+ * your PIN, and the app is yours - your role, your sales, your cash. Or
+ * scan your staff badge: a handheld scanner types it like a keyboard, or the
+ * camera reads it.
  */
 
 const device = computed(() => getDeviceAccount());
@@ -50,10 +54,11 @@ function erase(): void {
   pin.value = pin.value.slice(0, -1);
 }
 async function submit(): Promise<void> {
-  if (!picked.value || pin.value.length < 4 || busy.value) return;
+  if ((!picked.value && !pendingBadge.value) || pin.value.length < 4 || busy.value) return;
   busy.value = true;
   try {
-    await unlockTill(picked.value.userId, pin.value);
+    if (pendingBadge.value) await unlockWithBadge(pendingBadge.value, pin.value);
+    else await unlockTill(picked.value!.userId, pin.value);
   } catch (err) {
     const status = (err as HttpError).status;
     error.value = err instanceof Error ? err.message : 'Could not unlock.';
@@ -66,12 +71,78 @@ async function submit(): Promise<void> {
     busy.value = false;
   }
 }
+// ── Badges ──────────────────────────────────────────────────────────────────
+
+/** What a handheld scanner has typed since the last Enter. */
+let scanned = '';
+let scannedAt = 0;
+async function badge(code: string): Promise<void> {
+  pin.value = '';
+  error.value = null;
+  if (tillSettings.value.badgeNeedsPin) {
+    picked.value = null;
+    pendingBadge.value = code;
+    return;
+  }
+  busy.value = true;
+  try {
+    await unlockWithBadge(code);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not unlock with that badge.';
+  } finally {
+    busy.value = false;
+  }
+}
+
+const camera = ref(false);
+const video = ref<HTMLVideoElement | null>(null);
+let stopCamera: (() => void) | null = null;
+async function openCamera(): Promise<void> {
+  error.value = null;
+  camera.value = true;
+  await nextTick();
+  try {
+    stopCamera = await startCameraScan(video.value!, ['code_128', 'qr_code'], isStaffBadge, (code) => {
+      closeCamera();
+      void badge(code);
+    });
+  } catch (err) {
+    closeCamera();
+    error.value = err instanceof Error && err.name === 'NotAllowedError' ? 'Camera access was blocked - allow it in the browser settings.' : 'Could not open the camera.';
+  }
+}
+function closeCamera(): void {
+  stopCamera?.();
+  stopCamera = null;
+  camera.value = false;
+}
+onUnmounted(closeCamera);
+
+const padOpen = computed(() => !!picked.value || !!pendingBadge.value);
+function cancelPad(): void {
+  pendingBadge.value = null;
+  back();
+}
+
 function onKey(e: KeyboardEvent): void {
-  if (!picked.value || adding.value || settingPin.value) return;
+  if (adding.value || settingPin.value) return;
+  // A handheld scanner types the badge and presses Enter, faster than anyone types.
+  const now = Date.now();
+  if (now - scannedAt > 1000) scanned = '';
+  scannedAt = now;
+  if (e.key === 'Enter' && isStaffBadge(scanned)) {
+    const code = scanned;
+    scanned = '';
+    e.preventDefault();
+    return void badge(code);
+  }
+  if (e.key.length === 1) scanned += e.key;
+  else if (e.key === 'Enter') scanned = '';
+  if (!padOpen.value) return;
   if (/^\d$/.test(e.key)) press(e.key);
   else if (e.key === 'Backspace') erase();
   else if (e.key === 'Enter') void submit();
-  else if (e.key === 'Escape') back();
+  else if (e.key === 'Escape') cancelPad();
 }
 onMounted(() => window.addEventListener('keydown', onKey));
 onUnmounted(() => window.removeEventListener('keydown', onKey));
@@ -131,7 +202,8 @@ async function saveOwnPin(): Promise<void> {
     <div class="panel">
       <header>
         <span class="brand"><img src="/favicon.svg" alt="" class="mark" />{{ device?.accountName }}</span>
-        <h1 id="lock-title"><template v-if="picked">Hi <span class="cap">{{ nameOf(picked) }}</span></template><template v-else>Who's at the till?</template></h1>
+        <h1 id="lock-title"><template v-if="picked">Hi <span class="cap">{{ nameOf(picked) }}</span></template><template v-else-if="pendingBadge">Badge scanned</template><template v-else>Who's at the till?</template></h1>
+        <p v-if="pendingBadge && !picked" class="hint">Enter your PIN to finish.</p>
       </header>
 
       <!-- Adding someone to this device -->
@@ -168,7 +240,14 @@ async function saveOwnPin(): Promise<void> {
       </form>
 
       <!-- PIN pad -->
-      <div v-else-if="picked" class="pad">
+      <!-- Camera reading a badge -->
+      <div v-else-if="camera" class="camera">
+        <video ref="video" playsinline muted />
+        <p class="hint">Hold your badge in front of the camera.</p>
+        <button type="button" @click="closeCamera">Cancel</button>
+      </div>
+
+      <div v-else-if="padOpen" class="pad">
         <div class="dots" :class="{ shake: !!error }" aria-live="polite" :aria-label="`${pin.length} digits entered`">
           <i v-for="i in Math.max(4, pin.length)" :key="i" :class="{ on: i <= pin.length }" />
         </div>
@@ -179,7 +258,8 @@ async function saveOwnPin(): Promise<void> {
           <button type="button" @click="press('0')">0</button>
           <button type="button" class="primary" aria-label="Unlock" :disabled="pin.length < 4 || busy" @click="submit"><Icon name="check" /></button>
         </div>
-        <button type="button" class="quiet link" @click="back">Not <span class="cap">{{ nameOf(picked) }}</span>?</button>
+        <button v-if="picked" type="button" class="quiet link" @click="cancelPad">Not <span class="cap">{{ nameOf(picked) }}</span>?</button>
+        <button v-else type="button" class="quiet link" @click="cancelPad">Cancel</button>
       </div>
 
       <!-- People -->
@@ -196,6 +276,10 @@ async function saveOwnPin(): Promise<void> {
             <small>with their login</small>
           </button>
         </div>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p class="hint scan-hint">
+          Or scan your staff badge<template v-if="cameraScanSupported"> - <button type="button" class="quiet inline" @click="openCamera">use the camera</button></template>.
+        </p>
         <button type="button" class="quiet link" @click="signOutAndReload()">Sign this device out</button>
       </template>
     </div>
@@ -227,6 +311,10 @@ h1 { margin: 0; font-size: 1.5rem; }
 .keys button { height: 4.4rem; border-radius: 50%; font-size: 1.4rem; font-weight: 600; display: grid; place-items: center; }
 .link { border: 0; background: none; color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; font-size: .85rem; min-height: 2.2rem; }
 .error { margin: 0; color: var(--zfy-danger, #c6512f); text-align: center; }
+.scan-hint { text-align: center; }
+.inline { border: 0; padding: 0; min-height: 0; background: none; color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; font-size: inherit; }
+.camera { display: flex; flex-direction: column; align-items: center; gap: .7rem; width: 100%; }
+.camera video { width: min(100%, 26rem); aspect-ratio: 4 / 3; object-fit: cover; border-radius: 14px; background: #000; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .84rem; }
 .form { width: 100%; display: flex; flex-direction: column; gap: .7rem; padding: 1rem; border-radius: 14px; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); }
 .form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }

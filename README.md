@@ -223,7 +223,13 @@ credited to them, even when they sync after someone else took over. The till
 locks from its header or the sidebar, after a set idle time, or after each
 sale. Offline, someone who unlocked online once can still unlock, if they do
 not outrank the device's own user: they then act with the device's access, so
-a PIN check kept on the device never opens more than the device already could.
+a PIN check kept on the device never opens more than the device already could. **Staff
+badges** stand in for the name and PIN: an admin prints each person a card
+with a Code 128 barcode (Settings → Team → Badge), and scanning it - with a
+handheld scanner or the camera - unlocks the lock screen as its owner, or
+hands an unlocked till over when scanned into the till's search. A badge only
+works on tills its owner was added to; a device can still ask for the PIN
+after the badge, and a new badge retires the old card.
 
 **Fees and reports.** A store can charge an artist a fee - a missed setup
 (straight from the planner), not responding, late stock, handling, damage -

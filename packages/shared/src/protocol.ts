@@ -194,6 +194,23 @@ export interface NudgeMessage {
   latestSeq: number;
 }
 
+/** WS doorbell: the account has a new notification. Carries nothing; devices fetch over HTTP. */
+export interface NotificationMessage {
+  type: 'notification';
+}
+
+/** A short note for an account, shown under the shell's bell. */
+export interface AppNotification {
+  id: string;
+  moduleId: string | null;
+  title: string;
+  body: string;
+  /** In-app path to open, e.g. "/m/consignment?tab=mine". */
+  link: string | null;
+  createdAt: number;
+  readAt: number | null;
+}
+
 /**
  * Sent once, right when a device connects (or reconnects) - the shell content
  * only ever changes by redeploying the whole server, so a fresh connection is

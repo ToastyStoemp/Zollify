@@ -8,8 +8,16 @@ import {
   type Consignor,
   type ConsignorInput,
   type ConsignorStatement,
+  type ConsignmentRental,
+  type ConsignmentSpace,
+  type Delivery,
   type PayoutInput,
   type Product,
+  type RentalInput,
+  type SetupInput,
+  type SetupMoment,
+  type SpaceInput,
+  type UpgradeInput,
 } from '@zollify/shared';
 import { sdk } from './runtime';
 
@@ -38,6 +46,9 @@ export const loaded = ref(false);
 
 /** The account's stores - venues of kind 'store' - for assigning artists to. */
 export const stores = computed(() => sdk().data.events.list().filter((e) => isStore(e) && !e.deletedAt));
+
+/** The store the planner shows; kept here so it survives the tab reloading. */
+export const plannerStoreId = ref('');
 
 export const products = computed(() => sdk().data.products.list());
 export const productsOf = (consignorId: string): Product[] => products.value.filter((p) => p.consignorId === consignorId);
@@ -81,10 +92,49 @@ export const loadStatement = (): Promise<Statement> => sdk().http.get<Statement>
 export const addPayout = (input: PayoutInput): Promise<{ payout: ConsignmentPayout }> => sdk().http.post('payouts', input);
 export const deletePayout = (id: string): Promise<unknown> => sdk().http.del(`payouts/${encodeURIComponent(id)}`);
 
+// ── Planner ────────────────────────────────────────────────────────────────
+
+export interface Planner {
+  spaces: ConsignmentSpace[];
+  rentals: ConsignmentRental[];
+  setups: SetupMoment[];
+  /** Whether this server can send email at all. */
+  emailEnabled: boolean;
+}
+
+const id = (s: string): string => encodeURIComponent(s);
+export const loadPlanner = (): Promise<Planner> => sdk().http.get<Planner>('planner');
+export const saveSpace = (spaceId: string, input: SpaceInput): Promise<{ space: ConsignmentSpace }> => sdk().http.put(`spaces/${id(spaceId)}`, input);
+export const deleteSpace = (spaceId: string): Promise<unknown> => sdk().http.del(`spaces/${id(spaceId)}`);
+export const bookRental = (input: RentalInput): Promise<{ rental: ConsignmentRental; delivery: Delivery }> => sdk().http.post('rentals', input);
+export const editRental = (rentalId: string, input: RentalInput): Promise<{ rental: ConsignmentRental }> => sdk().http.put(`rentals/${id(rentalId)}`, input);
+export const upgradeRental = (rentalId: string, input: UpgradeInput): Promise<{ rental: ConsignmentRental; delivery: Delivery }> =>
+  sdk().http.post(`rentals/${id(rentalId)}/upgrade`, input);
+export const endRental = (rentalId: string, on: string): Promise<{ rental: ConsignmentRental }> => sdk().http.post(`rentals/${id(rentalId)}/end`, { on });
+export const deleteRental = (rentalId: string): Promise<unknown> => sdk().http.del(`rentals/${id(rentalId)}`);
+export const scheduleSetup = (input: SetupInput): Promise<{ setup: SetupMoment; delivery: Delivery }> => sdk().http.post('setups', input);
+export const moveSetup = (setupId: string, input: SetupInput): Promise<{ setup: SetupMoment; delivery: Delivery | null }> => sdk().http.put(`setups/${id(setupId)}`, input);
+export const cancelSetup = (setupId: string): Promise<{ setup: SetupMoment; delivery: Delivery | null }> => sdk().http.post(`setups/${id(setupId)}/cancel`);
+
+/** One line on who heard about it, for a toast. */
+export function deliveryText(name: string, d: Delivery | null | undefined): string {
+  if (!d) return 'Saved.';
+  const parts: string[] = [];
+  if (d.notified) parts.push(`${name} was notified in Zollify`);
+  if (d.emailedTo) parts.push(`emailed at ${d.emailedTo}`);
+  let text = parts.length ? `${parts.join(' and ')}.` : `Saved - ${name} has no linked account to notify.`;
+  if (d.emailSkipped === 'no_address') text += ' No email sent: add their address under Artists.';
+  if (d.emailSkipped === 'not_configured') text += ' No email sent: this server has no email set up.';
+  if (d.emailSkipped === 'failed') text += ' The email could not be sent.';
+  return text;
+}
+
 // ── The artist's side ──────────────────────────────────────────────────────
 
 export const myLinks = async (): Promise<ArtistConsignment[]> => (await sdk().http.get<{ links: ArtistConsignment[] }>('links')).links;
 export const acceptCode = (code: string): Promise<{ storeAccountName: string; consignorName: string }> => sdk().http.post('links', { code });
+export const respondToSetup = (storeAccountId: string, consignorId: string, setupId: string, status: 'confirmed' | 'declined', note = ''): Promise<{ setup: SetupMoment }> =>
+  sdk().http.post(`links/${id(storeAccountId)}/${id(consignorId)}/setups/${id(setupId)}/respond`, { status, note });
 export const leaveStore = (storeAccountId: string, consignorId: string): Promise<unknown> =>
   sdk().http.del(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}`);
 

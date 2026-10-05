@@ -179,6 +179,22 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_device_links_expires ON device_links(expiresAt);
   `,
+  // v11 - in-app notifications: a short note for an account, raised by the
+  // server (e.g. a store scheduling an artist's setup). See notifications.ts.
+  `
+  CREATE TABLE notifications (
+    id        TEXT PRIMARY KEY,
+    accountId TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    moduleId  TEXT,
+    minRole   TEXT NOT NULL DEFAULT 'member' CHECK (minRole IN ('owner','admin','member')),
+    title     TEXT NOT NULL,
+    body      TEXT NOT NULL DEFAULT '',
+    link      TEXT,
+    createdAt INTEGER NOT NULL,
+    readAt    INTEGER
+  );
+  CREATE INDEX idx_notifications_account ON notifications(accountId, createdAt);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

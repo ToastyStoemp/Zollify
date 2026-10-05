@@ -7,6 +7,7 @@ import {
   consignmentLines,
   consignmentStatements,
   isStore,
+  rentDue,
   type ArtistConsignment,
   type ConsignedItem,
   type ConsignmentPayout,
@@ -27,6 +28,7 @@ import {
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { migratePlanner, plannerForArtist, registerPlanner, rentalsOf } from './consignment-planner';
 
 /**
  * Consignment - the server half.
@@ -44,7 +46,7 @@ import {
  * crosses it is picked field by field below - never a spread of a record.
  */
 
-const MODULE_ID = 'consignment';
+export const MODULE_ID = 'consignment';
 const LINK_TTL = 14 * 24 * 3600 * 1000;
 
 function migrate(db: Database.Database): void {
@@ -75,7 +77,7 @@ function migrate(db: Database.Database): void {
 
 // ── Data access ─────────────────────────────────────────────────────────────
 
-interface ConsignorRow {
+export interface ConsignorRow {
   accountId: string;
   id: string;
   doc: string;
@@ -86,17 +88,19 @@ interface ConsignorRow {
   updatedAt: number;
 }
 
+/** Rent is charged by the server's calendar day. */
+const today = (): string => new Date().toISOString().slice(0, 10);
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 /** Codes are typed by hand, so dashes, spaces and case are forgiven. */
 const normaliseCode = (code: string): string => code.replace(/[^0-9a-z]/gi, '').toUpperCase();
 
-function accountName(db: Database.Database, accountId: string | null): string | null {
+export function accountName(db: Database.Database, accountId: string | null): string | null {
   if (!accountId) return null;
   const row = db.prepare('SELECT name FROM accounts WHERE id = ?').get(accountId) as { name: string } | undefined;
   return row?.name ?? null;
 }
 
-function parseDoc(raw: string): ConsignorInput {
+export function parseDoc(raw: string): ConsignorInput {
   const parsed = ConsignorInputSchema.safeParse(JSON.parse(raw));
   return parsed.success ? parsed.data : ConsignorInputSchema.parse({ name: 'Unnamed artist', commissionPct: 0 });
 }
@@ -120,7 +124,7 @@ function consignorRows(db: Database.Database, accountId: string): ConsignorRow[]
   return db.prepare('SELECT * FROM consignors WHERE accountId = ? ORDER BY createdAt').all(accountId) as ConsignorRow[];
 }
 
-function consignorRow(db: Database.Database, accountId: string, id: string): ConsignorRow | undefined {
+export function consignorRow(db: Database.Database, accountId: string, id: string): ConsignorRow | undefined {
   return db.prepare('SELECT * FROM consignors WHERE accountId = ? AND id = ?').get(accountId, id) as ConsignorRow | undefined;
 }
 
@@ -136,7 +140,7 @@ function payoutsFor(db: Database.Database, accountId: string, consignorId?: stri
 }
 
 /** One account's op-log, replayed into what a statement needs. */
-function replay(db: Database.Database, accountId: string) {
+export function replay(db: Database.Database, accountId: string) {
   const types = ['tx.create', 'tx.revert', 'product.merge', 'product.upsert', 'product.delete', 'event.upsert', 'event.close', 'inventory.set'];
   const ops = (
     db
@@ -184,10 +188,14 @@ export const consignmentServerModule: ServerModule = {
   id: MODULE_ID,
   // Commissions and payouts are not a helper's business, on either side.
   minRole: 'admin',
-  migrate,
+  migrate: (db) => {
+    migrate(db);
+    migratePlanner(db);
+  },
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;
+    registerPlanner(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 
@@ -306,7 +314,7 @@ export const consignmentServerModule: ServerModule = {
         venues: [...venueIds].map((id) => venueOf(byId.get(id), id)),
         lines,
         payouts,
-        statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id)),
+        statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today())),
       };
     });
 
@@ -380,10 +388,10 @@ export const consignmentServerModule: ServerModule = {
         };
         // The owner switched consignment off: the link stays, the sharing stops.
         if (!isEnabled(db, row.accountId, MODULE_ID)) {
-          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
+          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
           continue;
         }
-        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }) });
+        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }), ...plannerForArtist(db, row.accountId, row.id) });
       }
       return { links: out };
     });
@@ -443,6 +451,11 @@ function artistView(
     items: items.sort((a, b) => a.title.localeCompare(b.title) || (a.variantLabel ?? '').localeCompare(b.variantLabel ?? '')),
     lines,
     payouts,
-    statement: consignmentStatements(lines, payouts, [consignor.id])[0]!,
+    statement: consignmentStatements(
+      lines,
+      payouts,
+      [consignor.id],
+      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today()),
+    )[0]!,
   };
 }

@@ -107,7 +107,7 @@ async function exportCsv(): Promise<void> {
 <template>
   <div class="tab">
     <div class="bar">
-      <p class="hint">Commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out.</p>
+      <p class="hint">Commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out. Space rent comes off once each month has started (Planner).</p>
       <label class="check"><input v-model="showArchived" type="checkbox" /> Show archived</label>
       <button type="button" @click="refresh"><Icon name="refresh-cw" :size="14" /> Refresh</button>
       <button type="button" :disabled="!data?.lines.length" @click="exportCsv"><Icon name="download" :size="14" /> Export sales</button>
@@ -129,8 +129,9 @@ async function exportCsv(): Promise<void> {
         <div><span>Sales</span><strong>{{ fmtPrice(t.gross, t.currency) }}</strong></div>
         <div><span>Commission</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong></div>
         <div><span>Artist's share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+        <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
         <div><span>Paid</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong></div>
-        <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Owed' : 'Paid ahead' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
+        <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Owed' : 'They owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
       </div>
 
       <table v-if="s.byStore.length">

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import type { ArtistConsignment } from '@zollify/shared';
-import { commissionFor, fmtPrice } from '@zollify/shared';
+import type { SetupMoment } from '@zollify/shared';
+import { commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
-import { acceptCode, errorText, leaveStore, myLinks } from '../api';
+import { acceptCode, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -52,6 +53,26 @@ async function leave(l: ArtistConsignment): Promise<void> {
 }
 
 const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
+const now = today();
+const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const upcomingSetups = (l: ArtistConsignment): SetupMoment[] => l.setups.filter((s) => s.date >= now);
+const currentRentals = (l: ArtistConsignment) => l.rentals.filter((r) => rentalStatus(r, now) !== 'ended');
+
+/** Answering a setup: a reason is only asked for when saying no. */
+const replying = ref<string | null>(null);
+const reply = ref('');
+async function answer(l: ArtistConsignment, s: SetupMoment, status: 'confirmed' | 'declined'): Promise<void> {
+  emit('error', null);
+  try {
+    await respondToSetup(l.storeAccountId, l.consignorId, s.id, status, status === 'declined' ? reply.value.trim() : '');
+    replying.value = null;
+    reply.value = '';
+    sdk().ui.toast(status === 'confirmed' ? `Confirmed - ${l.storeAccountName} has been told.` : `${l.storeAccountName} has been told you can't make it.`, { kind: 'success' });
+    await refresh();
+  } catch (err) {
+    emit('error', errorText(err, 'Could not send your answer.'));
+  }
+}
 const fmtPct = (n: number): string => `${Number(n.toFixed(2))}%`;
 const venueName = (l: ArtistConsignment, id: string): string => l.venues.find((v) => v.id === id)?.name ?? 'Removed event';
 function commissionLine(l: ArtistConsignment): string {
@@ -89,11 +110,40 @@ function commissionLine(l: ArtistConsignment): string {
       <template v-else>
         <p v-if="l.venues.length" class="venues"><Icon name="store" :size="13" /> {{ l.venues.map((v) => (v.city ? `${v.name} (${v.city})` : v.name)).join(', ') }}</p>
 
+        <section v-if="upcomingSetups(l).length" class="setups">
+          <h3>Setups</h3>
+          <div v-for="s in upcomingSetups(l)" :key="s.id" :class="['setup', s.status]">
+            <div class="line">
+              <strong>{{ fmtDay(s.date) }} · {{ s.time }}</strong>
+              <span class="hint">{{ s.durationMin }} min · {{ venueName(l, s.storeId) }}</span>
+              <span :class="['pill', s.status]">{{ { scheduled: 'please reply', confirmed: 'confirmed', declined: "you can't make it", cancelled: 'cancelled by the store' }[s.status] }}</span>
+            </div>
+            <p v-if="s.note" class="note">{{ s.note }}</p>
+            <template v-if="s.status !== 'cancelled'">
+              <div v-if="replying === s.id" class="reply">
+                <input v-model="reply" type="text" placeholder="Optional - suggest another time" maxlength="500" />
+                <button type="button" @click="answer(l, s, 'declined')">Send</button>
+                <button type="button" class="quiet" @click="replying = null">Back</button>
+              </div>
+              <div v-else class="reply">
+                <button v-if="s.status !== 'confirmed'" type="button" class="primary" @click="answer(l, s, 'confirmed')"><Icon name="check" :size="14" /> I'll be there</button>
+                <button v-if="s.status !== 'declined'" type="button" @click="replying = s.id; reply = ''">Can't make it</button>
+              </div>
+            </template>
+          </div>
+        </section>
+
+        <p v-for="r in currentRentals(l)" :key="r.id" class="rental">
+          <Icon name="layers" :size="13" />
+          <span><strong>{{ r.spaceName }}</strong> at {{ venueName(l, r.storeId) }} · {{ r.startDate }} to {{ rentalEnd(r) }} · {{ fmtPrice(r.monthlyFee, r.currency) }}/month{{ r.deductFromSales ? ', taken off your sales' : '' }}<template v-if="rentalStatus(r, now) === 'upcoming'"> · starts {{ r.startDate }}</template></span>
+        </p>
+
         <div v-for="t in l.statement.totals" :key="t.currency" class="totals">
           <div><span>Sold</span><strong>{{ t.units }}</strong></div>
           <div><span>Your share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+          <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
           <div><span>Paid to you</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong></div>
-          <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Still owed' : 'Paid ahead' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
+          <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Still owed' : 'You owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
         </div>
 
         <details v-if="l.items.length" open>
@@ -169,6 +219,20 @@ function commissionLine(l: ArtistConsignment): string {
 .card header { display: flex; align-items: flex-start; gap: .6rem; }
 .card header button { min-height: 2.2rem; font-size: .8rem; }
 .grow { flex: 1; }
+.setups { display: flex; flex-direction: column; gap: .5rem; padding: .7rem .8rem; border-radius: 10px; background: var(--zfy-signal-soft, #e4ecf6); }
+.setups h3 { margin: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }
+.setup { display: flex; flex-direction: column; gap: .35rem; }
+.setup + .setup { border-top: 1px solid var(--zfy-line, #d6dde4); padding-top: .5rem; }
+.setup.cancelled strong { text-decoration: line-through; color: var(--zfy-muted, #5a6472); }
+.setup .line { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .88rem; }
+.setup .note { margin: 0; font-size: .85rem; }
+.reply { display: flex; gap: .4rem; flex-wrap: wrap; }
+.reply input { flex: 1 1 14rem; }
+.reply button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
+.pill { font-size: .64rem; font-weight: 600; text-transform: uppercase; letter-spacing: .07em; border-radius: 999px; padding: .12rem .45rem; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); }
+.pill.confirmed { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.pill.scheduled { background: var(--zfy-warning, #e0a63a); color: #1a2230; }
+.rental { margin: 0; font-size: .84rem; display: flex; align-items: center; gap: .35rem; }
 .venues { margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); display: flex; align-items: center; gap: .3rem; }
 .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: .5rem; }
 .totals div { display: flex; flex-direction: column; gap: .1rem; padding: .45rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }

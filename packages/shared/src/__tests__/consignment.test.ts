@@ -87,7 +87,7 @@ describe('consignment', () => {
       ['bern', 1, 15],
       ['zurich', 2, 35],
     ]);
-    expect(a.totals).toEqual([{ currency: 'CHF', units: 3, gross: 75, commission: 25, artistShare: 50, paid: 20, balance: 30 }]);
+    expect(a.totals).toEqual([{ currency: 'CHF', units: 3, gross: 75, commission: 25, artistShare: 50, paid: 20, rent: 0, balance: 30 }]);
     expect(b).toEqual({ consignorId: 'ben', byStore: [], totals: [] });
   });
 

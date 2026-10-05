@@ -24,6 +24,8 @@ import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
+import { createMailer, type Mailer } from './mailer';
+import { createNotifier, registerNotificationRoutes } from './notifications';
 
 export interface GatewayOptions {
   dataDir: string;
@@ -51,6 +53,8 @@ export interface GatewayOptions {
   requireHttps: boolean;
   trustProxy: boolean;
   logLevel?: string;
+  /** Outgoing email. Defaults to SMTP_URL + MAIL_FROM from the environment; disabled without them. */
+  mailer?: Mailer;
 }
 
 /**
@@ -203,6 +207,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerSyncRoutes(app, db, rooms);
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
+  registerNotificationRoutes(app, db);
+  const notify = createNotifier(db, rooms);
+  const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
@@ -221,7 +228,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     async (api) => {
       api.addHook('onRequest', app.authenticate);
       registerModuleRoutes(api, db, store, identity, opts.moduleStoreDir);
-      mountServerModules(api, db, opts.serverModules, identity);
+      mountServerModules(api, db, opts.serverModules, identity, { notify, mail });
     },
     { prefix: '/api' },
   );

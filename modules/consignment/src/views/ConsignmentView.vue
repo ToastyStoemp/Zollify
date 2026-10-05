@@ -1,19 +1,42 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { consignors, errorText, loadConsignors, loaded, stores } from '../api';
+import { sdk } from '../runtime';
 import ArtistsTab from './ArtistsTab.vue';
 import ItemsTab from './ItemsTab.vue';
 import StatementTab from './StatementTab.vue';
 import MyStoresTab from './MyStoresTab.vue';
+import PlannerTab from './PlannerTab.vue';
 
 /**
- * Consignment. The first three tabs are the store owner's: who the artists
- * are and which stores carry them, which items are theirs, and what each is
- * owed. "Where I consign" is the artist's side - the stores this account's
- * own work sells in. An account can be both.
+ * Consignment. The first four tabs are the store owner's: who the artists
+ * are and which stores carry them, which items are theirs, who rents which
+ * space and when they come in to set up, and what each is owed. "Where I
+ * consign" is the artist's side - the stores this account's own work sells
+ * in. An account can be both.
  */
-type Tab = 'artists' | 'items' | 'statement' | 'mine';
+type Tab = 'artists' | 'items' | 'planner' | 'statement' | 'mine';
+const TABS: Tab[] = ['artists', 'items', 'planner', 'statement', 'mine'];
 const tab = ref<Tab>('artists');
+
+/** A notification links to a tab ("/m/consignment?tab=mine"); the shell uses hash routes. */
+function tabOf(link: string | null | undefined): Tab | null {
+  const t = new URLSearchParams(link?.split('?')[1] ?? '').get('tab');
+  return TABS.includes(t as Tab) ? (t as Tab) : null;
+}
+const tabFromUrl = (): Tab | null => tabOf(location.hash);
+/** Bumped when one of our notifications is opened, so its tab reloads even if it was already showing. */
+const revision = ref(0);
+let off: (() => void) | null = null;
+onMounted(() => {
+  off = sdk().events.on('notification:opened', (n) => {
+    const t = n.moduleId === 'consignment' ? tabOf(n.link) : null;
+    if (!t) return;
+    tab.value = t;
+    revision.value++;
+  });
+});
+onUnmounted(() => off?.());
 const error = ref<string | null>(null);
 /** Handed from Artists to Items when "Items" is clicked on one artist. */
 const focus = ref<string>('');
@@ -22,7 +45,9 @@ onMounted(async () => {
   try {
     await loadConsignors();
     // An artist's account with no stores of its own opens on its own side.
-    if (!consignors.value.length && !stores.value.length) tab.value = 'mine';
+    const asked = tabFromUrl();
+    if (asked) tab.value = asked;
+    else if (!consignors.value.length && !stores.value.length) tab.value = 'mine';
   } catch (err) {
     error.value = errorText(err, 'Could not load consignment.');
   }
@@ -32,6 +57,7 @@ const active = computed(() => consignors.value.filter((c) => !c.archived).length
 const tabs = computed<{ id: Tab; label: string; badge?: number }[]>(() => [
   { id: 'artists', label: 'Artists', badge: active.value },
   { id: 'items', label: 'Items' },
+  { id: 'planner', label: 'Planner' },
   { id: 'statement', label: 'Statement' },
   { id: 'mine', label: 'Where I consign' },
 ]);
@@ -56,10 +82,11 @@ function showItems(consignorId: string): void {
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="!loaded && !error" class="hint">Loading…</p>
     <template v-else-if="loaded">
-      <ArtistsTab v-if="tab === 'artists'" @error="error = $event" @items="showItems" />
-      <ItemsTab v-else-if="tab === 'items'" v-model:consignor="focus" @error="error = $event" />
-      <StatementTab v-else-if="tab === 'statement'" @error="error = $event" />
-      <MyStoresTab v-else @error="error = $event" />
+      <ArtistsTab v-if="tab === 'artists'" :key="revision" @error="error = $event" @items="showItems" />
+      <ItemsTab v-else-if="tab === 'items'" :key="revision" v-model:consignor="focus" @error="error = $event" />
+      <PlannerTab v-else-if="tab === 'planner'" :key="revision" @error="error = $event" />
+      <StatementTab v-else-if="tab === 'statement'" :key="revision" @error="error = $event" />
+      <MyStoresTab v-else :key="revision" @error="error = $event" />
     </template>
   </section>
 </template>

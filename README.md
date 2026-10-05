@@ -176,6 +176,22 @@ and payouts at that owner's stores under *Where I consign*, and the owner can
 import items from their catalogue. That link is the only path between two
 accounts' data, and the server picks every field that crosses it.
 
+The consignment **planner** rents space by the month: each store lists the
+spaces it rents out (a small shelf, a large one, a window spot - with a fee and
+how many there are), an artist rents one for some months, and an upgrade stops
+that rental and starts a larger one from a date (by default the next billing
+period, so no month is charged twice). Started months come off the artist's
+balance unless the rent is paid separately. The store also schedules **setup
+moments**: the artist gets an in-app notification on their linked account and
+an email with a calendar file, confirms or declines from *Where I consign*, and
+the store hears back the same way.
+
+*Notifications and email* - platform features any server module can use
+through its context: `ctx.notify(accountId, …)` puts a note under the shell's
+bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when
+`SMTP_URL` and `MAIL_FROM` are set. Without them nothing is emailed and the
+app says so; notifications work either way.
+
 *Tax & books* (the ZollTax port) - **Payments**: drop a myPOS export or
 statement, a Shopify orders CSV or a Wise history, or pull straight from
 myPOS / Shopify / SumUp; rows cluster per convention (a day-and-a-half gap on

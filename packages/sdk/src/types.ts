@@ -163,6 +163,12 @@ export interface CoreEvents {
   'catalog:changed': { productIds: string[] };
   'event:activated': { eventId: string | null };
   'sync:completed': { at: number; pulled: number; pushed: number };
+  /**
+   * Someone opened a notification under the bell. Announced after the shell
+   * has navigated to its link, so a module whose screen was already open can
+   * show what the notification was about.
+   */
+  'notification:opened': { moduleId: string | null; link: string | null };
 }
 
 export type EventName = keyof CoreEvents | (string & {});

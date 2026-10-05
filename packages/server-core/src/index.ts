@@ -42,6 +42,8 @@ export {
   type Role,
 } from './modules/mount';
 export { registerModuleRoutes } from './routes/modules';
+export { createMailer, isPlainEmail, type Mailer, type MailMessage } from './mailer';
+export { createNotifier, type Notify, type NotificationInput } from './notifications';
 export { registerRefreshCookie, REFRESH_COOKIE, type RefreshCookieOptions } from './refresh-cookie';
 export { loadDotEnv } from './env';
 export { issueChallenge, verifyChallenge, type ChallengePurpose } from './captcha';

@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { isEnabled } from './entitlements';
+import type { Mailer } from '../mailer';
+import type { Notify } from '../notifications';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -19,6 +21,10 @@ export interface RequestIdentity {
 export interface ModuleContext {
   db: Database.Database;
   identity(req: FastifyRequest): RequestIdentity;
+  /** Raises an in-app notification for an account (shown under the bell). */
+  notify: Notify;
+  /** Outgoing email; `mail.enabled` is false on a server without SMTP. */
+  mail: Mailer;
 }
 
 /**
@@ -62,6 +68,7 @@ export function mountServerModules(
   db: Database.Database,
   modules: ServerModule[],
   identity: (req: FastifyRequest) => RequestIdentity,
+  services: Pick<ModuleContext, 'notify' | 'mail'>,
 ): void {
   for (const mod of modules) {
     try {
@@ -94,7 +101,9 @@ export function mountServerModules(
           return undefined;
         });
 
-        await scope.register(mod.routes({ db, identity }));
+        // Notifications a module raises carry its id, so the bell can say where they came from.
+        const notify: Notify = (accountId, n) => services.notify(accountId, { ...n, moduleId: mod.id });
+        await scope.register(mod.routes({ db, identity, notify, mail: services.mail }));
       },
       { prefix: `/m/${mod.id}` },
     );

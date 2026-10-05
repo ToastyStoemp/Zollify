@@ -132,7 +132,7 @@ describe('consignment', () => {
       { storeId: 'bern', currency: 'CHF', units: 1, gross: 30, commission: 9, artistShare: 21 },
       { storeId: 'zurich', currency: 'CHF', units: 2, gross: 60, commission: 24, artistShare: 36 },
     ]);
-    expect(ana.totals).toEqual([{ currency: 'CHF', units: 3, gross: 90, commission: 33, artistShare: 57, paid: 20, balance: 37 }]);
+    expect(ana.totals).toEqual([{ currency: 'CHF', units: 3, gross: 90, commission: 33, artistShare: 57, paid: 20, rent: 0, balance: 37 }]);
   });
 
   it('links the artist account only with a live code, once', async () => {

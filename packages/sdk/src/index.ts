@@ -23,6 +23,7 @@ export type {
   TillLookup,
   SaleEvent,
   CoreEvents,
+  LabelPrintJob,
   EventName,
   EventPayload,
   Unsubscribe,

@@ -1,11 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomInt } from 'node:crypto';
 import argon2 from 'argon2';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { DUMMY_HASH, checkSecondFactor, issueAccessToken, toAuthUser, type JwtClaims, type UserRow } from './auth';
 import { makeSecretBox } from './secretbox';
-import { STAFF_BADGE_PATTERN } from '@zollify/shared';
+import { STAFF_BADGE_PATTERN, normaliseStaffBadge } from '@zollify/shared';
 
 /**
  * Shared tills: several people of one account on one device, each unlocking
@@ -25,7 +25,7 @@ import { STAFF_BADGE_PATTERN } from '@zollify/shared';
  *
  * A staff badge - a barcode on a card - can stand in for the name and PIN:
  * scanning it unlocks as its owner, on devices they were added to. A device
- * can still ask for the PIN after the badge. Badges are long random codes,
+ * can still ask for the PIN after the badge. Badges are random codes,
  * stored hashed for lookup and encrypted for reprinting; a new one replaces
  * the old.
  *
@@ -60,20 +60,10 @@ interface Binding {
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
-/**
- * Badge codes: "ZS" and 22 characters from an alphabet without look-alikes,
- * about 110 bits - unguessable, and short enough for a Code 128 barcode on a
- * card. Scanners and keyboards may change case or drop the dash.
- */
-const BADGE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/** A new badge code: "ZS" and 24 random digits - see STAFF_BADGE_PATTERN. */
 function newBadgeCode(): string {
-  const bytes = randomBytes(22);
-  return `ZS-${[...bytes].map((b) => BADGE_ALPHABET[b % 32]).join('')}`;
+  return `ZS${Array.from({ length: 24 }, () => randomInt(10)).join('')}`;
 }
-const normaliseBadge = (code: string): string => {
-  const c = code.trim().toUpperCase().replace(/-/g, '');
-  return `ZS-${c.slice(2)}`;
-};
 
 const AddBody = z.object({
   deviceId: z.string().min(1).max(100),
@@ -258,7 +248,7 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     const claims = req.user as JwtClaims;
     const body = BadgeUnlockBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'Invalid request' });
-    const user = db.prepare('SELECT id, accountId FROM users WHERE badgeHash = ?').get(sha256(normaliseBadge(body.data.code))) as { id: string; accountId: string } | undefined;
+    const user = db.prepare('SELECT id, accountId FROM users WHERE badgeHash = ?').get(sha256(normaliseStaffBadge(body.data.code))) as { id: string; accountId: string } | undefined;
     if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Unknown badge - it may have been replaced.' });
     return unlockAs(claims, body.data.deviceId, user.id, body.data.grants[user.id], body.data.pin ?? null, reply);
   });

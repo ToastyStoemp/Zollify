@@ -6,6 +6,7 @@ import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label
 import { rasterizeCanvas } from '../engine/raster';
 import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
 import { sdk } from '../runtime';
+import { dropJob, pendingJobs } from '../jobs';
 
 /**
  * Prints SKU-barcode + product-name labels to a Phomemo M110 over Bluetooth.
@@ -354,6 +355,41 @@ function cancelPrint(): void {
   cancelRequested.value = true;
 }
 
+// ── Labels sent from elsewhere (a staff badge) ──────────────────────────────
+type Job = (typeof pendingJobs.value)[number];
+const jobCanvas = ref<HTMLCanvasElement | null>(null);
+function renderJob(canvas: HTMLCanvasElement, job: Job): void {
+  renderLabel(canvas, labelSize.value, job.caption ?? job.barcode, job.title, {
+    titleScale: titleScale.value,
+    barcodeValue: job.barcode,
+    showSkuText: !!job.caption,
+    ...(job.subtitle ? { artist: job.subtitle } : {}),
+  });
+}
+watch([() => pendingJobs.value[0], labelSize, titleScale, jobCanvas], () => {
+  const job = pendingJobs.value[0];
+  if (job && jobCanvas.value) renderJob(jobCanvas.value, job);
+}, { deep: true, flush: 'post' });
+
+async function printJob(job: Job): Promise<void> {
+  if (!printer.connected) {
+    error.value = 'Connect the printer first.';
+    return;
+  }
+  error.value = null;
+  busy.value = true;
+  try {
+    renderJob(workCanvas, job);
+    await printer.printRaster(rasterizeCanvas(workCanvas), { speed: speed.value, density: density.value, mode: printMode.value });
+    dropJob(job.id);
+    sdk().ui.toast(`Printed ${job.title}.`, { kind: 'success' });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Printing failed.';
+  } finally {
+    busy.value = false;
+  }
+}
+
 // ── Export as images ─────────────────────────────────────────────────────────
 // A fallback path that needs no printer connection at all: one PNG per
 // selected label, pixel-for-pixel what would otherwise be sent to the
@@ -428,6 +464,17 @@ async function printTestLabel(): Promise<void> {
         <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
       </div>
     </header>
+
+    <article v-if="pendingJobs.length" class="card jobs">
+      <h2>Ready to print</h2>
+      <canvas ref="jobCanvas" class="job-preview" :aria-label="`Preview of ${pendingJobs[0]!.title}`" />
+      <div v-for="job in pendingJobs" :key="job.id" class="job">
+        <span><strong>{{ job.title }}</strong><template v-if="job.caption"> · {{ job.caption }}</template></span>
+        <button type="button" class="primary" :disabled="busy || !printerName" @click="printJob(job)">Print</button>
+        <button type="button" class="quiet" @click="dropJob(job.id)">Discard</button>
+      </div>
+      <p v-if="!printerName" class="hint">Connect the printer below, then print. It uses the label size set under Label size.</p>
+    </article>
 
     <p v-if="!bluetoothSupported" class="warn">
       This browser has no Web Bluetooth support. Use Chrome or Edge on desktop, Chrome on Android, or the Android app - not Safari or iOS.
@@ -579,6 +626,9 @@ h2 { margin: 0; font-size: .95rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; }
 .grid { display: grid; grid-template-columns: minmax(20rem, 3fr) minmax(18rem, 2fr); gap: 1rem; align-items: start; }
+.jobs .job { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.jobs .job span { flex: 1; min-width: 10rem; }
+.job-preview { width: min(100%, 16rem); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 6px; image-rendering: pixelated; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .products { max-height: 40rem; }
 /* On desktop the product list is the thing actually worth scrolling

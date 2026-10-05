@@ -214,6 +214,20 @@ export interface CoreEvents {
    * show what the notification was about.
    */
   'notification:opened': { moduleId: string | null; link: string | null };
+  /**
+   * Something to print on a label - a staff badge, say - handed to whichever
+   * module prints labels. The shell opens that module's screen right after.
+   */
+  'label:print': LabelPrintJob;
+}
+
+/** A label to print: a title, a smaller line under it, a barcode and the text under the bars. */
+export interface LabelPrintJob {
+  title: string;
+  subtitle?: string;
+  caption?: string;
+  /** Encoded as Code 128. */
+  barcode: string;
 }
 
 export type EventName = keyof CoreEvents | (string & {});

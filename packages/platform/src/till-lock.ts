@@ -1,6 +1,6 @@
 import { ref, shallowRef } from 'vue';
 import { ROLE_RANK, type AccountSnapshot, type HttpError, type Role } from '@zollify/sdk';
-import type { TokenResponse } from '@zollify/shared';
+import { normaliseStaffBadge, type TokenResponse } from '@zollify/shared';
 import { deviceId } from './core/device';
 import { syncNow } from './core/sync';
 import { authFetch, deviceFetch, dropPerson, getAccount, getDeviceAccount, onPersonSessionLost, personFrom, setActivePerson } from './session';
@@ -138,7 +138,7 @@ interface OfflineBadge {
   hash: string;
 }
 const offlineBadges = (): Record<string, OfflineBadge> => read<Record<string, OfflineBadge>>('badges', {});
-const badgeKey = (code: string): string => code.trim().toUpperCase().replace(/-/g, '');
+const badgeKey = (code: string): string => normaliseStaffBadge(code);
 async function sha(text: string): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 }

@@ -224,8 +224,11 @@ locks from its header or the sidebar, after a set idle time, or after each
 sale. Offline, someone who unlocked online once can still unlock, if they do
 not outrank the device's own user: they then act with the device's access, so
 a PIN check kept on the device never opens more than the device already could. **Staff
-badges** stand in for the name and PIN: an admin prints each person a card
-with a Code 128 barcode (Settings → Team → Badge), and scanning it - with a
+badges** stand in for the name and PIN: an admin prints each person a badge
+with a Code 128 barcode (Settings → Team → Badge) - on a card, on a label
+printer installed on the computer (62 × 29, 57 × 32, 50 × 30 or 40 × 30 mm),
+as an image for a printer's own app, or through the Label Printer module's
+Bluetooth printer - and scanning it - with a
 handheld scanner or the camera - unlocks the lock screen as its owner, or
 hands an unlocked till over when scanned into the till's search. A badge only
 works on tills its owner was added to; a device can still ask for the PIN

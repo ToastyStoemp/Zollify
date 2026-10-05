@@ -28,9 +28,12 @@ export interface Op {
 export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set'];
 
 /**
- * A staff badge as a scanner reads it: "ZS", an optional dash, then 22
- * characters without look-alikes. Scanned at a shared till, it unlocks as
- * the badge's owner.
+ * A staff badge as a scanner reads it: "ZS", then 24 digits (about 80 bits,
+ * unguessable with the server's rate limits). Digits pack two to a Code 128
+ * symbol, so the barcode fits a 40mm label at a width scanners read well.
+ * Scanners and keyboards may change case or add a dash or spaces.
  */
-export const STAFF_BADGE_PATTERN = /^ZS-?[A-HJ-NP-Z2-9]{22}$/i;
+export const STAFF_BADGE_PATTERN = /^ZS[-\s]?(?:\d[\s]?){24}$/i;
 export const isStaffBadge = (code: string): boolean => STAFF_BADGE_PATTERN.test(code.trim());
+/** The one spelling a badge is stored and compared in: "ZS" and the 24 digits. */
+export const normaliseStaffBadge = (code: string): string => `ZS${code.replace(/\D/g, '')}`;

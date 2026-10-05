@@ -162,7 +162,7 @@ describe('staff badges', () => {
     const res = await post(owner, `/api/users/${kai.id}/badge`, {});
     expect(res.statusCode).toBe(201);
     code = res.json().code;
-    expect(code).toMatch(/^ZS-[A-HJ-NP-Z2-9]{22}$/);
+    expect(code).toMatch(/^ZS\d{24}$/);
     expect((await app.inject({ method: 'GET', url: `/api/users/${kai.id}/badge`, headers: auth(owner) })).json().code).toBe(code);
     // Staff cannot issue badges for others, only see their own.
     expect((await post(kai.token, `/api/users/${ownerId}/badge`, {})).statusCode).toBe(404);
@@ -170,13 +170,13 @@ describe('staff badges', () => {
   });
 
   it('scanning it unlocks as its owner on a device they were added to', async () => {
-    const res = await post(owner, '/api/auth/unlock-badge', { deviceId: TILL, code: code.toLowerCase().replace('-', ''), grants: { [kai.id]: grant } });
+    const res = await post(owner, '/api/auth/unlock-badge', { deviceId: TILL, code: `zs-${code.slice(2, 14)} ${code.slice(14)}`, grants: { [kai.id]: grant } });
     expect(res.json().user).toMatchObject({ id: kai.id, role: 'member' });
     // Not on another device, nor without the grant.
     expect((await post(owner, '/api/auth/unlock-badge', { deviceId: 'other-till', code, grants: { [kai.id]: grant } })).statusCode).toBe(404);
     expect((await post(owner, '/api/auth/unlock-badge', { deviceId: TILL, code, grants: {} })).statusCode).toBe(404);
     // An unknown code tells nothing.
-    expect((await post(owner, '/api/auth/unlock-badge', { deviceId: TILL, code: 'ZS-AAAAAAAAAAAAAAAAAAAAAA', grants: {} })).json().error).toMatch(/Unknown badge/);
+    expect((await post(owner, '/api/auth/unlock-badge', { deviceId: TILL, code: `ZS${'0'.repeat(24)}`, grants: {} })).json().error).toMatch(/Unknown badge/);
   });
 
   it('asks for the PIN too when the device wants it', async () => {

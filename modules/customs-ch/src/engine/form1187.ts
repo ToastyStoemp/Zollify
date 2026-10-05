@@ -6,7 +6,7 @@
  * form-layout.ts.
  */
 import { calcReturnStats, compute1174Groups, countryToCode } from './calc';
-import { box, checkbox, fill, fv, gv, label, sheet } from './form-layout';
+import { PURPOSE, box, checkbox, fill, fv, gv, label, sheet } from './form-layout';
 import { COUNTRY_BY_CODE } from './data';
 import type { CustomsState } from './model';
 
@@ -94,7 +94,7 @@ export function build1187Html(state: CustomsState, now: Date = new Date()): stri
     box(166.7, 33.5, W - 166.7, 8.5, `<div class="val c">${fv(countryToCode(m.venueCountry) || 'CH')}</div>`),
     box(L, 42, 166.7 - L, 8.5, label('9', ['Land der endgültigen Bestimmung', 'Pays de destination définitive', 'Paese di destinazione definitiva'])),
     box(166.7, 42, W - 166.7, 8.5, `<div class="val c">${fv(artistCC || '--')}</div>`),
-    box(L, 50.5, 166.7 - L, 16.6, label('10', ['Zweck der vorübergehenden Verwendung', "But de l'admission temporaire", "Scopo dell'ammissione temporanea"]) + `<div class="val">${fv('Verkauf an Ausstellungen / Messen · Vente aux expositions / foires')}</div>`),
+    box(L, 50.5, 166.7 - L, 16.6, label('10', ['Zweck der vorübergehenden Verwendung', "But de l'admission temporaire", "Scopo dell'ammissione temporanea"]) + `<div class="val">${fv(PURPOSE)}</div>`),
     box(166.7, 50.5, W - 166.7, 16.6),
     box(L, 67.1, W - L, 8.4,
       `<div style="display:flex;justify-content:space-between;align-items:center;padding-right:2mm">${label('11', ['Mietgeschäft', 'Location', 'Locazione'])}${checkbox(false, ['ja', 'oui', 'sì'])}${checkbox(false, ['nein', 'non', 'no'])}</div>`),

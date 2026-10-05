@@ -13,6 +13,12 @@
  * keep the whole form on one A4 page.
  */
 
+/**
+ * The purpose of the temporary admission (11.74 box 13, 11.87 box 10):
+ * goods taken to a show to be sold if they find a buyer.
+ */
+export const PURPOSE = 'ungewisser Verkauf';
+
 /** Frame position on the A4 sheet. */
 export const FX = 20;
 export const FY = 14;

@@ -92,3 +92,11 @@ describe('form 11.87 / 11.74 return totals match the return goods list', () => {
     expect(g1.retValue + g2.retValue).toBe(100);
   });
 });
+
+describe('form 11.87 purpose', () => {
+  it('states the purpose as "ungewisser Verkauf"', () => {
+    const html = build1187Html(state([product({ id: 'a' })]));
+    expect(html).toContain('<span class="fv">ungewisser Verkauf</span>');
+    expect(html).not.toContain('Verkauf an Ausstellungen');
+  });
+});

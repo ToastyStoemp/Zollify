@@ -6,7 +6,7 @@
  * form-layout.ts.
  */
 import { compute1174Groups, countryToCode } from './calc';
-import { box, checkbox, fill, fv, gv, label, sheet } from './form-layout';
+import { PURPOSE, box, checkbox, fill, fv, gv, label, sheet } from './form-layout';
 import { COUNTRY_BY_CODE } from './data';
 import type { CustomsState } from './model';
 
@@ -110,7 +110,7 @@ export function build1174Html(state: CustomsState, now: Date = new Date()): stri
     box(V, 42, W - V, 8.5, `<div class="val c">${fv(countryToCode(m.venueCountry) || 'CH')}</div>`),
     box(L, 50.5, V - L, 8.5, label('12', ['Land der endgültigen Bestimmung', 'Pays de destination définitive', 'Paese di destinazione definitiva'])),
     box(V, 50.5, W - V, 8.5, `<div class="val c">${fv(artistCC)}</div>`),
-    box(L, 59, W - L, 16.5, label('13', ['Verwendungszweck der Ware', 'Emploi de la marchandise', "Scopo d'impiego della merce"]) + `<div class="val">${fv('Verkauf an Ausstellungen / Messen · Vente aux expositions / foires')}</div>`),
+    box(L, 59, W - L, 16.5, label('13', ['Verwendungszweck der Ware', 'Emploi de la marchandise', "Scopo d'impiego della merce"]) + `<div class="val">${fv(PURPOSE)}</div>`),
     box(L, 75.5, W - L, 8.5,
       `<div style="display:flex;justify-content:space-between;align-items:center;padding-right:2mm">${label('14', ['Mietgeschäft', 'Location', 'Locazione'])}${checkbox(false, ['ja', 'oui', 'sì'])}${checkbox(false, ['nein', 'non', 'no'])}</div>`),
     box(L, 84, W - L, 8.5, label('15', ['Abschlusszollstelle', "Bureau de douane d'apurement", 'Ufficio doganale della conclusione'])),

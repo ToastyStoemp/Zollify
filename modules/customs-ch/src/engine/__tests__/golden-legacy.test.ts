@@ -16,6 +16,7 @@ import { buildAllVersionsHtml } from '../all-versions';
 import { buildProformaHtml } from '../proforma';
 import { build1174Html } from '../form1174';
 import { build1187Html } from '../form1187';
+import { PURPOSE } from '../form-layout';
 
 const appJsPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../legacy/app.js');
 
@@ -342,6 +343,10 @@ const normalizeGroupNumbers = (html: string): string => html.replace(/<span clas
  * list. Group figures (`gfv`) were already a deliberate divergence - see
  * normalizeGroupNumbers above - and are covered by form1187.test.ts.
  */
+/** The purpose field (11.74 box 13, 11.87 box 10) now reads PURPOSE; legacy had a generic exhibition text. */
+const LEGACY_PURPOSE = 'Verkauf an Ausstellungen / Messen · Vente aux expositions / foires';
+const withNewPurpose = (values: string[]): string[] => values.map((v) => (v === LEGACY_PURPOSE ? PURPOSE : v)).sort();
+
 const filledValues = (html: string): string[] =>
   [...html.matchAll(/class="fv[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div)>/g)].map((m) => m[1]!.trim().replace(/&quot;/g, '"')).sort();
 
@@ -438,7 +443,7 @@ describe('customs port vs legacy (golden diff)', () => {
       // the event alone, and box 28 (user of the goods) names the booth -
       // legacy left it empty. Everything else must match value for value.
       const event = make().meta.event;
-      const legacyValues = filledValues(captured.html[0]!).filter((v) => !v.startsWith(event));
+      const legacyValues = withNewPurpose(filledValues(captured.html[0]!)).filter((v) => !v.startsWith(event));
       const values = filledValues(ported);
       const added = [...values];
       for (const v of legacyValues) {
@@ -461,7 +466,7 @@ describe('customs port vs legacy (golden diff)', () => {
       expect(captured.html).toHaveLength(1);
       const values = filledValues(ported);
       expect(values.length).toBeGreaterThan(5);
-      expect(values).toEqual(filledValues(captured.html[0]!));
+      expect(values).toEqual(withNewPurpose(filledValues(captured.html[0]!)));
     }
   });
 });

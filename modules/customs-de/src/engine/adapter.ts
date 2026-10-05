@@ -5,7 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
-import { capSoldToBrought, discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, discountFraction, tripSpan } from '@zollify/customs-core';
 import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
@@ -35,6 +35,8 @@ export function buildCustomsDeState(
   stock: EventStock[],
   transactions: Transaction[],
   combinedEventIds: string[] = [],
+  /** The events behind combinedEventIds, so the documents can name the whole trip. */
+  combinedEvents: SalesEvent[] = [],
 ): CustomsDeState {
   const blob = readCustomsDeBlob(event);
   const eventIds = new Set([event.id, ...combinedEventIds]);
@@ -127,12 +129,14 @@ export function buildCustomsDeState(
     });
 
   const bm = blob.meta ?? {};
+  const trip = tripSpan(event, combinedEvents.filter((e) => combinedEventIds.includes(e.id)));
   const meta: CustomsDeMeta = {
     ...defaultCustomsDeMeta(),
     ...bm,
-    event: event.name,
-    eventDateStart: event.dateStart || bm.eventDateStart || '',
-    eventDateEnd: event.dateEnd || bm.eventDateEnd || '',
+    // Linked events: every name, and the first start to the last end.
+    event: trip.name,
+    eventDateStart: trip.dateStart || bm.eventDateStart || '',
+    eventDateEnd: trip.dateEnd || bm.eventDateEnd || '',
     eventLocation: bm.eventLocation || event.venue.city || '',
     destinationCountry: bm.destinationCountry || event.venue.country || '',
     // Consignee address defaults to the event's own venue address (Events → venue) -

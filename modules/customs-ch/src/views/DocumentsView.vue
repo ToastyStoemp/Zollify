@@ -218,7 +218,7 @@ const state = computed(() => {
     },
   };
   const api = sdk().data;
-  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value);
+  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value, api.events.list());
 });
 const lrp = computed(() => (state.value ? computeLRP(state.value, documentNumber.value) : ''));
 /** Claimed for this event but without a tariff no. or VAT rate - the goods lists leave these out. */

@@ -94,3 +94,24 @@ export async function setEventLink(events: EventStore, id: string, otherId: stri
   }
   return lists.get(id) ?? [];
 }
+
+/**
+ * How a declaration that covers linked events names its trip: every event's
+ * name in date order ("Con A / Con B"), and the dates from the first event's
+ * start to the last event's end. With no linked events it is just `event`.
+ */
+export function tripSpan(event: SalesEvent, linked: SalesEvent[] = []): { name: string; dateStart: string; dateEnd: string } {
+  const all = [event, ...linked.filter((e) => e.id !== event.id)];
+  const start = (e: SalesEvent): string => e.dateStart || e.dateEnd || '';
+  const end = (e: SalesEvent): string => e.dateEnd || e.dateStart || '';
+  // Undated events keep their place after the dated ones; stable sort keeps
+  // `event` first among equals.
+  const ordered = [...all].sort((a, b) => (start(a) || '￿').localeCompare(start(b) || '￿'));
+  const starts = all.map(start).filter(Boolean).sort();
+  const ends = all.map(end).filter(Boolean).sort();
+  return {
+    name: ordered.map((e) => e.name).filter(Boolean).join(' / '),
+    dateStart: linked.length ? (starts[0] ?? '') : event.dateStart || '',
+    dateEnd: linked.length ? (ends[ends.length - 1] ?? '') : event.dateEnd || '',
+  };
+}

@@ -190,7 +190,7 @@ const state = computed(() => {
     },
   };
   const api = sdk().data;
-  return buildCustomsDeState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value);
+  return buildCustomsDeState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value, api.events.list());
 });
 
 const broughtUnits = computed(() => state.value?.products.reduce((n, p) => n + p.amount, 0) ?? 0);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesEvent } from '@zollify/shared';
-import { eventGroup, setEventLink, type EventStore } from '../event-links';
+import { eventGroup, setEventLink, tripSpan, type EventStore } from '../event-links';
 
 function event(id: string, over: Partial<SalesEvent> = {}): SalesEvent {
   return { id, name: id, venue: {}, currency: 'CHF', ...over } as SalesEvent;
@@ -108,5 +108,25 @@ describe('setEventLink', () => {
       event('d'),
     ];
     expect(eventGroup(events, 'b').sort()).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('tripSpan', () => {
+  const a = event('a', { name: 'Con A', dateStart: '2026-05-01', dateEnd: '2026-05-03' });
+  const b = event('b', { name: 'Con B', dateStart: '2026-05-08', dateEnd: '2026-05-10' });
+  const c = event('c', { name: 'Con C', dateStart: '2026-05-05' });
+
+  it('is the event itself when nothing is linked', () => {
+    expect(tripSpan(a)).toEqual({ name: 'Con A', dateStart: '2026-05-01', dateEnd: '2026-05-03' });
+  });
+
+  it('names the events in date order and spans first start to last end', () => {
+    expect(tripSpan(b, [a])).toEqual({ name: 'Con A / Con B', dateStart: '2026-05-01', dateEnd: '2026-05-10' });
+    expect(tripSpan(a, [b, c])).toEqual({ name: 'Con A / Con C / Con B', dateStart: '2026-05-01', dateEnd: '2026-05-10' });
+  });
+
+  it('puts undated events last and ignores them for the dates', () => {
+    const d = event('d', { name: 'Con D' });
+    expect(tripSpan(d, [a])).toEqual({ name: 'Con A / Con D', dateStart: '2026-05-01', dateEnd: '2026-05-03' });
   });
 });

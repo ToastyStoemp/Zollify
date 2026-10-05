@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { calcCoreProduct, countryToCode, discountFraction, hasStock } from '../index';
+import { calcCoreProduct, capSoldToBrought, countryToCode, discountedLineValues, discountFraction, hasStock } from '../index';
 
 function txItem(over: Partial<TxItem>): TxItem {
   return { pid: 'p', vid: null, title: 'Item', qty: 1, unitPrice: 10, lineTotal: 10, ...over };
@@ -85,5 +85,39 @@ describe('discountFraction', () => {
 
   it('is zero for an empty sale rather than dividing by zero', () => {
     expect(discountFraction(tx([]))).toBe(0);
+  });
+});
+
+describe('discountedLineValues', () => {
+  it('splits the discount in whole units that add up to what was paid', () => {
+    // 25 off 100: 40 / 30 / 30 -> 30 / 22.5 / 22.5 exactly.
+    const out = discountedLineValues([40, 30, 30], 0.75);
+    expect(out).toEqual([30, 23, 22]);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(75);
+  });
+
+  it('never leaves cents, whatever the fraction', () => {
+    const out = discountedLineValues([59.9, 45, 25, 25], 1 - 19.9 / 154.9);
+    expect(out.every(Number.isInteger)).toBe(true);
+    expect(out.reduce((a, b) => a + b, 0)).toBe(135);
+  });
+
+  it('leaves an undiscounted sale exactly as charged', () => {
+    expect(discountedLineValues([12.5, 10], 1)).toEqual([12.5, 10]);
+  });
+
+  it('a fully discounted sale is all zero', () => {
+    expect(discountedLineValues([10, 20], 0)).toEqual([0, 0]);
+  });
+});
+
+describe('capSoldToBrought', () => {
+  it('keeps a whole value whole when scaling down to the claimed quantity', () => {
+    expect(capSoldToBrought({ qty: 3, value: 100 }, 2)).toEqual({ qty: 2, value: 67 });
+  });
+
+  it('rounds other values to the cent', () => {
+    expect(capSoldToBrought({ qty: 3, value: 10.5 }, 2)).toEqual({ qty: 2, value: 7 });
+    expect(capSoldToBrought({ qty: 3, value: 10.25 }, 1)).toEqual({ qty: 1, value: 3.42 });
   });
 });

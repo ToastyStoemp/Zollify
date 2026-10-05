@@ -334,6 +334,18 @@ const normalizeByTypeGroupName = (html: string): string => html.replace(/<strong
  */
 const normalizeGroupNumbers = (html: string): string => html.replace(/<span class="gfv">.*?<\/span>/g, '<span class="gfv"></span>');
 
+/**
+ * Legacy rounded e-dec weights to the nearest 100 g (minimum 0.1 kg) and
+ * floored the statistical value to whole units. The port now declares both
+ * as they are - weight to the gram, value as summed (whole units for sales,
+ * since discounts are split in whole units) - a deliberate, permanent
+ * divergence. Only these tags' contents (the value also feeds vatValue) are set aside; everything else
+ * in the XML must still match byte for byte. edec-xml.test.ts checks the new
+ * values themselves.
+ */
+const normalizeEdecAmounts = (xml: string): string =>
+  xml.replace(/<(grossMass|netMass|statisticalValue|vatValue)>[^<]*<\/\1>/g, '<$1></$1>');
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -362,7 +374,7 @@ describe('customs port vs legacy (golden diff)', () => {
       const ported = buildEdecXml(clone(make()), new Date());
       expect(ported).not.toBeNull();
       expect(captured.blobs).toHaveLength(1);
-      expect(ported!.xml).toBe(captured.blobs[0]);
+      expect(normalizeEdecAmounts(ported!.xml)).toBe(normalizeEdecAmounts(captured.blobs[0]!));
     }
   });
 

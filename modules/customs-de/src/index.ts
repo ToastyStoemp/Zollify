@@ -17,7 +17,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-de',
-  version: '0.1.13',
+  version: '0.1.14',
   sdk: '^0.1.0',
   title: 'Customs (Germany)',
   description: 'ATLAS export/re-import preparation: packing lists and a filing checklist.',

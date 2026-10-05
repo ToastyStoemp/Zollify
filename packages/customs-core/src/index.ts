@@ -373,5 +373,30 @@ export function discountFraction(tx: Transaction): number {
 export function capSoldToBrought(sold: { qty: number; value: number }, brought: number): { qty: number; value: number } {
   const cap = Math.max(0, brought);
   if (sold.qty <= cap) return sold;
-  return { qty: cap, value: sold.qty > 0 ? (sold.value * cap) / sold.qty : 0 };
+  const scaled = sold.qty > 0 ? (sold.value * cap) / sold.qty : 0;
+  // Keep whole amounts whole (see discountedLineValues); otherwise to the cent.
+  return { qty: cap, value: Number.isInteger(sold.value) ? Math.round(scaled) : Math.round(scaled * 100) / 100 };
+}
+
+/**
+ * Each line's share of what the customer actually paid, in whole currency
+ * units. A bundle price or custom discount reduces the whole sale, so it is
+ * spread over the lines in proportion to their value - but split exactly,
+ * that gave documents values like 174.82. Instead each line gets its share
+ * rounded down, and the units left over go to the lines with the largest
+ * remainders, so the lines still add up to the discounted total (rounded to
+ * a whole unit): 25 off 40 / 30 / 30 gives 30 / 23 / 22, not 30 / 22.50 / 22.50.
+ *
+ * A sale with no discount keeps its line values exactly as charged.
+ */
+export function discountedLineValues(lineValues: number[], keep: number): number[] {
+  if (keep >= 1) return [...lineValues];
+  const exact = lineValues.map((v) => v * Math.max(0, keep));
+  const target = Math.round(exact.reduce((s, v) => s + v, 0));
+  const out = exact.map((v) => Math.floor(v + 1e-9));
+  let left = target - out.reduce((s, v) => s + v, 0);
+  // Largest remainder first; ties keep line order so the result is stable.
+  const order = exact.map((v, i) => ({ i, rem: v - out[i]! })).sort((a, b) => b.rem - a.rem || a.i - b.i);
+  for (let k = 0; left > 0 && order.length; k = (k + 1) % order.length, left--) out[order[k]!.i]! += 1;
+  return out;
 }

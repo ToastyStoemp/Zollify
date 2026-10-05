@@ -3,6 +3,14 @@ import type { EventVat, SaleTax, TaxClass } from './vat';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
+/**
+ * What a sales venue is. A convention or market (`event`, the default) runs
+ * for a few dates; a `store` is a brick-and-mortar shop that is open
+ * indefinitely. Both sell through the same till, claims and history - a
+ * store is just a venue with no end date.
+ */
+export type SalesEventKind = 'event' | 'store';
+
 export interface Venue {
   street?: string;
   postcode?: string;
@@ -14,6 +22,8 @@ export interface Venue {
 export interface SalesEvent {
   id: string;
   name: string;
+  /** Absent = 'event'. See SalesEventKind. */
+  kind?: SalesEventKind;
   dateStart?: string;
   dateEnd?: string;
   venue: Venue;
@@ -86,6 +96,14 @@ export interface Product {
   material?: string;
   variants: Variant[];
   imageId?: string;
+  /**
+   * Consignment: the artist this item belongs to. The account sells it on
+   * their behalf and owes them the sale minus commission. Absent = the
+   * account's own stock.
+   */
+  consignorId?: string;
+  /** The artist's own product this was taken from, when it was imported from their linked catalogue. */
+  consignorProductId?: string;
   sortOrder: number;
   updatedAt: number;
   deletedAt?: number;
@@ -242,6 +260,12 @@ export interface TxItem {
   /** Same line in the event's base/tracking currency, when charged in a converted local currency. */
   baseUnitPrice?: number;
   baseLineTotal?: number;
+  /**
+   * The consignment artist the item belonged to when it sold - a snapshot,
+   * so moving a product to another artist later never rewrites who was owed
+   * for sales already made.
+   */
+  consignorId?: string;
 }
 
 export interface TxDiscount {

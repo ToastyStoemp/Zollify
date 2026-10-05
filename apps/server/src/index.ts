@@ -9,6 +9,7 @@ import { publicEventsServerModule } from './modules/public-events';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
+import { consignmentServerModule } from './modules/consignment';
 
 loadDotEnv();
 
@@ -69,6 +70,7 @@ async function main(): Promise<void> {
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
     receiptsServerModule,
+    consignmentServerModule,
   ];
 
   const app = await buildGateway({

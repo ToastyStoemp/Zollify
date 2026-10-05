@@ -37,6 +37,7 @@ modules/
   price-cards/    printable price tags from the catalogue
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
+  consignment/    artists' work sold in your stores, commission and payouts; artists' own view (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -158,7 +159,22 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events, Tax & books.
+events, Tax & books, Consignment.
+
+*Stores and consignment* - a venue is either a dated **event** or a **store**: a
+brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
+through the same till, stock claims, history and cash-up, so one account can run
+several shops and still take a booth to a convention. The Consignment module adds
+**artists** whose work the account sells: each is carried by one store or shared
+between several, with a commission that can differ per store. A product tagged
+with `consignorId` is the artist's, and each sale line snapshots it, so the
+statement (sales per store, commission, artist's share, payouts, balance) is
+replayed from the op-log and never moves when a product is reassigned later. An
+artist links their **own** Zollify account - the one they run their events from -
+with a single-use code from the store owner; linked, they see their items, sales
+and payouts at that owner's stores under *Where I consign*, and the owner can
+import items from their catalogue. That link is the only path between two
+accounts' data, and the server picks every field that crosses it.
 
 *Tax & books* (the ZollTax port) - **Payments**: drop a myPOS export or
 statement, a Shopify orders CSV or a Wise history, or pull straight from

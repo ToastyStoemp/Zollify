@@ -6,6 +6,7 @@ import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
+import { getProduct } from './catalog';
 
 /**
  * Recorded sales.
@@ -60,9 +61,18 @@ function toMinor(value: number): number {
  * The SDK event is deliberately a smaller shape than `Transaction` - it is the
  * contract other modules consume, and widening it would make every subscriber
  * depend on storage details. The mapping lives here instead.
+ *
+ * `consignorOf` names the consignment artist an item belongs to right now; it
+ * is copied onto the line so the sale stays theirs whatever happens to the
+ * product later.
  */
-export function saleToTransaction(sale: SaleEvent, device: string): Transaction {
+export function saleToTransaction(
+  sale: SaleEvent,
+  device: string,
+  consignorOf: (productId: string) => string | undefined = () => undefined,
+): Transaction {
   const items: TxItem[] = sale.lines.map((line) => ({
+    ...withConsignor(consignorOf(line.productId)),
     pid: line.productId,
     vid: line.variantId ?? null,
     title: line.name,
@@ -119,9 +129,11 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
   };
 }
 
+const withConsignor = (consignorId: string | undefined): Pick<TxItem, 'consignorId'> => (consignorId ? { consignorId } : {});
+
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
-  const tx = toPlain(saleToTransaction(sale, await deviceId()));
+  const tx = toPlain(saleToTransaction(sale, await deviceId(), (id) => getProduct(id)?.consignorId));
 
   await db.transactions.put(tx);
   transactions.set(tx.id, tx);

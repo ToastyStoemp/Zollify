@@ -334,6 +334,17 @@ const normalizeByTypeGroupName = (html: string): string => html.replace(/<strong
  */
 const normalizeGroupNumbers = (html: string): string => html.replace(/<span class="gfv">.*?<\/span>/g, '<span class="gfv"></span>');
 
+/**
+ * Forms 11.74 and 11.87 no longer copy legacy's markup: they are drawn box
+ * for box after BAZG's published forms (form-layout.ts), so the HTML can't
+ * match. What must not change is what they say - every pre-filled value
+ * (the `fv` spans/divs both versions use) is compared instead, as a sorted
+ * list. Group figures (`gfv`) were already a deliberate divergence - see
+ * normalizeGroupNumbers above - and are covered by form1187.test.ts.
+ */
+const filledValues = (html: string): string[] =>
+  [...html.matchAll(/class="fv[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div)>/g)].map((m) => m[1]!.trim().replace(/&quot;/g, '"')).sort();
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -415,7 +426,7 @@ describe('customs port vs legacy (golden diff)', () => {
     expect(stripMaterialColumn(ported)).toBe(captured.html[0]);
   });
 
-  it('produces an identical form 11.74', () => {
+  it('fills form 11.74 with the same values', () => {
     for (const [, make] of fixtures) {
       const captured: Captured = { html: [], blobs: [] };
       const legacy = loadLegacy(captured);
@@ -423,11 +434,13 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1174();
       const ported = build1174Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
+      const values = filledValues(ported);
+      expect(values.length).toBeGreaterThan(5);
+      expect(values).toEqual(filledValues(captured.html[0]!));
     }
   });
 
-  it('produces an identical form 11.87', () => {
+  it('fills form 11.87 with the same values', () => {
     for (const [, make] of fixtures) {
       const captured: Captured = { html: [], blobs: [] };
       const legacy = loadLegacy(captured);
@@ -435,7 +448,9 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1187();
       const ported = build1187Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
+      const values = filledValues(ported);
+      expect(values.length).toBeGreaterThan(5);
+      expect(values).toEqual(filledValues(captured.html[0]!));
     }
   });
 });

@@ -163,16 +163,19 @@ watch([artistOverride, edec, form1174, companyCode, documentNumber, venueName, e
 /** Other Swiss events this declaration can be combined with - everything but the one being viewed. */
 const otherEvents = computed(() => sdk().data.events.list().filter((e) => e.id !== eventId.value));
 /**
- * One tick links both ways and for both countries - the other event's list,
- * and the other country's lists on both events, are written straight away.
- * This page's own list follows through its usual autosave.
+ * Ticking joins the two events' groups (A-B plus C makes A, B and C all
+ * linked), unticking takes that one event out; both countries' records on
+ * every event in the group are written straight away. This page's list then
+ * shows the whole group, and its autosave writes back the same list.
  */
 function toggleCombined(id: string): void {
   const linked = !combinedEventIds.value.includes(id);
   combinedEventIds.value = linked ? [...combinedEventIds.value, id] : combinedEventIds.value.filter((x) => x !== id);
-  void setEventLink(sdk().data.events, eventId.value, id, linked).catch((err) => {
-    error.value = err instanceof Error ? err.message : 'Could not link the events.';
-  });
+  setEventLink(sdk().data.events, eventId.value, id, linked)
+    .then((ids) => (combinedEventIds.value = ids))
+    .catch((err) => {
+      error.value = err instanceof Error ? err.message : 'Could not link the events.';
+    });
 }
 const combinedEventsSummary = computed(() =>
   otherEvents.value
@@ -432,8 +435,8 @@ const TRANSPORT_MODES = [
         <p class="hint">
           For the same stock taken across the border once and sold at several consecutive Swiss shows before
           returning - check an event below to fold its sales into this declaration. Brought/claimed quantity stays
-          this event's own; only sold quantities and values add up across the events you check. A link works both
-          ways and covers the German paperwork too.
+          this event's own; only sold quantities and values add up across the events you check. Linked events form one
+          group: linking to an event that is already linked to others links them all, for the German paperwork too.
         </p>
         <p v-if="otherEvents.length === 0" class="hint">No other Swiss events yet.</p>
         <ul v-else class="combine">

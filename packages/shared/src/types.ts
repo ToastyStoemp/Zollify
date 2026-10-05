@@ -102,6 +102,8 @@ export interface Product {
    * account's own stock.
    */
   consignorId?: string;
+  /** The artist's name, kept on the product so the till and labels can show it offline. */
+  consignorName?: string;
   /** The artist's own product this was taken from, when it was imported from their linked catalogue. */
   consignorProductId?: string;
   sortOrder: number;

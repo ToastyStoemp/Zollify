@@ -127,6 +127,14 @@ export interface TillAction {
   order?: number;
 }
 
+/** What a module found for a code the till did not know. */
+export interface TillLookup {
+  productId: string;
+  variantId: string | null;
+  /** Shown to the seller, e.g. "Shared from Ana's catalogue - Ana has been told." */
+  message?: string;
+}
+
 /** Something a module puts in the till's cart that is not a catalogue product - a workshop place, say. */
 export interface TillLine {
   /** Unique per thing being paid for; adding the same key twice keeps one line. */
@@ -493,6 +501,14 @@ export interface Sdk {
     addLine(line: TillLine): boolean;
     /** The till's side: receive lines modules add. Only one till listens at a time. */
     onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
+    /**
+     * A module that can resolve a code the catalogue does not know - an
+     * artist's label scanned at a store, say. Return the catalogue product it
+     * has made available, or null.
+     */
+    onLookup(handler: (code: string) => Promise<TillLookup | null>): Unsubscribe;
+    /** The till's side: ask the modules about an unknown code. First answer wins. */
+    lookup(code: string): Promise<TillLookup | null>;
   };
 
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */

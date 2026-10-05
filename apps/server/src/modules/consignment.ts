@@ -30,6 +30,7 @@ import {
 } from '@zollify/server-core';
 import { migratePlanner, plannerForArtist, registerPlanner, rentalsOf } from './consignment-planner';
 import { migrateProgramme, programmeForArtist, registerProgramme, registerProgrammePublic } from './consignment-programme';
+import { followArtistChanges, migrateSharing, registerSharing, syncShared } from './consignment-sharing';
 
 /**
  * Consignment - the server half.
@@ -48,6 +49,9 @@ import { migrateProgramme, programmeForArtist, registerProgramme, registerProgra
  */
 
 export const MODULE_ID = 'consignment';
+
+/** All a staff account may call: the till's view of workshops and artists' items. */
+const TILL_ROUTES = new Set(['GET /till/workshops', 'POST /workshops/:id/signups', 'POST /scan']);
 const LINK_TTL = 14 * 24 * 3600 * 1000;
 
 function migrate(db: Database.Database): void {
@@ -187,21 +191,35 @@ const CODE_RATE_LIMIT = { config: { rateLimit: { max: 10, timeWindow: '1 minute'
 
 export const consignmentServerModule: ServerModule = {
   id: MODULE_ID,
-  // Commissions and payouts are not a helper's business, on either side.
-  minRole: 'admin',
+  // Staff load it for the till only - see TILL_ROUTES; everything else is admin.
+  minRole: 'member',
   migrate: (db) => {
     migrate(db);
     migratePlanner(db);
     migrateProgramme(db);
+    migrateSharing(db);
   },
+
+  /** An artist's devices changed products: stores sharing them follow. */
+  onOps: (svc, accountId, ops) => followArtistChanges(svc, accountId, ops),
 
   /** The store's public events-and-workshops page, and cancelling a place on it. */
   publicRoutes: (ctx) => async (app) => registerProgrammePublic(app, ctx),
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;
+    // Commissions, payouts and artists' details are not staff business. Staff
+    // get exactly what the till needs: workshop places to charge, booking a
+    // walk-in, and resolving a scanned artist's label.
+    app.addHook('preHandler', async (req, reply) => {
+      if (ctx.identity(req).role !== 'member') return undefined;
+      const route = `${req.method} ${req.routeOptions.url?.replace(/^\/api\/m\/consignment/, '') ?? ''}`;
+      if (TILL_ROUTES.has(route)) return undefined;
+      return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can do that.' });
+    });
     registerPlanner(app, ctx);
     registerProgramme(app, ctx);
+    registerSharing(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 
@@ -215,12 +233,17 @@ export const consignmentServerModule: ServerModule = {
       const id = IdParam.safeParse(req.params.id);
       const body = ConsignorInputSchema.safeParse(req.body);
       if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That artist is not valid.' });
+      const before = consignorRow(db, who.accountId, id.data);
+      const renamed = !!before && parseDoc(before.doc).name !== body.data.name;
       const now = Date.now();
       db.prepare(
         `INSERT INTO consignors (accountId, id, doc, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(accountId, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
       ).run(who.accountId, id.data, JSON.stringify(body.data), now, now);
-      return { consignor: toConsignor(db, consignorRow(db, who.accountId, id.data)!) };
+      const saved = consignorRow(db, who.accountId, id.data)!;
+      // Shared items carry the artist's name; a rename follows them.
+      if (renamed) syncShared(ctx, who.accountId, saved);
+      return { consignor: toConsignor(db, saved) };
     });
 
     /**

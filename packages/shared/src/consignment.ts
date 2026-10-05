@@ -448,3 +448,56 @@ export function occupancy(rentals: Pick<ConsignmentRental, 'spaceId' | 'startDat
   for (const r of rentals) if (r.startDate <= day && day < rentalEnd(r)) used.set(r.spaceId, (used.get(r.spaceId) ?? 0) + 1);
   return used;
 }
+
+// ── Sharing items from an artist's own catalogue ───────────────────────────
+
+/**
+ * How a store prices one linked artist's shared items: the artist sets
+ * prices in their own currency, the store sells in its own. Like an event
+ * abroad - a rate, rounding, and a price per item where the conversion does
+ * not land on a sensible number.
+ */
+export const SharePricingSchema = z.object({
+  /** 1 unit of the artist's currency = `rate` of the store's; null when not set yet. */
+  rate: z.number().positive().max(100_000).nullable().default(null),
+  /** Round converted prices to the nearest N (0 = cents). */
+  rounding: z.number().min(0).max(1000).default(0),
+  /** Store price by "productId:variantId" ('' variant = the product itself), in the store's currency. */
+  overrides: z.record(z.string().max(200), z.number().min(0).max(1_000_000)).default({}),
+});
+export type SharePricing = z.infer<typeof SharePricingSchema>;
+
+/**
+ * An artist's price in the store's currency. Null while the currencies
+ * differ and no rate is set: such an item is shared but not sold yet, rather
+ * than sold at a number in the wrong currency.
+ */
+export function sharedPrice(
+  artistPrice: number,
+  key: string,
+  sameCurrency: boolean,
+  pricing: Pick<SharePricing, 'rate' | 'rounding' | 'overrides'>,
+): number | null {
+  const override = pricing.overrides[key];
+  if (typeof override === 'number') return override;
+  if (sameCurrency) return artistPrice;
+  if (!pricing.rate) return null;
+  const step = pricing.rounding;
+  const raw = artistPrice * pricing.rate;
+  return step > 0 ? Math.round(raw / step) * step : Math.round(raw * 100) / 100;
+}
+
+/** One of the artist's own items, as the artist sees it when choosing what a store may sell. */
+export interface ShareableItem {
+  productId: string;
+  title: string;
+  sku?: string;
+  type?: string;
+  price: number;
+  variants: { id: string; name: string; price: number }[];
+  shared: boolean;
+  /** Shared because the store scanned its barcode, not because the artist chose it. */
+  autoShared: boolean;
+  /** What the store sells it for, in the store's currency; null while it has no rate. */
+  storePrice: number | null;
+}

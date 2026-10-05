@@ -101,3 +101,19 @@ describe('consignment', () => {
     expect(s.totals[0]).toMatchObject({ currency: 'EUR', paid: 10, balance: -10 });
   });
 });
+
+describe('shared item prices', () => {
+  const pricing = { rate: 1.07, rounding: 0, overrides: {} as Record<string, number> };
+  it('keeps the price when the currencies match, converts and rounds when not', async () => {
+    const { sharedPrice } = await import('../consignment');
+    expect(sharedPrice(30, 'p:', true, pricing)).toBe(30);
+    expect(sharedPrice(30, 'p:', false, pricing)).toBe(32.1);
+    expect(sharedPrice(30, 'p:', false, { ...pricing, rounding: 5 })).toBe(30);
+    expect(sharedPrice(33, 'p:', false, { ...pricing, rounding: 5 })).toBe(35);
+  });
+  it('has no price without a rate, and an override always wins', async () => {
+    const { sharedPrice } = await import('../consignment');
+    expect(sharedPrice(30, 'p:', false, { ...pricing, rate: null })).toBeNull();
+    expect(sharedPrice(30, 'p:', false, { ...pricing, rate: null, overrides: { 'p:': 29.9 } })).toBe(29.9);
+  });
+});

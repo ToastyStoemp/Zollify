@@ -20,6 +20,8 @@ import {
   type PayoutInput,
   type Product,
   type RentalInput,
+  type ShareableItem,
+  type SharePricing,
   type SetupInput,
   type SetupMoment,
   type SpaceInput,
@@ -62,10 +64,29 @@ export const productsOf = (consignorId: string): Product[] => products.value.fil
 export async function loadConsignors(): Promise<void> {
   consignors.value = (await sdk().http.get<{ consignors: Consignor[] }>('consignors')).consignors;
   loaded.value = true;
+  await fillArtistNames();
+}
+
+/**
+ * Items tagged before products carried the artist's name show as a generic
+ * "Artist" at the till and on labels. Fill the name in once; shared items
+ * are the server's to write, so they are left alone.
+ */
+async function fillArtistNames(): Promise<void> {
+  const names = new Map(consignors.value.map((c) => [c.id, c.name]));
+  for (const p of products.value) {
+    const name = p.consignorId ? names.get(p.consignorId) : undefined;
+    if (name && p.consignorName !== name && p.consignorProductId !== p.id) await sdk().data.products.upsert({ ...p, consignorName: name, updatedAt: Date.now() });
+  }
 }
 
 export async function saveConsignor(id: string, input: ConsignorInput): Promise<Consignor> {
   const { consignor } = await sdk().http.put<{ consignor: Consignor }>(`consignors/${encodeURIComponent(id)}`, input);
+  // Items carry the artist's name for the till and labels. Shared ones are
+  // rewritten by the server; tagged and imported ones are this account's to update.
+  for (const p of productsOf(id)) {
+    if (p.consignorName !== consignor.name && p.consignorProductId !== p.id) await sdk().data.products.upsert({ ...p, consignorName: consignor.name, updatedAt: Date.now() });
+  }
   const i = consignors.value.findIndex((c) => c.id === id);
   if (i >= 0) consignors.value.splice(i, 1, consignor);
   else consignors.value.push(consignor);
@@ -220,6 +241,25 @@ export function publicUrl(path: string): string {
 
 export const myLinks = async (): Promise<ArtistConsignment[]> => (await sdk().http.get<{ links: ArtistConsignment[] }>('links')).links;
 export const acceptCode = (code: string): Promise<{ storeAccountName: string; consignorName: string }> => sdk().http.post('links', { code });
+export interface Shares {
+  artistCurrency: string;
+  storeCurrency: string;
+  items: ShareableItem[];
+}
+export const loadShares = (storeAccountId: string, consignorId: string): Promise<Shares> =>
+  sdk().http.get(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/shares`);
+export const setShares = (storeAccountId: string, consignorId: string, productIds: string[], shared: boolean): Promise<{ items: ShareableItem[] }> =>
+  sdk().http.put(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/shares`, { productIds, shared });
+
+export interface Pricing {
+  artistCurrency: string | null;
+  storeCurrency: string;
+  pricing: SharePricing;
+  items: ShareableItem[];
+}
+export const loadPricing = (consignorId: string): Promise<Pricing> => sdk().http.get(`consignors/${encodeURIComponent(consignorId)}/pricing`);
+export const savePricing = (consignorId: string, pricing: SharePricing): Promise<unknown> => sdk().http.put(`consignors/${encodeURIComponent(consignorId)}/pricing`, pricing);
+
 export const respondToSetup = (storeAccountId: string, consignorId: string, setupId: string, status: 'confirmed' | 'declined', note = ''): Promise<{ setup: SetupMoment }> =>
   sdk().http.post(`links/${id(storeAccountId)}/${id(consignorId)}/setups/${id(setupId)}/respond`, { status, note });
 export const leaveStore = (storeAccountId: string, consignorId: string): Promise<unknown> =>
@@ -228,14 +268,14 @@ export const leaveStore = (storeAccountId: string, consignorId: string): Promise
 // ── Catalogue edits ────────────────────────────────────────────────────────
 
 export function withoutConsignor(p: Product): Product {
-  const { consignorId: _c, consignorProductId: _s, ...rest } = p;
+  const { consignorId: _c, consignorProductId: _s, consignorName: _n, ...rest } = p;
   return { ...rest, updatedAt: Date.now() };
 }
 
 export async function assign(productIds: string[], consignorId: string): Promise<void> {
   for (const id of productIds) {
     const p = sdk().data.products.get(id);
-    if (p) await sdk().data.products.upsert({ ...p, consignorId, updatedAt: Date.now() });
+    if (p) await sdk().data.products.upsert({ ...p, consignorId, consignorName: consignors.value.find((c) => c.id === consignorId)?.name, updatedAt: Date.now() });
   }
 }
 
@@ -269,6 +309,7 @@ export async function importFromArtist(consignorId: string, items: CatalogProduc
       unlisted: false,
       variants: src.variants.map((v) => ({ ...v })),
       consignorId,
+      consignorName: consignors.value.find((c) => c.id === consignorId)?.name,
       consignorProductId: src.id,
       sortOrder: sortOrder++,
       updatedAt: Date.now(),

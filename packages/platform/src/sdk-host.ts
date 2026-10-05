@@ -13,6 +13,7 @@ import {
   type ShellUi,
   type StoreSchema,
   type TillLine,
+  type TillLookup,
   type Unsubscribe,
 } from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
@@ -183,6 +184,8 @@ const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 
 /** The open till, when there is one - the module that sells registers here. */
 let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
+/** Modules that can resolve a code the catalogue does not know. */
+const tillLookups = new Set<(code: string) => Promise<TillLookup | null>>();
 
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
   const subscriptions: Unsubscribe[] = [];
@@ -315,6 +318,24 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         };
         subscriptions.push(off);
         return off;
+      },
+      onLookup(handler) {
+        guard();
+        tillLookups.add(handler);
+        const off = () => void tillLookups.delete(handler);
+        subscriptions.push(off);
+        return off;
+      },
+      async lookup(code) {
+        for (const handler of [...tillLookups]) {
+          try {
+            const found = await handler(code);
+            if (found) return found;
+          } catch {
+            /* one module failing must not stop the next one answering */
+          }
+        }
+        return null;
       },
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },

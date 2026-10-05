@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import type { Product } from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
+import PricingDialog from './PricingDialog.vue';
 import { artistCatalog, assign, consignors, errorText, importFromArtist, products, productsOf, stores, unassign, type CatalogProduct } from '../api';
 import { sdk } from '../runtime';
 
@@ -110,6 +111,7 @@ async function assignPicked(): Promise<void> {
 }
 
 // ── Import from the linked artist's catalogue ─────────────────────────────
+const pricingOpen = ref(false);
 const importing = ref(false);
 const catalog = ref<CatalogProduct[]>([]);
 const toImport = ref<string[]>([]);
@@ -147,11 +149,13 @@ async function runImport(): Promise<void> {
           </select>
         </label>
         <span class="grow" />
+        <button v-if="consignor?.linked" type="button" @click="pricingOpen = true"><Icon name="coins" :size="14" /> Prices</button>
         <button type="button" @click="openPicker"><Icon name="tag" :size="14" /> Tag catalogue items</button>
-        <button type="button" :disabled="!consignor?.linked" :title="consignor?.linked ? '' : 'Link their account first (Artists → Link code)'" @click="openImport">
-          <Icon name="download" :size="14" /> Import from their catalogue
+        <button type="button" class="quiet" :disabled="!consignor?.linked" :title="consignor?.linked ? 'A one-off copy you manage yourself - shared items stay in step with the artist instead' : 'Link their account first (Artists → Link code)'" @click="openImport">
+          <Icon name="download" :size="14" /> Import a copy
         </button>
       </div>
+      <p v-if="consignor?.linked" class="hint">{{ consignor.name }} shares items from their own Zollify catalogue - they appear here with photos and follow their edits. Scanning one of their labels at the till shares it too.</p>
 
       <p class="hint">
         On hand is what you hold of the artist's work across all stores.
@@ -201,6 +205,10 @@ async function runImport(): Promise<void> {
           <button type="button" class="primary" :disabled="!picked.length" @click="assignPicked">Tag {{ picked.length || '' }}</button>
         </div>
       </template>
+    </ModalShell>
+
+    <ModalShell v-if="pricingOpen && consignor" :title="`Prices for ${consignor.name}'s items`" @close="pricingOpen = false">
+      <PricingDialog :consignor-id="consignor.id" :name="consignor.name" @close="pricingOpen = false" @saved="sdk().ui.toast('Prices saved - every till picks them up with its next sync.', { kind: 'success' })" />
     </ModalShell>
 
     <ModalShell v-if="importing" :title="`Import from ${consignor?.name}`" @close="importing = false">

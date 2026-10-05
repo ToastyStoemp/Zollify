@@ -34,6 +34,8 @@ interface Leaf {
   type: string;
   /** Product-level (not per-variant) - used by subLabelFor() for art prints. */
   year?: number;
+  /** Consignment artist the product belongs to, when it is not this account's own work. */
+  artist?: string;
 }
 interface ProductGroup {
   productId: string;
@@ -62,10 +64,10 @@ const typeGroups = computed<TypeGroup[]>(() => {
             .filter((v) => !v.unlisted)
             .map((v) => {
               const variantName = v.name?.trim() || '(unnamed)';
-              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type, year: p.year };
+              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type, year: p.year, artist: p.consignorName };
             })
             .filter((l) => l.sku || artPrint)
-        : (p.sku?.trim() || artPrint ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku?.trim() || '', title: p.title || '(untitled)', type, year: p.year }] : []);
+        : (p.sku?.trim() || artPrint ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku?.trim() || '', title: p.title || '(untitled)', type, year: p.year, artist: p.consignorName }] : []);
     if (!leaves.length) continue;
     const group: ProductGroup = { productId: p.id, title: p.title || '(untitled)', leaves };
     (byType.get(type) ?? byType.set(type, []).get(type)!).push(group);
@@ -84,10 +86,17 @@ const skippedCount = computed(() => sdk().data.products.list().length - typeGrou
  */
 function subLabelFor(l: Leaf): string {
   if (l.sku) return l.sku;
-  const a = sdk().account()?.profile.artist;
-  const artist = (a?.companyName || a?.fullName || '').trim();
-  return [artist, l.year].filter(Boolean).join(' · ');
+  return [artistFor(l), l.year].filter(Boolean).join(' · ');
 }
+
+/** Who made it: the consignment artist in a store, otherwise this account's own artist name. */
+function artistFor(l: Leaf): string {
+  if (l.artist) return l.artist;
+  const a = sdk().account()?.profile.artist;
+  return (a?.companyName || a?.fullName || '').trim();
+}
+/** The artist line under the title - not when the SKU line already says it. */
+const artistLine = (l: Leaf): string | undefined => (showArtist.value && l.sku ? artistFor(l) || undefined : undefined);
 
 // ── Search ───────────────────────────────────────────────────────────────────
 const search = ref('');
@@ -191,6 +200,8 @@ const printMode = ref<PrintMode>('continuous');
 const titleScale = ref(1);
 /** See RenderLabelOptions.showSkuText in label.ts - defaults on, matching the previous unconditional behaviour. */
 const showSkuText = ref(true);
+/** The artist's name under the title - a store with many artists needs it on every label. */
+const showArtist = ref(true);
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
@@ -200,6 +211,7 @@ onMounted(async () => {
   printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
   titleScale.value = (await sdk().config.get<number>('titleScale')) ?? 1;
   showSkuText.value = (await sdk().config.get<boolean>('showSkuText')) ?? true;
+  showArtist.value = (await sdk().config.get<boolean>('showArtist')) ?? true;
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
@@ -207,6 +219,7 @@ watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
 watch(titleScale, (v) => void sdk().config.set('titleScale', v));
 watch(showSkuText, (v) => void sdk().config.set('showSkuText', v));
+watch(showArtist, (v) => void sdk().config.set('showArtist', v));
 
 // ── Test label: preview/print without picking a real product ────────────────
 const TEST_LEAF: Leaf = { key: '__test__', productId: '__test__', variantId: '', sku: 'TEST-0000001', title: 'Test Label', type: 'Test' };
@@ -227,9 +240,10 @@ function redrawPreview(): void {
     titleScale: titleScale.value,
     barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
     showSkuText: showSkuText.value,
+    artist: artistLine(l),
   });
 }
-watch([previewLeaf, labelSize, titleScale, showSkuText], redrawPreview, { flush: 'post' });
+watch([previewLeaf, labelSize, titleScale, showSkuText, showArtist], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
 
 // ── Printer connection ───────────────────────────────────────────────────────
@@ -310,6 +324,7 @@ async function printAll(): Promise<void> {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
+        artist: artistLine(l),
       });
       const rows = rasterizeCanvas(workCanvas);
       for (let i = 0; i < copies; i++) {
@@ -358,6 +373,7 @@ async function exportPngs(): Promise<void> {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
+        artist: artistLine(l),
       });
       const blob = await new Promise<Blob | null>((resolve) => workCanvas.toBlob(resolve, 'image/png'));
       if (blob) {
@@ -541,6 +557,11 @@ async function printTestLabel(): Promise<void> {
           <label class="field inline">
             <input v-model="showSkuText" type="checkbox" />
             <span>Print SKU number under the barcode</span>
+          </label>
+
+          <label class="field inline">
+            <input v-model="showArtist" type="checkbox" />
+            <span>Print the artist's name under the title</span>
           </label>
         </details>
       </article>

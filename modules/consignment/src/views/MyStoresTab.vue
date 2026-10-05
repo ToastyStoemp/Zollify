@@ -3,7 +3,8 @@ import { onMounted, ref } from 'vue';
 import type { ArtistConsignment } from '@zollify/shared';
 import type { SetupMoment } from '@zollify/shared';
 import { commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
-import { Icon } from '@zollify/ui';
+import { Icon, ModalShell } from '@zollify/ui';
+import ShareItems from './ShareItems.vue';
 import { acceptCode, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
 import { sdk } from '../runtime';
 
@@ -53,6 +54,14 @@ async function leave(l: ArtistConsignment): Promise<void> {
 }
 
 const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
+/** The store whose sharing is open, if any. */
+const sharing = ref<ArtistConsignment | null>(null);
+const sharingChanged = ref(false);
+function closeSharing(): void {
+  sharing.value = null;
+  if (sharingChanged.value) void refresh();
+  sharingChanged.value = false;
+}
 const now = today();
 const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const upcomingSetups = (l: ArtistConsignment): SetupMoment[] => l.setups.filter((s) => s.date >= now);
@@ -103,6 +112,7 @@ function commissionLine(l: ArtistConsignment): string {
           <p class="hint">As “{{ l.consignorName }}” · {{ commissionLine(l) }}</p>
         </div>
         <span class="grow" />
+        <button v-if="!l.paused" type="button" @click="sharing = l"><Icon name="tag" :size="14" /> Share items</button>
         <button type="button" class="quiet" @click="leave(l)">Unlink</button>
       </header>
 
@@ -210,6 +220,10 @@ function commissionLine(l: ArtistConsignment): string {
         </details>
       </template>
     </article>
+    <ModalShell v-if="sharing" :title="`Share with ${sharing.storeAccountName}`" @close="closeSharing">
+      <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" />
+      <template #footer><div class="foot"><button type="button" class="primary" @click="closeSharing">Done</button></div></template>
+    </ModalShell>
   </div>
 </template>
 
@@ -225,7 +239,8 @@ function commissionLine(l: ArtistConsignment): string {
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .card { display: flex; flex-direction: column; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
 .card header { display: flex; align-items: flex-start; gap: .6rem; }
-.card header button { min-height: 2.2rem; font-size: .8rem; }
+.card header button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
+.foot { display: flex; justify-content: flex-end; }
 .grow { flex: 1; }
 .setups { display: flex; flex-direction: column; gap: .5rem; padding: .7rem .8rem; border-radius: 10px; background: var(--zfy-signal-soft, #e4ecf6); }
 .setups h3 { margin: 0; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; }

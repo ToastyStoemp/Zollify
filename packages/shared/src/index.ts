@@ -16,3 +16,4 @@ export * from './charged-lines';
 export * from './vat';
 export * from './consignment';
 export * from './store-events';
+export * from './consignment-books';

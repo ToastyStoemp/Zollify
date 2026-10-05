@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { ConsignmentLine, ConsignorStatement } from '@zollify/shared';
-import { fmtPrice } from '@zollify/shared';
+import type { ConsignmentFee, ConsignmentLine, ConsignorStatement } from '@zollify/shared';
+import { FEE_REASONS, fmtPrice } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { addPayout, deletePayout, errorText, loadStatement, today, type Statement } from '../api';
+import { addPayout, deletePayout, deliveryText, errorText, loadStatement, today, waiveFee, type Statement } from '../api';
 import { sdk } from '../runtime';
+import FeeDialog from './FeeDialog.vue';
 
 /**
  * What each artist sold, per store, and what is still owed. The balance runs
@@ -40,6 +41,22 @@ const cards = computed(() => {
 const payoutsOf = (id: string) => data.value?.payouts.filter((p) => p.consignorId === id) ?? [];
 const linesOf = (id: string): ConsignmentLine[] => data.value?.lines.filter((l) => l.consignorId === id) ?? [];
 const open = ref<Record<string, boolean>>({});
+
+// ── Fees ────────────────────────────────────────────────────────────────────
+const feesOf = (id: string): ConsignmentFee[] => data.value?.fees?.filter((f) => f.consignorId === id) ?? [];
+const disputed = (id: string): number => feesOf(id).filter((f) => f.dispute && f.status === 'charged').length;
+const charging = ref<string | null>(null);
+async function waive(f: ConsignmentFee): Promise<void> {
+  const name = consignorName(f.consignorId);
+  if (!(await sdk().ui.confirm(`${fmtPrice(f.amount, f.currency)} goes back onto what you owe ${name}, and they are told.`, 'Waive fee?'))) return;
+  try {
+    const { delivery } = await waiveFee(f.id, '');
+    sdk().ui.toast(`Fee waived. ${deliveryText(name, delivery)}`, { kind: 'success' });
+    await refresh();
+  } catch (err) {
+    emit('error', errorText(err, 'Could not waive the fee.'));
+  }
+}
 
 // ── Payouts ─────────────────────────────────────────────────────────────────
 const paying = ref<string | null>(null);
@@ -107,7 +124,7 @@ async function exportCsv(): Promise<void> {
 <template>
   <div class="tab">
     <div class="bar">
-      <p class="hint">Commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out. Space rent comes off once each month has started (Planner).</p>
+      <p class="hint">Commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out. Space rent comes off once each month has started (Planner), and so do fees you charge.</p>
       <label class="check"><input v-model="showArchived" type="checkbox" /> Show archived</label>
       <button type="button" @click="refresh"><Icon name="refresh-cw" :size="14" /> Refresh</button>
       <button type="button" :disabled="!data?.lines.length" @click="exportCsv"><Icon name="download" :size="14" /> Export sales</button>
@@ -119,7 +136,9 @@ async function exportCsv(): Promise<void> {
     <article v-for="{ consignor: c, statement: s } in cards" :key="c.id" class="card">
       <header>
         <strong>{{ c.name }}</strong>
+        <span v-if="disputed(c.id)" class="flag">Objects to {{ disputed(c.id) === 1 ? 'a fee' : `${disputed(c.id)} fees` }}</span>
         <span class="grow" />
+        <button type="button" @click="charging = c.id"><Icon name="alert-triangle" :size="14" /> Charge a fee</button>
         <button type="button" class="primary" @click="openPay(c.id)"><Icon name="banknote" :size="14" /> Record payout</button>
       </header>
 
@@ -129,7 +148,9 @@ async function exportCsv(): Promise<void> {
         <div><span>Sales</span><strong>{{ fmtPrice(t.gross, t.currency) }}</strong></div>
         <div><span>Commission</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong></div>
         <div><span>Artist's share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+        <div v-if="t.cardFees"><span>Card costs</span><strong>{{ fmtPrice(t.cardFees, t.currency) }}</strong></div>
         <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
+        <div v-if="t.fees"><span>Fees</span><strong>{{ fmtPrice(t.fees, t.currency) }}</strong></div>
         <div><span>Paid</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong></div>
         <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Owed' : 'They owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
       </div>
@@ -146,6 +167,19 @@ async function exportCsv(): Promise<void> {
           </tr>
         </tbody>
       </table>
+
+      <details v-if="feesOf(c.id).length" :open="disputed(c.id) > 0">
+        <summary>Fees ({{ feesOf(c.id).length }})</summary>
+        <ul class="payouts">
+          <li v-for="f in feesOf(c.id)" :key="f.id" :class="{ waived: f.status === 'waived' }">
+            <span>{{ f.date }}</span>
+            <strong>{{ fmtPrice(f.amount, f.currency) }}</strong>
+            <span class="hint">{{ FEE_REASONS[f.reason] }}<template v-if="f.note"> · {{ f.note }}</template><template v-if="f.status === 'waived'"> · waived</template></span>
+            <button v-if="f.status === 'charged'" type="button" class="quiet" @click="waive(f)">Waive</button>
+            <p v-if="f.dispute" class="dispute">{{ c.name }} objects: “{{ f.dispute }}”</p>
+          </li>
+        </ul>
+      </details>
 
       <details v-if="payoutsOf(c.id).length">
         <summary>Payouts ({{ payoutsOf(c.id).length }})</summary>
@@ -174,6 +208,8 @@ async function exportCsv(): Promise<void> {
         </table>
       </details>
     </article>
+
+    <FeeDialog v-if="charging" :consignor-id="charging" :name="consignorName(charging)" @close="charging = null" @done="refresh" />
 
     <ModalShell v-if="paying" :title="`Payout to ${consignorName(paying)}`" @close="paying = null">
       <div class="form">
@@ -228,6 +264,9 @@ summary { cursor: pointer; font-size: .85rem; font-weight: 600; }
 .payouts { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
 .payouts li { display: flex; align-items: center; gap: .6rem; font-size: .85rem; flex-wrap: wrap; }
 .payouts .hint { flex: 1; }
+.payouts li.waived strong { text-decoration: line-through; color: var(--zfy-muted, #5a6472); }
+.dispute { flex-basis: 100%; margin: 0; padding: .35rem .6rem; border-radius: 8px; background: var(--zfy-signal-soft, #f6e5df); font-size: .82rem; }
+.flag { font-size: .72rem; font-weight: 600; padding: .1rem .5rem; border-radius: 999px; background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-warning-ink, #8a5a1e); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
 .form label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .two { display: grid; grid-template-columns: 2fr 1fr; gap: .6rem; }

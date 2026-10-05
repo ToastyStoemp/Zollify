@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
   ConsignorInputSchema,
   PayoutInputSchema,
+  cardFeesOf,
+  feesDue,
   consignmentLines,
   consignmentStatements,
   isStore,
@@ -31,6 +33,7 @@ import {
 import { migratePlanner, plannerForArtist, registerPlanner, rentalsOf } from './consignment-planner';
 import { migrateProgramme, programmeForArtist, registerProgramme, registerProgrammePublic } from './consignment-programme';
 import { followArtistChanges, migrateSharing, registerSharing, syncShared } from './consignment-sharing';
+import { booksForArtist, booksSettings, feesOf, migrateBooks, registerBooks } from './consignment-books';
 import { migrateStock, registerStock, stockForArtist } from './consignment-stock';
 
 /**
@@ -111,7 +114,7 @@ export function parseDoc(raw: string): ConsignorInput {
   return parsed.success ? parsed.data : ConsignorInputSchema.parse({ name: 'Unnamed artist', commissionPct: 0 });
 }
 
-function toConsignor(db: Database.Database, row: ConsignorRow): Consignor {
+export function toConsignor(db: Database.Database, row: ConsignorRow): Consignor {
   const doc = parseDoc(row.doc);
   // An artist account that was deleted reads as unlinked rather than as a name-less link.
   const linkedAccountName = accountName(db, row.linkedAccountId);
@@ -126,7 +129,7 @@ function toConsignor(db: Database.Database, row: ConsignorRow): Consignor {
   };
 }
 
-function consignorRows(db: Database.Database, accountId: string): ConsignorRow[] {
+export function consignorRows(db: Database.Database, accountId: string): ConsignorRow[] {
   return db.prepare('SELECT * FROM consignors WHERE accountId = ? ORDER BY createdAt').all(accountId) as ConsignorRow[];
 }
 
@@ -134,7 +137,7 @@ export function consignorRow(db: Database.Database, accountId: string, id: strin
   return db.prepare('SELECT * FROM consignors WHERE accountId = ? AND id = ?').get(accountId, id) as ConsignorRow | undefined;
 }
 
-function payoutsFor(db: Database.Database, accountId: string, consignorId?: string): ConsignmentPayout[] {
+export function payoutsFor(db: Database.Database, accountId: string, consignorId?: string): ConsignmentPayout[] {
   const rows = (
     consignorId
       ? db.prepare('SELECT id, doc, createdAt FROM consignment_payouts WHERE accountId = ? AND consignorId = ?').all(accountId, consignorId)
@@ -200,6 +203,7 @@ export const consignmentServerModule: ServerModule = {
     migrateProgramme(db);
     migrateSharing(db);
     migrateStock(db);
+    migrateBooks(db);
   },
 
   /** An artist's devices changed products: stores sharing them follow. */
@@ -223,6 +227,7 @@ export const consignmentServerModule: ServerModule = {
     registerProgramme(app, ctx);
     registerSharing(app, ctx);
     registerStock(app, ctx);
+    registerBooks(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 
@@ -337,8 +342,9 @@ export const consignmentServerModule: ServerModule = {
       const who = ctx.identity(req);
       const consignors = consignorRows(db, who.accountId).map((r) => toConsignor(db, r));
       const { events, transactions } = replay(db, who.accountId);
-      const lines = consignmentLines(transactions, consignors);
+      const lines = consignmentLines(transactions, consignors, cardFeesOf(booksSettings(db, who.accountId)));
       const payouts = payoutsFor(db, who.accountId);
+      const fees = feesOf(db, who.accountId);
       const byId = new Map(events.map((e) => [e.id, e]));
       const venueIds = new Set([...events.filter((e) => !e.deletedAt).map((e) => e.id), ...lines.map((l) => l.storeId)]);
       return {
@@ -346,7 +352,8 @@ export const consignmentServerModule: ServerModule = {
         venues: [...venueIds].map((id) => venueOf(byId.get(id), id)),
         lines,
         payouts,
-        statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today())),
+        fees,
+        statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today()), feesDue(fees)),
       };
     });
 
@@ -420,14 +427,14 @@ export const consignmentServerModule: ServerModule = {
         };
         // The owner switched consignment off: the link stays, the sharing stops.
         if (!isEnabled(db, row.accountId, MODULE_ID)) {
-          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], shipments: [], stockChanges: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
+          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], shipments: [], stockChanges: [], fees: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
           continue;
         }
         const programme = programmeForArtist(db, row.accountId, row.id);
         const planner = plannerForArtist(db, row.accountId, row.id);
         // Every store the artist hears about must have a name on their side.
         const mentioned = [...programme.features.flatMap((f) => f.storeIds), ...programme.workshops.map((w) => w.storeId), ...planner.rentals.map((r) => r.storeId), ...planner.setups.map((s) => s.storeId)];
-        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme, ...stockForArtist(db, row.accountId, row.id) });
+        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme, ...stockForArtist(db, row.accountId, row.id), ...booksForArtist(db, row.accountId, row.id) });
       }
       return { links: out };
     });
@@ -451,7 +458,7 @@ function artistView(
   alsoVenues: string[] = [],
 ): Pick<ArtistConsignment, 'venues' | 'items' | 'lines' | 'payouts' | 'statement'> {
   const { events, products, transactions, inventory } = replay(db, storeAccountId);
-  const lines = consignmentLines(transactions, [consignor]);
+  const lines = consignmentLines(transactions, [consignor], cardFeesOf(booksSettings(db, storeAccountId)));
   const payouts = payoutsFor(db, storeAccountId, consignor.id);
   const byId = new Map(events.map((e) => [e.id, e]));
 
@@ -493,6 +500,7 @@ function artistView(
       payouts,
       [consignor.id],
       rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today()),
+      feesDue(feesOf(db, storeAccountId, consignor.id)),
     )[0]!,
   };
 }

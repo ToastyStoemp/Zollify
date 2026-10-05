@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import type { ArtistConsignment } from '@zollify/shared';
+import type { ArtistConsignment, ConsignmentFee } from '@zollify/shared';
 import type { SetupMoment } from '@zollify/shared';
-import { commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
+import { FEE_REASONS, commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import ShareItems from './ShareItems.vue';
 import StockDialog from './StockDialog.vue';
-import { acceptCode, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
+import { acceptCode, disputeFee, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -91,6 +91,24 @@ async function answer(l: ArtistConsignment, s: SetupMoment, status: 'confirmed' 
     emit('error', errorText(err, 'Could not send your answer.'));
   }
 }
+/** Objecting to a fee: the store owner gets the reason by notification and email. */
+const objecting = ref<{ link: ArtistConsignment; fee: ConsignmentFee } | null>(null);
+const objection = ref('');
+async function object(): Promise<void> {
+  const o = objecting.value!;
+  if (!objection.value.trim()) return;
+  try {
+    await disputeFee(o.link.storeAccountId, o.link.consignorId, o.fee.id, objection.value.trim());
+    objecting.value = null;
+    objection.value = '';
+    sdk().ui.toast(`${o.link.storeAccountName} has your objection.`, { kind: 'success' });
+    await refresh();
+  } catch (err) {
+    emit('error', errorText(err, 'Could not send that.'));
+  }
+}
+const openFees = (l: ArtistConsignment): number => (l.fees ?? []).filter((f) => f.status === 'charged').length;
+
 const fmtPct = (n: number): string => `${Number(n.toFixed(2))}%`;
 const venueName = (l: ArtistConsignment, id: string): string => l.venues.find((v) => v.id === id)?.name ?? 'Removed event';
 function commissionLine(l: ArtistConsignment): string {
@@ -170,7 +188,9 @@ function commissionLine(l: ArtistConsignment): string {
         <div v-for="t in l.statement.totals" :key="t.currency" class="totals">
           <div><span>Sold</span><strong>{{ t.units }}</strong></div>
           <div><span>Your share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+          <div v-if="t.cardFees"><span>Card costs</span><strong>{{ fmtPrice(t.cardFees, t.currency) }}</strong></div>
           <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
+          <div v-if="t.fees"><span>Fees</span><strong>{{ fmtPrice(t.fees, t.currency) }}</strong></div>
           <div><span>Paid to you</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong></div>
           <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Still owed' : 'You owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
         </div>
@@ -217,6 +237,19 @@ function commissionLine(l: ArtistConsignment): string {
           </table>
         </details>
 
+        <details v-if="(l.fees ?? []).length" :open="openFees(l) > 0">
+          <summary>Fees ({{ l.fees.length }})</summary>
+          <ul class="fees">
+            <li v-for="f in l.fees" :key="f.id" :class="{ waived: f.status === 'waived' }">
+              <span>{{ f.date }}</span>
+              <strong>{{ fmtPrice(f.amount, f.currency) }}</strong>
+              <span class="hint grow">{{ FEE_REASONS[f.reason] }}<template v-if="f.note"> · {{ f.note }}</template><template v-if="f.status === 'waived'"> · waived<template v-if="f.waiveNote"> - {{ f.waiveNote }}</template></template></span>
+              <span v-if="f.dispute && f.status === 'charged'" class="hint">You objected</span>
+              <button v-else-if="f.status === 'charged'" type="button" class="quiet" @click="objecting = { link: l, fee: f }; objection = ''">Object</button>
+            </li>
+          </ul>
+        </details>
+
         <details v-if="l.payouts.length">
           <summary>Payouts ({{ l.payouts.length }})</summary>
           <table>
@@ -231,6 +264,14 @@ function commissionLine(l: ArtistConsignment): string {
         </details>
       </template>
     </article>
+    <ModalShell v-if="objecting" :title="`Object to a fee of ${fmtPrice(objecting.fee.amount, objecting.fee.currency)}`" @close="objecting = null">
+      <div class="object">
+        <p class="hint">{{ objecting.link.storeAccountName }} charged it for “{{ FEE_REASONS[objecting.fee.reason] }}”<template v-if="objecting.fee.note"> ({{ objecting.fee.note }})</template>. Say why you think it is wrong - they get it by notification and email, and can waive it.</p>
+        <textarea v-model="objection" rows="3" placeholder="I was there at 10, but the shop was closed." aria-label="Your objection" />
+      </div>
+      <template #footer><div class="foot"><button type="button" @click="objecting = null">Cancel</button><button type="button" class="primary" :disabled="!objection.trim()" @click="object">Send</button></div></template>
+    </ModalShell>
+
     <ModalShell v-if="stocking" :title="stocking.mode === 'restock' ? `Restock at ${stocking.link.storeAccountName}` : `Package for ${stocking.link.storeAccountName}`" @close="stocking = null">
       <StockDialog :link="stocking.link" :mode="stocking.mode" @done="stockDone" @close="stocking = null" />
     </ModalShell>
@@ -255,7 +296,7 @@ function commissionLine(l: ArtistConsignment): string {
 .card { display: flex; flex-direction: column; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
 .card header { display: flex; align-items: flex-start; gap: .6rem; }
 .card header button { min-height: 2.2rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
-.foot { display: flex; justify-content: flex-end; }
+.foot { display: flex; justify-content: flex-end; gap: .5rem; }
 .badge { font-style: normal; font-size: .66rem; padding: 0 .35rem; border-radius: 999px; background: var(--zfy-signal-soft, #e4ecf6); }
 .card header { flex-wrap: wrap; }
 .grow { flex: 1; }
@@ -275,6 +316,11 @@ function commissionLine(l: ArtistConsignment): string {
 .featured { margin: 0; font-size: .86rem; display: flex; align-items: center; gap: .4rem; padding: .5rem .7rem; border-radius: 10px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .rental { margin: 0; font-size: .84rem; display: flex; align-items: center; gap: .35rem; }
 .venues { margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); display: flex; align-items: center; gap: .3rem; }
+.fees { list-style: none; margin: .4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.fees li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; font-size: .85rem; }
+.fees li.waived strong { text-decoration: line-through; color: var(--zfy-muted, #5a6472); }
+.fees button { min-height: 2rem; padding: .1rem .6rem; font-size: .78rem; }
+.object { display: flex; flex-direction: column; gap: .6rem; }
 .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr)); gap: .5rem; }
 .totals div { display: flex; flex-direction: column; gap: .1rem; padding: .45rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
 .totals span { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }

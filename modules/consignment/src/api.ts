@@ -8,6 +8,11 @@ import {
   type Workshop,
   type WorkshopInput,
   type ArtistConsignment,
+  type BooksSettings,
+  type ConsignmentFee,
+  type FeeInput,
+  type ReportPeriod,
+  type StoreReport,
   type ConsignmentLine,
   type ConsignmentPayout,
   type ConsignmentVenue,
@@ -41,6 +46,7 @@ export interface Statement {
   lines: ConsignmentLine[];
   payouts: ConsignmentPayout[];
   statements: ConsignorStatement[];
+  fees: ConsignmentFee[];
 }
 
 /** A product in a linked artist's own catalogue, as the server shares it. */
@@ -118,6 +124,21 @@ export async function artistCatalog(id: string): Promise<CatalogProduct[]> {
 export const loadStatement = (): Promise<Statement> => sdk().http.get<Statement>('statement');
 export const addPayout = (input: PayoutInput): Promise<{ payout: ConsignmentPayout }> => sdk().http.post('payouts', input);
 export const deletePayout = (id: string): Promise<unknown> => sdk().http.del(`payouts/${encodeURIComponent(id)}`);
+
+// ── Fees and reports ────────────────────────────────────────────────────────
+
+export const loadBooksSettings = async (): Promise<BooksSettings> => (await sdk().http.get<{ settings: BooksSettings }>('books/settings')).settings;
+export const saveBooksSettings = (settings: BooksSettings): Promise<{ settings: BooksSettings }> => sdk().http.put('books/settings', settings);
+export const loadFees = async (): Promise<ConsignmentFee[]> => (await sdk().http.get<{ fees: ConsignmentFee[] }>('fees')).fees;
+export const issueFee = (input: FeeInput): Promise<{ fee: ConsignmentFee; delivery: Delivery }> => sdk().http.post('fees', input);
+export const waiveFee = (feeId: string, note: string): Promise<{ fee: ConsignmentFee; delivery: Delivery | null }> =>
+  sdk().http.post(`fees/${encodeURIComponent(feeId)}/waive`, { note });
+export const loadReports = (): Promise<{ settings: BooksSettings; periods: ReportPeriod[] }> => sdk().http.get('reports');
+export const loadReport = (from: string): Promise<{ report: StoreReport; venues: Record<string, string> }> => sdk().http.get(`reports/${encodeURIComponent(from)}`);
+export const payReport = (from: string, date: string, consignorIds?: string[]): Promise<{ payouts: { consignorId: string; amount: number; currency: string }[] }> =>
+  sdk().http.post(`reports/${encodeURIComponent(from)}/payouts`, { date, ...(consignorIds ? { consignorIds } : {}) });
+export const disputeFee = (storeAccountId: string, consignorId: string, feeId: string, note: string): Promise<{ fee: ConsignmentFee }> =>
+  sdk().http.post(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/fees/${encodeURIComponent(feeId)}/dispute`, { note });
 
 // ── Planner ────────────────────────────────────────────────────────────────
 

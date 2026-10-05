@@ -198,6 +198,32 @@ cancel link, and a notification to the store. People pay at the store; the
 sign-up list marks who has. Signing up costs a proof-of-work and is rate
 limited, like the online receipt.
 
+**Sharing and stock.** A linked artist chooses which items of their own
+catalogue a store sells; the server writes them into the store's catalogue
+(photos included, following the artist's edits) under the same id, so the
+artist's own labels scan at the store's till. A label of an item the artist
+has not shared yet shares it and tells them. Where the artist and store use
+different currencies, the store sets a rate, rounding and per-item prices,
+like an event abroad. Artists restock in person (add or recount from *Where I
+consign*), or send a package that only reaches the shelf once the store
+confirms what arrived. The till groups a store's items by artist, then by
+type, and labels can carry the artist's name. Staff accounts (role *member*)
+ring up sales and cash up as themselves, but cannot see or change artists,
+commissions, payouts or reports.
+
+**Fees and reports.** A store can charge an artist a fee - a missed setup
+(straight from the planner), not responding, late stock, handling, damage -
+which comes off their balance; the artist is told by notification and email,
+can object (the owner hears), and the owner can waive it. The **report**
+closes every month or every two weeks, in the store's time zone: sales,
+takings, discounts by name, VAT per rate, cash and card, what cards cost (a
+rate the store sets, optionally carried by artists in proportion to their
+share), commission, own stock, and per artist what the period earned against
+rent and fees and what is owed at its end. Payouts are recorded from it
+without ever paying the same money twice, it downloads as a spreadsheet, and
+when a period closes the owner gets it by email with the spreadsheet
+attached.
+
 *Notifications and email* - platform features any server module can use
 through its context: `ctx.notify(accountId, …)` puts a note under the shell's
 bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when

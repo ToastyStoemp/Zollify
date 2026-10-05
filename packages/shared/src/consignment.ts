@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ConsignmentFee } from './consignment-books';
 import type { StoreFeature } from './store-events';
 import type { SalesEvent, Transaction } from './types';
 
@@ -94,9 +95,31 @@ export interface ConsignmentLine {
   commissionPct: number;
   commission: number;
   artistShare: number;
+  /** The artist's part of what card payment cost, when the store passes card costs on. */
+  cardFees?: number;
 }
 
 const toMinor = (n: number): number => Math.round(n * 100);
+
+export interface CardFees {
+  pct: number;
+  fixed: number;
+}
+
+/** What the card payments of one sale cost, in the books' currency. */
+export function cardFeeOf(tx: Pick<Transaction, 'method' | 'payments' | 'total' | 'baseTotal' | 'baseCurrency' | 'currency'>, fees: CardFees): number {
+  const legs = tx.payments?.length ? tx.payments.filter((p) => p.kind === 'card') : tx.method === 'card' ? [{ amount: tx.total }] : [];
+  if (!legs.length) return 0;
+  const charged = legs.reduce((s, l) => s + l.amount, 0);
+  const toBase = baseFactor(tx);
+  return Math.round(((charged * fees.pct) / 100) * toBase * 100 + legs.length * fees.fixed * 100) / 100;
+}
+
+/** Charged currency → books' currency for one sale. */
+export function baseFactor(tx: Pick<Transaction, 'total' | 'baseTotal' | 'baseCurrency' | 'currency'>): number {
+  const converted = Boolean(tx.baseCurrency) && tx.baseCurrency !== tx.currency && (tx.baseTotal ?? 0) > 0 && tx.total > 0;
+  return converted ? tx.baseTotal! / tx.total : 1;
+}
 
 /**
  * Every consigned line in these sales, reverted sales left out.
@@ -109,12 +132,16 @@ const toMinor = (n: number): number => Math.round(n * 100);
 export function consignmentLines(
   transactions: Transaction[],
   consignors: Pick<Consignor, 'id' | 'commissionPct' | 'storeCommission'>[],
+  /** Card costs to pass on: each line carries the card fee in proportion to its share of the sale and the artist's part of it. */
+  cardFees?: CardFees,
 ): ConsignmentLine[] {
   const byId = new Map(consignors.map((c) => [c.id, c]));
   const out: ConsignmentLine[] = [];
   for (const tx of transactions) {
     if (tx.revertedAt || tx.revertedBy) continue;
     const currency = tx.baseCurrency ?? tx.currency;
+    const txFee = cardFees ? toMinor(cardFeeOf(tx, cardFees)) : 0;
+    const txGross = tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0);
     for (const item of tx.items) {
       const consignor = item.consignorId ? byId.get(item.consignorId) : undefined;
       if (!consignor) continue;
@@ -122,6 +149,7 @@ export function consignmentLines(
       const pct = typeof item.commissionPct === 'number' ? item.commissionPct : commissionFor(consignor, tx.eventId);
       const grossMinor = toMinor(item.baseLineTotal ?? item.lineTotal);
       const commissionMinor = Math.round((grossMinor * pct) / 100);
+      const feeMinor = txFee && txGross > 0 ? Math.round((((txFee * grossMinor) / txGross) * (100 - pct)) / 100) : 0;
       out.push({
         txId: tx.id,
         at: tx.timestamp,
@@ -137,6 +165,7 @@ export function consignmentLines(
         commissionPct: pct,
         commission: commissionMinor / 100,
         artistShare: (grossMinor - commissionMinor) / 100,
+        ...(feeMinor ? { cardFees: feeMinor / 100 } : {}),
       });
     }
   }
@@ -161,7 +190,11 @@ export interface CurrencyBalance {
   paid: number;
   /** Space rent charged so far and taken off the balance. */
   rent: number;
-  /** Still owed to the artist; negative when they owe the store (paid ahead, or rent beyond sales). */
+  /** Fees the store charged the artist (missed setups and the like), waived ones left out. */
+  fees: number;
+  /** The artist's part of card costs, when the store passes them on. */
+  cardFees: number;
+  /** Still owed to the artist; negative when they owe the store (paid ahead, or rent and fees beyond sales). */
   balance: number;
 }
 
@@ -177,16 +210,17 @@ export interface ConsignorStatement {
  * The balance is across all stores: an artist shared between two shops is
  * paid by one owner, and a payout naming a store still settles the same
  * debt. Rent for space the artist hires comes off it too, when the rental
- * says so. Money is summed in minor units so a long statement never drifts a cent.
+ * says so, as do fees the store charged and, when passed on, card costs. Money is summed in minor units so a long statement never drifts a cent.
  */
 export function consignmentStatements(
   lines: ConsignmentLine[],
   payouts: Pick<ConsignmentPayout, 'consignorId' | 'amount' | 'currency'>[],
   consignorIds: string[],
   rent: { consignorId: string; amount: number; currency: string }[] = [],
+  fees: { consignorId: string; amount: number; currency: string }[] = [],
 ): ConsignorStatement[] {
-  type Acc = { units: number; gross: number; commission: number; share: number; paid: number; rent: number };
-  const zero = (): Acc => ({ units: 0, gross: 0, commission: 0, share: 0, paid: 0, rent: 0 });
+  type Acc = { units: number; gross: number; commission: number; share: number; paid: number; rent: number; fees: number; card: number };
+  const zero = (): Acc => ({ units: 0, gross: 0, commission: 0, share: 0, paid: 0, rent: 0, fees: 0, card: 0 });
   const stores = new Map<string, Map<string, Acc>>(); // consignor → "store|currency"
   const totals = new Map<string, Map<string, Acc>>(); // consignor → currency
   const bucket = (outer: Map<string, Map<string, Acc>>, id: string, key: string): Acc => {
@@ -204,9 +238,11 @@ export function consignmentStatements(
       acc.commission += toMinor(l.commission);
       acc.share += toMinor(l.artistShare);
     }
+    bucket(totals, l.consignorId, l.currency).card += toMinor(l.cardFees ?? 0);
   }
   for (const p of payouts) bucket(totals, p.consignorId, p.currency).paid += toMinor(p.amount);
   for (const r of rent) bucket(totals, r.consignorId, r.currency).rent += toMinor(r.amount);
+  for (const f of fees) bucket(totals, f.consignorId, f.currency).fees += toMinor(f.amount);
 
   const ids = [...new Set([...consignorIds, ...totals.keys()])];
   return ids.map((consignorId) => ({
@@ -228,7 +264,9 @@ export function consignmentStatements(
         artistShare: a.share / 100,
         paid: a.paid / 100,
         rent: a.rent / 100,
-        balance: (a.share - a.paid - a.rent) / 100,
+        fees: a.fees / 100,
+        cardFees: a.card / 100,
+        balance: (a.share - a.card - a.paid - a.rent - a.fees) / 100,
       }))
       .sort((a, b) => a.currency.localeCompare(b.currency)),
   }));
@@ -301,6 +339,8 @@ export interface ArtistConsignment {
   }[];
   /** Restocks, recounts and received packages, newest first. */
   stockChanges: { id: string; kind: 'restock' | 'recount' | 'package'; storeId: string | null; lines: { productId: string; variantId: string; qty: number }[]; at: number }[];
+  /** Fees the store charged, waived ones included, newest first. */
+  fees: ConsignmentFee[];
   /** Coming workshops this artist hosts, with how many places are booked. */
   workshops: { id: string; title: string; storeId: string; date: string; time: string; durationMin: number; capacity: number; booked: number; cancelled: boolean }[];
 }

@@ -17,6 +17,8 @@ export interface MailMessage {
   replyTo?: string;
   /** An iCalendar body (METHOD:PUBLISH), attached so mail clients offer "add to calendar". */
   ics?: string;
+  /** Small text files, e.g. a report as CSV. */
+  attachments?: { filename: string; content: string; contentType: string }[];
 }
 
 export interface Mailer {
@@ -50,6 +52,7 @@ export function createMailer(
           text: m.text,
           ...(m.replyTo ? { replyTo: m.replyTo } : {}),
           ...(m.ics ? { icalEvent: { method: 'PUBLISH', filename: 'invite.ics', content: m.ics } } : {}),
+          ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename.replace(/[^\w.-]+/g, '-'), content: a.content, contentType: a.contentType })) } : {}),
         });
         return true;
       } catch (err) {

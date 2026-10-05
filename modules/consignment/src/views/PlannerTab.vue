@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import type { ConsignmentRental, ConsignmentSpace, SetupMoment } from '@zollify/shared';
+import type { ConsignmentFee, ConsignmentRental, ConsignmentSpace, SetupMoment } from '@zollify/shared';
 import { addMonths, fmtPrice, nextPeriodStart, occupancy, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -13,6 +13,7 @@ import {
   editRental,
   endRental,
   errorText,
+  loadFees,
   loadPlanner,
   moveSetup,
   plannerStoreId as storeId,
@@ -24,6 +25,7 @@ import {
   type Planner,
 } from '../api';
 import { sdk } from '../runtime';
+import FeeDialog from './FeeDialog.vue';
 
 /**
  * The planner, per store: the spaces it rents to artists, who has which one
@@ -41,9 +43,10 @@ watch(
   { immediate: true },
 );
 
+const fees = ref<ConsignmentFee[]>([]);
 async function refresh(): Promise<void> {
   try {
-    data.value = await loadPlanner();
+    [data.value, fees.value] = await Promise.all([loadPlanner(), loadFees()]);
   } catch (err) {
     emit('error', errorText(err, 'Could not load the planner.'));
   }
@@ -244,6 +247,11 @@ const upcoming = computed(() => (data.value?.setups ?? []).filter((s) => s.store
 const past = computed(() => (data.value?.setups ?? []).filter((s) => s.storeId === storeId.value && s.date < now).reverse().slice(0, 5));
 const statusLabel: Record<SetupMoment['status'], string> = { scheduled: 'waiting for reply', confirmed: 'confirmed', declined: "can't make it", cancelled: 'cancelled' };
 
+/** A setup that has started and was not called off can be charged as missed - once. */
+const chargeable = (s: SetupMoment): boolean => s.date <= now && s.status !== 'cancelled' && s.status !== 'declined';
+const feeFor = (s: SetupMoment): ConsignmentFee | undefined => fees.value.find((f) => f.setupId === s.id && f.status === 'charged');
+const missed = ref<SetupMoment | null>(null);
+
 const setupOpen = ref(false);
 const setupId = ref<string | null>(null);
 const setup = reactive({ consignorId: '', date: now, time: '10:00', durationMin: '30', note: '' });
@@ -324,6 +332,8 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
               <span :class="['pill', s.status]">{{ statusLabel[s.status] }}</span>
               <span v-if="s.artistNote" class="hint">“{{ s.artistNote }}”</span>
               <span class="grow" />
+              <span v-if="feeFor(s)" class="pill fee">fee {{ fmtPrice(feeFor(s)!.amount, feeFor(s)!.currency) }}</span>
+              <button v-else-if="chargeable(s)" type="button" class="quiet" @click="missed = s">Didn't show</button>
               <template v-if="s.status !== 'cancelled'">
                 <button type="button" @click="openSetup(s)">Move</button>
                 <button type="button" class="quiet" @click="cancel(s)">Cancel</button>
@@ -335,6 +345,9 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
             <ul class="setups">
               <li v-for="s in past" :key="s.id" class="past">
                 <span class="when">{{ fmtDay(s.date) }} · {{ s.time }}</span><strong>{{ nameOf(s.consignorId) }}</strong><span :class="['pill', s.status]">{{ statusLabel[s.status] }}</span>
+                <span class="grow" />
+                <span v-if="feeFor(s)" class="pill fee">fee {{ fmtPrice(feeFor(s)!.amount, feeFor(s)!.currency) }}</span>
+                <button v-else-if="chargeable(s)" type="button" class="quiet" @click="missed = s">Didn't show - charge a fee</button>
               </li>
             </ul>
           </details>
@@ -477,6 +490,7 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
       </div>
       <template #footer><div class="footer"><button type="button" @click="setupOpen = false">Cancel</button><button type="button" class="primary" @click="submitSetup">{{ setupId ? 'Move and notify' : 'Schedule and notify' }}</button></div></template>
     </ModalShell>
+    <FeeDialog v-if="missed" :consignor-id="missed.consignorId" :name="nameOf(missed.consignorId)" :setup="missed" @close="missed = null" @done="refresh" />
   </div>
 </template>
 
@@ -500,6 +514,7 @@ h2 { margin: 0; font-size: 1rem; }
 .setups li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; font-size: .86rem; padding: .35rem 0; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
 .setups li:last-child { border-bottom: 0; }
 .setups li.cancelled strong, .setups li.cancelled .when { text-decoration: line-through; color: var(--zfy-muted, #5a6472); }
+.pill.fee { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-warning-ink, #8a5a1e); }
 .setups button { min-height: 2rem; padding: .1rem .6rem; font-size: .78rem; }
 .when { font-variant-numeric: tabular-nums; min-width: 9.5rem; }
 .when small { color: var(--zfy-muted, #5a6472); }

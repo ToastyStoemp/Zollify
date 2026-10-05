@@ -107,7 +107,7 @@ describe('consignment planner', () => {
     expect(res.json().delivery).toEqual({ notified: true, emailedTo: null });
 
     const ana = (await call(store, 'GET', '/statement')).json().statements.find((s: { consignorId: string }) => s.consignorId === 'ana');
-    expect(ana.totals).toEqual([{ currency: 'CHF', units: 0, gross: 0, commission: 0, artistShare: 0, paid: 0, rent: 80, balance: -80 }]);
+    expect(ana.totals).toEqual([{ currency: 'CHF', units: 0, gross: 0, commission: 0, artistShare: 0, paid: 0, rent: 80, fees: 0, cardFees: 0, balance: -80 }]);
   });
 
   it('upgrades to a larger shelf from the next month, keeping both on record', async () => {

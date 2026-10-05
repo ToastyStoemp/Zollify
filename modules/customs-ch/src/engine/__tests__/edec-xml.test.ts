@@ -35,7 +35,7 @@ describe('buildEdecXml - Positionsdaten merged by HS code + material', () => {
       ]),
     )!.xml;
     expect(positionCount(xml)).toBe(1);
-    expect(xml).toContain('<description>14 Dragon Pin, Wolf Pin</description>');
+    expect(xml).toContain('<description>14 Dragon Pin, Wolf Pin (Zinc alloy)</description>');
     // Value and quantity both add up across the merged products.
     expect(xml).toContain('<statisticalValue>140</statisticalValue>');
   });
@@ -73,8 +73,8 @@ describe('buildEdecXml - Positionsdaten merged by HS code + material', () => {
     // Zinc: Enamel Pin's Dragon variant (6) + Wolf Pin (4) merge -> one position.
     // Gold: Enamel Pin's Gold Edition variant stays its own position.
     expect(positionCount(xml)).toBe(2);
-    expect(xml).toContain('<description>10 Enamel Pin, Wolf Pin</description>');
-    expect(xml).toContain('<description>2 Enamel Pin</description>');
+    expect(xml).toContain('<description>10 Enamel Pin, Wolf Pin (Zinc alloy)</description>');
+    expect(xml).toContain('<description>2 Enamel Pin (Gold plate)</description>');
   });
 });
 
@@ -104,5 +104,23 @@ describe('buildEdecXml - commodity code detail', () => {
       ]),
     )!.xml;
     expect(xml).toContain('<permitObligation>2</permitObligation>');
+  });
+});
+
+describe('buildEdecXml - description', () => {
+  it('names the material of each position', () => {
+    const xml = buildEdecXml(
+      state([
+        product({ id: 'a', title: 'Zinc Pin', material: 'Zinc alloy', soldQty: 10, soldValue: 100 }),
+        product({ id: 'b', title: 'Gold Pin', material: 'Gold plate', soldQty: 2, soldValue: 40 }),
+      ]),
+    )!.xml;
+    expect(xml).toContain('<description>10 Zinc Pin (Zinc alloy)</description>');
+    expect(xml).toContain('<description>2 Gold Pin (Gold plate)</description>');
+  });
+
+  it('leaves the description alone when there is no material', () => {
+    const xml = buildEdecXml(state([product({ id: 'a', title: 'Print', tariffNo: '4911.91.00', material: '', soldQty: 5 })]))!.xml;
+    expect(xml).toContain('<description>5 Print</description>');
   });
 });

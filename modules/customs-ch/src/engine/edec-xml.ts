@@ -181,7 +181,11 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
     lines.push(`      <GoodsItemType>`);
     lines.push(`        <traderItemID>${idx}</traderItemID>`);
-    lines.push(`        <description>${escapeXml(g.soldQty + ' ' + g.titles.join(', '))}</description>`);
+    // Material is part of what makes a position (see the grouping above), so
+    // it goes in the description too: "14 Dragon Pin, Wolf Pin (Zinc alloy)".
+    const material = g.material.trim();
+    const description = `${g.soldQty} ${g.titles.join(', ')}${material ? ` (${material})` : ''}`;
+    lines.push(`        <description>${escapeXml(description)}</description>`);
     lines.push(`        <commodityCode>${escapeXml(hsCode)}</commodityCode>`);
     lines.push(`        <grossMass>${weightKg}</grossMass>`);
     lines.push(`        <netMass>${weightKg}</netMass>`);

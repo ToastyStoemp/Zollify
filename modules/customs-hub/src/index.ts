@@ -13,7 +13,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-hub',
-  version: '0.1.1',
+  version: '0.1.2',
   sdk: '^0.1.0',
   title: 'Customs',
   description: 'One place to pick Swiss or German customs paperwork and jump to declarant settings.',

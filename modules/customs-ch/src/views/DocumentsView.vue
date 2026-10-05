@@ -24,6 +24,7 @@ import {
 import { DECLARANT_KEY } from './declarant';
 import { sdk } from '../runtime';
 import { setEventLink } from '@zollify/customs-core';
+import { EDEC_WEB_URL, autoCompanyCode as autoCodeFor } from '../bundle';
 
 /**
  * One event's customs paperwork - ZollTool's screen. Everything typed here is
@@ -185,16 +186,7 @@ const combinedEventsSummary = computed(() =>
 );
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
-const autoCompanyCode = computed(() => {
-  const name = (artist.value.companyName || artist.value.fullName || '').trim();
-  if (!name) return '';
-  const words = name.split(/\s+/).filter(Boolean);
-  const raw = words.length > 1 ? words.map((w) => w[0]).join('') : name.slice(0, 3);
-  return raw
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 6);
-});
+const autoCompanyCode = computed(() => autoCodeFor(artist.value));
 const effectiveCompanyCode = computed(() => companyCode.value.trim() || autoCompanyCode.value);
 
 // ── Live state for the generators ───────────────────────────────────────────
@@ -307,9 +299,6 @@ const openProforma = () => state.value && openHtml(buildProformaHtml(state.value
 const openProformaEu = () => state.value && openHtml(buildProformaEuHtml(state.value), safeName('proforma_eu'));
 const open1174 = () => state.value && openHtml(build1174Html(state.value), safeName('form_1174'));
 const open1187 = () => state.value && openHtml(build1187Html(state.value), safeName('form_1187'));
-/** The Swiss customs office's (BAZG) own e-dec web portal, where the XML is filed. */
-const EDEC_WEB_URL = 'https://e-dec-web.ezv.admin.ch/webdec/main.xhtml';
-
 function exportEdec(): void {
   if (!state.value) return;
   const result = buildEdecXml(state.value);

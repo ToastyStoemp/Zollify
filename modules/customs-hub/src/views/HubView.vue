@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { collectBundleProviders, type CustomsPhase } from '@zollify/customs-core';
+import { htmlDocsToPdf, Icon } from '@zollify/ui';
 import { sdk } from '../runtime';
 
 interface CountryCard {
@@ -50,6 +52,63 @@ function openTarget(c: CountryCard) {
     ? { name: c.documentsRoute, params: { eventId: eventId.value } }
     : { name: c.indexRoute };
 }
+
+// ── Export all documents ─────────────────────────────────────────────────────
+// Each installed country module builds its own documents, in its own
+// currency (see CustomsBundleProvider); this page only renders them into one
+// PDF per country and hands the files over.
+
+/** Without an event from the URL, pick one here - the active event first. */
+const events = computed(() =>
+  [...sdk().data.events.list()].sort((a, b) => (b.dateStart || '').localeCompare(a.dateStart || '') || a.name.localeCompare(b.name)),
+);
+const pickedEventId = ref(sdk().data.events.active()?.id ?? '');
+const exportEventId = computed(() => eventId.value ?? (pickedEventId.value || null));
+
+interface ExportResult {
+  phase: CustomsPhase;
+  saved: string[];
+  links: { label: string; url: string }[];
+  notes: string[];
+}
+const exporting = ref<CustomsPhase | null>(null);
+const exportError = ref<string | null>(null);
+const result = ref<ExportResult | null>(null);
+
+async function exportAll(phase: CustomsPhase): Promise<void> {
+  const id = exportEventId.value;
+  if (!id) return;
+  exporting.value = phase;
+  exportError.value = null;
+  result.value = null;
+  const out: ExportResult = { phase, saved: [], links: [], notes: [] };
+  try {
+    const providers = collectBundleProviders(sdk().events);
+    if (!providers.length) throw new Error('No customs country module is running on this device.');
+    for (const provider of providers) {
+      const bundle = await provider.build(id, phase);
+      if (!bundle) continue;
+      if (bundle.docs.length) {
+        const name = `${bundle.fileBase}_${phase}_${provider.country}_${bundle.currency}.pdf`;
+        const pdf = await htmlDocsToPdf(bundle.docs.map((d) => d.html));
+        await sdk().ui.saveFile(name, pdf, 'application/pdf');
+        out.saved.push(`${name} - ${bundle.country}, ${bundle.currency}: ${bundle.docs.map((d) => d.title).join(', ')}`);
+      }
+      for (const f of bundle.files) {
+        await sdk().ui.saveFile(f.filename, f.content, f.mimeType);
+        out.saved.push(`${f.filename} - ${bundle.country}`);
+      }
+      out.links.push(...bundle.links);
+      out.notes.push(...bundle.notes.map((n) => `${bundle.country}: ${n}`));
+    }
+    result.value = out;
+  } catch (err) {
+    exportError.value = err instanceof Error ? err.message : 'Could not export the documents.';
+    if (out.saved.length) result.value = out;
+  } finally {
+    exporting.value = null;
+  }
+}
 </script>
 
 <template>
@@ -64,7 +123,41 @@ function openTarget(c: CountryCard) {
       Neither the Switzerland nor Germany customs module is installed. Add one under Settings → Modules.
     </p>
 
-    <div v-else class="cards">
+    <article v-if="countries.length" class="card export">
+      <h2>Export all documents</h2>
+      <p class="desc">
+        Every installed country's paperwork at once - one PDF per country, in that country's currency.
+        <strong>Before</strong>: packing list and proforma invoice. <strong>After</strong>: return / re-import and sold goods lists, plus the Swiss e-dec XML.
+      </p>
+      <label v-if="!eventId" class="pick">
+        <span>Event</span>
+        <select v-model="pickedEventId">
+          <option value="" disabled>Choose an event</option>
+          <option v-for="e in events" :key="e.id" :value="e.id">{{ e.name }}{{ e.dateStart ? ` (${e.dateStart})` : '' }}</option>
+        </select>
+      </label>
+      <div class="row">
+        <button type="button" class="btn-primary" :disabled="!exportEventId || exporting !== null" @click="exportAll('before')">
+          <Icon name="download" :size="14" /> {{ exporting === 'before' ? 'Exporting…' : 'Before the event' }}
+        </button>
+        <button type="button" class="btn-primary" :disabled="!exportEventId || exporting !== null" @click="exportAll('after')">
+          <Icon name="download" :size="14" /> {{ exporting === 'after' ? 'Exporting…' : 'After the event' }}
+        </button>
+      </div>
+      <p v-if="exportError" class="error" role="alert">{{ exportError }}</p>
+      <div v-if="result" class="result" role="status">
+        <p class="ok"><Icon name="check" :size="14" /> {{ result.phase === 'before' ? 'Before-event' : 'After-event' }} documents saved:</p>
+        <ul>
+          <li v-for="s in result.saved" :key="s">{{ s }}</li>
+        </ul>
+        <p v-for="n in result.notes" :key="n" class="desc">{{ n }}</p>
+        <a v-for="l in result.links" :key="l.url" :href="l.url" target="_blank" rel="noopener" class="link-btn">
+          <Icon name="external-link" :size="14" /> {{ l.label }}
+        </a>
+      </div>
+    </article>
+
+    <div v-if="countries.length" class="cards">
       <article v-for="c in countries" :key="c.key" class="card">
         <div class="flag">{{ c.flag }}</div>
         <h2>{{ c.title }}</h2>
@@ -95,4 +188,15 @@ function openTarget(c: CountryCard) {
 .primary:hover { background: var(--zfy-accent-ink, #0a5a4a); }
 .secondary { border: 1px solid var(--zfy-line, #d6dde4); color: inherit; }
 .secondary:hover { border-color: var(--zfy-accent, #0e7c66); }
+.export { margin-bottom: 1rem; }
+.pick { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; max-width: 22rem; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; }
+.btn-primary { display: inline-flex; align-items: center; gap: .4rem; background: var(--zfy-accent, #0e7c66); border-color: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); }
+.btn-primary:hover:not(:disabled) { filter: brightness(.92); background: var(--zfy-accent, #0e7c66); }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
+.result { display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.result ul { margin: 0; padding-left: 1.1rem; font-size: .85rem; }
+.ok { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); display: inline-flex; align-items: center; gap: .35rem; font-weight: 600; }
+.link-btn { display: inline-flex; align-items: center; gap: .4rem; text-decoration: none; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; padding: .45rem .95rem; color: inherit; font-weight: 500; font-size: .875rem; }
+.link-btn:hover { background: var(--zfy-surface-2, #e9edf1); }
 </style>

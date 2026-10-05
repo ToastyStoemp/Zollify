@@ -20,6 +20,22 @@ import html2canvas from 'html2canvas';
  * one-page content and several for anything taller, e.g. a long goods list.
  */
 export async function htmlToPdf(html: string): Promise<Blob> {
+  return htmlDocsToPdf([html]);
+}
+
+/**
+ * Several documents in one PDF, each starting on a fresh page in its own
+ * orientation - "export all documents" hands over one file per country
+ * instead of one per document.
+ */
+export async function htmlDocsToPdf(htmls: string[]): Promise<Blob> {
+  if (!htmls.length) throw new Error('Nothing to put in the PDF.');
+  let pdf: jsPDF | null = null;
+  for (const html of htmls) pdf = await renderInto(pdf, html);
+  return pdf!.output('blob');
+}
+
+async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> {
   const landscape = /@page\s*\{[^}]*\blandscape\b/i.test(html);
   const pageWidthMm = landscape ? 297 : 210;
   const pageHeightMm = landscape ? 210 : 297;
@@ -58,13 +74,14 @@ export async function htmlToPdf(html: string): Promise<Blob> {
     const pxPerMm = canvas.width / pageWidthMm;
     const pageHeightPx = Math.round(pageHeightMm * pxPerMm);
 
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait' });
+    const pdf = existing ?? new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait' });
     const slice = document.createElement('canvas');
     slice.width = canvas.width;
     const sliceCtx = slice.getContext('2d');
     if (!sliceCtx) throw new Error('Could not prepare the PDF image.');
 
-    for (let y = 0, first = true; y < canvas.height; y += pageHeightPx, first = false) {
+    // A new document always starts a new page; only the very first page of a fresh PDF is already there.
+    for (let y = 0, first = !existing; y < canvas.height; y += pageHeightPx, first = false) {
       const sliceHeightPx = Math.min(pageHeightPx, canvas.height - y);
       slice.height = sliceHeightPx;
       sliceCtx.clearRect(0, 0, slice.width, slice.height);
@@ -73,7 +90,7 @@ export async function htmlToPdf(html: string): Promise<Blob> {
       pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm);
     }
 
-    return pdf.output('blob');
+    return pdf;
   } finally {
     document.body.removeChild(iframe);
   }

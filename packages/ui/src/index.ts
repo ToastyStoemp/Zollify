@@ -29,7 +29,7 @@ export { default as CurrencyPicker } from './CurrencyPicker.vue';
 export { default as DateRangePicker } from './DateRangePicker.vue';
 export { default as DeclarantForm } from './DeclarantForm.vue';
 export type { DeclarantFormModel } from './DeclarantForm.vue';
-export { htmlToPdf } from './pdf';
+export { htmlDocsToPdf, htmlToPdf } from './pdf';
 export { default as QrCode } from './QrCode.vue';
 export { default as AfterSalePanel } from './AfterSalePanel.vue';
 export { qrPngBase64 } from './qr-raster';

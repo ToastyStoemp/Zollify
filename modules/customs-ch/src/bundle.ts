@@ -2,6 +2,8 @@ import type { SalesEvent } from '@zollify/shared';
 import { fileSafe, type CustomsBundle, type CustomsBundleProvider, type CustomsPhase } from '@zollify/customs-core';
 import { buildCustomsState, readCustomsBlob } from './engine/adapter';
 import { buildEdecXml } from './engine/edec-xml';
+import { build1174Html } from './engine/form1174';
+import { build1187Html } from './engine/form1187';
 import { buildGoodsListHtml } from './engine/goods-list';
 import { buildPackingListHtml } from './engine/packing-list';
 import { buildProformaHtml } from './engine/proforma';
@@ -69,9 +71,18 @@ export async function storedCustomsState(ev: SalesEvent): Promise<CustomsState> 
   return buildCustomsState(withSaved, api.products.list(), stock, api.transactions.recent(), combined, api.events.list());
 }
 
+/** Forms 11.74 (temporary admission) and 11.87 (its conclusion) - part of both sets. */
+function swissForms(state: CustomsState): CustomsBundle['docs'] {
+  return [
+    { title: 'Form 11.74', html: build1174Html(state) },
+    { title: 'Form 11.87', html: build1187Html(state) },
+  ];
+}
+
 /**
- * Before: the import packing list and proforma invoice. After: the return
- * goods list, the sold goods list and the e-dec XML, with the e-dec web
+ * Before: the import packing list, proforma invoice and forms 11.74/11.87.
+ * After: the return
+ * goods list, the sold goods list, forms 11.74/11.87 and the e-dec XML, with the e-dec web
  * portal to file it in.
  */
 export function swissDocuments(state: CustomsState, phase: CustomsPhase, fileBase: string): CustomsBundle {
@@ -87,10 +98,12 @@ export function swissDocuments(state: CustomsState, phase: CustomsPhase, fileBas
   if (phase === 'before') {
     bundle.docs.push({ title: 'Packing list (import)', html: buildPackingListHtml(state, 'detailed') });
     bundle.docs.push({ title: 'Proforma invoice', html: buildProformaHtml(state) });
+    bundle.docs.push(...swissForms(state));
     return bundle;
   }
   bundle.docs.push({ title: 'Return goods list', html: buildGoodsListHtml(state, 3, 'detailed') });
   bundle.docs.push({ title: 'Sold goods list', html: buildGoodsListHtml(state, 2, 'detailed') });
+  bundle.docs.push(...swissForms(state));
   const edec = buildEdecXml(state);
   if (edec) bundle.files.push({ filename: edec.filename, content: edec.xml, mimeType: 'application/xml' });
   else bundle.notes.push('No e-dec XML: nothing has sold yet.');

@@ -6,7 +6,7 @@
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { toLocalPrice } from '@zollify/shared';
-import { capSoldToBrought, discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, discountFraction, tripSpan } from '@zollify/customs-core';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';
@@ -41,6 +41,8 @@ export function buildCustomsState(
   stock: EventStock[],
   transactions: Transaction[],
   combinedEventIds: string[] = [],
+  /** The events behind combinedEventIds, so the documents can name the whole trip. */
+  combinedEvents: SalesEvent[] = [],
 ): CustomsState {
   const blob = readCustomsBlob(event);
   const eventIds = new Set([event.id, ...combinedEventIds]);
@@ -156,13 +158,15 @@ export function buildCustomsState(
     });
 
   const bm = blob.meta ?? {};
+  const trip = tripSpan(event, combinedEvents.filter((e) => combinedEventIds.includes(e.id)));
   const meta: CustomsMeta = {
     ...defaultCustomsMeta(),
     ...bm,
     // The event record is the source of truth for everything it owns
-    event: event.name,
-    eventDateStart: event.dateStart || bm.eventDateStart || '',
-    eventDateEnd: event.dateEnd || bm.eventDateEnd || '',
+    // Linked events: every name, and the first start to the last end.
+    event: trip.name,
+    eventDateStart: trip.dateStart || bm.eventDateStart || '',
+    eventDateEnd: trip.dateEnd || bm.eventDateEnd || '',
     eventLocation: bm.eventLocation || event.venue.city || '',
     venueStreet: event.venue.street || bm.venueStreet || '',
     venuePostcode: event.venue.postcode || bm.venuePostcode || '',

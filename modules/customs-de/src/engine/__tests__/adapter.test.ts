@@ -81,6 +81,23 @@ describe('buildCustomsDeState - combining sales from other events (same trip, tw
     expect(p.soldValue).toBe(30); // 10 (ev1) + 20 (ev2)
   });
 
+  it('names every linked event and spans from the first start to the last end', () => {
+    const a: SalesEvent = { ...event, dateStart: '2026-05-01', dateEnd: '2026-05-03' };
+    const b: SalesEvent = { ...event2, dateStart: '2026-05-08', dateEnd: '2026-05-10' };
+    const state = buildCustomsDeState(b, [product({ price: 10 })], stock, [tx1, tx2], ['ev1'], [a, b]);
+    expect(state.meta.event).toBe('Con / Con 2');
+    expect(state.meta.eventDateStart).toBe('2026-05-01');
+    expect(state.meta.eventDateEnd).toBe('2026-05-10');
+  });
+
+  it('keeps this event\'s own name and dates when nothing is linked', () => {
+    const a: SalesEvent = { ...event, dateStart: '2026-05-01', dateEnd: '2026-05-03' };
+    const state = buildCustomsDeState(a, [product({ price: 10 })], stock, [tx1], [], [a, event2]);
+    expect(state.meta.event).toBe('Con');
+    expect(state.meta.eventDateStart).toBe('2026-05-01');
+    expect(state.meta.eventDateEnd).toBe('2026-05-03');
+  });
+
   it('combining from the other direction (viewing event 2) still only uses event 2\'s own brought stock', () => {
     const state = buildCustomsDeState(event2, [product({ price: 10 })], stock, [tx1, tx2], ['ev1']);
     const p = state.products[0]!;

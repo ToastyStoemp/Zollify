@@ -54,6 +54,12 @@ function toMinor(value: number): number {
   return Math.round(value * 100);
 }
 
+/** The till's snapshot, minus a per-line discount list that doesn't pair with the items. */
+function asChargedFor(snap: NonNullable<SaleEvent['asCharged']>, itemCount: number): NonNullable<Transaction['asCharged']> {
+  const { lineDiscounts, ...rest } = snap;
+  return lineDiscounts && lineDiscounts.length === itemCount ? { ...rest, lineDiscounts } : rest;
+}
+
 /**
  * Turns the SDK's cross-module `sale` announcement into a stored Transaction.
  *
@@ -105,7 +111,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
     total: sale.total,
     currency: sale.currency,
     ...(sale.receiptToken ? { receiptToken: sale.receiptToken } : {}),
-    ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: sale.asCharged } : {}),
+    ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: asChargedFor(sale.asCharged, items.length) } : {}),
     ...(sale.tax && sale.tax.rates.length === items.length ? { tax: sale.tax } : {}),
     // Only set when the sale was converted; an unconverted sale leaves these
     // absent rather than duplicating its own currency into them.

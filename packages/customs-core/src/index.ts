@@ -30,7 +30,7 @@
  * genuinely different fields (CH's 11.74/11.87, e-dec XML; DE's DEXPDF XML,
  * IAA-Plus sheet) still stay separate per-country.
  */
-import { COUNTRY_CODES, type Transaction } from '@zollify/shared';
+import { COUNTRY_CODES, splitAmount, type Transaction } from '@zollify/shared';
 export * from './goods-doc';
 export * from './proforma-doc';
 export * from './event-links';
@@ -374,29 +374,47 @@ export function capSoldToBrought(sold: { qty: number; value: number }, brought: 
   const cap = Math.max(0, brought);
   if (sold.qty <= cap) return sold;
   const scaled = sold.qty > 0 ? (sold.value * cap) / sold.qty : 0;
-  // Keep whole amounts whole (see discountedLineValues); otherwise to the cent.
+  // Keep whole amounts whole (see declaredLineValues); otherwise to the cent.
   return { qty: cap, value: Number.isInteger(sold.value) ? Math.round(scaled) : Math.round(scaled * 100) / 100 };
 }
 
 /**
- * Each line's share of what the customer actually paid, in whole currency
- * units. A bundle price or custom discount reduces the whole sale, so it is
- * spread over the lines in proportion to their value - but split exactly,
- * that gave documents values like 174.82. Instead each line gets its share
- * rounded down, and the units left over go to the lines with the largest
- * remainders, so the lines still add up to the discounted total (rounded to
- * a whole unit): 25 off 40 / 30 / 30 gives 30 / 23 / 22, not 30 / 22.50 / 22.50.
+ * What each line of a sale is declared at, in whole currency units, adding
+ * up to what was actually paid (rounded to a whole unit).
  *
- * A sale with no discount keeps its line values exactly as charged.
+ * `layer` picks the currency: 'charged' is what the customer paid in (the
+ * Swiss documents, which declare in the event's local currency), 'book' the
+ * booth's book currency (the German documents).
+ *
+ * - Sales recorded with the till's own split (`asCharged.lineDiscounts`):
+ *   each rule's discount already sits on the lines it matched, so those
+ *   values are used as they are - only re-split if they carry cents.
+ * - Older sales and imports: the paid total is split over the lines' list
+ *   prices. Discounts recorded before the till kept the split were spread
+ *   over the whole basket, so this is the best that can be recovered.
+ *
+ * Splits use splitAmount: rounded down, leftover units to the largest
+ * remainders - 25 off 40 / 30 / 30 gives 30 / 23 / 22, not 30 / 22.50 / 22.50.
  */
-export function discountedLineValues(lineValues: number[], keep: number): number[] {
-  if (keep >= 1) return [...lineValues];
-  const exact = lineValues.map((v) => v * Math.max(0, keep));
-  const target = Math.round(exact.reduce((s, v) => s + v, 0));
-  const out = exact.map((v) => Math.floor(v + 1e-9));
-  let left = target - out.reduce((s, v) => s + v, 0);
-  // Largest remainder first; ties keep line order so the result is stable.
-  const order = exact.map((v, i) => ({ i, rem: v - out[i]! })).sort((a, b) => b.rem - a.rem || a.i - b.i);
-  for (let k = 0; left > 0 && order.length; k = (k + 1) % order.length, left--) out[order[k]!.i]! += 1;
-  return out;
+export function declaredLineValues(tx: Transaction, layer: 'charged' | 'book'): number[] {
+  const snap = tx.asCharged;
+  const recorded = !!snap && snap.listTotals.length === tx.items.length && snap.lineDiscounts?.length === tx.items.length;
+  const converted = !!tx.baseCurrency && tx.baseCurrency !== tx.currency && (tx.baseTotal ?? 0) > 0;
+  const paid = Math.round(layer === 'book' && converted ? tx.baseTotal! : tx.total);
+
+  let weights: number[];
+  if (recorded) {
+    // Net per line: charged figures on the snapshot, book figures on the lines.
+    weights = layer === 'charged' || !converted ? snap!.listTotals.map((t, i) => t - snap!.lineDiscounts![i]!) : tx.items.map((i) => i.lineTotal);
+  } else if (layer === 'charged' && snap && snap.listTotals.length === tx.items.length) {
+    weights = [...snap.listTotals];
+  } else {
+    // List price per line: a till sale's unitPrice is in book currency, an
+    // import's in the charged one with the book price alongside.
+    weights = tx.items.map((i) => (layer === 'book' && i.baseUnitPrice != null ? i.baseUnitPrice : i.unitPrice) * i.qty);
+  }
+  weights = weights.map((w) => Math.round(w * 100) / 100);
+  const sum = Math.round(weights.reduce((a, b) => a + b, 0) * 100) / 100;
+  if (sum === paid && weights.every(Number.isInteger)) return weights;
+  return splitAmount(paid, weights, { wholeUnits: true });
 }

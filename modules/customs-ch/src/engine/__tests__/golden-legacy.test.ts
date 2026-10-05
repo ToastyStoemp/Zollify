@@ -434,9 +434,20 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1174();
       const ported = build1174Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
+      // Deliberate change: box 3 names the booth "c/o" the event instead of
+      // the event alone, and box 28 (user of the goods) names the booth -
+      // legacy left it empty. Everything else must match value for value.
+      const event = make().meta.event;
+      const legacyValues = filledValues(captured.html[0]!).filter((v) => !v.startsWith(event));
       const values = filledValues(ported);
-      expect(values.length).toBeGreaterThan(5);
-      expect(values).toEqual(filledValues(captured.html[0]!));
+      const added = [...values];
+      for (const v of legacyValues) {
+        const i = added.indexOf(v);
+        expect(i, `legacy value missing: ${v}`).toBeGreaterThanOrEqual(0);
+        added.splice(i, 1);
+      }
+      expect(added).toHaveLength(2);
+      expect(added.some((v) => v.includes(`c/o ${event}`))).toBe(true);
     }
   });
 

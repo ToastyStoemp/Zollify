@@ -22,6 +22,18 @@ export function build1174Html(state: CustomsState, now: Date = new Date()): stri
   const venueLines = [m.event, m.venueStreet, [m.venuePostcode, m.venueCity].filter(Boolean).join(' '), m.venueCountry || '']
     .filter(Boolean)
     .join('\n');
+  // Box 3 is the importer: the booth bringing the goods in, care of the
+  // venue where they are used - the venue alone read as if the event itself
+  // imported the stock. The venue's Swiss address stays, matching box 5's PLZ.
+  const artistNames = [a.companyName, a.fullName].filter(Boolean);
+  const recipientLines = artistNames.length
+    ? [...artistNames, m.event ? `c/o ${m.event}` : '', m.venueStreet, [m.venuePostcode, m.venueCity].filter(Boolean).join(' '), m.venueCountry || '']
+        .filter(Boolean)
+        .join('\n')
+    : venueLines;
+  // Box 28, the user of the goods: whoever actually has control of them (the
+  // form's own instructions) - the booth itself.
+  const userOfGoods = artistNames.join(', ');
 
   const vehicleCC = (e.transportationCountry || '').trim().toUpperCase();
   const transportMode = e.transportMode || '3';
@@ -75,7 +87,7 @@ export function build1174Html(state: CustomsState, now: Date = new Date()): stri
     // Left column: 1-5
     box(0, 0, L, 25, label('1', ['Versender', 'Expéditeur', 'Speditore']) + `<div class="val beside">${fv(senderBlock, true)}</div>`, 'thick-l thick-t'),
     box(0, 25, L, 17, label('2', ['Eigentümer der Ware', 'Propriétaire de la marchandise', 'Proprietario della merce']) + `<div class="val beside">${fv(senderBlock, true)}</div>`, 'thick-l'),
-    box(0, 42, L, 25, label('3', ['Empfänger/Importeur', 'Destinataire/Importateur', 'Destinatario/Importatore']) + `<div class="val beside">${fv(venueLines, true)}</div>`, 'thick-l'),
+    box(0, 42, L, 25, label('3', ['Empfänger/Importeur', 'Destinataire/Importateur', 'Destinatario/Importatore']) + `<div class="val beside">${fv(recipientLines, true)}</div>`, 'thick-l'),
     box(0, 67, L, 17,
       label('4', ['Präferenzbehandlung - Régime préférentiel - Trattamento preferenziale']) +
       `<div style="display:flex;gap:3mm;margin:0.3mm 0 0 3.4mm">${checkbox(false, ['Europäische Freihandelszone', 'Zone européenne de libre-échange', 'Zona europea di libero scambio'])}${checkbox(false, ['Allgemeines Präferenzsystem', 'Système généralisé de préférences', 'Sistema generale di preferenze'])}</div>` +
@@ -125,6 +137,7 @@ export function build1174Html(state: CustomsState, now: Date = new Date()): stri
     // 28-31 and the duties block
     box(0, 160.5, L, 25,
       label('28', ['Verwender der Ware', 'Utilisateur de la marchandise', 'Utilizzatore della merce']) +
+      `<div class="val beside">${fv(userOfGoods)}</div>` +
       `<div style="position:absolute;left:0.8mm;top:15.5mm;display:flex;gap:22mm">${label('29', ['MWST-Nr.', 'No TVA', 'N. IVA'])}${label('', ['MWST-Code', 'Code-TVA', 'Codice-IVA'])}</div>`, 'thick-l'),
     fill(15.5, 51, 183.5),
     fill(69, 89, 183.5),

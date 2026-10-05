@@ -1,4 +1,6 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
+import { CUSTOMS_BUNDLE_REQUEST, type CustomsBundleRequest } from '@zollify/customs-core';
+import { swissBundleProvider } from './bundle';
 import { clearSdk, setSdk } from './runtime';
 
 /**
@@ -41,6 +43,9 @@ export default defineModule({
       component: () => import('./views/DeclarantSettings.vue'),
       order: 120,
     });
+
+    // The customs hub's "export all documents" buttons ask each country module for its documents.
+    sdk.events.on(CUSTOMS_BUNDLE_REQUEST, (req) => (req as CustomsBundleRequest).providers.push(swissBundleProvider));
 
     sdk.log.info('customs module ready');
   },

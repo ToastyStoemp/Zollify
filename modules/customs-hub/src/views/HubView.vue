@@ -128,6 +128,7 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
       <p class="desc">
         Every installed country's paperwork at once - one PDF per country, in that country's currency.
         <strong>Before</strong>: packing list and proforma invoice. <strong>After</strong>: return / re-import and sold goods lists, plus the Swiss e-dec XML.
+        Switzerland also gets forms 11.74 and 11.87 in both.
       </p>
       <label v-if="!eventId" class="pick">
         <span>Event</span>

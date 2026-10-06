@@ -29,6 +29,7 @@ What the server guarantees, and the settings that matter for it. Regression test
 - **Webhooks**: public https addresses only. Loopback, private, link-local, carrier NAT, benchmark ranges and IPv6 forms that wrap them are refused. The address is checked again when connecting, so DNS rebinding does not help, and only a few KB of the answer is read.
 - **Integrations** (Lexware, myPOS, SumUp, Shopify): only the providers' own hosts, and no redirects.
 - **Peppol**: Storecove's fixed address only. The Peppol Directory lookup accepts strict identifiers only.
+- **Nexi SmartPOS**: Poynt's fixed API host only (services-eu.poynt.net, or services.poynt.net). The terminal's callbacks only count on the per-payment URL Poynt was given (a random secret in the path), only for the exact amount and currency asked, and a final outcome is never overwritten. Connecting a Nexi account takes a one-time context we issued, a fresh code made out to this app (signature checked when `POYNT_AUTH_PUBLIC_KEY` is set), Poynt confirming the app can see that business, and a business links to one account only.
 
 ## Output
 

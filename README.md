@@ -16,7 +16,7 @@ and never import one another.
   the Node process holding the database and every tenant's API keys.
 - **Install online, boot offline.** The network is on the install path only. A
   booth with no signal boots every module it already has, out of IndexedDB.
-- **Zollify never touches the sale.** myPOS and SumUp terminals take the card and
+- **Zollify never touches the sale.** myPOS, SumUp and Nexi SmartPOS terminals take the card and
   settle to the vendor's own bank. That keeps PCI scope and money-transmission
   licensing out of the platform - see [SECURITY.md](./SECURITY.md).
 
@@ -269,6 +269,15 @@ modules post through `ctx.webhooks.emit()` and add summary lines with
 `webhookReport`. Deliveries go out one at a time per webhook, never hold up
 a sale, and a webhook that keeps failing switches itself off. The server only
 posts to public https addresses unless `WEBHOOK_ALLOW_PRIVATE=1`.
+
+*Nexi SmartPOS* (Nets SmartPOS N950, e.g. in Denmark) - card payments start
+from any till over the cloud: the server sends the amount to the terminal
+through Poynt's Payment Bridge (the platform SmartPOS runs on), the customer
+pays there, and the terminal posts the outcome back to a one-off callback
+URL. The account is connected once under Settings → Payments (the owner
+allows Zollify on their Nexi/Poynt account) and each till picks its
+terminal. The server needs a Poynt cloud app - see `POYNT_*` in
+`apps/server/.env.example`. Not yet tried against a live terminal.
 
 *E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
 invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B

@@ -5,6 +5,7 @@ import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
+import { SMARTPOS_TERMINAL_SETTING, loadSmartposTerminals, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
 import { sdk } from '../runtime';
@@ -55,13 +56,55 @@ onMounted(async () => {
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
+  smartposTerminal.value = (await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING))?.deviceId ?? '';
+  if (active.value === 'nexi-smartpos') void refreshSmartpos();
+  // Back from Nexi/Poynt after connecting (or not).
+  const outcome = new URLSearchParams(location.hash.split('?')[1] ?? '').get('smartpos');
+  if (outcome) {
+    const text: Record<string, string> = {
+      connected: 'Nexi account connected - now pick this till’s terminal.',
+      declined: 'Connecting was cancelled on the Nexi page.',
+      expired: 'That link had expired - try Connect again.',
+      in_use: 'That Nexi account is already connected to another Zollify account.',
+      not_configured: 'This server is not set up for Nexi SmartPOS.',
+      failed: 'Nexi did not confirm the connection - try again.',
+    };
+    sdk().ui.toast(text[outcome] ?? 'Back from Nexi.', { kind: outcome === 'connected' ? 'success' : 'warning', timeoutMs: 7000 });
+    if (outcome === 'connected') {
+      await select('nexi-smartpos');
+      void refreshSmartpos();
+    }
+  }
 });
+
+// ── Nexi SmartPOS: which terminal this till sends payments to ───────────────
+const smartposTerminals = ref<SmartposTerminal[]>([]);
+const smartposTerminal = ref('');
+const smartposError = ref('');
+async function refreshSmartpos(): Promise<void> {
+  smartposError.value = '';
+  try {
+    smartposTerminals.value = await loadSmartposTerminals();
+  } catch (err) {
+    const body = (err as { body?: { error?: string; message?: string } } | null)?.body;
+    smartposTerminals.value = [];
+    // Not connected yet is what the hint below already says.
+    smartposError.value = body?.error === 'not_connected' ? '' : (body?.message ?? 'Could not load your terminals.');
+  }
+}
+async function saveSmartposTerminal(): Promise<void> {
+  const t = smartposTerminals.value.find((x) => x.deviceId === smartposTerminal.value) ?? null;
+  await setSetting(SMARTPOS_TERMINAL_SETTING, t);
+  sdk().ui.toast(t ? `Card payments go to ${t.name}.` : 'Terminal cleared.', { kind: 'success' });
+  void refreshStatuses();
+}
 onUnmounted(() => clearInterval(pollTimer));
 
 async function select(id: PaymentProviderId): Promise<void> {
   active.value = id;
   await sdk().config.set('activeProvider', id);
   onActiveProviderChanged(id);
+  if (id === 'nexi-smartpos') void refreshSmartpos();
   sdk().ui.toast('Payment provider updated.', { kind: 'success' });
   void refreshStatuses();
 }
@@ -147,6 +190,19 @@ async function removeMethod(name: string): Promise<void> {
         <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="From the SumUp developer dashboard" @change="saveKey" />
       </label>
       <p class="hint">Save the key and tap <strong>Connect</strong> to log in once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+    </template>
+
+    <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">
+      <div class="carbon">
+        <div class="row"><span class="label">This till’s Nexi terminal</span><button type="button" class="quiet" @click="refreshSmartpos">Refresh</button></div>
+        <select v-if="smartposTerminals.length" v-model="smartposTerminal" @change="saveSmartposTerminal">
+          <option value="" disabled>Choose a terminal…</option>
+          <option v-for="t in smartposTerminals" :key="t.deviceId" :value="t.deviceId">{{ t.name }}{{ t.storeName ? ` - ${t.storeName}` : '' }}{{ t.serial ? ` (${t.serial})` : '' }}</option>
+        </select>
+        <p v-else-if="smartposError" class="error">{{ smartposError }}</p>
+        <p v-else class="hint">Tap <strong>Connect</strong> above to allow Zollify on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
+        <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. Each till can use its own terminal.</p>
+      </div>
     </template>
 
     <template v-if="active === 'mypos-carbon-remote'">

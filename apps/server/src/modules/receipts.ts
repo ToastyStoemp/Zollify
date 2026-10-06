@@ -11,6 +11,7 @@ import {
   type ServerModule,
 } from '@zollify/server-core';
 import { POW_SOLVER_JS } from './pow-client';
+import { migrateSmartpos, registerSmartpos, registerSmartposPublic } from './smartpos';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -423,10 +424,15 @@ function ipOf(req: FastifyRequest): string {
 
 export const receiptsServerModule: ServerModule = {
   id: MODULE_ID,
-  migrate,
+  migrate: (db) => {
+    migrate(db);
+    migrateSmartpos(db);
+  },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {
+    // Nexi SmartPOS card payments - see smartpos.ts.
+    registerSmartpos(app, ctx);
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
@@ -455,6 +461,8 @@ export const receiptsServerModule: ServerModule = {
   },
 
   publicRoutes: (ctx: PublicModuleContext) => async (app) => {
+    // The merchant coming back from Poynt, and the terminal's payment callbacks.
+    registerSmartposPublic(app, ctx);
     // Undo the /p/ prefix's cross-origin allowances: a receipt is never meant
     // to be embedded or fetched from anywhere but its own page.
     app.addHook('onSend', async (_req, reply) => {

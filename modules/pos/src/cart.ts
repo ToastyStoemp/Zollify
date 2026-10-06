@@ -6,6 +6,7 @@ import { getProvider } from './payments/registry';
 import { sdk } from './runtime';
 import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
+  allocateDiscounts,
   computeCartTotals,
   distributeTotal,
   type CartLine as DiscountCartLine,
@@ -322,13 +323,20 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       cardBrand = result.cardBrand;
     }
 
-    // Discounts are spread proportionally across the lines so the recorded
-    // line totals add up to what was actually paid. Distributed against the
-    // base total: line figures stay in the currency the books are kept in.
-    const priced = distributeTotal(
-      cart.lines.map((line) => ({ ...line, lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100 })),
-      base,
-    );
+    // Each discount lands on the lines it belongs to - a rule's on the lines
+    // it matched, a one-off one on the whole sale - in whole units where the
+    // amounts are whole (allocateDiscounts). Line totals stay in the currency
+    // the books are kept in; the charged currency's split goes on asCharged.
+    const baseShares = allocateDiscounts(discountLines.value, totals.value);
+    const chargeShares = allocateDiscounts(chargeLines.value, chargeTotals.value);
+    let priced = cart.lines.map((line, i) => ({
+      ...line,
+      lineTotal: round2((Math.round(line.unitPrice * 100) * line.qty) / 100 - baseShares[i]!),
+    }));
+    // Safety net: if the split ever disagrees with the total (a discount
+    // capped at a line's value, the total floored at zero), fall back to
+    // spreading the difference so the lines still add up to what was paid.
+    if (Math.abs(priced.reduce((sum, l) => sum + l.lineTotal, 0) - base) > 0.001) priced = distributeTotal(priced, base);
 
     const tax = saleTaxFor(cart.eventId, priced.map((l) => l.productId));
     const sale: SaleEvent = {
@@ -350,9 +358,14 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // discount by name, in the charged currency.
       asCharged: {
         listTotals: chargeLines.value.map((l) => l.lineTotal),
+        lineDiscounts: chargeShares,
         discounts: [
-          ...chargeTotals.value.ruleDiscounts.filter((r) => r.amount > 0).map((r) => ({ name: r.rule.name, amount: r.amount })),
-          ...(cart.custom && chargeTotals.value.customDiscountAmount > 0 ? [{ name: cart.custom.name || 'Discount', amount: chargeTotals.value.customDiscountAmount }] : []),
+          ...chargeTotals.value.ruleDiscounts
+            .filter((r) => r.amount > 0)
+            .map((r) => ({ name: r.rule.name, amount: r.amount, ruleId: r.rule.id, lines: [...r.lines] })),
+          ...(cart.custom && chargeTotals.value.customDiscountAmount > 0
+            ? [{ name: cart.custom.name || 'Discount', amount: chargeTotals.value.customDiscountAmount, lines: cart.lines.map((_, i) => i) }]
+            : []),
         ],
       },
       payment: {

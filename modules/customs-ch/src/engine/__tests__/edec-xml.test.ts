@@ -151,3 +151,16 @@ describe('buildEdecXml - permit and non-customs-law obligations', () => {
     expect(xml).toContain('<nonCustomsLawObligation>0</nonCustomsLawObligation>');
   });
 });
+
+describe('buildEdecXml - amounts declared as they are', () => {
+  it('keeps the weight to the gram instead of rounding to 100 g', () => {
+    const xml = buildEdecXml(state([product({ id: 'a', title: 'Pin', material: 'Zinc', weightG: 37, soldQty: 3, soldValue: 30 })]))!.xml;
+    expect(xml).toContain('<grossMass>0.111</grossMass>');
+    expect(xml).toContain('<netMass>0.111</netMass>');
+  });
+
+  it('keeps the value instead of flooring it', () => {
+    const xml = buildEdecXml(state([product({ id: 'a', title: 'Print', material: 'Paper', soldQty: 3, soldValue: 37.5 })]))!.xml;
+    expect(xml).toContain('<statisticalValue>37.5</statisticalValue>');
+  });
+});

@@ -5,7 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
-import { capSoldToBrought, discountFraction, tripSpan } from '@zollify/customs-core';
+import { capSoldToBrought, declaredLineValues, tripSpan } from '@zollify/customs-core';
 import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
@@ -50,17 +50,16 @@ export function buildCustomsDeState(
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
     if (!eventIds.has(tx.eventId) || tx.revertedBy) continue;
-    // A bundle price or custom discount reduces the whole sale, not one line
-    // item - spread proportionally across this transaction's own lines so a
-    // discounted item's declared value isn't its full, undiscounted price.
-    const keep = 1 - discountFraction(tx);
-    for (const item of tx.items) {
+    // Each line at what it actually cost, discounts included, in the book
+    // currency, whole units adding up to what was paid - see declaredLineValues.
+    const lineValues = declaredLineValues(tx, 'book');
+    tx.items.forEach((item, i) => {
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
       cur.qty += item.qty;
-      cur.value += (item.baseLineTotal ?? item.lineTotal) * keep;
+      cur.value += lineValues[i]!;
       soldByKey.set(key, cur);
-    }
+    });
   }
   // Sold more than was claimed for this event? The excess never crossed the
   // border on this declaration, so it's ignored - see capSoldToBrought.

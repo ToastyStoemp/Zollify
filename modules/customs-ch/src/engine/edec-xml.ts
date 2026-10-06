@@ -182,9 +182,11 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
   [...groups.values()].forEach((g, idx) => {
     const hsCode = toEdecHsCode(g.tariffNo);
-    // Round to nearest 100 g (0.1 kg), minimum 0.1 kg.
-    const weightKg = Math.max(0.1, Math.round(g.weightKg * 10) / 10);
-    const statValue = Math.floor(g.statValue);
+    // Declared as they are - no rounding to 100 g or down to whole units.
+    // Sold values are already whole units (declaredLineValues); these only
+    // trim floating-point noise: weight to the gram, value to the cent.
+    const weightKg = Math.round(g.weightKg * 1000) / 1000;
+    const statValue = Math.round(g.statValue * 100) / 100;
 
     lines.push(`      <GoodsItemType>`);
     lines.push(`        <traderItemID>${idx}</traderItemID>`);

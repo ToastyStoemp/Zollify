@@ -293,5 +293,23 @@ export interface Transaction {
 
 export interface AsCharged {
   listTotals: number[];
-  discounts: { name: string; amount: number }[];
+  /**
+   * How much of the discounts each line carries, paired with `items` by
+   * index, in the charged currency - so `listTotals[i] - lineDiscounts[i]`
+   * is what that line actually cost. A rule's discount only lands on the
+   * lines the rule matched; a one-off discount on the whole sale. Split in
+   * whole units whenever the discount and prices are whole. Absent on sales
+   * recorded before the till kept this.
+   */
+  lineDiscounts?: number[];
+  discounts: AsChargedDiscount[];
+}
+
+export interface AsChargedDiscount {
+  name: string;
+  amount: number;
+  /** The rule that gave it; absent for a one-off discount. */
+  ruleId?: string;
+  /** Indexes into `items` of the lines it applied to. */
+  lines?: number[];
 }

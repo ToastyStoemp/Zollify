@@ -48,22 +48,36 @@ export default defineModule({
     sdk.nav.add({ routeName: 'index', group: 'stores', label: 'My stores', icon: 'store', order: 300, minRole: 'admin' });
     // Setups at the stores on the home calendar; one still to confirm stands out.
     sdk.calendar.source(async ({ from, to }) =>
-      (await myLinks()).flatMap((l) =>
-        l.setups
+      (await myLinks()).flatMap((l) => [
+        // Workshops the artist hosts at the store.
+        ...l.workshops
+          .filter((w) => w.date >= from && w.date <= to)
+          .map((w) => ({
+            id: `workshop:${l.storeAccountId}:${w.id}`,
+            date: w.date,
+            time: w.time,
+            title: `${w.title} · ${l.storeAccountName}`,
+            icon: 'users',
+            tone: w.cancelled ? ('muted' as const) : ('normal' as const),
+            link: '/m/consignment-artist',
+          })),
+        ...l.setups
           .filter((s) => s.date >= from && s.date <= to)
           .map((s) => ({
             id: `setup:${l.storeAccountId}:${s.id}`,
             date: s.date,
             time: s.time,
             title: `Setup · ${l.storeAccountName}`,
+            icon: 'layers',
             tone: s.status === 'scheduled' ? ('attention' as const) : s.status === 'cancelled' || s.status === 'declined' ? ('muted' as const) : ('normal' as const),
             link: '/m/consignment-artist',
           })),
-      ),
+      ]),
     );
     // A store's invite waiting for an answer: asked right away, whatever screen
     // this account opened on - for someone who signed up with the invite, it
     // is the reason they are here.
+    sdk.home.card({ id: 'low-stock', order: 50, component: () => import('./views/LowStockCard.vue') });
     void askAboutInvites(sdk);
     sdk.log.info('consignment-artist module ready');
   },

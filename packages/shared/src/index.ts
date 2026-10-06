@@ -22,3 +22,4 @@ export * from './consignment-books';
 export * from './webhooks';
 export * from './peppol';
 export * from './csv';
+export * from './restock';

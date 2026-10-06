@@ -248,6 +248,13 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
 
+    home: {
+      card(card) {
+        guard();
+        services.contributions.addHomeCard(moduleId, card);
+      },
+    },
+
     events: {
       on(name, handler) {
         guard();

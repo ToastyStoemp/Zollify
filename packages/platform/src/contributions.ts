@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { CalendarSource, NavItem, Role, RouteDef, SettingsPanel, TillAction } from '@zollify/sdk';
+import type { CalendarSource, HomeCard, NavItem, Role, RouteDef, SettingsPanel, TillAction } from '@zollify/sdk';
 import { roleAtLeast } from '@zollify/sdk';
 
 export interface OwnedRoute extends RouteDef {
@@ -31,6 +31,7 @@ export class ContributionRegistry {
   readonly settingsPanels = reactive<OwnedSettingsPanel[]>([]);
   readonly tillActions = reactive<(TillAction & { moduleId: string })[]>([]);
   readonly calendarSources = reactive<{ moduleId: string; source: CalendarSource }[]>([]);
+  readonly homeCards = reactive<(HomeCard & { moduleId: string })[]>([]);
 
   private sink: RouteSink | null = null;
 
@@ -78,6 +79,15 @@ export class ContributionRegistry {
     this.tillActions.push({ ...action, moduleId, id: `${moduleId}.${action.id}` });
   }
 
+  addHomeCard(moduleId: string, card: HomeCard): void {
+    this.homeCards.push({ ...card, moduleId, id: `${moduleId}.${card.id}` });
+  }
+
+  /** Home cards visible to a role, in order. */
+  homeCardsFor(role: Role): (HomeCard & { moduleId: string })[] {
+    return this.homeCards.filter((c) => !c.minRole || roleAtLeast(role, c.minRole)).sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  }
+
   addCalendarSource(moduleId: string, source: CalendarSource): void {
     this.calendarSources.push({ moduleId, source });
   }
@@ -96,6 +106,7 @@ export class ContributionRegistry {
     spliceWhere(this.settingsPanels, (p) => p.moduleId === moduleId);
     spliceWhere(this.tillActions, (a) => a.moduleId === moduleId);
     spliceWhere(this.calendarSources, (c) => c.moduleId === moduleId);
+    spliceWhere(this.homeCards, (c) => c.moduleId === moduleId);
   }
 
   /**

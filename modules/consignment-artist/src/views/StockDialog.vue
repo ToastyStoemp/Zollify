@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import type { ArtistConsignment } from '@zollify/shared';
+import { restockForecast, type ArtistConsignment, type RestockRow } from '@zollify/shared';
 import { cancelShipment, errorText, restock, sendShipment, type StockLineInput } from '../api';
 
 /**
  * The artist's own stock at a store. In person: add what they just put on
  * the shelf, or recount it. By post: list what is in the box; nothing
  * changes until the store confirms it arrived, and then what the store
- * counted goes on the shelf.
+ * counted goes on the shelf. For a package, a forecast from the last weeks
+ * of sales suggests how many of each to send.
  */
 const props = defineProps<{ link: ArtistConsignment; mode: 'restock' | 'package' }>();
 const emit = defineEmits<{ done: [message: string]; close: [] }>();
@@ -57,6 +58,26 @@ async function submit(): Promise<void> {
 }
 
 const open = computed(() => (props.link.shipments ?? []).filter((s) => s.status === 'sent'));
+
+// ── Forecast: how many to send ──────────────────────────────────────────────
+/** How many weeks the shelf should last once the package is in. */
+const weeks = ref(6);
+const forecast = computed(() => {
+  const inTransit: Record<string, number> = {};
+  for (const s of open.value) for (const l of s.lines) inTransit[`${l.productId}:${l.variantId}`] = (inTransit[`${l.productId}:${l.variantId}`] ?? 0) + l.qty;
+  const rows = restockForecast(props.link.items, props.link.lines, { weeks: Math.max(1, Math.min(52, Number(weeks.value) || 6)), inTransit });
+  return new Map(rows.map((r) => [r.key, r]));
+});
+const rowOf = (i: { productId: string; variantId: string }): RestockRow | undefined => forecast.value.get(key(i));
+const suggested = computed(() => [...forecast.value.values()].reduce((n, r) => n + r.suggest, 0));
+const anySales = computed(() => [...forecast.value.values()].some((r) => r.sold > 0));
+function useSuggestions(): void {
+  for (const i of props.link.items) {
+    const r = rowOf(i);
+    form.qty[key(i)] = r && r.suggest > 0 ? r.suggest : '';
+  }
+}
+const lasts = (r: RestockRow | undefined): string => (!r || r.weeksLeft == null ? '-' : r.weeksLeft >= 52 ? '1 yr+' : `${r.weeksLeft} wk`);
 async function cancel(id: string): Promise<void> {
   try {
     await cancelShipment(props.link.storeAccountId, props.link.consignorId, id);
@@ -86,13 +107,38 @@ async function cancel(id: string): Promise<void> {
       <label v-if="mode === 'restock'" class="check"><input v-model="form.recount" type="checkbox" /> Recount instead - the numbers are what is there now</label>
     </div>
 
+    <div v-if="mode === 'package' && link.items.length" class="forecast">
+      <label>
+        <span>Enough for</span>
+        <input v-model.number="weeks" type="number" min="1" max="52" step="1" inputmode="numeric" aria-label="Weeks the stock should last" />
+        <span>weeks</span>
+      </label>
+      <p class="hint grow">
+        <template v-if="anySales">Suggested from the last 8 weeks of sales at {{ link.storeAccountName }}, less what is on the shelf and on its way: {{ suggested }} in all.</template>
+        <template v-else>Nothing has sold there in the last 8 weeks, so there is nothing to go on yet.</template>
+      </p>
+      <button type="button" :disabled="!suggested" @click="useSuggestions">Fill in suggestions</button>
+    </div>
+
     <p v-if="!link.items.length" class="hint">You have no items at this store yet - share some first.</p>
     <table v-else>
-      <thead><tr><th>Item</th><th class="num">There now</th><th class="num">{{ mode === 'package' ? 'In the box' : form.recount ? 'Counted' : 'Adding' }}</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th v-if="mode === 'package'" class="num" title="Sold per week over the last 8 weeks">Per week</th>
+          <th class="num">There now</th>
+          <th v-if="mode === 'package'" class="num" title="How long the shelf and anything on its way last at that pace">Lasts</th>
+          <th v-if="mode === 'package'" class="num">Suggested</th>
+          <th class="num">{{ mode === 'package' ? 'In the box' : form.recount ? 'Counted' : 'Adding' }}</th>
+        </tr>
+      </thead>
       <tbody>
-        <tr v-for="i in link.items" :key="key(i)">
+        <tr v-for="i in link.items" :key="key(i)" :class="{ low: mode === 'package' && rowOf(i)?.weeksLeft != null && rowOf(i)!.weeksLeft! < weeks }">
           <td>{{ i.title }}<template v-if="i.variantLabel"> · {{ i.variantLabel }}</template></td>
-          <td class="num">{{ i.remaining ?? '-' }}</td>
+          <td v-if="mode === 'package'" class="num">{{ rowOf(i)?.perWeek || '-' }}</td>
+          <td class="num">{{ i.remaining ?? '-' }}<small v-if="mode === 'package' && rowOf(i)?.inTransit"> +{{ rowOf(i)!.inTransit }}</small></td>
+          <td v-if="mode === 'package'" class="num">{{ lasts(rowOf(i)) }}</td>
+          <td v-if="mode === 'package'" class="num sug">{{ rowOf(i)?.suggest || '-' }}</td>
           <td class="num"><input v-model="form.qty[key(i)]" type="number" min="0" step="1" inputmode="numeric" placeholder="-" :aria-label="`${i.title} ${i.variantLabel ?? ''}`" /></td>
         </tr>
       </tbody>
@@ -137,4 +183,12 @@ td input { width: 5rem; text-align: right; }
 .open { display: flex; flex-direction: column; gap: .25rem; padding: .5rem .7rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .84rem; }
 .open button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .76rem; }
 .foot { display: flex; justify-content: flex-end; gap: .5rem; }
+.forecast { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; padding: .55rem .7rem; border-radius: 10px; background: var(--zfy-accent-soft, #deeee9); }
+.forecast label { display: flex; align-items: center; gap: .35rem; font-size: .84rem; white-space: nowrap; }
+.forecast input { width: 3.6rem; text-align: right; }
+.forecast .grow { flex: 1 1 14rem; }
+.forecast button { min-height: 2.1rem; font-size: .8rem; }
+tr.low td:first-child { font-weight: 600; }
+tr.low .sug { color: var(--zfy-accent-ink, #0a5a4a); font-weight: 700; }
+td small { color: var(--zfy-muted, #5a6472); }
 </style>

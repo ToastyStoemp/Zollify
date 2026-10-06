@@ -54,6 +54,9 @@ export function migrateSharing(db: Database.Database): void {
       PRIMARY KEY (accountId, imageId)
     );
   `);
+  // Sharing some variants of a product, not all: their ids, or NULL for every one.
+  const cols = new Set((db.prepare('PRAGMA table_info(consignment_shares)').all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has('variantIds')) db.exec('ALTER TABLE consignment_shares ADD COLUMN variantIds TEXT');
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -62,6 +65,13 @@ const sharedIds = (db: Database.Database, storeAccountId: string, consignorId: s
   new Map(
     (db.prepare('SELECT productId, auto FROM consignment_shares WHERE accountId = ? AND consignorId = ?').all(storeAccountId, consignorId) as { productId: string; auto: number }[]).map(
       (r) => [r.productId, r.auto === 1],
+    ),
+  );
+/** Per shared product, the variants shared: a list, or null for all of them. */
+const sharedVariants = (db: Database.Database, storeAccountId: string, consignorId: string): Map<string, string[] | null> =>
+  new Map(
+    (db.prepare('SELECT productId, variantIds FROM consignment_shares WHERE accountId = ? AND consignorId = ?').all(storeAccountId, consignorId) as { productId: string; variantIds: string | null }[]).map(
+      (r) => [r.productId, r.variantIds ? (JSON.parse(r.variantIds) as string[]) : null],
     ),
   );
 
@@ -92,6 +102,7 @@ export function syncShared(svc: ModuleServices, storeAccountId: string, row: Con
   const artist = artistOf(db, row);
   if (!artist) return 0;
   const shared = sharedIds(db, storeAccountId, row.id);
+  const variantsOf = sharedVariants(db, storeAccountId, row.id);
   const wanted = ids ? [...ids] : [...shared.keys()];
   if (!wanted.length) return 0;
 
@@ -115,6 +126,13 @@ export function syncShared(svc: ModuleServices, storeAccountId: string, row: Con
     // Only ever this artist's own copy: a store product (or another artist's) under the same id
     // is left alone - the id comes from the artist, so it must never let them overwrite the store's.
     if (current && current.consignorId !== row.id) continue;
+    // Only the variants the artist picked for this store (all of them unless they picked).
+    const picked = variantsOf.get(id) ?? null;
+    const listed = (source.variants ?? []).filter((v) => !v.unlisted && (!picked || picked.includes(v.id)));
+    if (source.variants?.some((v) => !v.unlisted) && !listed.length) {
+      if (current && !current.deletedAt) ops.push({ type: 'product.delete', payload: { id, deletedAt: now } });
+      continue;
+    }
     const price = sharedPrice(source.price, `${id}:`, same, pricing);
     const product: Product = {
       id,
@@ -130,8 +148,7 @@ export function syncShared(svc: ModuleServices, storeAccountId: string, row: Con
       ...(source.year != null ? { year: source.year } : {}),
       ...(source.material ? { material: source.material } : {}),
       ...(source.imageId ? { imageId: source.imageId } : {}),
-      variants: (source.variants ?? [])
-        .filter((v) => !v.unlisted)
+      variants: listed
         .map((v) => {
           const vp = v.price != null || pricing.overrides[`${id}:${v.id}`] != null ? sharedPrice(v.price ?? source.price, `${id}:${v.id}`, same, pricing) : null;
           return {
@@ -189,26 +206,57 @@ function imageOps(db: Database.Database, artist: string, store: string, ids: Set
   return out;
 }
 
-export function setShared(svc: ModuleServices, storeAccountId: string, row: ConsignorRow, productIds: string[], shared: boolean, auto = false): void {
+/**
+ * Shares or stops sharing. A key is a product id (the whole product, every
+ * variant) or `productId:variantId` (that one variant). Stopping one variant
+ * of a wholly shared product keeps the others.
+ */
+export function setShared(svc: ModuleServices, storeAccountId: string, row: ConsignorRow, keys: string[], shared: boolean, auto = false): void {
   const { db } = svc;
+  const artist = artistOf(db, row);
+  const products = artist ? new Map(replay(db, artist).products.map((p) => [p.id, p])) : new Map<string, Product>();
+  const allVariants = (pid: string): string[] => (products.get(pid)?.variants ?? []).filter((v) => !v.unlisted).map((v) => v.id);
+  const touched = new Set<string>();
   db.transaction(() => {
-    for (const id of productIds) {
-      if (shared) {
-        db.prepare(
-          `INSERT INTO consignment_shares (accountId, consignorId, productId, auto, sharedAt) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(accountId, consignorId, productId) DO UPDATE SET auto = MIN(auto, excluded.auto)`,
-        ).run(storeAccountId, row.id, id, auto ? 1 : 0, Date.now());
+    const current = sharedVariants(db, storeAccountId, row.id);
+    const write = (pid: string, variants: string[] | null): void => {
+      db.prepare(
+        `INSERT INTO consignment_shares (accountId, consignorId, productId, auto, sharedAt, variantIds) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(accountId, consignorId, productId) DO UPDATE SET auto = MIN(auto, excluded.auto), variantIds = excluded.variantIds`,
+      ).run(storeAccountId, row.id, pid, auto ? 1 : 0, Date.now(), variants ? JSON.stringify(variants) : null);
+      current.set(pid, variants);
+    };
+    const drop = (pid: string): void => {
+      db.prepare('DELETE FROM consignment_shares WHERE accountId = ? AND consignorId = ? AND productId = ?').run(storeAccountId, row.id, pid);
+      current.delete(pid);
+    };
+    for (const key of keys) {
+      const [pid, vid] = key.split(':', 2) as [string, string | undefined];
+      touched.add(pid);
+      const now = current.has(pid) ? current.get(pid)! : undefined; // undefined: not shared; null: all variants
+      if (!vid) {
+        if (shared) write(pid, null);
+        else drop(pid);
+      } else if (shared) {
+        if (now === null) continue;
+        const next = [...new Set([...(now ?? []), vid])];
+        // Every variant picked is the same as the whole product: new ones follow too.
+        write(pid, allVariants(pid).every((v) => next.includes(v)) ? null : next);
       } else {
-        db.prepare('DELETE FROM consignment_shares WHERE accountId = ? AND consignorId = ? AND productId = ?').run(storeAccountId, row.id, id);
+        if (now === undefined) continue;
+        const next = (now ?? allVariants(pid)).filter((v) => v !== vid);
+        if (next.length) write(pid, next);
+        else drop(pid);
       }
     }
   })();
-  syncShared(svc, storeAccountId, row, productIds);
+  syncShared(svc, storeAccountId, row, [...touched]);
 }
 
 /** The artist's own items, marked with what one store may sell. */
 function shareableItems(db: Database.Database, storeAccountId: string, row: ConsignorRow, artist: string): ShareableItem[] {
   const shared = sharedIds(db, storeAccountId, row.id);
+  const picked = sharedVariants(db, storeAccountId, row.id);
   const pricing = pricingOf(db, storeAccountId, row.id);
   const same = currencyOf(db, artist) === currencyOf(db, storeAccountId);
   return replay(db, artist)
@@ -220,7 +268,9 @@ function shareableItems(db: Database.Database, storeAccountId: string, row: Cons
       ...(p.sku ? { sku: p.sku } : {}),
       ...(p.type ? { type: p.type } : {}),
       price: p.price,
-      variants: (p.variants ?? []).filter((v) => !v.unlisted).map((v) => ({ id: v.id, name: v.name, price: v.price ?? p.price })),
+      variants: (p.variants ?? [])
+        .filter((v) => !v.unlisted)
+        .map((v) => ({ id: v.id, name: v.name, price: v.price ?? p.price, shared: shared.has(p.id) && (!picked.get(p.id) || picked.get(p.id)!.includes(v.id)) })),
       shared: shared.has(p.id),
       autoShared: shared.get(p.id) === true,
       storePrice: sharedPrice(p.price, `${p.id}:`, same, pricing),
@@ -229,7 +279,12 @@ function shareableItems(db: Database.Database, storeAccountId: string, row: Cons
 
 // ── Routes ──────────────────────────────────────────────────────────────────
 
-const ShareBody = z.object({ productIds: z.array(z.string().min(1).max(80)).min(1).max(500), shared: z.boolean() });
+const Key = z.string().min(1).max(170);
+/** Either one direction for some keys, or a whole edit at once - what to share and what to stop. */
+const ShareBody = z.union([
+  z.object({ productIds: z.array(Key).min(1).max(500), shared: z.boolean() }).transform((b) => (b.shared ? { share: b.productIds, unshare: [] } : { share: [], unshare: b.productIds })),
+  z.object({ share: z.array(Key).max(1000).default([]), unshare: z.array(Key).max(1000).default([]) }),
+]);
 const ScanBody = z.object({ code: z.string().trim().min(1).max(80) });
 
 export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: Side): void {
@@ -257,12 +312,15 @@ export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: 
       const body = ShareBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the items to share.' });
       const own = new Set(replay(db, who.accountId).products.filter((p) => !p.deletedAt).map((p) => p.id));
-      const ids = body.data.productIds.filter((id) => own.has(id));
-      setShared(ctx, row.accountId, row, ids, body.data.shared);
+      const mine = (keys: string[]): string[] => keys.filter((k) => own.has(k.split(':', 1)[0]!));
+      const share = mine(body.data.share);
+      const unshare = mine(body.data.unshare);
+      if (unshare.length) setShared(ctx, row.accountId, row, unshare, false);
+      if (share.length) setShared(ctx, row.accountId, row, share, true);
       const name = parseDoc(row.doc).name;
       const total = sharedIds(db, row.accountId, row.id).size;
       // One note per artist, however often they press share: it says where things stand now.
-      if (ids.length) ctx.notify(row.accountId, { kind: 'sharing', level: 'low', groupKey: `sharing:${row.id}`,
+      if (share.length || unshare.length) ctx.notify(row.accountId, { kind: 'sharing', level: 'low', groupKey: `sharing:${row.id}`,
         title: `${name} updated the items they share`,
         body: `${total} item${total === 1 ? '' : 's'} shared with you now - in your catalogue and on the till. Items taken off keep the sales already made.`,
         link: '/m/consignment/items',
@@ -321,9 +379,11 @@ export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: 
           if (p.deletedAt || !p.forSale) continue;
           const hit = matchCode(p, code);
           if (!hit) continue;
-          const already = sharedIds(db, who.accountId, row.id).has(p.id);
+          const picked = sharedVariants(db, who.accountId, row.id);
+          const already = picked.has(p.id) && (!hit.variantId || !picked.get(p.id) || picked.get(p.id)!.includes(hit.variantId));
           if (!already) {
-            setShared(ctx, who.accountId, row, [p.id], true, true);
+            // Just what was scanned: that variant, or the product when it has none.
+            setShared(ctx, who.accountId, row, [hit.variantId ? `${p.id}:${hit.variantId}` : p.id], true, true);
             ctx.notify(artist, { kind: 'sharing', level: 'low', groupKey: `scanned:${row.accountId}:${row.id}`,
               title: `${p.title} was scanned at ${accountName(db, who.accountId)} and is now shared`,
               body: 'It is on their till. Stop sharing it under Stores → My stores if that was a mistake.',

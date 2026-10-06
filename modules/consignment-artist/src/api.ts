@@ -32,9 +32,9 @@ export interface Shares {
   items: ShareableItem[];
 }
 export const loadShares = (storeAccountId: string, consignorId: string): Promise<Shares> => sdk().http.get(linkPath(storeAccountId, consignorId, 'shares'));
-/** `keys` are product ids, or `productId:variantId` for one variant. */
-export const setShares = (storeAccountId: string, consignorId: string, keys: string[], shared: boolean): Promise<{ items: ShareableItem[] }> =>
-  sdk().http.put(linkPath(storeAccountId, consignorId, 'shares'), { productIds: keys, shared });
+/** One edit: keys to share and to stop - product ids (every variant), or `productId:variantId` (one). */
+export const saveShares = (storeAccountId: string, consignorId: string, share: string[], unshare: string[]): Promise<{ items: ShareableItem[] }> =>
+  sdk().http.put(linkPath(storeAccountId, consignorId, 'shares'), { share, unshare });
 
 export interface StockLineInput {
   productId: string;

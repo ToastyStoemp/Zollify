@@ -321,8 +321,7 @@ function commissionLine(l: ArtistConsignment): string {
     </ModalShell>
 
     <ModalShell v-if="sharing" :title="`Share with ${sharing.storeAccountName}`" @close="closeSharing">
-      <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" />
-      <template #footer><div class="foot"><button type="button" class="primary" @click="closeSharing">Done</button></div></template>
+      <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" @close="closeSharing" />
     </ModalShell>
   </div>
 </template>

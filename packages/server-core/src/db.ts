@@ -179,6 +179,48 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_device_links_expires ON device_links(expiresAt);
   `,
+  // v11 - in-app notifications: a short note for an account, raised by the
+  // server (e.g. a store scheduling an artist's setup). See notifications.ts.
+  `
+  CREATE TABLE notifications (
+    id        TEXT PRIMARY KEY,
+    accountId TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    moduleId  TEXT,
+    minRole   TEXT NOT NULL DEFAULT 'member' CHECK (minRole IN ('owner','admin','member')),
+    title     TEXT NOT NULL,
+    body      TEXT NOT NULL DEFAULT '',
+    link      TEXT,
+    createdAt INTEGER NOT NULL,
+    readAt    INTEGER
+  );
+  CREATE INDEX idx_notifications_account ON notifications(accountId, createdAt);
+  `,
+  // v12 - shared tills: a personal PIN per user, and the people added to a
+  // device who unlock it with their PIN. See device-users.ts.
+  `
+  ALTER TABLE users ADD COLUMN pinHash TEXT;
+  CREATE TABLE device_users (
+    accountId     TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    deviceId      TEXT NOT NULL,
+    userId        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    grantHash     TEXT NOT NULL,
+    failures      INTEGER NOT NULL DEFAULT 0,
+    lockedUntil   INTEGER NOT NULL DEFAULT 0,
+    unlockedUntil INTEGER NOT NULL DEFAULT 0,
+    lastUnlockAt  INTEGER,
+    createdAt     INTEGER NOT NULL,
+    PRIMARY KEY (deviceId, userId)
+  );
+  CREATE INDEX idx_device_users_account ON device_users(accountId);
+  `,
+  // v13 - staff badges: a barcode per user that unlocks a shared till they
+  // were added to. Looked up by hash; kept encrypted so it can be reprinted.
+  `
+  ALTER TABLE users ADD COLUMN badgeHash TEXT;
+  ALTER TABLE users ADD COLUMN badgeBox TEXT;
+  ALTER TABLE users ADD COLUMN badgeIssuedAt INTEGER;
+  CREATE UNIQUE INDEX idx_users_badge ON users(badgeHash) WHERE badgeHash IS NOT NULL;
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {
@@ -231,6 +273,7 @@ export function touchDevice(
      ON CONFLICT (id) DO UPDATE SET
        lastSeenAt = excluded.lastSeenAt,
        name = COALESCE(excluded.name, name),
-       flavor = COALESCE(excluded.flavor, flavor)`,
+       flavor = COALESCE(excluded.flavor, flavor)
+     WHERE devices.accountId = excluded.accountId`,
   ).run(id, accountId, userId, name, flavor, now, now);
 }

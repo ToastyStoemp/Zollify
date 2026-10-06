@@ -153,6 +153,14 @@ export interface AccountProfile {
   defaultCurrency: string;
   /** Small-business VAT exemptions, by country - see resolveEventVat. */
   vat?: VatProfile;
+  /** Staff see sales totals (takings, stats, expected cash). Off: they see single sales only, and cash up blind. */
+  staffSeesTotals?: boolean;
+}
+
+/** Whether this person may see sales totals: owners and admins always, staff when the account allows it. */
+export function seesSalesTotals(who: { role: string; profile?: Pick<AccountProfile, 'staffSeesTotals'> } | null | undefined): boolean {
+  if (!who) return false;
+  return who.role !== 'member' || who.profile?.staffSeesTotals === true;
 }
 
 export const CurrencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/);
@@ -164,11 +172,12 @@ export const ProfileUpdateSchema = z.object({
   defaultCurrency: CurrencyCodeSchema.optional(),
   setupCompleted: z.boolean().optional(),
   vat: VatProfileUpdateSchema.optional(),
+  staffSeesTotals: z.boolean().optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export function emptyProfile(): AccountProfile {
-  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF', vat: VatProfileSchema.parse({}) };
+  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF', vat: VatProfileSchema.parse({}), staffSeesTotals: false };
 }
 
 export interface AuthUser {
@@ -192,6 +201,23 @@ export interface TokenResponse {
 export interface NudgeMessage {
   type: 'nudge';
   latestSeq: number;
+}
+
+/** WS doorbell: the account has a new notification. Carries nothing; devices fetch over HTTP. */
+export interface NotificationMessage {
+  type: 'notification';
+}
+
+/** A short note for an account, shown under the shell's bell. */
+export interface AppNotification {
+  id: string;
+  moduleId: string | null;
+  title: string;
+  body: string;
+  /** In-app path to open, e.g. "/m/consignment?tab=mine". */
+  link: string | null;
+  createdAt: number;
+  readAt: number | null;
 }
 
 /**

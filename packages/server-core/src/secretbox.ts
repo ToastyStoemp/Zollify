@@ -27,7 +27,7 @@ export function makeSecretBox(secret: string, salt = 'zolltool-totp-v1'): Secret
     decrypt(blob) {
       const [v, ivB64, tagB64, ctB64] = String(blob).split('.');
       if (v !== 'v1' || !ivB64 || !tagB64 || !ctB64) throw new Error('Malformed encrypted blob.');
-      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'), { authTagLength: 16 });
       decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
       const pt = Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64')), decipher.final()]);
       return JSON.parse(pt.toString('utf8'));

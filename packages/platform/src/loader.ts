@@ -193,6 +193,18 @@ export class ModuleLoader {
     this.loaded.set(definition.id, { definition, host, version });
   }
 
+  /**
+   * Unloads every module the role may not use - when a shared till passes
+   * from someone senior to someone who is not. Returns the ids unloaded.
+   */
+  async unloadAbove(role: Role): Promise<string[]> {
+    const doomed = [...this.loaded.values()]
+      .filter((m) => m.definition.minRole && !roleAtLeast(role, m.definition.minRole))
+      .map((m) => m.definition.id);
+    for (const id of doomed) if (this.loaded.has(id)) await this.unload(id);
+    return doomed;
+  }
+
   /** Unloads a module and everything it contributed. Dependents are unloaded first. */
   async unload(moduleId: string): Promise<void> {
     for (const [id, mod] of this.loaded) {

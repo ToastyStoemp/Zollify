@@ -37,6 +37,7 @@ modules/
   price-cards/    printable price tags from the catalogue
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
+  consignment/    artists' work sold in your stores, commission and payouts; artists' own view (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -158,7 +159,139 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events, Tax & books.
+events, Tax & books, Consignment.
+
+*Stores and consignment* - a venue is either a dated **event** or a **store**: a
+brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
+through the same till, stock claims, history and cash-up, so one account can run
+several shops and still take a booth to a convention. The Consignment module adds
+**artists** whose work the account sells: each is carried by one store or shared
+between several, with a commission that can differ per store. A product tagged
+with `consignorId` is the artist's, and each sale line snapshots it, so the
+statement (sales per store, commission, artist's share, payouts, balance) is
+replayed from the op-log and never moves when a product is reassigned later. An
+artist links their **own** Zollify account - the one they run their events from -
+with a single-use code from the store owner; linked, they see their items, sales
+and payouts at that owner's stores under *Where I consign*, and the owner can
+import items from their catalogue. That link is the only path between two
+accounts' data, and the server picks every field that crosses it.
+
+The consignment **planner** rents space by the month: each store lists the
+spaces it rents out (a small shelf, a large one, a window spot - with a fee and
+how many there are), an artist rents one for some months, and an upgrade stops
+that rental and starts a larger one from a date (by default the next billing
+period, so no month is charged twice). Started months come off the artist's
+balance unless the rent is paid separately. The store also schedules **setup
+moments**: the artist gets an in-app notification on their linked account and
+an email with a calendar file, confirms or declines from *Where I consign*, and
+the store hears back the same way.
+
+**Store events** plan what happens in the shops besides selling. *Artist of the
+month* features an artist at one or more stores for a date range, optionally
+with a discount: it is an ordinary core discount rule, limited to the artist's
+items (`consignorIds`), the dates (`validFrom`/`validUntil`) and the stores
+(`eventIds`), so every till applies it by itself, offline too. *Workshops* take
+sign-ups on a public page, `/p/consignment/s/<token>` (the owner can replace
+the token to retire a link): capacity, a waitlist that moves up in order when
+someone cancels, a confirmation email with a calendar file and a personal
+cancel link, and a notification to the store. People pay at the store; the
+sign-up list marks who has. Signing up costs a proof-of-work and is rate
+limited, like the online receipt.
+
+**Sharing and stock.** A linked artist chooses which items of their own
+catalogue a store sells; the server writes them into the store's catalogue
+(photos included, following the artist's edits) under the same id, so the
+artist's own labels scan at the store's till. A label of an item the artist
+has not shared yet shares it and tells them. Where the artist and store use
+different currencies, the store sets a rate, rounding and per-item prices,
+like an event abroad. Artists restock in person (add or recount from *Where I
+consign*), or send a package that only reaches the shelf once the store
+confirms what arrived. The till groups a store's items by artist, then by
+type, and labels can carry the artist's name. Staff accounts (role *member*)
+ring up sales and cash up as themselves, but cannot see or change artists,
+commissions, payouts or reports. Sales totals are the owner's too unless an admin
+switches on *Staff can see sales totals* (Settings → Team): until then staff
+see their own sales one by one, no takings, stats or exports, and cash up
+blind - they count the box, the owner compares.
+
+*Shared tills* - several people of one account can use one device at once.
+The device stays signed in as whoever set it up; under Settings → This device
+→ Shared till it locks with a PIN. Each colleague is added once from the lock
+screen with their own email and password (and 2FA code), and from then on taps
+their name and enters their personal PIN. The server checks the PIN, counts
+wrong guesses (a few minutes' lockout after 5, removed from the device after
+10) and hands the device a short-lived token for that person, so their role
+applies - staff stay staff on the owner's device - and their sales are
+credited to them, even when they sync after someone else took over. The till
+locks from its header or the sidebar, after a set idle time, or after each
+sale. Offline, someone who unlocked online once can still unlock, if they do
+not outrank the device's own user: they then act with the device's access, so
+a PIN check kept on the device never opens more than the device already could. **Staff
+badges** stand in for the name and PIN: an admin prints each person a badge
+with a Code 128 barcode (Settings → Team → Badge) - on a card, on a label
+printer installed on the computer (62 × 29, 57 × 32, 50 × 30 or 40 × 30 mm),
+as an image for a printer's own app, or through the Label Printer module's
+Bluetooth printer - and scanning it - with a
+handheld scanner or the camera - unlocks the lock screen as its owner, or
+hands an unlocked till over when scanned into the till's search. A badge only
+works on tills its owner was added to; a device can still ask for the PIN
+after the badge, and a new badge retires the old card.
+
+**Fees and reports.** A store can charge an artist a fee - a missed setup
+(straight from the planner), not responding, late stock, handling, damage -
+which comes off their balance; the artist is told by notification and email,
+can object (the owner hears), and the owner can waive it. The **report**
+closes every month or every two weeks, in the store's time zone: sales,
+takings, discounts by name, VAT per rate, cash and card, what cards cost (a
+rate the store sets, optionally carried by artists in proportion to their
+share), commission, own stock, and per artist what the period earned against
+rent and fees and what is owed at its end. Payouts are recorded from it
+without ever paying the same money twice, it downloads as a spreadsheet, and
+when a period closes the owner gets it by email with the spreadsheet
+attached.
+
+**Discounts.** A store's discount rules can be a plain percent off, aimed at
+product types, products, variants or one or more artists' work, and limited
+to some days or some events and stores. Linked artists can put their own work
+in a store on discount from *Where I consign* - within the store's limit
+(Consignment → Reports → Settings), on all their items there or some, for
+some days or until ended. It becomes an ordinary rule in the store (every
+till applies it, offline too), the store can end it under Discounts, and
+both sides are told.
+
+*Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as
+signed JSON anywhere: each sale, a daily or weekly summary (in the webhook's
+time zone), and the in-app notifications by category - rentals and setups,
+restocks and packages, store events and workshops, shared items, artist
+discounts, fees, consignment reports. An artist's account can also hear each
+sale of its work in a store, and its summaries count those sales. Server
+modules post through `ctx.webhooks.emit()` and add summary lines with
+`webhookReport`. Deliveries go out one at a time per webhook, never hold up
+a sale, and a webhook that keeps failing switches itself off. The server only
+posts to public https addresses unless `WEBHOOK_ALLOW_PRIVATE=1`.
+
+*E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
+invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B
+invoices must be from 2026. Each one is checked against the Peppol and
+Belgian rules before it is issued (enterprise number, VAT categories, the
+small-business exemption, reverse charge, intra-EU delivery); numbers are
+taken only on issue, per series and year, without gaps, and an issued
+invoice is frozen - corrections are credit notes. Invoices can start from a
+till sale, customers are checked against the Peppol Directory, and sending
+goes through the business's own Storecove account (its API key is stored
+encrypted and never reaches the browser). With any other access point,
+download the XML and upload it there. The generated XML passes the official
+CEN and OpenPEPPOL schematrons and the UBL 2.1 schema.
+
+Security notes and settings are in [docs/security.md](docs/security.md);
+legal notes per country in [docs/germany-compliance.md](docs/germany-compliance.md)
+and [docs/denmark-compliance.md](docs/denmark-compliance.md).
+
+*Notifications and email* - platform features any server module can use
+through its context: `ctx.notify(accountId, …)` puts a note under the shell's
+bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when
+`SMTP_URL` and `MAIL_FROM` are set. Without them nothing is emailed and the
+app says so; notifications work either way.
 
 *Tax & books* (the ZollTax port) - **Payments**: drop a myPOS export or
 statement, a Shopify orders CSV or a Wise history, or pull straight from

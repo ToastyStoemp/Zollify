@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { fmtPrice, round2 } from '@zollify/shared';
+import { fmtPrice, round2, seesSalesTotals } from '@zollify/shared';
 import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
@@ -57,8 +57,15 @@ const revenueMode = ref<'local' | 'base'>('local');
 const showCurrencyToggle = computed(() => !allMode.value && currency.value !== baseCurrency.value);
 const displayCurrency = computed(() => (revenueMode.value === 'local' ? currency.value : baseCurrency.value));
 
+/**
+ * Staff see totals only when the owner allows it (Settings → Team). Without,
+ * this is a list of their own sales - to find one for a customer - and no
+ * figures across them.
+ */
+const showTotals = computed(() => seesSalesTotals(account.value));
 const scoped = computed(() => {
-  const list = allMode.value ? recentTransactions.value : recentTransactions.value.filter((t) => t.eventId === scope.value);
+  const mine = (t: Transaction): boolean => showTotals.value || t.soldBy?.userId === account.value?.userId;
+  const list = (allMode.value ? recentTransactions.value : recentTransactions.value.filter((t) => t.eventId === scope.value)).filter(mine);
   return [...list].sort((a, b) => b.timestamp - a.timestamp);
 });
 const live = computed(() => scoped.value.filter((t) => !t.revertedAt));
@@ -97,6 +104,13 @@ const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
 
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
+/** '' = everyone; otherwise the user id that rang the sale up. */
+const sellerFilter = ref('');
+const sellerOptions = computed(() => {
+  const seen = new Map<string, string>();
+  for (const tx of scoped.value) if (tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
+  return [...seen.entries()].map(([id, email]) => ({ id, email })).sort((a, b) => a.email.localeCompare(b.email));
+});
 const showReverted = ref(false);
 const txSearch = ref('');
 const methodOptions = computed(() => {
@@ -115,6 +129,7 @@ const visible = computed(() => {
     (tx) =>
       (showReverted.value || !tx.revertedAt) &&
       (methodFilter.value === 'all' || tx.method === methodFilter.value) &&
+      (!sellerFilter.value || tx.soldBy?.userId === sellerFilter.value) &&
       (!q || matchesSearch(tx, q)),
   );
 });
@@ -381,7 +396,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <button type="button" :class="{ on: revenueMode === 'base' }" @click="revenueMode = 'base'">{{ baseCurrency }}</button>
       </div>
       <span class="spacer"></span>
-      <div class="tools">
+      <div v-if="showTotals" class="tools">
         <button type="button" :disabled="!scoped.length" @click="exportCsv"><Icon name="download" :size="14" /> Export CSV</button>
         <button v-if="!allMode" type="button" :disabled="!scoped.length" @click="exportPdf"><Icon name="file-text" :size="14" /> PDF report</button>
         <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
@@ -390,6 +405,8 @@ const money = (n: number, c: string) => fmtPrice(n, c);
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
+    <p v-if="!showTotals" class="hint">Your own sales. Totals are kept for the owner.</p>
+    <template v-if="showTotals">
     <div class="tiles">
       <div class="tile"><span>Revenue</span><strong>{{ money(stats.revenue, displayCurrency) }}</strong></div>
       <div class="tile"><span>Sales / items</span><strong>{{ stats.count }} / {{ stats.items }}</strong></div>
@@ -490,12 +507,17 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       </div>
       <p v-if="compareHourly" class="hint legend"><i></i> day before</p>
     </article>
+    </template>
 
     <div class="filters">
       <input v-model="txSearch" type="search" placeholder="Find an item or discount…" aria-label="Find a sale" class="txsearch" />
       <div class="seg">
         <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ m }}</button>
       </div>
+      <select v-if="sellerOptions.length > 1" v-model="sellerFilter" aria-label="Sold by">
+        <option value="">Everyone</option>
+        <option v-for="s in sellerOptions" :key="s.id" :value="s.id">{{ s.email }}</option>
+      </select>
       <label class="inline"><input v-model="showReverted" type="checkbox" /> <span>Show reverted</span></label>
     </div>
 
@@ -508,7 +530,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <span v-if="allMode" class="chip">{{ eventName(tx.eventId) }}</span>
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
-          <span class="muted time">{{ fmtTime(tx.timestamp) }}</span>
+          <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && sellerOptions.length > 1"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
           <router-link v-if="hasRoute('pos:receipt')" :to="{ name: 'pos:receipt', params: { saleId: tx.id } }" class="quiet icon" aria-label="Receipt"><Icon name="printer" :size="16" /></router-link>
           <button v-if="canRevert && !tx.revertedAt" type="button" class="quiet danger" @click="revertId = tx.id">Revert</button>
         </div>

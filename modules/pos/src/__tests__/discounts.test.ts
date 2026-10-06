@@ -269,6 +269,25 @@ describe('distributeTotal', () => {
   });
 });
 
+describe('artist-targeted rules', () => {
+  it('takes a percent off every item by the artist, and nothing else', () => {
+    const lines = [
+      { ...line('print', null, 2, 30), consignorId: 'ana' },
+      { ...line('vase', null, 1, 80), consignorId: 'leo' },
+      line('mug', null, 1, 12),
+    ];
+    const [hit] = computeRuleDiscounts(lines, [rule({ type: 'nth_pct', nth: 1, percent: 20, productIds: [], consignorIds: ['ana'] })]);
+    expect(hit?.amount).toBeCloseTo(12);
+  });
+
+  it("lands only on the artist's lines when the sale records who got what", () => {
+    const lines = [{ ...line('print', null, 2, 30), consignorId: 'ana' }, { ...line('vase', null, 1, 80), consignorId: 'leo' }];
+    const totals = computeCartTotals(lines, [rule({ type: 'nth_pct', nth: 1, percent: 20, productIds: [], consignorIds: ['ana'] })], null);
+    expect(totals.ruleDiscounts[0]!.lines).toEqual([0]);
+    expect(allocateDiscounts(lines, totals)).toEqual([12, 0]);
+  });
+});
+
 describe('allocateDiscounts', () => {
   const typed = (pid: string, type: string, qty: number, unitPrice: number): CartLine => ({ ...line(pid, null, qty, unitPrice), type });
   const enamel = rule({ id: 'en', name: 'Enamel Pin Bundle', type: 'tiered', productTypes: ['Enamel'], tiers: [{ qty: 2, total: 22 }, { qty: 3, total: 30 }] });

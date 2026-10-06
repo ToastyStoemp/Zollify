@@ -12,7 +12,7 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, seesSalesTotals } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -27,6 +27,8 @@ const account = currentAccount;
 const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Staff see takings only when the owner allows it (Settings → Team). */
+const showTotals = computed(() => seesSalesTotals(account.value));
 
 // NOT toISOString().slice(0, 10) - that converts to UTC first, which shifts
 // the date by the timezone offset (e.g. a UTC+2 local midnight becomes
@@ -218,7 +220,8 @@ const syncLine = computed(() => {
           <router-link v-if="event" :to="{ name: 'events' }" class="sub">at {{ event.name }}</router-link>
           <router-link v-else :to="{ name: 'events' }" class="sub warn"><Icon name="alert-triangle" :size="14" /> No active event - sales won't be filed against one</router-link>
         </header>
-        <div class="figures">
+        <p v-if="!showTotals" class="hint">Sales totals are kept for the owner. Ring up sales in the till; your own sales are under History.</p>
+        <div v-if="showTotals" class="figures">
           <div class="figure big">
             <span class="label">Taken today</span>
             <strong>{{ fmtPrice(todayTotal, currency) }}</strong>
@@ -228,7 +231,7 @@ const syncLine = computed(() => {
           <div class="figure"><span class="label">Card</span><strong>{{ fmtPrice(todayCard, currency) }}</strong></div>
           <div v-if="event" class="figure"><span class="label">Whole event</span><strong>{{ fmtPrice(eventTotal, currency) }}</strong><small>{{ eventSales.length }} sales</small></div>
         </div>
-        <div v-if="bestToday.length" class="best">
+        <div v-if="showTotals && bestToday.length" class="best">
           <span class="label">Selling best</span>
           <ol>
             <li v-for="b in bestToday" :key="b.title"><span>{{ b.title }}</span><strong>{{ b.qty }}</strong></li>
@@ -325,6 +328,7 @@ const syncLine = computed(() => {
 </template>
 
 <style scoped>
+.card .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .86rem; }
 .home { display: flex; flex-direction: column; gap: 1.25rem; }
 .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.01em; }

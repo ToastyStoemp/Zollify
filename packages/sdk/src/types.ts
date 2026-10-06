@@ -101,6 +101,51 @@ export interface SaleLine {
    */
   lineTotal: number;
   taxRate: number | null;
+  /** Consignment artist this line's money is shared with; absent = read from the product. */
+  consignorId?: string;
+  /** Percent of the line the store keeps when `consignorId` is set; absent = the artist's usual commission. */
+  commissionPct?: number;
+  /** What the line pays for, when a module added it to the till - see TillApi. */
+  ref?: SaleLineRef;
+}
+
+/** Ties a sale line back to the module record it settles, e.g. a workshop booking. */
+export interface SaleLineRef {
+  /** Stamped by the host with the module that added the line; a module cannot claim another's. */
+  moduleId: string;
+  kind: string;
+  id: string;
+}
+
+/** A button a module adds to the till, opening one of its own screens over it. */
+export interface TillAction {
+  id: string;
+  label: string;
+  icon?: string;
+  /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
+  component: ComponentLoader;
+  order?: number;
+}
+
+/** What a module found for a code the till did not know. */
+export interface TillLookup {
+  productId: string;
+  variantId: string | null;
+  /** Shown to the seller, e.g. "Shared from Ana's catalogue - Ana has been told." */
+  message?: string;
+}
+
+/** Something a module puts in the till's cart that is not a catalogue product - a workshop place, say. */
+export interface TillLine {
+  /** Unique per thing being paid for; adding the same key twice keeps one line. */
+  key: string;
+  name: string;
+  /** Fixed: the seller cannot change it at the till. */
+  qty: number;
+  unitPrice: number;
+  consignorId?: string;
+  commissionPct?: number;
+  ref?: { kind: string; id: string };
 }
 
 /**
@@ -168,6 +213,26 @@ export interface CoreEvents {
   'catalog:changed': { productIds: string[] };
   'event:activated': { eventId: string | null };
   'sync:completed': { at: number; pulled: number; pushed: number };
+  /**
+   * Someone opened a notification under the bell. Announced after the shell
+   * has navigated to its link, so a module whose screen was already open can
+   * show what the notification was about.
+   */
+  'notification:opened': { moduleId: string | null; link: string | null };
+  /**
+   * Something to print on a label - a staff badge, say - handed to whichever
+   * module prints labels. The shell opens that module's screen right after.
+   */
+  'label:print': LabelPrintJob;
+}
+
+/** A label to print: a title, a smaller line under it, a barcode and the text under the bars. */
+export interface LabelPrintJob {
+  title: string;
+  subtitle?: string;
+  caption?: string;
+  /** Encoded as Code 128. */
+  barcode: string;
 }
 
 export type EventName = keyof CoreEvents | (string & {});
@@ -416,6 +481,15 @@ export interface Sdk {
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
 
   /**
+   * A shared till: several people unlock this device with their own PIN.
+   * `available()` is true when this device has it switched on; `lock()` hands
+   * the till back to the lock screen, where the next person says who they are;
+   * `badge(code)` hands the till to the owner of a scanned staff badge (see
+   * `isStaffBadge` in @zollify/shared) and throws when the badge is refused.
+   */
+  lock: { available(): boolean; lock(): Promise<void>; badge(code: string): Promise<void> };
+
+  /**
    * Customer display: publish what this register's cart looks like right now.
    * `afterSale` is what this device's owner chose to show once a sale is paid
    * (device-local, set under Settings → This device); `receiptUrl` turns a
@@ -439,6 +513,30 @@ export interface Sdk {
     devices(): Promise<DeviceSummary[]>;
     sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage): boolean;
     onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;
+  };
+
+  /**
+   * The till. A module contributes buttons to it and puts its own lines in
+   * the cart; the till (POS) registers itself as the receiver while open.
+   * The sale those lines end up in is recorded like any other, with each
+   * line's `ref` kept, so the module can tell later what was paid.
+   */
+  till: {
+    action(action: TillAction): void;
+    /** Actions every module contributed, in order - read by the till. */
+    actions(): (TillAction & { moduleId: string })[];
+    /** False when no till is open to take it (or it refused, e.g. no active event). */
+    addLine(line: TillLine): boolean;
+    /** The till's side: receive lines modules add. Only one till listens at a time. */
+    onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
+    /**
+     * A module that can resolve a code the catalogue does not know - an
+     * artist's label scanned at a store, say. Return the catalogue product it
+     * has made available, or null.
+     */
+    onLookup(handler: (code: string) => Promise<TillLookup | null>): Unsubscribe;
+    /** The till's side: ask the modules about an unknown code. First answer wins. */
+    lookup(code: string): Promise<TillLookup | null>;
   };
 
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */

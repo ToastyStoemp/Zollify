@@ -8,14 +8,15 @@ import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
-import { listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
+import { isEnabled, listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
-import { mountPublicModules, mountServerModules, type RequestIdentity, type ServerModule } from './modules/mount';
+import { moduleServices, mountPublicModules, mountServerModules, type ModuleServices, type RequestIdentity, type ServerModule } from './modules/mount';
 import { registerModuleRoutes } from './routes/modules';
 import { registerRefreshCookie } from './refresh-cookie';
 import { registerDeviceLinkRoutes } from './device-link';
+import { registerDeviceUserRoutes } from './device-users';
 import { registerStatic } from './static';
-import { registerSyncRoutes } from './routes/sync';
+import { appendOps, registerSyncRoutes } from './routes/sync';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
@@ -24,6 +25,10 @@ import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
+import { configureCaptchaKey } from './captcha';
+import { createMailer, type Mailer } from './mailer';
+import { createNotifier, registerNotificationRoutes, type Notify } from './notifications';
+import { createWebhooks, migrateWebhooks, registerWebhookRoutes } from './webhooks';
 
 export interface GatewayOptions {
   dataDir: string;
@@ -49,8 +54,11 @@ export interface GatewayOptions {
   allowedOrigins: string[];
   /** Set false only for local HTTP development. */
   requireHttps: boolean;
-  trustProxy: boolean;
+  /** true trusts one proxy hop in front (the usual reverse proxy); a number trusts that many. */
+  trustProxy: boolean | number;
   logLevel?: string;
+  /** Outgoing email. Defaults to SMTP_URL + MAIL_FROM from the environment; disabled without them. */
+  mailer?: Mailer;
 }
 
 /**
@@ -80,6 +88,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   const app = Fastify({
     logger: {
       level: opts.logLevel ?? 'info',
+      // The live-sync socket carries its token in the query string.
+      serializers: {
+        req: (req: { method: string; url: string; ip?: string }) => ({ method: req.method, url: req.url.replace(/([?&](?:token|grant)=)[^&]*/g, '$1[redacted]'), remoteAddress: req.ip }),
+      },
       // Credentials and tokens must never reach the log, including when a
       // handler logs the whole request for debugging.
       redact: {
@@ -95,7 +107,8 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
         remove: true,
       },
     },
-    trustProxy: opts.trustProxy,
+    // Trusting every X-Forwarded-For hop would let anyone pick their own IP and step around the rate limits.
+    trustProxy: opts.trustProxy === false ? false : ((hops: number) => (_addr: string, hop: number) => hop < hops)(opts.trustProxy === true ? 1 : opts.trustProxy),
     // Generous on purpose: a backup restore pushes hundreds of image
     // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
     // authentication bound who can send this much, not the size itself.
@@ -188,21 +201,62 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
+  app.decorate('db', db);
+  // Large bodies are for signed-in work (backups, invoice PDFs); without a token
+  // nothing big is read, so nobody can make the server parse 32 MB for free.
+  app.addHook('onRequest', async (req, reply) => {
+    const size = Number(req.headers['content-length'] ?? 0);
+    if (size > 256 * 1024 && !req.headers.authorization) return reply.code(413).send({ error: 'Request too large.' });
+  });
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
+  configureCaptchaKey(opts.jwtSecret);
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
   registerDeviceLinkRoutes(app, db);
+  registerDeviceUserRoutes(app, db, opts.jwtSecret);
 
   // ── Sync, devices, admin ──────────────────────────────────────────────────
   // These declare their own absolute /api/... paths, so they register on the
   // root instance rather than inside the /api scope below.
 
   const rooms = new Rooms();
-  registerSyncRoutes(app, db, rooms);
+  const ring = createNotifier(db, rooms);
+  const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
+  // Webhooks hear every notification by its category, and modules add to the summaries.
+  migrateWebhooks(db);
+  const webhooks = createWebhooks(db, {
+    notify: ring,
+    contributors: () =>
+      opts.serverModules
+        .filter((m) => m.webhookReport)
+        .map((m) => (accountId: string, period: { from: string; to: string; timeZone: string }) =>
+          isEnabled(db, accountId, m.id) ? m.webhookReport!(services(m), accountId, period) : []),
+    log: (err) => app.log.warn({ err }, 'webhook failed'),
+  });
+  app.addHook('onClose', async () => webhooks.stop());
+  const notify: Notify = (accountId, n) => {
+    ring(accountId, n);
+    webhooks.notification(accountId, n);
+  };
+  // One set of services per module, built once: notifications carry its id, server writes its name.
+  const servicesByModule = new Map<string, ModuleServices>();
+  const services = (mod: ServerModule): ModuleServices => {
+    let s = servicesByModule.get(mod.id);
+    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, webhooks, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
+    return s;
+  };
+  registerSyncRoutes(app, db, rooms, (accountId, ops) => {
+    webhooks.onOps(accountId, ops);
+    for (const mod of opts.serverModules) {
+      if (mod.onOps && isEnabled(db, accountId, mod.id)) mod.onOps(services(mod), accountId, ops);
+    }
+  });
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
+  registerNotificationRoutes(app, db);
+  registerWebhookRoutes(app, db, webhooks);
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
@@ -221,15 +275,15 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     async (api) => {
       api.addHook('onRequest', app.authenticate);
       registerModuleRoutes(api, db, store, identity, opts.moduleStoreDir);
-      mountServerModules(api, db, opts.serverModules, identity);
+      mountServerModules(api, db, opts.serverModules, identity, services);
     },
     { prefix: '/api' },
   );
 
   // Public halves: no session, resolved by the module from a slug or token.
-  mountPublicModules(app, db, opts.serverModules);
+  mountPublicModules(app, db, opts.serverModules, services);
 
-  app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+  app.decorate('zollify', { db, store, webhooks, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 
   /**
    * Liveness probe. Deliberately unauthenticated and free of detail: a load

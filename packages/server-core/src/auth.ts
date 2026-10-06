@@ -44,12 +44,49 @@ export interface SessionInfo {
 // A valid argon2id hash of a throwaway value. Verified against on login when the
 // email is unknown, so a missing user costs the same time as a wrong password -
 // closing the timing side-channel that would otherwise reveal which emails exist.
-const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
+export const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
 
 export interface JwtClaims {
   sub: string;
   accountId: string;
   role: UserRole;
+  /** Set on a person's token from a shared till: the device it was unlocked on. */
+  till?: string;
+}
+
+/**
+ * What a person unlocked at a shared till may not do with that token. The
+ * till is a shared device: whoever walks up to an unlocked one must not be
+ * able to make the access last (API tokens, invites, sessions, devices,
+ * badges), send data out (webhooks), or lock the person out (2FA, deletion).
+ * Those need the person's own sign-in.
+ */
+const TILL_DENIED: [RegExp, RegExp][] = [
+  [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
+  [/./, /^\/api\/modules\/(toggle|reload)$/],
+  [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+];
+
+/**
+ * Checks a verified token against the database on every request: the person
+ * must still exist in the token's account (a removed person's token stops at
+ * once, not after 15 minutes), the role is the current one rather than the
+ * one at sign-in, and a till token only works while that person is unlocked
+ * on that device. Returns an error, or null with `claims.role` refreshed.
+ */
+export function checkClaims(db: Database.Database, claims: JwtClaims, method: string, url: string): { code: number; error: string } | null {
+  const row = db.prepare('SELECT accountId, role FROM users WHERE id = ?').get(claims.sub) as { accountId: string; role: UserRole } | undefined;
+  if (!row || row.accountId !== claims.accountId) return { code: 401, error: 'Not authenticated' };
+  claims.role = row.role;
+  if (claims.till !== undefined) {
+    const b = db.prepare('SELECT unlockedUntil FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(claims.accountId, claims.till, claims.sub) as { unlockedUntil: number } | undefined;
+    if (!b || b.unlockedUntil <= Date.now()) return { code: 401, error: 'Not authenticated' };
+    const path = url.split('?')[0]!;
+    if (TILL_DENIED.some(([m, p]) => m.test(method) && p.test(path)))
+      return { code: 403, error: 'Not from a shared till - sign in with your own account for this.' };
+  }
+  return null;
 }
 
 export interface UserRow {
@@ -62,6 +99,13 @@ export interface UserRow {
   totpEnabled?: number;
   recoveryCodes?: string | null;
 }
+
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newInviteCode(): string {
+  return [...randomBytes(16)].map((b) => INVITE_ALPHABET[b % 32]).join('');
+}
+/** Codes are typed by hand: case, spaces and dashes are forgiven. */
+export const normaliseInviteCode = (raw: string): string => raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
@@ -97,10 +141,17 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
+      staffSeesTotals: parsed.staffSeesTotals === true,
     };
   } catch {
     return emptyProfile();
   }
+}
+
+/** A bare access token, for a person unlocking a shared till: no refresh token, see device-users.ts. */
+export function issueAccessToken(app: FastifyInstance, user: Pick<UserRow, 'id' | 'accountId' | 'role'>, tillDeviceId: string): string {
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role, till: tillDeviceId };
+  return app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
 }
 
 export async function issueTokens(
@@ -157,11 +208,34 @@ function clearDeviceTrust(db: Database.Database, userId: string): void {
   db.prepare('DELETE FROM trusted_devices WHERE userId = ?').run(userId);
 }
 
+/**
+ * A user's second factor: an authenticator code, or one of their single-use
+ * recovery codes (which is spent). Only call it for users with 2FA on.
+ */
+export function checkSecondFactor(
+  db: Database.Database,
+  box: { decrypt<T>(s: string): T },
+  user: UserRow,
+  rawCode: unknown,
+): 'ok' | 'recovery' | 'missing' | 'invalid' {
+  const code = String(rawCode ?? '').trim();
+  if (!code) return 'missing';
+  if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) return 'ok';
+  // Read fresh and write only if unchanged: two sign-ins racing with one code must not both pass.
+  const stored = (db.prepare('SELECT recoveryCodes FROM users WHERE id = ?').get(user.id) as { recoveryCodes: string | null } | undefined)?.recoveryCodes ?? '[]';
+  const codes: string[] = JSON.parse(stored);
+  const idx = codes.indexOf(hashRecovery(code));
+  if (idx < 0) return 'invalid';
+  codes.splice(idx, 1); // recovery codes are single-use
+  const used = db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ? AND recoveryCodes = ?').run(JSON.stringify(codes), user.id, stored);
+  return used.changes === 1 ? 'recovery' : 'invalid';
+}
+
 export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
   if (!deviceId) return;
   db.prepare(
     `INSERT INTO devices (id, accountId, userId, name, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name)`,
+     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name) WHERE devices.accountId = excluded.accountId`,
   ).run(deviceId, accountId, userId, name ?? null, Date.now(), Date.now());
 }
 
@@ -218,7 +292,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
    * owner without an invite. The sign-in screen asks this to decide whether to
    * show "Set up this server" instead of the usual invite-gated form.
    */
-  const userCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  // Once anyone has signed up, the server stays set up: deleting the last account must not
+  // reopen "first visitor becomes owner" to whoever finds the page next.
+  db.exec('CREATE TABLE IF NOT EXISTS server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const markInitialised = () => db.prepare("INSERT OR IGNORE INTO server_meta (key, value) VALUES ('initialised', ?)").run(String(Date.now()));
+  const realUserCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  if (realUserCount() > 0) markInitialised();
+  const initialised = (): boolean => !!db.prepare("SELECT 1 FROM server_meta WHERE key = 'initialised'").get();
+  const userCount = (): number => (initialised() ? Math.max(1, realUserCount()) : realUserCount());
   app.get('/api/setup', async () => ({ needsOwner: userCount() === 0 }));
 
   app.post('/api/auth/register', AUTH_RATE_LIMIT, async (req, reply) => {
@@ -247,7 +328,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     if (inviteCode) {
       invite = db
         .prepare('SELECT code, accountId, role, allowedEventIds FROM invites WHERE code = ? AND usedBy IS NULL AND expiresAt > ?')
-        .get(inviteCode.trim().toUpperCase(), Date.now()) as typeof invite;
+        .get(normaliseInviteCode(inviteCode), Date.now()) as typeof invite;
       if (!invite && !open) return reply.code(403).send({ error: 'Invalid or expired invite code' });
     } else if (!open && !firstUser) {
       return reply.code(403).send({ error: 'An invite code is required' });
@@ -265,6 +346,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     try {
       db.transaction(() => {
         if (firstUser && userCount() !== 0) throw new Error('NOT_FIRST');
+        if (firstUser) markInitialised();
         if (!accountId) {
           accountId = randomUUID();
           db.prepare('INSERT INTO accounts (id, name, createdAt) VALUES (?, ?, ?)').run(
@@ -331,18 +413,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // Second factor, unless this device is already trusted from a prior 2FA login.
     let usedRecovery = false;
     if (has2fa(user) && !deviceTrusted(db, user.id, deviceId, b.trustToken)) {
-      const code = String(b.code ?? '').trim();
-      if (!code) return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
-      if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) {
-        /* valid TOTP */
-      } else {
-        const codes: string[] = JSON.parse(user.recoveryCodes ?? '[]');
-        const idx = codes.indexOf(hashRecovery(code));
-        if (idx < 0) return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
-        codes.splice(idx, 1); // recovery codes are single-use
-        db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes), user.id);
-        usedRecovery = true;
-      }
+      const second = checkSecondFactor(db, box, user, b.code);
+      if (second === 'missing') return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
+      if (second === 'invalid') return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
+      usedRecovery = second === 'recovery';
     }
 
     db.prepare('UPDATE users SET lastLoginAt = ? WHERE id = ?').run(Date.now(), user.id);
@@ -428,9 +502,15 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const u = db.prepare('SELECT totpEnabled FROM users WHERE id = ?').get(claims.sub) as { totpEnabled: number } | undefined;
     return { enabled: !!u?.totpEnabled };
   });
-  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    const u = db.prepare('SELECT email FROM users WHERE id = ?').get(claims.sub) as { email: string };
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    // Starting over switches the current 2FA off: with it on, that takes the current code,
+    // or a stolen session could swap in the thief's authenticator.
+    if (u.totpEnabled) {
+      const second = checkSecondFactor(db, box, u, (req.body as { code?: string } | undefined)?.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Enter your current authenticator code to set up a new one.', needs2fa: true });
+    }
     const secret = generateSecret();
     db.prepare('UPDATE users SET totpSecret = ?, totpEnabled = 0 WHERE id = ?').run(box.encrypt(secret), claims.sub);
     return { secret, otpauth: otpauthUri({ secret, account: u.email, issuer: 'Zollify' }) };
@@ -516,7 +596,8 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // A restricted "helper" invite: a member bound to one or more events.
     const events = Array.isArray(body.allowedEventIds) ? body.allowedEventIds.filter((e) => typeof e === 'string' && e) : [];
     const allowedEventIds = !body.newAccount && events.length ? JSON.stringify(events) : null;
-    const code = randomBytes(4).toString('hex').toUpperCase();
+    // 16 characters without look-alikes, about 80 bits: not guessable in an invite's 14 days.
+    const code = newInviteCode();
     db.prepare('INSERT INTO invites (code, accountId, role, allowedEventIds, createdBy, createdAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       code,
       body.newAccount ? null : claims.accountId,
@@ -640,8 +721,16 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   app.post('/api/account/delete', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     if (claims.role === 'member') return reply.code(403).send({ error: 'Only an account admin can delete the account' });
-    const body = (req.body ?? {}) as { password?: string };
+    // The server owner's own account goes only by the owner's hand.
+    const hasOwner = db.prepare("SELECT 1 FROM users WHERE accountId = ? AND role = 'owner'").get(claims.accountId);
+    if (hasOwner && claims.role !== 'owner') return reply.code(403).send({ error: 'Only the server owner can delete this account' });
+    const body = (req.body ?? {}) as { password?: string; code?: string };
     if (!(await passwordOk(claims.sub, body.password))) return reply.code(401).send({ error: 'Password is incorrect' });
+    const me = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    if (me.totpEnabled) {
+      const second = checkSecondFactor(db, box, me, body.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Authenticator code required.', needs2fa: true });
+    }
     const accountId = claims.accountId;
     db.transaction(() => {
       const userIds = (db.prepare('SELECT id FROM users WHERE accountId = ?').all(accountId) as { id: string }[]).map((u) => u.id);
@@ -656,7 +745,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       db.prepare(
         'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
       ).run(accountId, accountId, accountId);
-      for (const table of ['ops', 'images', 'metrics', 'logs', 'api_tokens', 'devices']) {
+      for (const table of ['ops', 'images', 'metrics', 'logs', 'api_tokens', 'devices', 'notifications']) {
         db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
       }
       db.prepare('DELETE FROM users WHERE accountId = ?').run(accountId);
@@ -727,8 +816,10 @@ export async function authenticate(this: FastifyInstance, req: FastifyRequest, r
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -756,8 +847,10 @@ export async function authenticateApiOrJwt(
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -790,6 +883,8 @@ export async function authenticateApiWrite(
     return reply.code(401).send({ error: 'Not authenticated' });
   }
   const claims = req.user as JwtClaims;
+  const bad = checkClaims(this.db, claims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
   if (claims.role === 'member') {
     return reply.code(403).send({ error: 'Catalog writes require an owner/admin or a data:write token' });
   }

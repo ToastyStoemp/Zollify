@@ -13,22 +13,32 @@ const account: AccountSnapshot = {
 };
 
 /** Requests the fake server has seen, so tests can assert on ordering. */
-const calls: { path: string; body?: unknown }[] = [];
+const calls: { path: string; body?: unknown; as?: string | null }[] = [];
 let pushResponse: unknown = { accepted: 0, duplicates: 0, latestSeq: 0 };
 let failPush = false;
 let pullResponses: unknown[] = [];
 
+/** People unlocked on a shared till whose sessions the fake device holds. */
+const heldPeople = new Set<string>();
+let actingAs: string | null = null;
+let deviceRole = 'owner';
+const fakeFetch = async (path: string, init?: RequestInit, as: string | null = null) => {
+  calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined, as });
+  if (path.startsWith('/sync/push')) {
+    if (failPush) throw new Error('network down');
+    return pushResponse;
+  }
+  return pullResponses.shift() ?? { ops: [], latestSeq: 0 };
+};
+
 vi.mock('../session', () => ({
-  getAccount: () => account,
+  getAccount: () => (account && actingAs ? { ...account, userId: actingAs } : account),
+  getDeviceAccount: () => (account ? { ...account, role: deviceRole } : null),
+  personSession: (id: string) => (heldPeople.has(id) ? { token: 't' } : null),
   onAccountChange: () => () => {},
-  authFetch: async (path: string, init?: RequestInit) => {
-    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-    if (path.startsWith('/sync/push')) {
-      if (failPush) throw new Error('network down');
-      return pushResponse;
-    }
-    return pullResponses.shift() ?? { ops: [], latestSeq: 0 };
-  },
+  authFetch: (path: string, init?: RequestInit) => fakeFetch(path, init, actingAs),
+  authFetchAs: (as: string | null, path: string, init?: RequestInit) => fakeFetch(path, init, as),
+  deviceFetch: (path: string, init?: RequestInit) => fakeFetch(path, init, null),
 }));
 
 const { deleteCoreDb, openCoreDb } = await import('../core/db');
@@ -47,10 +57,39 @@ beforeEach(async () => {
   pullResponses = [];
   pushResponse = { accepted: 0, duplicates: 0, latestSeq: 0 };
   failPush = false;
+  heldPeople.clear();
+  actingAs = null;
+  deviceRole = 'owner';
   await deleteCoreDb(account.accountId);
   catalog.resetCatalogCache();
   events.resetSalesEventCache();
   device.resetDeviceCache();
+});
+
+describe('sync on a shared till', () => {
+  it("pushes each person's changes with their own session, and holds what the device may not send for them", async () => {
+    deviceRole = 'member';
+    actingAs = 'sam';
+    heldPeople.add('sam');
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'by-sam' } });
+    actingAs = 'owner-2';
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'by-owner' } });
+    await outbox.queueOp({ type: 'product.upsert', payload: product('p9', 'Owner edit', 1) });
+    actingAs = null;
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'by-device' } });
+
+    await sync.syncNow();
+
+    const pushes = calls.filter((c) => c.path === '/sync/push').map((c) => ({ as: c.as, ids: (c.body as { ops: { payload: { id: string } }[] }).ops.map((o) => o.payload.id) }));
+    // Sam's sale under Sam; the owner's sale and the device's own as the device. The
+    // owner's product edit waits: a staff device may not make it, and the owner is gone.
+    expect(pushes).toEqual([
+      { as: 'sam', ids: ['by-sam'] },
+      { as: null, ids: ['by-owner', 'by-device'] },
+    ]);
+    expect((await outbox.unsyncedOps()).map((o) => o.type)).toEqual(['product.upsert']);
+    expect(pushes.flatMap((p) => p.ids)).not.toContain('p9');
+  });
 });
 
 describe('sync', () => {

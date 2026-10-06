@@ -57,6 +57,13 @@ const corePanels: Panel[] = [
     component: () => import('./TeamSettings.vue'),
   },
   {
+    id: 'core.webhooks',
+    label: 'Webhooks',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./WebhooksSettings.vue'),
+  },
+  {
     id: 'core.modules',
     label: 'Modules',
     group: 'Core',

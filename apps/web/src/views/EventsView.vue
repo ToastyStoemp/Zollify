@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import type { SalesEvent } from '@zollify/shared';
-import { VAT_RATES, countryCodeOf, fmtPrice, fmtRate, resolveEventVat, toLocalPrice, type EventVat } from '@zollify/shared';
+import type { SalesEvent, SalesEventKind } from '@zollify/shared';
+import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -22,14 +22,17 @@ import {
 } from '@zollify/platform';
 
 /**
- * Events - ZollTool's card grid. Upcoming and active first, soonest at the
- * top; finished ones below. Selling always goes through an event, so the
- * card is where you open it, sell for it, and close it again.
+ * Events - ZollTool's card grid. Stores (permanent shops) first, then
+ * upcoming and active events, soonest at the top; finished ones below.
+ * Selling always goes through an event or a store, so the card is where you
+ * open it, sell for it, and close it again.
  */
 
 const account = currentAccount;
 const router = useRouter();
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Staff see takings only when the owner allows it (Settings → Team). */
+const showTotals = computed(() => seesSalesTotals(account.value));
 const isHelper = computed(() => (account.value?.allowedEventIds?.length ?? 0) > 0);
 const baseCurrency = computed(() => account.value?.profile.defaultCurrency ?? 'CHF');
 const error = ref<string | null>(null);
@@ -41,11 +44,14 @@ const customsOn = (): boolean =>
 
 // Sort key = the event's date; undated events sort last.
 const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '￿';
+const stores = computed(() =>
+  visibleEvents.value.filter((e) => isStore(e)).sort((a, b) => Number(a.status === 'closed') - Number(b.status === 'closed') || a.name.localeCompare(b.name)),
+);
 const upcoming = computed(() =>
-  visibleEvents.value.filter((e) => e.status !== 'closed').sort((a, b) => dateKey(a).localeCompare(dateKey(b)) || a.name.localeCompare(b.name)),
+  visibleEvents.value.filter((e) => !isStore(e) && e.status !== 'closed').sort((a, b) => dateKey(a).localeCompare(dateKey(b)) || a.name.localeCompare(b.name)),
 );
 const finished = computed(() =>
-  visibleEvents.value.filter((e) => e.status === 'closed').sort((a, b) => dateKey(b).localeCompare(dateKey(a)) || b.updatedAt - a.updatedAt),
+  visibleEvents.value.filter((e) => !isStore(e) && e.status === 'closed').sort((a, b) => dateKey(b).localeCompare(dateKey(a)) || b.updatedAt - a.updatedAt),
 );
 
 /** Sales and revenue per event, in the event's base currency. */
@@ -67,7 +73,10 @@ function fmtDates(e: SalesEvent): string {
   return e.dateStart || e.dateEnd || '';
 }
 function pill(e: SalesEvent): string {
-  return e.id === activeEventId.value ? 'selling' : e.status;
+  if (e.id === activeEventId.value) return 'selling';
+  // A store has no dates to be "planned" for - it is open or it is not.
+  if (isStore(e)) return e.status === 'active' ? 'open' : 'closed';
+  return e.status;
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -90,7 +99,9 @@ const sell = (e: SalesEvent) =>
     if (hasRoute('pos:index')) await router.push({ name: 'pos:index' });
   });
 async function close(e: SalesEvent): Promise<void> {
-  const ok = await shellConfirm('Closing stops sales for this event. Nothing is deleted - history and exports stay, and you can reopen it any time.', 'Close event?');
+  const ok = isStore(e)
+    ? await shellConfirm('Closing stops sales at this store. Nothing is deleted - history, stock and consignment statements stay, and you can reopen it any time.', 'Close store?')
+    : await shellConfirm('Closing stops sales for this event. Nothing is deleted - history and exports stay, and you can reopen it any time.', 'Close event?');
   if (!ok) return;
   await guard(async () => {
     const end = e.dateEnd || e.dateStart;
@@ -101,9 +112,10 @@ async function close(e: SalesEvent): Promise<void> {
   });
 }
 async function remove(e: SalesEvent): Promise<void> {
+  const what = isStore(e) ? 'store' : 'event';
   const ok = await shellConfirm(
-    'The event disappears from every device. Recorded sales are kept in History under "Removed event", but its claims and customs details go with it.',
-    'Delete event?',
+    `The ${what} disappears from every device. Recorded sales are kept in History under "Removed event", but its claims and customs details go with it.`,
+    `Delete ${what}?`,
   );
   if (!ok) return;
   await guard(() => deleteSalesEvent(e.id));
@@ -121,6 +133,9 @@ const ROUNDING = [
 ] as const;
 const editing = ref(false);
 const editId = ref<string | null>(null);
+/** What the editor is creating or editing - a store has no dates. */
+const editKind = ref<SalesEventKind>('event');
+const kindLabel = computed(() => (editKind.value === 'store' ? 'store' : 'event'));
 const fetchingRate = ref(false);
 const rateError = ref('');
 const form = reactive({
@@ -146,8 +161,9 @@ const form = reactive({
   pricesFrom: '',
 });
 
-function openNew(): void {
+function openNew(kind: SalesEventKind = 'event'): void {
   editId.value = null;
+  editKind.value = kind;
   Object.assign(form, {
     name: '',
     dateStart: '',
@@ -178,7 +194,7 @@ function openNew(): void {
  * is over, since that is what is physically carried on to the next show.
  */
 function openDuplicate(e: SalesEvent): void {
-  openNew();
+  openNew(e.kind ?? 'event');
   Object.assign(form, {
     name: `${e.name} (copy)`,
     street: e.venue?.street ?? '',
@@ -202,6 +218,7 @@ const vatFormOf = (vat: EventVat | undefined) => ({
 });
 function openEdit(e: SalesEvent): void {
   editId.value = e.id;
+  editKind.value = e.kind ?? 'event';
   Object.assign(form, {
     name: e.name,
     dateStart: e.dateStart ?? '',
@@ -296,9 +313,10 @@ const localExample = computed(() => {
 
 async function save(): Promise<void> {
   if (!form.name.trim()) {
-    error.value = 'Give the event a name before saving.';
+    error.value = `Give the ${kindLabel.value} a name before saving.`;
     return;
   }
+  const store = editKind.value === 'store';
   const existing = editId.value ? visibleEvents.value.find((e) => e.id === editId.value) : undefined;
   const local = form.localCurrency.trim().toUpperCase();
   const rate = parseFloat(form.exchangeRate);
@@ -310,8 +328,10 @@ async function save(): Promise<void> {
     ...pricing,
     id: editId.value ?? crypto.randomUUID(),
     name: form.name.trim(),
-    dateStart: form.dateStart || undefined,
-    dateEnd: form.dateEnd || undefined,
+    // 'event' is left implicit, so events keep the shape they always had.
+    kind: store ? 'store' : undefined,
+    dateStart: store ? undefined : form.dateStart || undefined,
+    dateEnd: store ? undefined : form.dateEnd || undefined,
     venue: {
       street: form.street.trim() || undefined,
       postcode: form.postcode.trim() || undefined,
@@ -324,7 +344,8 @@ async function save(): Promise<void> {
     exchangeRate: converting ? rate : undefined,
     roundingIncrement: Number(form.roundingIncrement) || 0,
     vat: formVat(),
-    status: existing?.status ?? 'planned',
+    // A store has no dates to wait for, so it opens as soon as it exists.
+    status: existing?.status ?? (store ? 'active' : 'planned'),
     updatedAt: Date.now(),
   };
   await guard(async () => {
@@ -343,15 +364,18 @@ async function save(): Promise<void> {
   <section class="events">
     <header>
       <h1>Events</h1>
-      <button v-if="canEdit" type="button" class="primary" @click="openNew"><Icon name="plus" :size="16" /> New event</button>
+      <div v-if="canEdit" class="header-actions">
+        <button type="button" @click="openNew('store')"><Icon name="store" :size="16" /> New store</button>
+        <button type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
+      </div>
     </header>
 
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
-    <p v-if="!visibleEvents.length" class="empty">No events yet. Create one to start selling - every sale is recorded against the active event.</p>
+    <p v-if="!visibleEvents.length" class="empty">No events yet. Create one to start selling - every sale is recorded against the active event. Running a shop? Add it as a store: it stays open with no end date.</p>
 
-    <template v-for="group in [{ label: '', list: upcoming }, { label: 'Finished', list: finished }]" :key="group.label">
+    <template v-for="group in [{ label: 'Stores', list: stores }, { label: stores.length ? 'Events' : '', list: upcoming }, { label: 'Finished', list: finished }]" :key="group.label">
       <h2 v-if="group.label && group.list.length" class="group">{{ group.label }}</h2>
       <ul v-if="group.list.length" class="grid">
         <li v-for="e in group.list" :key="e.id" :class="['card', { active: e.id === activeEventId }]">
@@ -359,15 +383,15 @@ async function save(): Promise<void> {
             <strong>{{ e.name }}</strong>
             <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
           </div>
-          <p class="when">{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
-          <p class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
+          <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active'" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
             <button v-else type="button" @click="sell(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" class="btn"><Icon name="coins" :size="14" /> Prices</router-link>
-            <router-link v-if="customsOn()" :to="{ name: 'customs-hub:index', query: { event: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
+            <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
             <button v-if="canEdit" type="button" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
             <!-- Only meaningful for an active event - close() on a planned one
@@ -389,18 +413,19 @@ async function save(): Promise<void> {
       </ul>
     </template>
 
-    <ModalShell v-if="editing" :title="editId ? 'Edit event' : 'New event'" @close="editing = false">
+    <ModalShell v-if="editing" :title="`${editId ? 'Edit' : 'New'} ${kindLabel}`" @close="editing = false">
       <div class="form">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <label><span>Name</span><input v-model="form.name" type="text" required /></label>
-        <label><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /></label>
+        <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /></label>
+        <p v-else class="hint">A store is open until you close it - no dates. Its stock claims reserve what is on its shelves, and it sells through the till like an event.</p>
         <div class="two">
           <label><span>Street</span><input v-model="form.street" type="text" /></label>
           <label><span>City</span><input v-model="form.city" type="text" /></label>
           <label><span>Postcode</span><input v-model="form.postcode" type="text" /></label>
           <label><span>Country</span><CountryPicker v-model="form.country" store="name" /></label>
         </div>
-        <label><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
+        <label v-if="editKind === 'event'"><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
 
         <fieldset>
           <legend>Currency</legend>
@@ -486,7 +511,8 @@ async function save(): Promise<void> {
 .events { display: flex; flex-direction: column; gap: 1rem; max-width: 72rem; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
-header .primary { display: inline-flex; align-items: center; gap: .4rem; }
+header button { display: inline-flex; align-items: center; gap: .4rem; }
+.header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); font-size: .82rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
@@ -498,7 +524,7 @@ header .primary { display: inline-flex; align-items: center; gap: .4rem; }
 .title { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .title strong { font-size: 1rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
-.pill.selling, .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .pill.planned { background: var(--zfy-signal-soft, #e4ecf6); color: var(--zfy-ink, #1a2230); }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }

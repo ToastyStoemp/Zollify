@@ -32,6 +32,8 @@ export interface OutboxOp extends Op {
   seq?: number;
   /** 0 = not yet pushed, 1 = acknowledged. */
   synced: 0 | 1;
+  /** Who made the change, on a till several people share - pushed with their own token where possible. */
+  userId?: string;
 }
 
 export interface SettingRow {

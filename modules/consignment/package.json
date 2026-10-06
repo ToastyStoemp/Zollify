@@ -1,0 +1,28 @@
+{
+  "name": "@zollify/consignment",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "zollify": {
+    "moduleId": "consignment",
+    "entry": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@zollify/sdk": "*",
+    "@zollify/shared": "*",
+    "@zollify/ui": "*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.0",
+    "vite": "^6.0.0",
+    "vitest": "^5.0.1",
+    "vue": "^3.5.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

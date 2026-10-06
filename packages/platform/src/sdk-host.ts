@@ -7,16 +7,20 @@ import {
   type Logger,
   type NavItem,
   type RouteDef,
+  type SaleLineRef,
   type Sdk,
   type SettingsPanel,
   type ShellUi,
   type StoreSchema,
+  type TillLine,
+  type TillLookup,
   type Unsubscribe,
 } from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
+import { lockTill, switchByBadge, tillSettings } from './till-lock';
 import {
   allProducts,
   deleteProduct,
@@ -179,6 +183,11 @@ const coreData: import('@zollify/sdk').DataApi = {
 const CONFIG_STORE = 'config';
 const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 
+/** The open till, when there is one - the module that sells registers here. */
+let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
+/** Modules that can resolve a code the catalogue does not know. */
+const tillLookups = new Set<(code: string) => Promise<TillLookup | null>>();
+
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
   const subscriptions: Unsubscribe[] = [];
   let ownDb: Dexie | null = null;
@@ -265,6 +274,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     data: coreData,
 
     account: () => getAccount(),
+    lock: { available: () => tillSettings.value.enabled, lock: () => lockTill(), badge: (code) => switchByBadge(code) },
 
     onAccountChange(handler) {
       guard();
@@ -287,6 +297,47 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         const off = onPaymentMessage(handler);
         subscriptions.push(off);
         return off;
+      },
+    },
+    till: {
+      action(action) {
+        guard();
+        services.contributions.addTillAction(moduleId, action);
+      },
+      actions: () => [...services.contributions.tillActions].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label)),
+      addLine(line) {
+        guard();
+        if (!tillReceiver) return false;
+        // The ref names the module that added the line - never one it chose.
+        const { ref, ...rest } = line;
+        return tillReceiver({ ...rest, ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}) });
+      },
+      onAddLine(handler) {
+        guard();
+        tillReceiver = handler;
+        const off = () => {
+          if (tillReceiver === handler) tillReceiver = null;
+        };
+        subscriptions.push(off);
+        return off;
+      },
+      onLookup(handler) {
+        guard();
+        tillLookups.add(handler);
+        const off = () => void tillLookups.delete(handler);
+        subscriptions.push(off);
+        return off;
+      },
+      async lookup(code) {
+        for (const handler of [...tillLookups]) {
+          try {
+            const found = await handler(code);
+            if (found) return found;
+          } catch {
+            /* one module failing must not stop the next one answering */
+          }
+        }
+        return null;
       },
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },

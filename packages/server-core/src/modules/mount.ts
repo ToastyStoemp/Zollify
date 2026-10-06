@@ -1,6 +1,11 @@
 import type { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { isEnabled } from './entitlements';
+import type { Mailer } from '../mailer';
+import type { Notify } from '../notifications';
+import type { ServerOpInput } from '../routes/sync';
+import type { WebhookMessage, WireOp } from '@zollify/shared';
+import type { Webhooks } from '../webhooks';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -16,8 +21,24 @@ export interface RequestIdentity {
  * than being trusted to derive it - a module never reads the raw token, and
  * never chooses which account it is acting for.
  */
-export interface ModuleContext {
+/** What every part of a server module gets, signed in or not. */
+export interface ModuleServices {
   db: Database.Database;
+  /** Raises an in-app notification for an account (shown under the bell). */
+  notify: Notify;
+  /** Outgoing email; `mail.enabled` is false on a server without SMTP. */
+  mail: Mailer;
+  /**
+   * Writes changes into an account's synced data, as the server, and rings
+   * its devices. For acting on someone's behalf across accounts - an artist
+   * restocking their shelf in a store, say. Returns how many were written.
+   */
+  writeOps(accountId: string, ops: ServerOpInput[]): number;
+  /** Posts to the account's webhooks that listen for the event (Discord, Slack, JSON). */
+  webhooks: Pick<Webhooks, 'emit'>;
+}
+
+export interface ModuleContext extends ModuleServices {
   identity(req: FastifyRequest): RequestIdentity;
 }
 
@@ -26,8 +47,7 @@ export interface ModuleContext {
  * module resolves which account a request is for from its own data (a slug, a
  * token) and must check `isEnabled` before serving anything for it.
  */
-export interface PublicModuleContext {
-  db: Database.Database;
+export interface PublicModuleContext extends ModuleServices {
   isEnabled(accountId: string): boolean;
 }
 
@@ -45,6 +65,29 @@ export interface ServerModule {
    * resource-isolation headers for this prefix only.
    */
   publicRoutes?: (ctx: PublicModuleContext) => FastifyPluginAsync;
+  /**
+   * Called after an account's devices pushed ops, for accounts with the
+   * module switched on - so a module can follow changes as they happen
+   * (an artist editing a product a store shares, say). Must not throw.
+   */
+  onOps?(ctx: ModuleServices, accountId: string, ops: WireOp[]): void;
+  /** Lines the module adds to an account's daily and weekly webhook summaries. */
+  webhookReport?(ctx: ModuleServices, accountId: string, period: { from: string; to: string; timeZone: string }): WebhookMessage['fields'];
+}
+
+/** Builds the per-module services: notifications carry the module's id, server writes its name. */
+export function moduleServices(
+  mod: Pick<ServerModule, 'id'>,
+  db: Database.Database,
+  base: { notify: Notify; mail: Mailer; webhooks: Pick<Webhooks, 'emit'>; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
+): ModuleServices {
+  return {
+    db,
+    notify: (accountId, n) => base.notify(accountId, { ...n, moduleId: mod.id }),
+    mail: base.mail,
+    webhooks: base.webhooks,
+    writeOps: (accountId, ops) => base.writeOps(accountId, mod.id, ops),
+  };
 }
 
 const RANK: Record<Role, number> = { member: 0, admin: 1, owner: 2 };
@@ -62,6 +105,7 @@ export function mountServerModules(
   db: Database.Database,
   modules: ServerModule[],
   identity: (req: FastifyRequest) => RequestIdentity,
+  services: (mod: ServerModule) => ModuleServices,
 ): void {
   for (const mod of modules) {
     try {
@@ -94,7 +138,7 @@ export function mountServerModules(
           return undefined;
         });
 
-        await scope.register(mod.routes({ db, identity }));
+        await scope.register(mod.routes({ ...services(mod), identity }));
       },
       { prefix: `/m/${mod.id}` },
     );
@@ -109,10 +153,15 @@ export function mountServerModules(
  * app-wide `same-origin` resource policy and closed CORS would refuse. Nothing
  * under `/p/` carries a session, so the wider exposure costs nothing.
  */
-export function mountPublicModules(app: FastifyInstance, db: Database.Database, modules: ServerModule[]): void {
+export function mountPublicModules(
+  app: FastifyInstance,
+  db: Database.Database,
+  modules: ServerModule[],
+  services: (mod: ServerModule) => ModuleServices,
+): void {
   for (const mod of modules) {
     if (!mod.publicRoutes) continue;
-    const ctx: PublicModuleContext = { db, isEnabled: (accountId) => isEnabled(db, accountId, mod.id) };
+    const ctx: PublicModuleContext = { ...services(mod), isEnabled: (accountId) => isEnabled(db, accountId, mod.id) };
     void app.register(
       async (scope) => {
         scope.addHook('onSend', async (_req, reply) => {

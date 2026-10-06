@@ -11,34 +11,38 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@zollify/consignment": "*",
+    "@zollify/convention-checklist": "*",
+    "@zollify/costs": "*",
+    "@zollify/peppol-be": "*",
     "@zollify/customs-ch": "*",
     "@zollify/customs-de": "*",
     "@zollify/customs-hub": "*",
+    "@zollify/label-printer": "*",
     "@zollify/migration": "*",
     "@zollify/platform": "*",
     "@zollify/pos": "*",
     "@zollify/price-cards": "*",
-    "@zollify/convention-checklist": "*",
-    "@zollify/label-printer": "*",
-    "@zollify/costs": "*",
+    "@zollify/public-events": "*",
     "@zollify/sdk": "*",
     "@zollify/shopify-sync": "*",
-    "@zollify/public-events": "*",
-    "@zollify/tax": "*",
     "@zollify/sourcing": "*",
+    "@zollify/tax": "*",
     "@zollify/ui": "*",
     "dexie": "^4.2.0",
-    "vue": "^3.5.0",
-    "vue-router": "^4.5.0",
+    "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "vue": "^3.5.0",
+    "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@types/jsbarcode": "^3.11.4",
+    "@types/qrcode": "^1.5.6",
     "@vitejs/plugin-vue": "^5.2.0",
     "vite": "^6.0.0",
     "vitest": "^5.0.1",
-    "vue-tsc": "^2.2.0",
-    "@types/qrcode": "^1.5.6"
+    "vue-tsc": "^2.2.0"
   }
 }

@@ -1,12 +1,54 @@
 import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
-import { PushRequestSchema, type PullResponse, type PushResponse, type ServerOp } from '@zollify/shared';
+import { randomUUID } from 'node:crypto';
+import { PushRequestSchema, STAFF_OP_TYPES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
 
-export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, rooms: Rooms): void {
+/** A change the server itself makes to an account's data, on a module's behalf. */
+export interface ServerOpInput {
+  type: WireOp['type'];
+  payload: unknown;
+}
+
+/**
+ * Appends ops to an account's log as if a device had pushed them, then rings
+ * the account's devices so they pull. Used where the server acts for someone
+ * else - an artist restocking their shelf in a store's account, say. Each op
+ * gets a fresh id and the device id `server:<origin>`, so it is always clear
+ * in the log what the server wrote.
+ */
+export function appendOps(db: Database.Database, rooms: Rooms, accountId: string, origin: string, ops: ServerOpInput[]): number {
+  if (!ops.length) return 0;
+  const deviceId = `server:${origin}`;
+  const latest = db.transaction(() => {
+    let seq = (db.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM ops WHERE accountId = ?').get(accountId) as { m: number }).m;
+    const insert = db.prepare('INSERT INTO ops (accountId, seq, opId, deviceId, ts, type, payload, receivedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const op of ops) {
+      seq++;
+      insert.run(accountId, seq, `srv-${randomUUID()}`, deviceId, Date.now(), op.type, JSON.stringify(op.payload ?? null), Date.now());
+    }
+    return seq;
+  })();
+  rooms.nudge(accountId, latest);
+  return ops.length;
+}
+
+/**
+ * What a plain member - store staff - may change: sales, refunds and claims.
+ * The catalogue, prices, discounts, events and settings are the owner's and
+ * admins'. Their screens already hide those; this is the guarantee.
+ */
+const STAFF_TYPES = new Set(STAFF_OP_TYPES);
+
+export function registerSyncRoutes(
+  app: FastifyInstance,
+  db: Database.Database,
+  rooms: Rooms,
+  onOps: (accountId: string, ops: WireOp[]) => void = () => {},
+): void {
   const insertOp = db.prepare(
     `INSERT OR IGNORE INTO ops (accountId, seq, opId, deviceId, ts, type, payload, receivedAt)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -51,8 +93,15 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
   }
   // Which ops a restricted user is allowed to WRITE: only sales/stock for their
   // events (never catalog, discounts, other events, or account settings).
-  function opWritable(allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
-    if (op.type === 'tx.revert') return true; // only reverts a tx already on their device
+  function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }, batch: { type: string; payload: unknown }[]): boolean {
+    if (op.type === 'tx.revert') {
+      // Only a sale of one of their events: one already on the server, or one in this same push.
+      const txId = (op.payload as { txId?: string } | null)?.txId;
+      if (!txId) return false;
+      const inBatch = batch.find((o) => o.type === 'tx.create' && (o.payload as { id?: string } | null)?.id === txId);
+      const eid = inBatch ? eventIdOf(inBatch) : (txEventOf.get(accountId, txId) as { eid?: string } | undefined)?.eid;
+      return !!eid && allowed.has(eid);
+    }
     if (op.type === 'tx.create' || op.type === 'stock.set') {
       const eid = eventIdOf(op);
       return !!eid && allowed.has(eid);
@@ -70,12 +119,16 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     // Disallowed ops are DROPPED (not stored), never rejected with 403 - a 403
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
-    const ops = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;
+    const scoped = allowed ? rawOps.filter((op) => opWritable(claims.accountId, allowed, op, rawOps)) : rawOps;
+    const staff = claims.role === 'member';
+    const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff, deviceId));
     const dropped = rawOps.length - ops.length;
-    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside helper event scope');
+    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
 
     let accepted = 0;
     let txCount = 0;
+    /** Ops the server did not have yet: what onOps hears, so a retried push is never announced twice. */
+    const fresh: typeof ops = [];
     const result = db.transaction((): PushResponse => {
       let seq = (maxSeq.get(claims.accountId) as { m: number }).m;
       for (const op of ops) {
@@ -92,6 +145,7 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
         if (r.changes > 0) {
           seq++;
           accepted++;
+          fresh.push(op);
           if (op.type === 'tx.create') txCount++;
         }
       }
@@ -104,6 +158,11 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
       bumpMetric(db, claims.accountId, 'opsReceived', accepted);
       if (txCount > 0) bumpMetric(db, claims.accountId, 'txCount', txCount);
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
+      try {
+        onOps(claims.accountId, fresh);
+      } catch (err) {
+        req.log.error({ err }, 'a module failed to handle pushed ops');
+      }
     }
     return result;
   });
@@ -153,6 +212,42 @@ export function registerSyncRoutes(app: FastifyInstance, db: Database.Database, 
     const response: PullResponse = { ops, latestSeq, epoch, ...(skipDevice && rows.length < limit ? { caughtUp: true } : {}) };
     return sendJson(req.headers['accept-encoding'], reply, response);
   });
+}
+
+const emailOf = (db: Database.Database, userId: string): string | null =>
+  (db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined)?.email ?? null;
+
+/**
+ * Who made a sale is the signed-in user who pushed it - never what the
+ * device claimed. Staff are stamped always; an admin's own sales too, except
+ * an import of old sales that already name someone.
+ *
+ * On a shared till the push can come from someone else than the seller (the
+ * person who rang it up locked the till before it synced). A sale naming a
+ * colleague who was added to this very device, with their password, keeps
+ * that name.
+ */
+function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff: boolean, deviceId: string): WireOp {
+  if (op.type !== 'tx.create' || !op.payload || typeof op.payload !== 'object') return op;
+  const payload = op.payload as { soldBy?: { userId?: string } };
+  const named = payload.soldBy?.userId;
+  // A sale recorded at a shared till, in the name of someone unlocked there: only believed
+  // when the push really comes from that till - the device id in the body is the client's word.
+  if (named && named !== claims.sub && pushedFromDevice(db, claims, deviceId) && boundToDevice(db, claims.accountId, deviceId, named)) {
+    return { ...op, payload: { ...payload, soldBy: { userId: named, email: emailOf(db, named) } } };
+  }
+  if (!staff && named) return op;
+  return { ...op, payload: { ...payload, soldBy: { userId: claims.sub, email: emailOf(db, claims.sub) } } };
+}
+
+/** The pusher is signed in on this device: a till token for it, or a live session that signed in there. */
+function pushedFromDevice(db: Database.Database, claims: JwtClaims, deviceId: string): boolean {
+  if (claims.till !== undefined) return claims.till === deviceId;
+  return !!db.prepare('SELECT 1 FROM refresh_tokens WHERE userId = ? AND deviceId = ? AND expiresAt > ?').get(claims.sub, deviceId, Date.now());
+}
+
+function boundToDevice(db: Database.Database, accountId: string, deviceId: string, userId: string): boolean {
+  return !!db.prepare('SELECT 1 FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(accountId, deviceId, userId);
 }
 
 /**

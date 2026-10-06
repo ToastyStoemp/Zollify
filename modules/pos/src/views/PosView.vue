@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
-import type { SaleEvent } from '@zollify/sdk';
+import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts } from '@zollify/shared';
+import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addLine,
   addMisc,
+  addModuleLine,
   appliedDiscounts,
   chargeTotals,
   customDiscountCharged,
@@ -153,22 +154,68 @@ function productLeft(p: Product): number | null {
   return keys.reduce((s, vid) => s + Math.max(0, remaining(p.id, vid) ?? 0), 0);
 }
 
-// ── Browsing: by type, or flat ──────────────────────────────────────────────
+// ── Browsing: by artist, by type, or flat ───────────────────────────────────
+// A store's till sells many artists' work, so it opens by artist; a booth's
+// till sells one artist's and opens by type. Each remembers its own choice.
+type ViewMode = 'flat' | 'grouped' | 'artists';
 const VIEW_KEY = 'zollify.pos.view';
-const viewMode = ref<'flat' | 'grouped'>('grouped');
-try {
-  if (localStorage.getItem(VIEW_KEY) === 'flat') viewMode.value = 'flat';
-} catch {
-  /* no storage */
-}
-function setViewMode(mode: 'flat' | 'grouped'): void {
-  viewMode.value = mode;
+const STORE_VIEW_KEY = 'zollify.pos.view.store';
+const readMode = (key: string): ViewMode | null => {
   try {
-    localStorage.setItem(VIEW_KEY, mode);
+    const v = localStorage.getItem(key);
+    return v === 'flat' || v === 'grouped' || v === 'artists' ? v : null;
+  } catch {
+    return null;
+  }
+};
+const boothMode = ref<ViewMode>(readMode(VIEW_KEY) === 'flat' ? 'flat' : 'grouped');
+const storeMode = ref<ViewMode>(readMode(STORE_VIEW_KEY) ?? 'artists');
+const atStore = computed(() => isStore(activeEvent.value));
+/** Artists only mean something when the catalogue has their work in it. */
+const hasArtists = computed(() => products.value.some((p) => p.consignorId));
+const viewMode = computed<ViewMode>(() => {
+  const mode = atStore.value ? storeMode.value : boothMode.value;
+  return mode === 'artists' && !hasArtists.value ? 'grouped' : mode;
+});
+function setViewMode(mode: ViewMode): void {
+  if (atStore.value) storeMode.value = mode;
+  else boothMode.value = mode;
+  openArtist.value = null;
+  try {
+    localStorage.setItem(atStore.value ? STORE_VIEW_KEY : VIEW_KEY, mode);
   } catch {
     /* no storage */
   }
 }
+
+/** The artist being browsed, by consignor id; '' = the store's own items. */
+const openArtist = ref<string | null>(null);
+watch(() => activeEvent.value?.id, () => (openArtist.value = null));
+const artistKey = (p: Product): string => p.consignorId ?? '';
+interface ArtistGroup {
+  key: string;
+  name: string;
+  products: Product[];
+  stock: number | null;
+  inCart: number;
+}
+const artistGroups = computed<ArtistGroup[]>(() => {
+  const map = new Map<string, Product[]>();
+  for (const p of products.value) (map.get(artistKey(p)) ?? map.set(artistKey(p), []).get(artistKey(p))!).push(p);
+  const own = sdk().account()?.accountName || 'Our own';
+  return [...map.entries()]
+    .map(([key, list]) => ({
+      key,
+      name: key ? (list.find((p) => p.consignorName)?.consignorName ?? 'Artist') : own,
+      products: list,
+      stock: activeEvent.value ? list.reduce((s, p) => s + (productLeft(p) ?? 0), 0) : null,
+      inCart: list.reduce((s, p) => s + productInCart(p), 0),
+    }))
+    .sort((a, b) => Number(!a.key) - Number(!b.key) || a.name.localeCompare(b.name));
+});
+const openArtistName = computed(() => artistGroups.value.find((g) => g.key === openArtist.value)?.name ?? '');
+/** What the type grouping works on: one artist's items while browsing by artist. */
+const scoped = computed(() => (viewMode.value === 'artists' && openArtist.value !== null ? products.value.filter((p) => artistKey(p) === openArtist.value) : products.value));
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -178,7 +225,7 @@ const filtered = computed(() => {
   );
 });
 /** Searching always shows flat results; grouping is for browsing. */
-const grouped = computed(() => viewMode.value === 'grouped' && !search.value.trim());
+const grouped = computed(() => viewMode.value !== 'flat' && !search.value.trim());
 
 interface TypeGroup {
   type: string;
@@ -188,7 +235,7 @@ interface TypeGroup {
 }
 const typeGroups = computed<TypeGroup[]>(() => {
   const map = new Map<string, Product[]>();
-  for (const p of products.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
+  for (const p of scoped.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
   return [...map.entries()].map(([type, list]) => ({
     type,
     products: list,
@@ -196,13 +243,16 @@ const typeGroups = computed<TypeGroup[]>(() => {
     inCart: list.reduce((s, p) => s + productInCart(p), 0),
   }));
 });
-type Entry = { key: string; product: Product } | { key: string; group: TypeGroup };
+type Entry = { key: string; product: Product } | { key: string; group: TypeGroup } | { key: string; artist: ArtistGroup };
 const entries = computed<Entry[]>(() => {
   if (!grouped.value) return filtered.value.map((p) => ({ key: p.id, product: p }));
+  if (viewMode.value === 'artists' && openArtist.value === null && artistGroups.value.length > 1) {
+    return artistGroups.value.map((g) => ({ key: `a:${g.key}`, artist: g }));
+  }
   return typeGroups.value.map((g) => (g.products.length === 1 ? { key: g.products[0]!.id, product: g.products[0]! } : { key: `t:${g.type}`, group: g }));
 });
 const openType = ref<string | null>(null);
-const typeProducts = computed(() => (openType.value === null ? [] : products.value.filter((p) => (p.type || '(no type)') === openType.value)));
+const typeProducts = computed(() => (openType.value === null ? [] : scoped.value.filter((p) => (p.type || '(no type)') === openType.value)));
 
 // A short beep via WebAudio rather than an audio file - no asset to ship,
 // and it needs no user gesture beyond the one already opening the search/scan
@@ -231,17 +281,51 @@ const justAddedId = ref<string | null>(null);
 let justAddedTimer: ReturnType<typeof setTimeout> | undefined;
 
 function submitSearch(): void {
+  // A staff badge, from a handheld scanner or the camera: hand the till over.
+  if (isStaffBadge(search.value) && canLock.value) {
+    const code = search.value.trim();
+    search.value = '';
+    void sdk()
+      .lock.badge(code)
+      .then(() => toast(`Selling as ${seller.value}.`, 'ok'))
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : 'That badge was not accepted.', 'bad'));
+    return;
+  }
   const match = findSearchMatch(products.value, search.value);
-  if (!match) return toast('No product found for that search.', 'bad');
+  if (!match) {
+    const code = search.value.trim();
+    // A code-like miss may be an item another module can make available
+    // (an artist's label scanned at a store); words are just a failed search.
+    if (!code || /\s/.test(code)) return toast('No product found for that search.', 'bad');
+    void lookupUnknown(code);
+    return;
+  }
   if ('ambiguous' in match) return toast(`${match.count} matches - keep typing to narrow it down.`, 'bad');
-  add(match.productId, match.variantId);
-  toast(`Added ${match.label}`);
+  added(match.productId, match.variantId, `Added ${match.label}`);
+}
+
+function added(productId: string, variantId: string | null, message: string): void {
+  add(productId, variantId);
+  toast(message);
   search.value = '';
   navigator.vibrate?.(80);
   beep();
-  justAddedId.value = match.productId;
+  justAddedId.value = productId;
   clearTimeout(justAddedTimer);
   justAddedTimer = setTimeout(() => (justAddedId.value = null), 1500);
+}
+
+/**
+ * Asks the modules about a code the catalogue does not know. What one makes
+ * available reaches this device with the next sync (the server rings it), so
+ * wait a few seconds for it before adding.
+ */
+async function lookupUnknown(code: string): Promise<void> {
+  const found = await sdk().till.lookup(code);
+  if (!found) return toast('No product found for that code.', 'bad');
+  for (let i = 0; i < 40 && !products.value.some((p) => p.id === found.productId); i++) await new Promise((r) => setTimeout(r, 250));
+  if (!products.value.some((p) => p.id === found.productId)) return toast(`${found.message ?? 'Found it.'} It is not on this till yet - try again in a moment.`, 'bad');
+  added(found.productId, found.variantId, found.message ?? 'Added');
 }
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
@@ -469,6 +553,21 @@ function applyDiscount(): void {
   setCustomDiscount({ type: discountForm.type, value, name: discountForm.name.trim() || (discountForm.type === 'percent' ? `${value}% off` : 'Discount') });
   showDiscount.value = false;
 }
+
+// ── What other modules add to the till (a workshop place, say) ─────────────
+const tillActions = computed(() => sdk().till.actions());
+const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
+function runAction(action: TillAction): void {
+  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
+}
+const offTill = sdk().till.onAddLine((line) => {
+  if (!activeEvent.value) {
+    toast('Pick an active event first (Events).', 'bad');
+    return false;
+  }
+  return addModuleLine(line);
+});
+onUnmounted(offTill);
 
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });
@@ -766,6 +865,18 @@ async function cancelPayment(): Promise<void> {
   if (payment.phase === 'terminal') await provider.value.cancel().catch(() => {});
   payment.phase = 'idle';
 }
+
+// ── Shared till: who is selling, and handing the till on ──────────────────
+const sellerAccount = ref(sdk().account());
+const offSeller = sdk().onAccountChange((a) => (sellerAccount.value = a));
+onUnmounted(offSeller);
+const canLock = computed(() => sdk().lock?.available() ?? false);
+/** Staff see the day's takings only when the owner allows it. */
+const showTotals = computed(() => seesSalesTotals(sellerAccount.value));
+const seller = computed(() => (sellerAccount.value?.email ?? '').split('@')[0] ?? '');
+function lockTill(): void {
+  void sdk().lock?.lock();
+}
 </script>
 
 <template>
@@ -776,10 +887,11 @@ async function cancelPayment(): Promise<void> {
         <div class="event">
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
-          <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
+          <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
+        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="door-open" :size="16" /><span>{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
@@ -788,6 +900,7 @@ async function cancelPayment(): Promise<void> {
           <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
         </div>
         <div class="modes">
+          <button v-if="atStore && hasArtists" type="button" :class="['pill', { active: viewMode === 'artists' }]" @click="setViewMode('artists')">Artists</button>
           <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
           <button type="button" :class="['pill', { active: viewMode === 'grouped' }]" @click="setViewMode('grouped')">Types</button>
         </div>
@@ -804,10 +917,27 @@ async function cancelPayment(): Promise<void> {
         <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
       </div>
 
+      <div v-if="grouped && viewMode === 'artists' && openArtist !== null" class="crumb">
+        <button type="button" class="quiet" @click="openArtist = null"><Icon name="arrow-left" :size="14" /> All artists</button>
+        <strong>{{ openArtistName }}</strong>
+      </div>
+
       <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
-          <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
+          <button v-if="'artist' in e" type="button" class="tile type artist" :aria-label="`${e.artist.name}, ${e.artist.products.length} products`" :class="{ dim: e.artist.stock === 0, added: e.artist.products.some((p) => p.id === justAddedId) }" @click="openArtist = e.artist.key">
+            <span v-if="e.artist.inCart" class="count">{{ e.artist.inCart }}</span>
+            <span class="head">
+              <ProductThumb v-if="e.artist.products.find((p) => p.imageId)" :image-id="e.artist.products.find((p) => p.imageId)!.imageId!" :alt="''" :size="36" />
+              <span class="title">{{ e.artist.name }}</span>
+            </span>
+            <small>{{ e.artist.products.length }} product{{ e.artist.products.length === 1 ? '' : 's' }}</small>
+            <span class="foot">
+              <span :class="e.artist.stock === 0 ? 'bad' : 'muted'">{{ e.artist.stock === null ? '' : e.artist.stock === 0 ? 'Out of stock' : `${e.artist.stock} in stock` }}</span>
+              <Icon name="chevron-right" :size="14" />
+            </span>
+          </button>
+          <button v-else-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
             <span v-if="e.group.inCart" class="count">{{ e.group.inCart }}</span>
             <span class="title" :style="{ color: typeColor(e.group.type) }">{{ e.group.type }}</span>
             <small>{{ e.group.products.length }} products</small>
@@ -853,7 +983,12 @@ async function cancelPayment(): Promise<void> {
         <ul v-else>
           <li v-for="l in lines" :key="l.lineId">
             <div class="row"><span class="name">{{ l.name }}</span><strong>{{ money(l.chargedTotal) }}</strong></div>
-            <div class="row qty">
+            <div v-if="l.fixed" class="row qty">
+              <span>× {{ l.qty }}</span>
+              <small>à {{ money(l.chargedUnit) }}</small>
+              <button type="button" class="quiet" :aria-label="`Remove ${l.name}`" @click="setQty(l.lineId, 0)">Remove</button>
+            </div>
+            <div v-else class="row qty">
               <button type="button" :aria-label="`One fewer ${l.name}`" @click="setQty(l.lineId, l.qty - 1)">−</button>
               <span>{{ l.qty }}</span>
               <button type="button" :aria-label="`One more ${l.name}`" @click="setQty(l.lineId, l.qty + 1)">+</button>
@@ -875,6 +1010,7 @@ async function cancelPayment(): Promise<void> {
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
           <button type="button" @click="openMisc">+ Misc item</button>
+          <button v-for="a in tillActions" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
@@ -939,6 +1075,11 @@ async function cancelPayment(): Promise<void> {
       </div>
       <p class="hint">Point the camera at a barcode.</p>
       <p v-if="scannerInfo" class="hint mono">{{ scannerInfo }}</p>
+    </ModalShell>
+
+    <!-- ── A screen another module put on the till ───────────────────────── -->
+    <ModalShell v-if="openAction" :title="openAction.action.label" @close="openAction = null">
+      <component :is="openAction.view" @close="openAction = null" />
     </ModalShell>
 
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
@@ -1071,6 +1212,8 @@ async function cancelPayment(): Promise<void> {
 .event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
+.seller { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: .1rem .55rem; font-size: .8rem; font-weight: 600; max-width: 9rem; }
+.seller span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
 .scanner-wrap { position: relative; }
@@ -1104,6 +1247,9 @@ async function cancelPayment(): Promise<void> {
 .tile .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: .25rem; font-size: .75rem; gap: .5rem; }
 .tile .foot strong { font-variant-numeric: tabular-nums; }
 .tile.type .foot { color: var(--zfy-muted, #5a6472); }
+.tile.artist { border-left-color: var(--zfy-ink, #1a2230); }
+.crumb { display: flex; align-items: center; gap: .6rem; margin: 0 0 .5rem; }
+.crumb button { min-height: 2rem; display: inline-flex; align-items: center; gap: .3rem; font-size: .82rem; }
 .count { position: absolute; top: -.4rem; right: -.4rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .78rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); }
 .bundles { display: flex; gap: .3rem; flex-wrap: wrap; padding-top: .1rem; }
 .bundle { font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
@@ -1133,7 +1279,7 @@ async function cancelPayment(): Promise<void> {
 .sums { display: flex; flex-direction: column; gap: .15rem; font-variant-numeric: tabular-nums; }
 .row.total { font-size: 1.05rem; font-weight: 700; }
 .row.small { font-size: .78rem; }
-.tools { display: flex; gap: .4rem; }
+.tools { display: flex; gap: .4rem; flex-wrap: wrap; }
 .tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
 .pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }

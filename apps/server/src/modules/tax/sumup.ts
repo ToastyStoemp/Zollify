@@ -62,12 +62,12 @@ export class SumupClient {
 
   private async get(url: string): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { headers: { authorization: `Bearer ${this.config.apiKey}`, accept: 'application/json' } });
+      const res = await fetch(url, { redirect: 'error', headers: { authorization: `Bearer ${this.config.apiKey}`, accept: 'application/json' } });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;
       }
-      if (!res.ok) throw new SourceError(`SumUp API ${res.status}: ${await res.text()}`, res.status);
+      if (!res.ok) throw new SourceError(`SumUp API ${res.status}: ${(await res.text()).slice(0, 300)}`, res.status);
       return res.json();
     }
   }

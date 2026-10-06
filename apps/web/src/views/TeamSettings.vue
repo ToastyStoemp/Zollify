@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, visibleEvents } from '@zollify/platform';
+import { authFetch, currentAccount, updateProfile, visibleEvents } from '@zollify/platform';
+import BadgeDialog from './BadgeDialog.vue';
 
 /**
  * Team management.
@@ -102,7 +103,7 @@ async function setScope(user: TeamUser, eventIds: string[]): Promise<void> {
 
 function scopeLabel(user: TeamUser): string {
   if (user.role !== 'member') return 'Full access';
-  if (!user.allowedEventIds?.length) return 'Full access';
+  if (!user.allowedEventIds?.length) return 'Staff · sells, counts own cash';
   const names = user.allowedEventIds.map(
     (id) => visibleEvents.value.find((e) => e.id === id)?.name ?? 'removed event',
   );
@@ -112,18 +113,48 @@ function scopeLabel(user: TeamUser): string {
 function when(ts: number | null): string {
   return ts ? new Date(ts).toLocaleDateString() : 'never';
 }
+
+// Staff badges: an admin prints them for anyone who does not outrank them.
+const badgeFor = ref<TeamUser | null>(null);
+const canBadge = (u: TeamUser): boolean => u.role !== 'owner' || currentAccount.value?.role === 'owner';
+
+// Whether staff see sales totals - takings, stats, what the cash box should hold.
+const staffTotals = computed(() => currentAccount.value?.profile.staffSeesTotals === true);
+const savingTotals = ref(false);
+async function setStaffTotals(on: boolean): Promise<void> {
+  savingTotals.value = true;
+  error.value = null;
+  try {
+    await updateProfile({ staffSeesTotals: on });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save that.';
+  } finally {
+    savingTotals.value = false;
+  }
+}
 </script>
 
 <template>
   <section class="team">
     <h2>Team</h2>
     <p class="hint">
-      Invite someone by sending them a code. A member limited to specific events is a
-      <strong>helper</strong>: they only see and sync those events, and catalogue prices are
-      restricted for them.
+      Invite someone by sending them a code. <strong>Staff</strong> sell at the till and cash up
+      their own drawer - each sale records who made it - but cannot change products, prices,
+      discounts, events or settings. Staff limited to specific events are <strong>helpers</strong>:
+      they only see and sync those events. <strong>Admins</strong> run the store with you.
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <BadgeDialog v-if="badgeFor" :user-id="badgeFor.id" :email="badgeFor.email" @close="badgeFor = null" />
+
+    <label class="totals-toggle">
+      <input type="checkbox" :checked="staffTotals" :disabled="savingTotals" @change="setStaffTotals(($event.target as HTMLInputElement).checked)" />
+      <span>
+        <strong>Staff can see sales totals</strong>
+        <small>Takings on Home and the till, History's figures and exports, event totals, and the expected cash in Cash up. Off, staff see only their own sales one by one and cash up blind: they count the box, you compare.</small>
+      </span>
+    </label>
 
     <h3>People</h3>
     <ul class="list">
@@ -132,6 +163,7 @@ function when(ts: number | null): string {
           <strong>{{ user.email }}</strong>
           <span>{{ user.role }} · {{ scopeLabel(user) }} · last seen {{ when(user.lastLoginAt) }}</span>
         </div>
+        <button v-if="canBadge(user)" type="button" @click="badgeFor = user">Badge</button>
         <button
           v-if="user.role === 'member' && user.allowedEventIds?.length"
           type="button"
@@ -147,14 +179,14 @@ function when(ts: number | null): string {
       <label>
         <span>Role</span>
         <select v-model="inviteRole">
-          <option value="member">Member</option>
+          <option value="member">Staff</option>
           <option v-if="isOwner" value="admin">Admin</option>
         </select>
       </label>
 
       <fieldset v-if="inviteRole === 'member'">
         <legend>Limit to events (optional)</legend>
-        <p class="hint">Leave all unticked for full access.</p>
+        <p class="hint">Leave all unticked for staff who work every store and event.</p>
         <label v-for="event in visibleEvents" :key="event.id" class="inline">
           <input
             type="checkbox"
@@ -194,6 +226,10 @@ function when(ts: number | null): string {
 </template>
 
 <style scoped>
+.totals-toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .75rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); cursor: pointer; }
+.totals-toggle input { margin-top: .2rem; }
+.totals-toggle span { display: flex; flex-direction: column; gap: .15rem; font-size: .875rem; }
+.totals-toggle small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .team { display: flex; flex-direction: column; gap: .75rem; max-width: 40rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }

@@ -18,6 +18,7 @@ beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-profile-'));
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.OWNER_PASSWORD = OWNER_PASSWORD;
+  process.env.REQUIRE_CAPTCHA = '0';
 
   app = await buildGateway({
     dataDir,
@@ -55,6 +56,7 @@ afterAll(async () => {
   }
   delete process.env.OWNER_EMAIL;
   delete process.env.OWNER_PASSWORD;
+  delete process.env.REQUIRE_CAPTCHA;
 });
 
 const auth = () => ({ authorization: `Bearer ${token}` });
@@ -129,6 +131,20 @@ describe('account profile', () => {
     await put({ street: 'Seestrasse 2' });
     const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
     expect(profile.artist).toMatchObject({ companyName: 'Harbour Prints', street: 'Seestrasse 2' });
+  });
+
+  it('keeps sales totals from staff until an admin allows it, and only an admin can', async () => {
+    const get = async (t: string) => (await app.inject({ method: 'GET', url: '/api/account/profile', headers: { authorization: `Bearer ${t}` } })).json() as { staffSeesTotals: boolean };
+    expect((await get(token)).staffSeesTotals).toBe(false);
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(), payload: { role: 'member' } });
+    const staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'staff-totals@example.test', password: 'correct horse battery staple', inviteCode: invite.json().code } })).json().accessToken as string;
+    expect((await app.inject({ method: 'PUT', url: '/api/account/profile', headers: { authorization: `Bearer ${staff}` }, payload: { staffSeesTotals: true } })).statusCode).toBe(403);
+    const res = await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { staffSeesTotals: true } });
+    expect(res.json().user.profile.staffSeesTotals).toBe(true);
+    expect((await get(staff)).staffSeesTotals).toBe(true);
+    // Other settings leave it alone.
+    await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { defaultCurrency: 'EUR' } });
+    expect((await get(token)).staffSeesTotals).toBe(true);
   });
 
   it('rejects a profile that fails validation', async () => {

@@ -1,3 +1,4 @@
+import { safeHttpUrl } from './csv';
 import { z } from 'zod';
 import { countryFlag } from './flags';
 import type { SalesEvent } from './types';
@@ -15,7 +16,7 @@ import type { SalesEvent } from './types';
 
 export const EventOverlaySchema = z.object({
   /** Link to the convention's own site. */
-  link: z.string().max(500).default(''),
+  link: z.string().max(500).default('').refine((v) => !v || !!safeHttpUrl(v), 'Links must start with https://'),
   hall: z.string().max(40).default(''),
   booth: z.string().max(40).default(''),
   /** The convention's Instagram handle, with or without the @. */
@@ -88,7 +89,7 @@ function publicOne(e: SalesEvent, ov: Partial<EventOverlay>, today: Date): Publi
     city: e.venue?.city ?? '',
     country: e.venue?.country ?? '',
     flag: countryFlag(e.venue?.country),
-    link: ov.link ?? '',
+    link: safeHttpUrl(ov.link),
     hall: ov.hall ?? '',
     booth: ov.booth ?? '',
     igHandle: ov.igHandle ?? '',

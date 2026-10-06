@@ -87,6 +87,11 @@ export interface RenderLabelOptions {
   barcodeValue?: string;
   /** Whether the SKU prints as text under the bars. Default true - a short code in the bars doesn't require dropping the human-readable SKU. */
   showSkuText?: boolean;
+  /**
+   * Who made it, in a smaller line under the title - in a store selling many
+   * artists' work, the first thing a customer and the till need to know.
+   */
+  artist?: string;
 }
 
 /**
@@ -157,22 +162,33 @@ export function renderLabel(canvas: HTMLCanvasElement, size: LabelSize, sku: str
   // Product name, as large as fits in the title area on up to two lines -
   // stops at a legible floor and truncates rather than shrinking further.
   const titleScale = Math.min(1.5, Math.max(0.5, options.titleScale ?? 1));
-  let fontSize = Math.round(titleAreaHeight * TITLE_FONT_FRACTION * titleScale);
+  const artist = options.artist?.trim() ?? '';
+  // The artist line takes its room out of the title area, so the title
+  // shrinks to fit rather than the barcode losing height.
+  const artistFontSize = artist ? Math.max(MIN_TITLE_FONT_PX, Math.round(titleAreaHeight * 0.17)) : 0;
+  const artistBlock = artist ? artistFontSize * 1.2 : 0;
+  const titleRoom = titleAreaHeight - artistBlock;
+  let fontSize = Math.round(titleRoom * TITLE_FONT_FRACTION * titleScale * (artist ? 1.2 : 1));
   let lines: string[] = [];
   for (;;) {
     ctx.font = `600 ${fontSize}px Arial, Helvetica, sans-serif`;
-    lines = wrapText(ctx, title || '(untitled)', widthDots - margin * 2, 2);
+    lines = wrapText(ctx, title || '(untitled)', widthDots - margin * 2, artist ? 1 : 2);
     const totalHeight = lines.length * fontSize * 1.15;
-    if (totalHeight <= titleAreaHeight - 4 || fontSize <= MIN_TITLE_FONT_PX) break;
+    if (totalHeight <= titleRoom - 4 || fontSize <= MIN_TITLE_FONT_PX) break;
     fontSize -= 1;
   }
   const lineHeight = fontSize * 1.15;
-  const textBlockHeight = lines.length * lineHeight;
+  const textBlockHeight = lines.length * lineHeight + artistBlock;
   let y = titleTop + (titleAreaHeight - textBlockHeight) / 2;
   for (const line of lines) {
     ctx.textAlign = 'center';
     ctx.fillText(line, widthDots / 2, y, widthDots - margin * 2);
     y += lineHeight;
+  }
+  if (artist) {
+    ctx.font = `400 ${artistFontSize}px Arial, Helvetica, sans-serif`;
+    const [byLine] = wrapText(ctx, artist, widthDots - margin * 2, 1);
+    ctx.fillText(byLine ?? artist, widthDots / 2, y + artistFontSize * 0.1, widthDots - margin * 2);
   }
 
   // A thin rule separates name from barcode - reads as a deliberately

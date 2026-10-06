@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue';
-import type { DiscountRule } from '@zollify/shared';
+import { discountAppliesAt, type DiscountRule } from '@zollify/shared';
+import { activeEventId } from './sales-events';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -38,10 +39,17 @@ export const allDiscounts = computed(() =>
   [...rules.values()].sort((a, b) => a.name.localeCompare(b.name)),
 );
 
-/** Only rules that should be applied at checkout. */
-export const activeDiscounts = computed(() =>
-  allDiscounts.value.filter((r) => (r as DiscountRule & { enabled?: boolean }).enabled !== false),
-);
+/**
+ * Only rules that should be applied at checkout: switched on, inside their
+ * dates (by this device's calendar day) and meant for the event being sold at.
+ */
+export const activeDiscounts = computed(() => {
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return allDiscounts.value.filter(
+    (r) => (r as DiscountRule & { enabled?: boolean }).enabled !== false && discountAppliesAt(r, day, activeEventId.value),
+  );
+});
 
 export function getDiscount(id: string): DiscountRule | undefined {
   return rules.get(id);

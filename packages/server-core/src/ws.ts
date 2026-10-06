@@ -6,12 +6,13 @@ import type {
   DisplayCartMessage,
   DisplayListenersMessage,
   DisplaySubscribeMessage,
+  NotificationMessage,
   NudgeMessage,
   PaymentResultMessage,
   PaymentTriggerMessage,
   ShellUpdateMessage,
 } from '@zollify/shared';
-import type { JwtClaims } from './auth';
+import { checkClaims, type JwtClaims } from './auth';
 import { touchDevice } from './db';
 
 type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
@@ -65,6 +66,12 @@ export class Rooms {
 
   private send(socket: WebSocket, msg: unknown): void {
     if (socket.readyState === socket.OPEN) socket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  }
+
+  /** Doorbell: the account has a new notification; devices fetch it over HTTP. */
+  notify(accountId: string): void {
+    const msg: NotificationMessage = { type: 'notification' };
+    for (const { socket } of this.byAccount.get(accountId) ?? []) this.send(socket, msg);
   }
 
   nudge(accountId: string, latestSeq: number, exceptDeviceId?: string): void {
@@ -148,6 +155,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
     let claims: JwtClaims;
     try {
       claims = app.jwt.verify<JwtClaims>(token ?? '');
+      if (checkClaims(db, claims, 'GET', '/api/sync/ws')) throw new Error('revoked');
     } catch {
       socket.close(4001, 'invalid token');
       return;

@@ -2,12 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { LogUploadSchema, type AdminLogEntry } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 
 const ID_RE = /^[\w-]+$/;
+/** Each account keeps its newest uploads only, so a looping or hostile device cannot fill the disk. */
+const KEEP_PER_ACCOUNT = 30;
 
 /**
  * Client-uploaded diagnostic logs (console warnings/errors, uncaught
@@ -26,7 +28,7 @@ export function registerLogRoutes(app: FastifyInstance, db: Database.Database, d
     return join(dir, `${id}.log`);
   };
 
-  app.post('/api/logs', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/api/logs', { preHandler: app.authenticate, config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req, reply) => {
     const parsed = LogUploadSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: 'Invalid log upload' });
     const claims = req.user as JwtClaims;
@@ -37,6 +39,13 @@ export function registerLogRoutes(app: FastifyInstance, db: Database.Database, d
       `INSERT INTO logs (id, accountId, deviceId, deviceName, flavor, appVersion, reason, size, createdAt)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, claims.accountId, deviceId, deviceName ?? null, flavor ?? null, appVersion ?? null, reason ?? null, Buffer.byteLength(log, 'utf-8'), Date.now());
+    const old = db
+      .prepare('SELECT id FROM logs WHERE accountId = ? ORDER BY createdAt DESC LIMIT -1 OFFSET ?')
+      .all(claims.accountId, KEEP_PER_ACCOUNT) as { id: string }[];
+    for (const o of old) {
+      db.prepare('DELETE FROM logs WHERE id = ?').run(o.id);
+      await rm(logPath(o.id), { force: true });
+    }
     return { ok: true };
   });
 

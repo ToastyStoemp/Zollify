@@ -3,6 +3,14 @@ import type { EventVat, SaleTax, TaxClass } from './vat';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
+/**
+ * What a sales venue is. A convention or market (`event`, the default) runs
+ * for a few dates; a `store` is a brick-and-mortar shop that is open
+ * indefinitely. Both sell through the same till, claims and history - a
+ * store is just a venue with no end date.
+ */
+export type SalesEventKind = 'event' | 'store';
+
 export interface Venue {
   street?: string;
   postcode?: string;
@@ -14,6 +22,8 @@ export interface Venue {
 export interface SalesEvent {
   id: string;
   name: string;
+  /** Absent = 'event'. See SalesEventKind. */
+  kind?: SalesEventKind;
   dateStart?: string;
   dateEnd?: string;
   venue: Venue;
@@ -86,6 +96,16 @@ export interface Product {
   material?: string;
   variants: Variant[];
   imageId?: string;
+  /**
+   * Consignment: the artist this item belongs to. The account sells it on
+   * their behalf and owes them the sale minus commission. Absent = the
+   * account's own stock.
+   */
+  consignorId?: string;
+  /** The artist's name, kept on the product so the till and labels can show it offline. */
+  consignorName?: string;
+  /** The artist's own product this was taken from, when it was imported from their linked catalogue. */
+  consignorProductId?: string;
   sortOrder: number;
   updatedAt: number;
   deletedAt?: number;
@@ -154,8 +174,33 @@ export interface DiscountRule {
   tierContinue?: boolean;
   /** Don't show the derived "+N" quick-add chips on POS product cards. */
   hideQuickAdd?: boolean;
+  /** Consignment artists whose items the rule applies to (Product.consignorId). */
+  consignorIds?: string[];
+  /** First day the till applies the rule (yyyy-mm-dd, inclusive); absent = always. */
+  validFrom?: string;
+  /** Last day the till applies the rule (yyyy-mm-dd, inclusive); absent = always. */
+  validUntil?: string;
+  /** Only at these events or stores; absent/empty = everywhere. */
+  eventIds?: string[];
+  /** Set when a module maintains the rule (e.g. 'consignment' for an artist-of-the-month discount). */
+  managedBy?: string;
   updatedAt: number;
   deletedAt?: number;
+}
+
+/**
+ * Whether a rule applies at the till today, at this event. The rows stay in
+ * the catalogue either way; only where and when they are charged is limited.
+ */
+export function discountAppliesAt(
+  rule: Pick<DiscountRule, 'validFrom' | 'validUntil' | 'eventIds'>,
+  day: string,
+  eventId: string | null,
+): boolean {
+  if (rule.validFrom && day < rule.validFrom) return false;
+  if (rule.validUntil && day > rule.validUntil) return false;
+  if (rule.eventIds?.length && (!eventId || !rule.eventIds.includes(eventId))) return false;
+  return true;
 }
 
 /**
@@ -242,6 +287,16 @@ export interface TxItem {
   /** Same line in the event's base/tracking currency, when charged in a converted local currency. */
   baseUnitPrice?: number;
   baseLineTotal?: number;
+  /**
+   * The consignment artist the item belonged to when it sold - a snapshot,
+   * so moving a product to another artist later never rewrites who was owed
+   * for sales already made.
+   */
+  consignorId?: string;
+  /** Percent the store kept on this line, when it was set for the line itself (e.g. a workshop's own split). */
+  commissionPct?: number;
+  /** The module record this line paid for - e.g. a workshop booking. */
+  ref?: { moduleId: string; kind: string; id: string };
 }
 
 export interface TxDiscount {
@@ -289,6 +344,8 @@ export interface Transaction {
   asCharged?: AsCharged;
   /** VAT as applied at the time of the sale - see SaleTax. Absent on sales made before VAT was tracked. */
   tax?: SaleTax;
+  /** Who rang it up - set by the server from the signed-in user, so staff cash-ups add up per person. */
+  soldBy?: { userId: string; email: string | null };
 }
 
 export interface AsCharged {

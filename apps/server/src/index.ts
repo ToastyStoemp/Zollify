@@ -9,6 +9,8 @@ import { publicEventsServerModule } from './modules/public-events';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
+import { consignmentServerModule } from './modules/consignment';
+import { peppolServerModule } from './modules/peppol-be';
 
 loadDotEnv();
 
@@ -69,6 +71,8 @@ async function main(): Promise<void> {
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
     receiptsServerModule,
+    consignmentServerModule,
+    peppolServerModule(jwtSecret),
   ];
 
   const app = await buildGateway({
@@ -86,7 +90,7 @@ async function main(): Promise<void> {
       .map((s) => s.trim())
       .filter(Boolean),
     requireHttps: flag('ZOLLIFY_REQUIRE_HTTPS', true),
-    trustProxy: flag('ZOLLIFY_TRUST_PROXY', true),
+    trustProxy: /^\d+$/.test(process.env.ZOLLIFY_TRUST_PROXY ?? '') ? Number(process.env.ZOLLIFY_TRUST_PROXY) : flag('ZOLLIFY_TRUST_PROXY', true),
     logLevel: process.env.LOG_LEVEL ?? 'info',
   });
 

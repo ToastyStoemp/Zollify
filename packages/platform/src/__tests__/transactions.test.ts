@@ -58,6 +58,32 @@ describe('recording sales', () => {
     expect(tx.getTransaction('s1')?.total).toBe(35);
   });
 
+  it('keeps what a line added by a module paid for, and its own split', () => {
+    const t = tx.saleToTransaction(
+      sale({
+        lines: [
+          { productId: 'workshop:w1', sku: null, name: 'Linocut · Alex', qty: 2, unitPrice: 45, lineTotal: 90, taxRate: null, consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } },
+        ],
+      }),
+      'dev',
+      () => 'someone-else',
+    );
+    expect(t.items[0]).toMatchObject({ consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } });
+  });
+
+  it('keeps the consignment artist a line belonged to when it sold', async () => {
+    const product = { id: 'p1', title: 'Anchor print', forSale: true, unlisted: false, price: 35, variants: [], sortOrder: 0, updatedAt: 1 };
+    await catalog.upsertProduct({ ...product, consignorId: 'artist-1' });
+    const recorded = await tx.recordSale(sale({ saleId: 'c1' }));
+    expect(recorded.items[0]?.consignorId).toBe('artist-1');
+
+    // Moving the product to someone else later does not move the sale.
+    await catalog.upsertProduct({ ...product, updatedAt: 2 });
+    expect(tx.getTransaction('c1')?.items[0]?.consignorId).toBe('artist-1');
+    const own = await tx.recordSale(sale({ saleId: 'c2' }));
+    expect(own.items[0]).not.toHaveProperty('consignorId');
+  });
+
   it('maps a manual payment to cash and a terminal to card', async () => {
     const manual = tx.saleToTransaction(sale({ saleId: 'a' }), 'dev');
     const card = tx.saleToTransaction(

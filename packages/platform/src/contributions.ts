@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { NavItem, Role, RouteDef, SettingsPanel } from '@zollify/sdk';
+import type { NavItem, Role, RouteDef, SettingsPanel, TillAction } from '@zollify/sdk';
 import { roleAtLeast } from '@zollify/sdk';
 
 export interface OwnedRoute extends RouteDef {
@@ -29,6 +29,7 @@ export class ContributionRegistry {
   readonly routes = reactive<OwnedRoute[]>([]);
   readonly nav = reactive<OwnedNavItem[]>([]);
   readonly settingsPanels = reactive<OwnedSettingsPanel[]>([]);
+  readonly tillActions = reactive<(TillAction & { moduleId: string })[]>([]);
 
   private sink: RouteSink | null = null;
 
@@ -72,6 +73,10 @@ export class ContributionRegistry {
     this.nav.push({ ...item, moduleId, routeName: qualifiedName(moduleId, item.routeName) });
   }
 
+  addTillAction(moduleId: string, action: TillAction): void {
+    this.tillActions.push({ ...action, moduleId, id: `${moduleId}.${action.id}` });
+  }
+
   addSettingsPanel(moduleId: string, panel: SettingsPanel): void {
     this.settingsPanels.push({ ...panel, moduleId, id: `${moduleId}.${panel.id}` });
   }
@@ -84,6 +89,7 @@ export class ContributionRegistry {
     spliceWhere(this.routes, (r) => r.moduleId === moduleId);
     spliceWhere(this.nav, (n) => n.moduleId === moduleId);
     spliceWhere(this.settingsPanels, (p) => p.moduleId === moduleId);
+    spliceWhere(this.tillActions, (a) => a.moduleId === moduleId);
   }
 
   /**

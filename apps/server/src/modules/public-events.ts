@@ -118,9 +118,10 @@ function loadSite(ctx: PublicModuleContext, req: FastifyRequest, slug: string): 
 
 /** The origin visitors reach us at, honouring a reverse proxy's forwarded headers. */
 function publicOrigin(req: FastifyRequest): string {
-  const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol).split(',')[0]!.trim();
-  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0]!.trim();
-  return `${proto}://${host}`;
+  // PUBLIC_ORIGIN when set; otherwise what Fastify derives, which honours forwarded headers
+  // only from a trusted proxy - a raw X-Forwarded-Host would let anyone point the links elsewhere.
+  if (process.env.PUBLIC_ORIGIN) return process.env.PUBLIC_ORIGIN.replace(/\/+$/, '');
+  return `${req.protocol}://${req.host}`;
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -143,8 +144,8 @@ function range(start: string, end: string): string {
 
 function place(ev: PublicEvent): string {
   const loc = [ev.city, ev.country].filter(Boolean).map(h).join(', ');
-  // The flag is a pair of regional-indicator code points - safe unescaped.
-  return ev.flag ? (loc ? `${ev.flag} ${loc}` : ev.flag) : loc;
+  const flag = h(ev.flag);
+  return flag ? (loc ? `${flag} ${loc}` : flag) : loc;
 }
 
 const PAGE_STYLE = `
@@ -304,7 +305,7 @@ function widget(BASE) {
     var chip = '<div class="zev-chip"><span class="zev-d">' + (s ? s.getDate() : '') + '</span><span class="zev-m">' + (s ? MON[s.getMonth()].toUpperCase() : '') + '</span></div>';
     var now = ev.ongoing ? '<span class="zev-now">Now</span>' : ev.soon ? '<span class="zev-soon">Soon</span>' : '';
     var loc = [ev.city, ev.country].filter(Boolean).map(esc).join(', ');
-    if (ev.flag) loc = loc ? ev.flag + ' ' + loc : ev.flag;
+    if (ev.flag) loc = loc ? esc(ev.flag) + ' ' + loc : esc(ev.flag);
     var extra = [];
     if (ev.hall) extra.push('Hall ' + esc(ev.hall));
     if (ev.booth) extra.push('Booth ' + esc(ev.booth));

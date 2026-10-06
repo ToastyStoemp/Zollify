@@ -18,7 +18,7 @@ import type { Transaction } from '@zollify/shared';
 function escape(value: unknown): string {
   if (value === null || value === undefined) return '';
   let text = String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   if (/[",\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
   return text;
 }

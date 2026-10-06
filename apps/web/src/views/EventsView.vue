@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
 import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
@@ -125,6 +125,20 @@ async function remove(e: SalesEvent): Promise<void> {
     await deleteSalesEvent(e.id);
   });
 }
+
+const posOn = (): boolean => hasRoute('pos:index');
+
+// ── The "more" menu ─────────────────────────────────────────────────────────
+// A tile keeps its main action and History; the rest lives in a menu.
+const menuFor = ref<string | null>(null);
+const closeMenu = (): void => {
+  menuFor.value = null;
+};
+onMounted(() => window.addEventListener('click', closeMenu));
+onBeforeUnmount(() => window.removeEventListener('click', closeMenu));
+/** Whether the menu has anything in it for this tile (a helper may have nothing). */
+const hasMore = (e: SalesEvent): boolean =>
+  canEdit.value || Boolean(notesBadge(e)) || (customsOn() && !isStore(e));
 
 // ── Notes & files ───────────────────────────────────────────────────────────
 const notesFor = ref<string | null>(null);
@@ -400,28 +414,33 @@ async function save(): Promise<void> {
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
-            <button v-else-if="e.status === 'active'" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
-            <button v-else type="button" @click="sell(e)">Reopen</button>
+            <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
+            <button v-else-if="e.status === 'closed'" type="button" @click="sell(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
-            <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" class="btn"><Icon name="coins" :size="14" /> Prices</router-link>
-            <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
-            <button v-if="canEdit || notesBadge(e)" type="button" @click="notesFor = e.id"><Icon name="paperclip" :size="14" /> Notes &amp; files<template v-if="notesBadge(e)"> · {{ notesBadge(e) }}</template></button>
-            <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
-            <button v-if="canEdit" type="button" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
-            <!-- Only meaningful for an active event - close() on a planned one
-                 just re-confirms 'planned' (it parks a not-yet-started event
-                 back there instead of closing it), so showing it there was
-                 a dead-end button doing nothing. -->
-            <button v-if="canEdit && e.status === 'active'" type="button" class="quiet" @click="close(e)">Close</button>
-            <!-- Deleting an active event is two steps on purpose: close first,
-                 then delete - it may have real sales/claims to protect. A
-                 planned event can't have any of that yet (it was never
-                 opened), so it deletes directly; forcing "close" on it first
-                 was also a dead end anyway - close() parks a not-yet-started
-                 event straight back to 'planned' (see close() above) instead
-                 of ever reaching 'closed', so the button below would never
-                 have appeared for it. -->
-            <button v-if="canEdit && (e.status === 'closed' || e.status === 'planned')" type="button" class="quiet danger" @click="remove(e)">Delete</button>
+            <div v-if="hasMore(e)" class="more" @click.stop>
+              <button type="button" :aria-expanded="menuFor === e.id" aria-haspopup="menu" aria-label="More actions" @click="menuFor = menuFor === e.id ? null : e.id"><Icon name="more" :size="16" /></button>
+              <div v-if="menuFor === e.id" class="menu" role="menu" @click="menuFor = null">
+                <button v-if="canEdit || notesBadge(e)" type="button" role="menuitem" @click="notesFor = e.id"><Icon name="paperclip" :size="14" /> Notes &amp; files<template v-if="notesBadge(e)"> · {{ notesBadge(e) }}</template></button>
+                <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" role="menuitem"><Icon name="coins" :size="14" /> Prices</router-link>
+                <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" role="menuitem"><Icon name="file-text" :size="14" /> Customs</router-link>
+                <button v-if="canEdit" type="button" role="menuitem" @click="openEdit(e)"><Icon name="settings" :size="14" /> Edit</button>
+                <button v-if="canEdit" type="button" role="menuitem" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
+                <!-- Only meaningful for an active event - close() on a planned one
+                     just re-confirms 'planned' (it parks a not-yet-started event
+                     back there instead of closing it), so showing it there was
+                     a dead-end button doing nothing. -->
+                <button v-if="canEdit && e.status === 'active'" type="button" role="menuitem" @click="close(e)"><Icon name="x" :size="14" /> Close</button>
+                <!-- Deleting an active event is two steps on purpose: close first,
+                     then delete - it may have real sales/claims to protect. A
+                     planned event can't have any of that yet (it was never
+                     opened), so it deletes directly; forcing "close" on it first
+                     was also a dead end anyway - close() parks a not-yet-started
+                     event straight back to 'planned' (see close() above) instead
+                     of ever reaching 'closed', so the button below would never
+                     have appeared for it. -->
+                <button v-if="canEdit && (e.status === 'closed' || e.status === 'planned')" type="button" role="menuitem" class="danger" @click="remove(e)"><Icon name="trash" :size="14" /> Delete</button>
+              </div>
+            </div>
           </div>
         </li>
       </ul>
@@ -548,6 +567,11 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .actions button, .actions .btn { min-height: 2.2rem; padding: .2rem .7rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .3rem; }
 .btn { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; text-decoration: none; }
 .btn:hover { background: var(--zfy-bg, #f1f4f6); }
+.more { position: relative; margin-left: auto; }
+.menu { position: absolute; right: 0; top: calc(100% + .25rem); z-index: 5; min-width: 11rem; display: flex; flex-direction: column; padding: .3rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); box-shadow: 0 12px 28px -12px var(--zfy-shadow, rgba(20,26,34,.4)); }
+.menu button, .menu a { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.4rem; padding: .3rem .6rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-ink, #1a2230); font-size: .85rem; text-align: left; text-decoration: none; cursor: pointer; }
+.menu button:hover, .menu a:hover { background: var(--zfy-bg, #f1f4f6); }
+.menu .danger { color: var(--zfy-danger, #c6512f); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }

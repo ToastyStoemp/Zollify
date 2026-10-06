@@ -18,6 +18,7 @@ import {
   type ReportPeriod,
   type SetupMoment,
   type StoreReport,
+  isStore,
 } from '@zollify/shared';
 import { isEnabled, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, consignorRows, parseDoc, payoutsFor, replay, toConsignor } from './consignment';
@@ -86,10 +87,14 @@ function saveFee(db: Database.Database, accountId: string, fee: ConsignmentFee):
 /** One period's report for a store account. */
 export function reportFor(db: Database.Database, accountId: string, period: ReportPeriod): StoreReport {
   const settings = booksSettings(db, accountId);
+  const { events, transactions } = replay(db, accountId);
+  // The store's report: sales at its stores only. An account that also sells
+  // at its own fairs and markets keeps that revenue out of it.
+  const storeIds = new Set(events.filter((e) => isStore(e)).map((e) => e.id));
   return storeReport({
     period,
     settings,
-    transactions: replay(db, accountId).transactions,
+    transactions: transactions.filter((t) => storeIds.has(t.eventId)),
     consignors: consignorRows(db, accountId).map((r) => toConsignor(db, r)),
     payouts: payoutsFor(db, accountId),
     fees: feesOf(db, accountId),

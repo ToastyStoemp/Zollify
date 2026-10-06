@@ -64,6 +64,9 @@ beforeAll(async () => {
     { type: 'event.upsert', payload: { id: 'zh', name: 'Zurich shop', kind: 'store', venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } },
     { type: 'product.upsert', payload: { id: 'p1', title: 'Fox print', forSale: true, unlisted: false, price: 100, variants: [], consignorId: 'ana', sortOrder: 0, updatedAt: 1 } },
     { type: 'tx.create', payload: { id: 't1', eventId: 'zh', deviceId: 'dev', timestamp: Date.now(), method: 'card', payments: [{ kind: 'card', amount: 100 }], items: [{ pid: 'p1', vid: null, title: 'Fox print', qty: 1, unitPrice: 100, lineTotal: 100, consignorId: 'ana' }], discounts: [], total: 100, currency: 'CHF' } },
+    // The same account also sells at a fair of its own: not the store's report.
+    { type: 'event.upsert', payload: { id: 'fair', name: 'Spring fair', venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } },
+    { type: 'tx.create', payload: { id: 't2', eventId: 'fair', deviceId: 'dev', timestamp: Date.now(), method: 'cash', payments: [{ kind: 'cash', amount: 500 }], items: [{ pid: 'own', vid: null, title: 'Own mug', qty: 1, unitPrice: 500, lineTotal: 500 }], discounts: [], total: 500, currency: 'CHF' } },
   ]);
   await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 40, storeIds: ['zh'] });
   const { code } = (await call(store, 'POST', '/consignors/ana/link-code')).json();

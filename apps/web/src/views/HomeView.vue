@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import type { CalendarEntry } from '@zollify/sdk';
+import { contributions } from '../boot';
 import { useRouter } from 'vue-router';
 import {
   activeEvent,
@@ -144,6 +146,33 @@ interface CalDay {
   inMonth: boolean;
   isToday: boolean;
   events: CalEventSpan[];
+  /** What modules put on this day - an artist's setup at a store, say. */
+  entries: CalendarEntry[];
+}
+
+/**
+ * Entries from modules for the days on screen. Asked again when the month
+ * changes or a module comes or goes; a source that fails is just left out.
+ */
+const moduleEntries = ref<CalendarEntry[]>([]);
+function gridRange(): { from: string; to: string } {
+  const first = calMonth.value;
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 41);
+  return { from: isoOf(start), to: isoOf(end) };
+}
+let asked = 0;
+async function loadEntries(): Promise<void> {
+  const mine = ++asked;
+  const range = gridRange();
+  const results = await Promise.all(contributions.calendarSources.map((c) => c.source(range).catch(() => [] as CalendarEntry[])));
+  if (mine === asked) moduleEntries.value = results.flat();
+}
+watch([calMonth, () => contributions.calendarSources.length], () => void loadEntries(), { immediate: true });
+function openEntry(e: CalendarEntry): void {
+  if (e.link) void router.push(e.link);
 }
 const calendarWeeks = computed<CalDay[][]>(() => {
   const first = calMonth.value;
@@ -166,7 +195,8 @@ const calendarWeeks = computed<CalDay[][]>(() => {
           continuesLeft: i > 0 && e.dateStart! <= prevIso && (e.dateEnd ?? e.dateStart)! >= prevIso,
           continuesRight: i < 6 && e.dateStart! <= nextIso && (e.dateEnd ?? e.dateStart)! >= nextIso,
         }));
-      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today, events });
+      const entries = moduleEntries.value.filter((x) => x.date === iso).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
+      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today, events, entries });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(days);
@@ -266,10 +296,10 @@ const syncLine = computed(() => {
               :key="d.iso"
               :to="d.events.length ? { name: 'events' } : undefined"
               class="cal-day"
-              :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length }"
+              :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length || d.entries.length }"
             >
               <span class="cal-date">{{ d.day }}</span>
-              <span v-if="d.events.length" class="cal-names">
+              <span v-if="d.events.length || d.entries.length" class="cal-names">
                 <span
                   v-for="e in d.events.slice(0, 2)"
                   :key="e.event.id"
@@ -278,7 +308,20 @@ const syncLine = computed(() => {
                   :title="`${e.event.name} · ${e.event.status}`"
                   >{{ e.event.name }}</span
                 >
-                <span v-if="d.events.length > 2" class="cal-more">+{{ d.events.length - 2 }} more</span>
+                <!-- Module entries (setups…) share the two visible lines with events. -->
+                <span
+                  v-for="x in d.entries.slice(0, Math.max(0, 2 - d.events.length))"
+                  :key="x.id"
+                  class="cal-entry"
+                  :class="x.tone ?? 'normal'"
+                  :title="x.time ? `${x.time} · ${x.title}` : x.title"
+                  role="link"
+                  tabindex="0"
+                  @click.stop.prevent="openEntry(x)"
+                  @keydown.enter.stop.prevent="openEntry(x)"
+                  ><template v-if="x.time">{{ x.time }} </template>{{ x.title }}</span
+                >
+                <span v-if="d.events.length + d.entries.length > 2" class="cal-more">+{{ d.events.length + d.entries.length - 2 }} more</span>
               </span>
             </component>
           </template>
@@ -366,6 +409,9 @@ h2 { margin: 0; font-size: 1rem; }
 .cal-nav { display: flex; align-items: center; gap: .3rem; }
 .icon-btn { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid var(--zfy-line); background: var(--zfy-bg); color: inherit; border-radius: 8px; padding: .3rem .55rem; font-size: .78rem; cursor: pointer; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
+.cal-entry { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .68rem; line-height: 1.35; padding: 0 .3rem; border-radius: 4px; border-left: 3px solid var(--zfy-warning); background: var(--zfy-bg); color: var(--zfy-ink); cursor: pointer; }
+.cal-entry.attention { border-left-color: var(--zfy-danger); background: var(--zfy-signal-soft); font-weight: 600; }
+.cal-entry.muted { color: var(--zfy-muted); text-decoration: line-through; }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }
 .cal-weekday { text-align: center; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--zfy-muted); padding-bottom: .25rem; }
 .cal-day {

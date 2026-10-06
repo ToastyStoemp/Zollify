@@ -444,6 +444,24 @@ export interface ShellUi {
   openDocument(filename: string, content: string, mimeType?: string): Promise<boolean>;
 }
 
+// ── The home calendar ───────────────────────────────────────────────────────
+
+/** Something dated a module puts on the home screen's calendar, beside the sales events. */
+export interface CalendarEntry {
+  id: string;
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string;
+  /** HH:mm, when it has one. */
+  time?: string;
+  title: string;
+  /** `attention` draws it as needing an answer (a setup to confirm). */
+  tone?: 'normal' | 'attention' | 'muted';
+  /** In-app path to open when it is clicked, e.g. "/m/consignment/planner". */
+  link?: string;
+}
+/** Asked for the days on screen, `from` to `to` inclusive (YYYY-MM-DD). Throwing just leaves the source out. */
+export type CalendarSource = (range: { from: string; to: string }) => Promise<CalendarEntry[]>;
+
 // ── The SDK surface ─────────────────────────────────────────────────────────
 
 /**
@@ -459,6 +477,8 @@ export interface Sdk {
   routes: { add(route: RouteDef): void; addAll(routes: RouteDef[]): void };
   nav: { add(item: NavItem): void };
   settings: { panel(panel: SettingsPanel): void };
+  /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
+  calendar: { source(source: CalendarSource): void };
 
   events: EventBus;
   http: HttpClient;

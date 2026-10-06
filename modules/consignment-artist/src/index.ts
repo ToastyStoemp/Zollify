@@ -1,5 +1,6 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
+import { myLinks } from './api';
 
 /**
  * My stores - the artist's half of consignment. Stores that sell this
@@ -20,6 +21,21 @@ export default defineModule({
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'My stores', minRole: 'admin', component: () => import('./views/MyStoresView.vue') });
     sdk.nav.add({ routeName: 'index', group: 'stores', label: 'My stores', icon: 'store', order: 300, minRole: 'admin' });
+    // Setups at the stores on the home calendar; one still to confirm stands out.
+    sdk.calendar.source(async ({ from, to }) =>
+      (await myLinks()).flatMap((l) =>
+        l.setups
+          .filter((s) => s.date >= from && s.date <= to)
+          .map((s) => ({
+            id: `setup:${l.storeAccountId}:${s.id}`,
+            date: s.date,
+            time: s.time,
+            title: `Setup · ${l.storeAccountName}`,
+            tone: s.status === 'scheduled' ? ('attention' as const) : s.status === 'cancelled' || s.status === 'declined' ? ('muted' as const) : ('normal' as const),
+            link: '/m/consignment-artist',
+          })),
+      ),
+    );
     sdk.log.info('consignment-artist module ready');
   },
 

@@ -270,6 +270,23 @@ modules post through `ctx.webhooks.emit()` and add summary lines with
 a sale, and a webhook that keeps failing switches itself off. The server only
 posts to public https addresses unless `WEBHOOK_ALLOW_PRIVATE=1`.
 
+*E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
+invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B
+invoices must be from 2026. Each one is checked against the Peppol and
+Belgian rules before it is issued (enterprise number, VAT categories, the
+small-business exemption, reverse charge, intra-EU delivery); numbers are
+taken only on issue, per series and year, without gaps, and an issued
+invoice is frozen - corrections are credit notes. Invoices can start from a
+till sale, customers are checked against the Peppol Directory, and sending
+goes through the business's own Storecove account (its API key is stored
+encrypted and never reaches the browser). With any other access point,
+download the XML and upload it there. The generated XML passes the official
+CEN and OpenPEPPOL schematrons and the UBL 2.1 schema.
+
+Security notes and settings are in [docs/security.md](docs/security.md);
+legal notes per country in [docs/germany-compliance.md](docs/germany-compliance.md)
+and [docs/denmark-compliance.md](docs/denmark-compliance.md).
+
 *Notifications and email* - platform features any server module can use
 through its context: `ctx.notify(accountId, …)` puts a note under the shell's
 bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when

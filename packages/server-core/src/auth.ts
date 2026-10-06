@@ -64,7 +64,7 @@ export interface JwtClaims {
 const TILL_DENIED: [RegExp, RegExp][] = [
   [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
   [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
-  [/./, /^\/modules\/(toggle|reload)$/],
+  [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
 ];
 

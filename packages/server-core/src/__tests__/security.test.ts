@@ -104,7 +104,7 @@ describe('a shared till', () => {
     // Everyday work is fine.
     expect((await app.inject({ method: 'GET', url: '/api/users', headers: auth(till) })).statusCode).toBe(200);
     // Making it last, sending data out, or locking the person out is not.
-    for (const url of ['/api/invites', '/api/tokens', '/api/webhooks', '/api/2fa/setup', '/api/sessions/revoke-others', '/api/account/delete', '/api/users/me/delete'])
+    for (const url of ['/api/invites', '/api/tokens', '/api/webhooks', '/api/2fa/setup', '/api/sessions/revoke-others', '/api/account/delete', '/api/users/me/delete', '/api/modules/toggle'])
       expect((await post(till, url)).statusCode, url).toBe(403);
     // Locked: after the short grace for syncing, the token is dead.
     await post(owner, '/api/auth/lock', { deviceId: TILL, userId: alex.id });

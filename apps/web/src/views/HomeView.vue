@@ -319,7 +319,7 @@ const syncLine = computed(() => {
                   tabindex="0"
                   @click.stop.prevent="openEntry(x)"
                   @keydown.enter.stop.prevent="openEntry(x)"
-                  ><template v-if="x.time">{{ x.time }} </template>{{ x.title }}</span
+                  ><b v-if="x.time" class="cal-time">{{ x.time }}</b>{{ x.title }}</span
                 >
                 <span v-if="d.events.length + d.entries.length > 2" class="cal-more">+{{ d.events.length + d.entries.length - 2 }} more</span>
               </span>
@@ -410,6 +410,7 @@ h2 { margin: 0; font-size: 1rem; }
 .icon-btn { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid var(--zfy-line); background: var(--zfy-bg); color: inherit; border-radius: 8px; padding: .3rem .55rem; font-size: .78rem; cursor: pointer; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
 .cal-entry { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .68rem; line-height: 1.35; padding: 0 .3rem; border-radius: 4px; border-left: 3px solid var(--zfy-warning); background: var(--zfy-bg); color: var(--zfy-ink); cursor: pointer; }
+.cal-time { font-weight: 600; margin-right: .3em; }
 .cal-entry.attention { border-left-color: var(--zfy-danger); background: var(--zfy-signal-soft); font-weight: 600; }
 .cal-entry.muted { color: var(--zfy-muted); text-decoration: line-through; }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }

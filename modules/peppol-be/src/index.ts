@@ -10,7 +10,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'peppol-be',
-  version: '0.1.0',
+  version: '0.1.1',
   sdk: '^0.1.0',
   title: 'E-invoices for Belgium (Peppol)',
   description: 'Issue Belgian B2B invoices and credit notes in Peppol BIS 3.0, send them through your access point or download the UBL.',

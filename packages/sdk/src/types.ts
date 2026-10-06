@@ -437,7 +437,8 @@ export interface ToastOptions {
 
 export interface ShellUi {
   toast(message: string, options?: ToastOptions): void;
-  confirm(message: string, title?: string): Promise<boolean>;
+  /** Yes or no. `labels` names the two buttons (defaults: Confirm / Cancel). */
+  confirm(message: string, title?: string, labels?: { confirm?: string; cancel?: string }): Promise<boolean>;
   /** Hands the user a file: a download on the web, the save dialog in the Android app. */
   saveFile(filename: string, content: string | Blob, mimeType: string): Promise<void>;
   /** Opens a document to read or print: a new tab on the web, the device viewer in the app. False if a pop-up was blocked. */

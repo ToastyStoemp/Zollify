@@ -109,9 +109,10 @@ const eventsById = (db: Database.Database, accountId: string): Map<string, Sales
 
 /** The origin people reach this server at, honouring a reverse proxy, for links in emails. */
 function originOf(req: FastifyRequest): string {
-  const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol).split(',')[0]!.trim();
-  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '').split(',')[0]!.trim();
-  return `${proto}://${host}`;
+  // PUBLIC_ORIGIN when set; otherwise what Fastify derives, which honours forwarded headers
+  // only from a trusted proxy - a raw X-Forwarded-Host would let anyone point the links elsewhere.
+  if (process.env.PUBLIC_ORIGIN) return process.env.PUBLIC_ORIGIN.replace(/\/+$/, '');
+  return `${req.protocol}://${req.host}`;
 }
 
 const cancelUrl = (origin: string, token: string): string => `${origin}/p/consignment/cancel#${token}`;
@@ -210,6 +211,12 @@ const SignupPatchSchema = z.object({ paid: z.boolean().optional(), status: z.enu
 export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): void {
   const { db } = ctx;
   const bad = (message: string) => ({ error: 'invalid_request', message });
+  type Who = ReturnType<typeof ctx.identity>;
+  const staff = (who: Who) => who.role === 'member';
+  /** Staff limited to some events work only with those stores' workshops. */
+  const mayUseStore = (who: Who, storeId: string | undefined) => !staff(who) || !who.allowedEventIds || (!!storeId && who.allowedEventIds.includes(storeId));
+  /** Staff see who is coming, not their contact details or notes. */
+  const forStaff = <T extends { email?: string; note?: string }>(who: Who, s: T): T => (staff(who) ? { ...s, email: '', note: '' } : s);
 
   app.get('/programme', async (req) => {
     const who = ctx.identity(req);
@@ -334,8 +341,9 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
 
   app.get<{ Params: { id: string } }>('/workshops/:id/signups', async (req, reply) => {
     const who = ctx.identity(req);
-    if (!get<Workshop>(db, who.accountId, 'workshops', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-    return { signups: withTillPayments(db, who.accountId, signupsOf(db, who.accountId, req.params.id)) };
+    const w = get<Workshop>(db, who.accountId, 'workshops', req.params.id);
+    if (!w || !mayUseStore(who, w.storeId)) return reply.code(404).send({ error: 'not_found' });
+    return { signups: withTillPayments(db, who.accountId, signupsOf(db, who.accountId, req.params.id)).map((s) => forStaff(who, s)) };
   });
 
   /**
@@ -344,6 +352,7 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
    */
   app.get<{ Querystring: { storeId?: string } }>('/till/workshops', async (req) => {
     const who = ctx.identity(req);
+    if (!mayUseStore(who, req.query.storeId)) return { workshops: [] };
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     const workshops = list<Workshop>(db, who.accountId, 'workshops')
       .filter((w) => w.storeId === req.query.storeId && !w.cancelledAt && w.date >= since)
@@ -354,19 +363,21 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
         return {
           ...w,
           booked: seatsTaken(signups),
-          unpaid: signups.filter((s) => s.status === 'booked' && !s.paid && !s.paidAtTill),
+          unpaid: signups.filter((s) => s.status === 'booked' && !s.paid && !s.paidAtTill).map((s) => forStaff(who, s)),
         };
       }),
     };
   });
 
   /** The store books someone itself - a phone call, someone at the counter. */
-  app.post<{ Params: { id: string } }>('/workshops/:id/signups', async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/workshops/:id/signups', { config: { rateLimit: { max: 30, timeWindow: '10 minutes' } } }, async (req, reply) => {
     const who = ctx.identity(req);
     const w = get<Workshop>(db, who.accountId, 'workshops', req.params.id);
-    if (!w || w.cancelledAt) return reply.code(404).send({ error: 'not_found' });
+    if (!w || w.cancelledAt || !mayUseStore(who, w.storeId)) return reply.code(404).send({ error: 'not_found' });
     const body = StoreSignupSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send(bad('A sign-up needs a name.'));
+    // Staff take payment at the till, which marks the place paid; they cannot just say so.
+    if (staff(who)) body.data.paid = false;
     const token = newToken();
     const result = db.transaction(() => {
       const place = placeSignup(w, signupsOf(db, who.accountId, w.id), body.data.seats);
@@ -377,7 +388,7 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
     })();
     if (!result) return reply.code(409).send(bad('There are not enough places left.'));
     const emailed = await tellParticipant(ctx.mail, db, who.accountId, w, result, result.status === 'booked' ? 'booked' : 'waitlist', cancelUrl(originOf(req), token));
-    return reply.code(201).send({ signup: result, emailed });
+    return reply.code(201).send({ signup: forStaff(who, result), emailed });
   });
 
   app.put<{ Params: { id: string } }>('/signups/:id', async (req, reply) => {
@@ -388,6 +399,8 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
     if (!body.success) return reply.code(400).send(bad('That change is not valid.'));
     const current = JSON.parse(row.doc) as Signup;
     const w = get<Workshop>(db, who.accountId, 'workshops', current.workshopId)!;
+    if (!mayUseStore(who, w.storeId)) return reply.code(404).send({ error: 'not_found' });
+    if (staff(who)) delete body.data.paid;
     let next: Signup = { ...current, ...(body.data.paid !== undefined ? { paid: body.data.paid } : {}) };
     if (body.data.status === 'cancelled' && current.status !== 'cancelled') next = { ...next, status: 'cancelled', cancelledAt: Date.now() };
     // Booking someone off the waitlist by hand is the store's call, even over capacity.
@@ -395,7 +408,7 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
     saveSignup(db, who.accountId, next);
     if (next.status !== current.status && next.status === 'booked') await tellParticipant(ctx.mail, db, who.accountId, w, next, 'promoted', null);
     const promoted = next.status === 'cancelled' && current.status === 'booked' ? await promote(ctx.mail, db, who.accountId, w) : 0;
-    return { signup: next, promoted };
+    return { signup: forStaff(who, next), promoted };
   });
 }
 

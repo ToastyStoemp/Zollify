@@ -111,8 +111,9 @@ export function syncShared(svc: ModuleServices, storeAccountId: string, row: Con
       if (current && !current.deletedAt && current.consignorId === row.id) ops.push({ type: 'product.delete', payload: { id, deletedAt: now } });
       continue;
     }
-    // A product the store owns under this id (it never should) is left alone.
-    if (current && current.consignorId && current.consignorId !== row.id) continue;
+    // Only ever this artist's own copy: a store product (or another artist's) under the same id
+    // is left alone - the id comes from the artist, so it must never let them overwrite the store's.
+    if (current && current.consignorId !== row.id) continue;
     const price = sharedPrice(source.price, `${id}:`, same, pricing);
     const product: Product = {
       id,

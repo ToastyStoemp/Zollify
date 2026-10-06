@@ -221,19 +221,21 @@ export function checkSecondFactor(
   const code = String(rawCode ?? '').trim();
   if (!code) return 'missing';
   if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) return 'ok';
-  const codes: string[] = JSON.parse(user.recoveryCodes ?? '[]');
+  // Read fresh and write only if unchanged: two sign-ins racing with one code must not both pass.
+  const stored = (db.prepare('SELECT recoveryCodes FROM users WHERE id = ?').get(user.id) as { recoveryCodes: string | null } | undefined)?.recoveryCodes ?? '[]';
+  const codes: string[] = JSON.parse(stored);
   const idx = codes.indexOf(hashRecovery(code));
   if (idx < 0) return 'invalid';
   codes.splice(idx, 1); // recovery codes are single-use
-  db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes), user.id);
-  return 'recovery';
+  const used = db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ? AND recoveryCodes = ?').run(JSON.stringify(codes), user.id, stored);
+  return used.changes === 1 ? 'recovery' : 'invalid';
 }
 
 export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
   if (!deviceId) return;
   db.prepare(
     `INSERT INTO devices (id, accountId, userId, name, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name)`,
+     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name) WHERE devices.accountId = excluded.accountId`,
   ).run(deviceId, accountId, userId, name ?? null, Date.now(), Date.now());
 }
 
@@ -718,7 +720,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   // irreversible. This is a client erasing their own workspace for good.
   app.post('/api/account/delete', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    if (claims.role !== 'owner') return reply.code(403).send({ error: 'Only the account owner can delete the account' });
+    if (claims.role === 'member') return reply.code(403).send({ error: 'Only an account admin can delete the account' });
+    // The server owner's own account goes only by the owner's hand.
+    const hasOwner = db.prepare("SELECT 1 FROM users WHERE accountId = ? AND role = 'owner'").get(claims.accountId);
+    if (hasOwner && claims.role !== 'owner') return reply.code(403).send({ error: 'Only the server owner can delete this account' });
     const body = (req.body ?? {}) as { password?: string; code?: string };
     if (!(await passwordOk(claims.sub, body.password))) return reply.code(401).send({ error: 'Password is incorrect' });
     const me = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;

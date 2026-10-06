@@ -54,7 +54,8 @@ export interface GatewayOptions {
   allowedOrigins: string[];
   /** Set false only for local HTTP development. */
   requireHttps: boolean;
-  trustProxy: boolean;
+  /** true trusts one proxy hop in front (the usual reverse proxy); a number trusts that many. */
+  trustProxy: boolean | number;
   logLevel?: string;
   /** Outgoing email. Defaults to SMTP_URL + MAIL_FROM from the environment; disabled without them. */
   mailer?: Mailer;
@@ -87,6 +88,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   const app = Fastify({
     logger: {
       level: opts.logLevel ?? 'info',
+      // The live-sync socket carries its token in the query string.
+      serializers: {
+        req: (req: { method: string; url: string; ip?: string }) => ({ method: req.method, url: req.url.replace(/([?&](?:token|grant)=)[^&]*/g, '$1[redacted]'), remoteAddress: req.ip }),
+      },
       // Credentials and tokens must never reach the log, including when a
       // handler logs the whole request for debugging.
       redact: {
@@ -102,7 +107,8 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
         remove: true,
       },
     },
-    trustProxy: opts.trustProxy,
+    // Trusting every X-Forwarded-For hop would let anyone pick their own IP and step around the rate limits.
+    trustProxy: opts.trustProxy === false ? false : ((hops: number) => (_addr: string, hop: number) => hop < hops)(opts.trustProxy === true ? 1 : opts.trustProxy),
     // Generous on purpose: a backup restore pushes hundreds of image
     // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
     // authentication bound who can send this much, not the size itself.
@@ -196,6 +202,12 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.decorate('db', db);
+  // Large bodies are for signed-in work (backups, invoice PDFs); without a token
+  // nothing big is read, so nobody can make the server parse 32 MB for free.
+  app.addHook('onRequest', async (req, reply) => {
+    const size = Number(req.headers['content-length'] ?? 0);
+    if (size > 256 * 1024 && !req.headers.authorization) return reply.code(413).send({ error: 'Request too large.' });
+  });
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.

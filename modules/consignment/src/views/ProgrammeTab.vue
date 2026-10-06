@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { Signup, StoreFeature } from '@zollify/shared';
-import { addMonths, featureOn, fmtPrice } from '@zollify/shared';
+import { addMonths, featureOn, fmtPrice, csvCell } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addSignup,
@@ -245,10 +245,6 @@ async function addWalkIn(): Promise<void> {
     if (emailed) sdk().ui.toast('Added and emailed their confirmation.', { kind: 'success' });
   }
 }
-const csvCell = (v: unknown): string => {
-  const s = String(v ?? '');
-  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
 async function exportSignups(): Promise<void> {
   const w = listFor.value!;
   const rows = [['Name', 'Email', 'Places', 'Status', 'Paid', 'Note', 'Signed up'], ...signups.value.map((s) => [s.name, s.email, s.seats, s.status, s.paidAtTill ? 'at till' : s.paid ? 'yes' : '', s.note, new Date(s.createdAt).toISOString().slice(0, 16).replace('T', ' ')])];

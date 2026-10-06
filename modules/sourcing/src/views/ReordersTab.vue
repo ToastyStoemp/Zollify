@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, safeHttpUrl } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import { CARRIERS, STATUSES, STATUS_LABELS, buildSpec, nextRef, resolveReorderCosts, trackingUrl, type Reorder, type ReorderStatus } from '../engine';
 import { fileBytes, remove, save, snap, supplierName } from '../api';
@@ -153,7 +153,7 @@ async function pushCosts(): Promise<void> {
         <button v-if="next(r)" type="button" class="primary" @click="setStatus(r, next(r)!)"><Icon name="chevron-right" :size="14" /> {{ STATUS_LABELS[next(r)!] }}</button>
         <button type="button" @click="copySpec(r)"><Icon name="copy" :size="14" /> Copy spec</button>
         <a v-if="rep(r.supplierId)?.email" :href="mailto(r)" class="btn"><Icon name="send" :size="14" /> Email {{ rep(r.supplierId)!.name }}</a>
-        <a v-if="rep(r.supplierId)?.chatUrl" :href="rep(r.supplierId)!.chatUrl" target="_blank" rel="noopener" class="btn"><Icon name="external-link" :size="14" /> Chat</a>
+        <a v-if="rep(r.supplierId)?.chatUrl" :href="safeHttpUrl(rep(r.supplierId)!.chatUrl)" target="_blank" rel="noopener" class="btn"><Icon name="external-link" :size="14" /> Chat</a>
         <button type="button" @click="downloadZip(r)"><Icon name="download" :size="14" /> Design zip</button>
         <button type="button" @click="openShip(r)"><Icon name="truck" :size="14" /> Shipment</button>
         <button v-if="r.status === 'received'" type="button" @click="costing = r"><Icon name="coins" :size="14" /> Costs → products</button>

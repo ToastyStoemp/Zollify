@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
-import { HS_CODES, fmtPrice } from '@zollify/shared';
+import { HS_CODES, csvCell, fmtPrice } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
 import { loader } from '../boot';
 import {
@@ -116,7 +116,7 @@ const filtered = computed(() => {
 function exportRestockCsv(): void {
   const rows = [['Product', 'Variant', 'Type', 'SKU', 'Left']];
   for (const p of filtered.value) for (const r of lowRows(p)) rows.push([p.title, r.variant, p.type ?? '', p.sku ?? '', String(r.left)]);
-  const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(',')).join('\r\n');
+  const csv = rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
   void saveFile(`restock_${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 

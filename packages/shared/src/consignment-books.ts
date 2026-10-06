@@ -1,3 +1,4 @@
+import { csvCell } from './csv';
 import { z } from 'zod';
 import {
   baseFactor,
@@ -422,7 +423,7 @@ export function storeReport(input: ReportInput): StoreReport {
 
 /** The report as a spreadsheet: one row per artist, then the totals. */
 export function reportCsv(r: StoreReport, storeName: (id: string) => string = (id) => id): string {
-  const cell = (v: string | number): string => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const cell = (v: string | number): string => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : csvCell(v));
   const row = (cells: (string | number)[]): string => cells.map(cell).join(',');
   const out = [
     row(['Period', `${r.period.from} to ${r.period.to}`]),

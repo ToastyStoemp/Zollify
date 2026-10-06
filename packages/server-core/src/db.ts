@@ -273,6 +273,7 @@ export function touchDevice(
      ON CONFLICT (id) DO UPDATE SET
        lastSeenAt = excluded.lastSeenAt,
        name = COALESCE(excluded.name, name),
-       flavor = COALESCE(excluded.flavor, flavor)`,
+       flavor = COALESCE(excluded.flavor, flavor)
+     WHERE devices.accountId = excluded.accountId`,
   ).run(id, accountId, userId, name, flavor, now, now);
 }

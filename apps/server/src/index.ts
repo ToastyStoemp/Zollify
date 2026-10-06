@@ -90,7 +90,7 @@ async function main(): Promise<void> {
       .map((s) => s.trim())
       .filter(Boolean),
     requireHttps: flag('ZOLLIFY_REQUIRE_HTTPS', true),
-    trustProxy: flag('ZOLLIFY_TRUST_PROXY', true),
+    trustProxy: /^\d+$/.test(process.env.ZOLLIFY_TRUST_PROXY ?? '') ? Number(process.env.ZOLLIFY_TRUST_PROXY) : flag('ZOLLIFY_TRUST_PROXY', true),
     logLevel: process.env.LOG_LEVEL ?? 'info',
   });
 

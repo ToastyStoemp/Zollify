@@ -1,6 +1,9 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
+import { lookup as lookupCb, type LookupAddress } from 'node:dns';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { BlockList, isIP, type LookupFunction } from 'node:net';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import {
@@ -59,14 +62,68 @@ export function migrateWebhooks(db: Database.Database): void {
 
 // ── Where a webhook may point ───────────────────────────────────────────────
 
-function privateAddress(ip: string): boolean {
-  if (isIP(ip) === 4) {
-    const [a, b] = ip.split('.').map(Number) as [number, number];
-    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+/** Everything that is not the public internet: loopback, private, link-local, carrier NAT, benchmark, multicast, and the IPv6 forms that wrap an IPv4 address. */
+const BLOCKED = new BlockList();
+for (const [net, bits] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 3]] as const) BLOCKED.addSubnet(net, bits, 'ipv4');
+for (const [net, bits] of [['::', 127], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001:db8::', 32], ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8]] as const) BLOCKED.addSubnet(net, bits, 'ipv6');
+
+export function privateAddress(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return BLOCKED.check(ip, 'ipv4');
+  if (family !== 6) return true;
+  // ::ffff:a.b.c.d in any spelling (dotted or hex) is that IPv4 address.
+  const norm = new URL(`http://[${ip}]/`).hostname.slice(1, -1);
+  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(norm);
+  if (mapped) {
+    const hi = parseInt(mapped[1]!, 16);
+    const lo = parseInt(mapped[2]!, 16);
+    return privateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
   }
-  const v6 = ip.toLowerCase();
-  if (v6.startsWith('::ffff:')) return privateAddress(v6.slice(7));
-  return v6 === '::1' || v6 === '::' || v6.startsWith('fc') || v6.startsWith('fd') || v6.startsWith('fe80') || v6.startsWith('ff');
+  if (/^::ffff:/.test(norm)) return true;
+  return BLOCKED.check(norm, 'ipv6');
+}
+
+/**
+ * Resolves the host at connection time and refuses a private answer there:
+ * checking the name once beforehand is not enough, as a name can resolve to
+ * a public address for the check and a private one a moment later.
+ */
+const safeLookup: LookupFunction = (hostname, options, callback) => {
+  lookupCb(hostname, { ...options, all: true }, (err, addresses) => {
+    if (err) return callback(err, '', 0);
+    const list = (addresses as unknown as LookupAddress[]).filter((a) => !privateAddress(a.address));
+    if (!list.length) return callback(Object.assign(new Error('That address points into a private network.'), { code: 'EPRIVATE' }), '', 0);
+    if ((options as { all?: boolean }).all) return (callback as unknown as (e: null, a: LookupAddress[]) => void)(null, list);
+    callback(null, list[0]!.address, list[0]!.family);
+  });
+};
+
+/** One POST, without following redirects, reading at most a few KB of the answer. */
+function postOnce(raw: string, body: string, headers: Record<string, string>): Promise<{ status: number; retryAfter: string | null; text: string }> {
+  const url = new URL(raw);
+  const allowPrivate = process.env.WEBHOOK_ALLOW_PRIVATE === '1';
+  const send = url.protocol === 'http:' ? httpRequest : httpsRequest;
+  return new Promise((resolve, reject) => {
+    const req = send(
+      url,
+      { method: 'POST', headers: { ...headers, 'content-length': Buffer.byteLength(body) }, timeout: TIMEOUT_MS, ...(allowPrivate ? {} : { lookup: safeLookup }) },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          if (text.length < 4096) text += chunk;
+          if (text.length >= 4096) res.destroy();
+        });
+        const done = () => resolve({ status: res.statusCode ?? 0, retryAfter: (res.headers['retry-after'] as string | undefined) ?? null, text: text.slice(0, 4096) });
+        res.on('end', done);
+        res.on('close', done);
+        res.on('error', done);
+      },
+    );
+    req.on('timeout', () => req.destroy(new Error('Timed out.')));
+    req.on('error', reject);
+    req.end(body);
+  });
 }
 
 /** Null when the server may post to the URL; otherwise why not. */
@@ -99,6 +156,10 @@ const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n -
 function payloadFor(hook: Webhook, event: WebhookEvent, msg: WebhookMessage, accountName: string): { body: string; headers: Record<string, string> } {
   const fields = (msg.fields ?? []).filter((f) => f.value);
   if (hook.format === 'discord') {
+    // No masked links ([text](url)) from account text: a product name must not become a disguised link.
+    const d = (s: string) => s.replace(/\[([^\]]*)\]\(([^)]*)\)/g, '$1 ($2)');
+    msg = { ...msg, title: d(msg.title), ...(msg.body ? { body: d(msg.body) } : {}) };
+    fields.splice(0, fields.length, ...fields.map((f) => ({ ...f, name: d(f.name), value: d(f.value) })));
     return {
       headers: {},
       body: JSON.stringify({
@@ -118,7 +179,9 @@ function payloadFor(hook: Webhook, event: WebhookEvent, msg: WebhookMessage, acc
     };
   }
   if (hook.format === 'slack') {
-    const text = [`*${msg.title}*`, msg.body, ...fields.map((f) => `*${f.name}:* ${f.value}`)].filter(Boolean).join('\n');
+    // Slack reads <…> as links and mentions (<!channel>); text from the account (product names) must stay text.
+    const e = (s: string | undefined) => (s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const text = [`*${e(msg.title)}*`, e(msg.body), ...fields.map((f) => `*${e(f.name)}:* ${e(f.value)}`)].filter(Boolean).join('\n');
     return { headers: {}, body: JSON.stringify({ text: clip(text, 3900) }) };
   }
   const body = JSON.stringify({ event, account: accountName, at: new Date().toISOString(), title: msg.title, body: msg.body ?? '', fields });
@@ -164,20 +227,15 @@ export function createWebhooks(
     const { body, headers } = payloadFor(hook, event, msg, accountName(accountId));
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await fetch(hook.url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'user-agent': 'Zollify-Webhooks', ...headers },
-          body,
-          redirect: 'manual',
-          signal: AbortSignal.timeout(TIMEOUT_MS),
-        });
+        const res = await postOnce(hook.url, body, { 'content-type': 'application/json', 'user-agent': 'Zollify-Webhooks', ...headers });
         if (res.status === 429 && attempt === 0) {
           // Discord and Slack say how long to wait; never longer than a few seconds here.
-          const wait = Number(res.headers.get('retry-after') ?? '1');
+          const wait = Number(res.retryAfter ?? '1');
           await new Promise((r) => setTimeout(r, Math.min(5, Number.isFinite(wait) ? wait : 1) * 1000));
           continue;
         }
-        return res.ok ? { status: res.status, error: null } : { status: res.status, error: (await res.text().catch(() => '')).slice(0, 200) || res.statusText };
+        const ok = res.status >= 200 && res.status < 300;
+        return ok ? { status: res.status, error: null } : { status: res.status, error: res.text.slice(0, 200) || `HTTP ${res.status}` };
       } catch (err) {
         if (attempt === 1) return { status: null, error: err instanceof Error ? err.message : String(err) };
       }

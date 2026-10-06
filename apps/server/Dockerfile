@@ -27,6 +27,7 @@ COPY modules/price-cards/package.json modules/price-cards/
 COPY modules/label-printer/package.json modules/label-printer/
 COPY modules/convention-checklist/package.json modules/convention-checklist/
 COPY modules/consignment/package.json modules/consignment/
+COPY modules/peppol-be/package.json modules/peppol-be/
 COPY modules/migration/package.json modules/migration/
 COPY apps/web/package.json apps/web/
 COPY apps/server/package.json apps/server/

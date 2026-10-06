@@ -104,8 +104,29 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     lockedUntil: b && b.lockedUntil > Date.now() ? b.lockedUntil : null,
   });
 
-  // The device session's own user has no binding; their misses are counted here.
-  const selfMisses = new Map<string, { n: number; until: number }>();
+  // The device session's own user has no binding; their misses are counted per person here.
+  db.exec('CREATE TABLE IF NOT EXISTS pin_misses (userId TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0, lockedUntil INTEGER NOT NULL DEFAULT 0)');
+
+  /**
+   * Counts a guess before the PIN is checked, and sets the lock in the same
+   * statement when this guess is the one that reaches it: parallel guesses
+   * cannot all slip in while the first is still being verified. Returns the
+   * new count, or null when locked.
+   */
+  const takeGuess = (table: 'device_users' | 'pin_misses', where: string, args: unknown[], now: number): number | null => {
+    const row = db
+      .prepare(
+        `UPDATE ${table} SET failures = failures + 1,
+           lockedUntil = CASE WHEN (failures + 1) % ${LOCKOUT_AFTER} = 0 THEN ? ELSE lockedUntil END
+         WHERE ${where} AND lockedUntil <= ? RETURNING failures`,
+      )
+      .get(now + LOCKOUT_MS, ...args, now) as { failures: number } | undefined;
+    return row ? row.failures : null;
+  };
+  const lockedReply = (reply: FastifyReply, table: 'device_users' | 'pin_misses', where: string, args: unknown[]) => {
+    const row = db.prepare(`SELECT lockedUntil FROM ${table} WHERE ${where}`).get(...args) as { lockedUntil: number } | undefined;
+    return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: row?.lockedUntil ?? Date.now() + LOCKOUT_MS });
+  };
 
   // ── Your own PIN ──────────────────────────────────────────────────────────
 
@@ -193,16 +214,11 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     const now = Date.now();
     if (userId === claims.sub) {
       if (pin === null) return { ok: true, userId };
-      const key = `${deviceId}:${userId}`;
-      const miss = selfMisses.get(key);
-      if (miss && miss.until > now) return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: miss.until });
+      db.prepare('INSERT OR IGNORE INTO pin_misses (userId) VALUES (?)').run(userId);
+      if (takeGuess('pin_misses', 'userId = ?', [userId], now) === null) return lockedReply(reply, 'pin_misses', 'userId = ?', [userId]);
       const user = userById(userId);
-      if (!(await pinOk(user?.pinHash, pin))) {
-        const n = (miss?.n ?? 0) + 1;
-        selfMisses.set(key, { n: n >= LOCKOUT_AFTER ? 0 : n, until: n >= LOCKOUT_AFTER ? now + LOCKOUT_MS : 0 });
-        return reply.code(403).send({ error: 'Wrong PIN.' });
-      }
-      selfMisses.delete(key);
+      if (!(await pinOk(user?.pinHash, pin))) return reply.code(403).send({ error: 'Wrong PIN.' });
+      db.prepare('UPDATE pin_misses SET failures = 0, lockedUntil = 0 WHERE userId = ?').run(userId);
       return { ok: true, userId };
     }
 
@@ -212,22 +228,20 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Not on this device - add them again.', removed: true, userId });
 
     if (pin !== null) {
-      if (b.lockedUntil > now) return reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil: b.lockedUntil });
+      const where = 'accountId = ? AND deviceId = ? AND userId = ?';
+      const args = [claims.accountId, deviceId, userId];
+      const failures = takeGuess('device_users', where, args, now);
+      if (failures === null) return lockedReply(reply, 'device_users', where, args);
       if (!(await pinOk(user.pinHash, pin))) {
-        const failures = b.failures + 1;
         if (failures >= REMOVE_AFTER) {
-          db.prepare('DELETE FROM device_users WHERE deviceId = ? AND userId = ?').run(deviceId, userId);
+          db.prepare(`DELETE FROM device_users WHERE ${where}`).run(...args);
           return reply.code(404).send({ error: 'Too many wrong PINs - sign in with your password to add yourself again.', removed: true, userId });
         }
-        const lockedUntil = failures % LOCKOUT_AFTER === 0 ? now + LOCKOUT_MS : 0;
-        db.prepare('UPDATE device_users SET failures = ?, lockedUntil = ? WHERE deviceId = ? AND userId = ?').run(failures, lockedUntil, deviceId, userId);
-        return lockedUntil
-          ? reply.code(423).send({ error: 'Too many wrong PINs - try again in a few minutes.', lockedUntil })
-          : reply.code(403).send({ error: 'Wrong PIN.' });
+        return failures % LOCKOUT_AFTER === 0 ? lockedReply(reply, 'device_users', where, args) : reply.code(403).send({ error: 'Wrong PIN.' });
       }
     }
-    db.prepare('UPDATE device_users SET failures = 0, lockedUntil = 0, unlockedUntil = ?, lastUnlockAt = ? WHERE deviceId = ? AND userId = ?').run(now + UNLOCK_MS, now, deviceId, userId);
-    return { accessToken: issueAccessToken(app, user), user: toAuthUser(db, user) };
+    db.prepare('UPDATE device_users SET failures = 0, lockedUntil = 0, unlockedUntil = ?, lastUnlockAt = ? WHERE accountId = ? AND deviceId = ? AND userId = ?').run(now + UNLOCK_MS, now, claims.accountId, deviceId, userId);
+    return { accessToken: issueAccessToken(app, user, deviceId), user: toAuthUser(db, user) };
   }
 
   /** Name and PIN. */
@@ -298,7 +312,7 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     if (b.unlockedUntil <= Date.now()) return reply.code(403).send({ error: 'Locked - enter the PIN again.' });
     const user = userById(b.userId);
     if (!user || user.accountId !== claims.accountId) return reply.code(404).send({ error: 'Not on this device.', removed: true });
-    return { accessToken: issueAccessToken(app, user), user: toAuthUser(db, user) };
+    return { accessToken: issueAccessToken(app, user, body.data.deviceId), user: toAuthUser(db, user) };
   });
 
   /** The till was locked: the person's unlock ends, after a short grace for syncing. */

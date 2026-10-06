@@ -103,6 +103,11 @@ describe('a shared till', () => {
   it('keeps a sale credited to whoever rang it up, even if someone else syncs it', async () => {
     // Kim signs the till in as staff; Sam rang up a sale before locking, and it syncs under Kim.
     const kim = await member('kim@till.test');
+    // Signed in somewhere else only: the till's id in the push is not enough.
+    const unproven = sale(sam.id);
+    await push(kim.token, [unproven]);
+    expect(await sellerOf(unproven.payload.id)).toBe(kim.id);
+    kim.token = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'kim@till.test', password: PASSWORD, deviceId: TILL } })).json().accessToken;
     const fromSam = sale(sam.id);
     await push(kim.token, [fromSam]);
     expect(await sellerOf(fromSam.payload.id)).toBe(sam.id);

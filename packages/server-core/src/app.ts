@@ -195,6 +195,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
+  app.decorate('db', db);
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.

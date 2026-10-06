@@ -224,11 +224,19 @@ function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff
   if (op.type !== 'tx.create' || !op.payload || typeof op.payload !== 'object') return op;
   const payload = op.payload as { soldBy?: { userId?: string } };
   const named = payload.soldBy?.userId;
-  if (named && named !== claims.sub && boundToDevice(db, claims.accountId, deviceId, named)) {
+  // A sale recorded at a shared till, in the name of someone unlocked there: only believed
+  // when the push really comes from that till - the device id in the body is the client's word.
+  if (named && named !== claims.sub && pushedFromDevice(db, claims, deviceId) && boundToDevice(db, claims.accountId, deviceId, named)) {
     return { ...op, payload: { ...payload, soldBy: { userId: named, email: emailOf(db, named) } } };
   }
   if (!staff && named) return op;
   return { ...op, payload: { ...payload, soldBy: { userId: claims.sub, email: emailOf(db, claims.sub) } } };
+}
+
+/** The pusher is signed in on this device: a till token for it, or a live session that signed in there. */
+function pushedFromDevice(db: Database.Database, claims: JwtClaims, deviceId: string): boolean {
+  if (claims.till !== undefined) return claims.till === deviceId;
+  return !!db.prepare('SELECT 1 FROM refresh_tokens WHERE userId = ? AND deviceId = ? AND expiresAt > ?').get(claims.sub, deviceId, Date.now());
 }
 
 function boundToDevice(db: Database.Database, accountId: string, deviceId: string, userId: string): boolean {

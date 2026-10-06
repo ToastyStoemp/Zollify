@@ -50,6 +50,43 @@ export interface JwtClaims {
   sub: string;
   accountId: string;
   role: UserRole;
+  /** Set on a person's token from a shared till: the device it was unlocked on. */
+  till?: string;
+}
+
+/**
+ * What a person unlocked at a shared till may not do with that token. The
+ * till is a shared device: whoever walks up to an unlocked one must not be
+ * able to make the access last (API tokens, invites, sessions, devices,
+ * badges), send data out (webhooks), or lock the person out (2FA, deletion).
+ * Those need the person's own sign-in.
+ */
+const TILL_DENIED: [RegExp, RegExp][] = [
+  [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
+  [/./, /^\/modules\/(toggle|reload)$/],
+  [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+];
+
+/**
+ * Checks a verified token against the database on every request: the person
+ * must still exist in the token's account (a removed person's token stops at
+ * once, not after 15 minutes), the role is the current one rather than the
+ * one at sign-in, and a till token only works while that person is unlocked
+ * on that device. Returns an error, or null with `claims.role` refreshed.
+ */
+export function checkClaims(db: Database.Database, claims: JwtClaims, method: string, url: string): { code: number; error: string } | null {
+  const row = db.prepare('SELECT accountId, role FROM users WHERE id = ?').get(claims.sub) as { accountId: string; role: UserRole } | undefined;
+  if (!row || row.accountId !== claims.accountId) return { code: 401, error: 'Not authenticated' };
+  claims.role = row.role;
+  if (claims.till !== undefined) {
+    const b = db.prepare('SELECT unlockedUntil FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(claims.accountId, claims.till, claims.sub) as { unlockedUntil: number } | undefined;
+    if (!b || b.unlockedUntil <= Date.now()) return { code: 401, error: 'Not authenticated' };
+    const path = url.split('?')[0]!;
+    if (TILL_DENIED.some(([m, p]) => m.test(method) && p.test(path)))
+      return { code: 403, error: 'Not from a shared till - sign in with your own account for this.' };
+  }
+  return null;
 }
 
 export interface UserRow {
@@ -112,8 +149,8 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
 }
 
 /** A bare access token, for a person unlocking a shared till: no refresh token, see device-users.ts. */
-export function issueAccessToken(app: FastifyInstance, user: Pick<UserRow, 'id' | 'accountId' | 'role'>): string {
-  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role };
+export function issueAccessToken(app: FastifyInstance, user: Pick<UserRow, 'id' | 'accountId' | 'role'>, tillDeviceId: string): string {
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role, till: tillDeviceId };
   return app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
 }
 
@@ -253,7 +290,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
    * owner without an invite. The sign-in screen asks this to decide whether to
    * show "Set up this server" instead of the usual invite-gated form.
    */
-  const userCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  // Once anyone has signed up, the server stays set up: deleting the last account must not
+  // reopen "first visitor becomes owner" to whoever finds the page next.
+  db.exec('CREATE TABLE IF NOT EXISTS server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const markInitialised = () => db.prepare("INSERT OR IGNORE INTO server_meta (key, value) VALUES ('initialised', ?)").run(String(Date.now()));
+  const realUserCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  if (realUserCount() > 0) markInitialised();
+  const initialised = (): boolean => !!db.prepare("SELECT 1 FROM server_meta WHERE key = 'initialised'").get();
+  const userCount = (): number => (initialised() ? Math.max(1, realUserCount()) : realUserCount());
   app.get('/api/setup', async () => ({ needsOwner: userCount() === 0 }));
 
   app.post('/api/auth/register', AUTH_RATE_LIMIT, async (req, reply) => {
@@ -300,6 +344,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     try {
       db.transaction(() => {
         if (firstUser && userCount() !== 0) throw new Error('NOT_FIRST');
+        if (firstUser) markInitialised();
         if (!accountId) {
           accountId = randomUUID();
           db.prepare('INSERT INTO accounts (id, name, createdAt) VALUES (?, ?, ?)').run(
@@ -455,9 +500,15 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const u = db.prepare('SELECT totpEnabled FROM users WHERE id = ?').get(claims.sub) as { totpEnabled: number } | undefined;
     return { enabled: !!u?.totpEnabled };
   });
-  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    const u = db.prepare('SELECT email FROM users WHERE id = ?').get(claims.sub) as { email: string };
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    // Starting over switches the current 2FA off: with it on, that takes the current code,
+    // or a stolen session could swap in the thief's authenticator.
+    if (u.totpEnabled) {
+      const second = checkSecondFactor(db, box, u, (req.body as { code?: string } | undefined)?.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Enter your current authenticator code to set up a new one.', needs2fa: true });
+    }
     const secret = generateSecret();
     db.prepare('UPDATE users SET totpSecret = ?, totpEnabled = 0 WHERE id = ?').run(box.encrypt(secret), claims.sub);
     return { secret, otpauth: otpauthUri({ secret, account: u.email, issuer: 'Zollify' }) };
@@ -667,9 +718,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   // irreversible. This is a client erasing their own workspace for good.
   app.post('/api/account/delete', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    if (claims.role === 'member') return reply.code(403).send({ error: 'Only an account admin can delete the account' });
-    const body = (req.body ?? {}) as { password?: string };
+    if (claims.role !== 'owner') return reply.code(403).send({ error: 'Only the account owner can delete the account' });
+    const body = (req.body ?? {}) as { password?: string; code?: string };
     if (!(await passwordOk(claims.sub, body.password))) return reply.code(401).send({ error: 'Password is incorrect' });
+    const me = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    if (me.totpEnabled) {
+      const second = checkSecondFactor(db, box, me, body.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Authenticator code required.', needs2fa: true });
+    }
     const accountId = claims.accountId;
     db.transaction(() => {
       const userIds = (db.prepare('SELECT id FROM users WHERE accountId = ?').all(accountId) as { id: string }[]).map((u) => u.id);
@@ -755,8 +811,10 @@ export async function authenticate(this: FastifyInstance, req: FastifyRequest, r
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -784,8 +842,10 @@ export async function authenticateApiOrJwt(
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -818,6 +878,8 @@ export async function authenticateApiWrite(
     return reply.code(401).send({ error: 'Not authenticated' });
   }
   const claims = req.user as JwtClaims;
+  const bad = checkClaims(this.db, claims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
   if (claims.role === 'member') {
     return reply.code(403).send({ error: 'Catalog writes require an owner/admin or a data:write token' });
   }

@@ -12,7 +12,7 @@ import type {
   PaymentTriggerMessage,
   ShellUpdateMessage,
 } from '@zollify/shared';
-import type { JwtClaims } from './auth';
+import { checkClaims, type JwtClaims } from './auth';
 import { touchDevice } from './db';
 
 type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
@@ -155,6 +155,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
     let claims: JwtClaims;
     try {
       claims = app.jwt.verify<JwtClaims>(token ?? '');
+      if (checkClaims(db, claims, 'GET', '/api/sync/ws')) throw new Error('revoked');
     } catch {
       socket.close(4001, 'invalid token');
       return;

@@ -11,7 +11,8 @@ import { Icon } from '@zollify/ui';
  */
 
 const account = currentAccount;
-const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+// Only the owner deletes the whole account; anyone else deletes their own login.
+const isOwner = computed(() => account.value?.role === 'owner');
 const error = ref<string | null>(null);
 
 // ── Two-factor ──────────────────────────────────────────────────────────────
@@ -134,6 +135,7 @@ const ago = (ts: number): string => {
 // ── Danger zone ─────────────────────────────────────────────────────────────
 const showDanger = ref(false);
 const password = ref('');
+const deleteCode = ref('');
 const confirmText = ref('');
 const deleting = ref(false);
 async function confirmDelete(): Promise<void> {
@@ -144,7 +146,7 @@ async function confirmDelete(): Promise<void> {
   deleting.value = true;
   error.value = null;
   try {
-    await authFetch(isAdmin.value ? '/account/delete' : '/users/me/delete', { method: 'POST', body: JSON.stringify({ password: password.value }) });
+    await authFetch(isOwner.value ? '/account/delete' : '/users/me/delete', { method: 'POST', body: JSON.stringify({ password: password.value, code: deleteCode.value.trim() || undefined }) });
     await signOut();
     location.reload();
   } catch (err) {
@@ -221,16 +223,17 @@ onMounted(async () => {
     <article class="card danger-zone">
       <h3>Danger zone</h3>
       <p class="hint">
-        <template v-if="isAdmin">Permanently delete this account and <strong>all</strong> of its data - events, products, sales, images and every user. This cannot be undone.</template>
+        <template v-if="isOwner">Permanently delete this account and <strong>all</strong> of its data - events, products, sales, images and every user. This cannot be undone.</template>
         <template v-else>Permanently delete your own login. The account's shared data stays for the other members.</template>
       </p>
-      <button v-if="!showDanger" type="button" class="danger" @click="showDanger = true">{{ isAdmin ? 'Delete account & all data…' : 'Delete my login…' }}</button>
+      <button v-if="!showDanger" type="button" class="danger" @click="showDanger = true">{{ isOwner ? 'Delete account & all data…' : 'Delete my login…' }}</button>
       <form v-else class="form" @submit.prevent="confirmDelete">
         <p class="hint">Confirm your password and type <code>DELETE</code> to proceed.</p>
         <input v-model="password" type="password" autocomplete="current-password" placeholder="Your password" aria-label="Password" />
+        <input v-if="isOwner && twofaEnabled" v-model="deleteCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Authenticator code" aria-label="Authenticator code" />
         <input v-model="confirmText" type="text" placeholder="Type DELETE" aria-label="Confirmation" />
         <div class="row">
-          <button type="submit" class="danger" :disabled="deleting || !password">{{ deleting ? 'Deleting…' : isAdmin ? 'Delete everything' : 'Delete my login' }}</button>
+          <button type="submit" class="danger" :disabled="deleting || !password">{{ deleting ? 'Deleting…' : isOwner ? 'Delete everything' : 'Delete my login' }}</button>
           <button type="button" @click="showDanger = false; password = ''; confirmText = ''">Cancel</button>
         </div>
       </form>

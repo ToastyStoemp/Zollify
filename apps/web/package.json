@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@zollify/consignment": "*",
+    "@zollify/consignment-artist": "*",
     "@zollify/convention-checklist": "*",
     "@zollify/costs": "*",
     "@zollify/peppol-be": "*",

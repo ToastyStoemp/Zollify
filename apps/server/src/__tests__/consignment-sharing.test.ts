@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, reduceProducts, setEnabled } from '@zollify/server-core';
 import { shortBarcode, type AppNotification, type Product, type ShareableItem } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * Sharing crosses accounts in the other direction: the artist decides, and
@@ -24,7 +24,7 @@ let artist: string;
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 let n = 0;
 const push = (t: string, ops: { type: string; payload: unknown }[]) =>
   app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-share-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
@@ -45,8 +45,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -62,6 +62,7 @@ beforeAll(async () => {
   const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'ana@example.test', password: PASSWORD, inviteCode: invite.json().code, accountName: 'Ana Prints' } });
   artist = reg.json().accessToken;
   setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist', true);
   await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(artist), payload: { defaultCurrency: 'EUR' } });
 
   await push(artist, [
@@ -99,7 +100,7 @@ describe('sharing items with a store', () => {
     expect(p).not.toHaveProperty('cost');
     const img = (await storeOps()).find((o) => o.type === 'image.meta');
     expect(img?.payload).toMatchObject({ imageId: 'img1', thumbB64: 'AAAA' });
-    expect(img?.deviceId).toBe('server:consignment');
+    expect(img?.deviceId).toBe('server:consignment-artist');
     const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[];
     expect(bell[0]?.title).toBe('Ana shared 1 item');
   });

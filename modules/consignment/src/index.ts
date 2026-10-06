@@ -1,24 +1,25 @@
+import { defineComponent, h } from 'vue';
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { isStore } from '@zollify/shared';
 import { clearSdk, setSdk } from './runtime';
+import type { Page } from './views/ConsignmentView.vue';
 
 /**
- * Consignment - selling artists' work in your stores, and following your own
- * work in other people's.
+ * Consignment - selling artists' work in your stores.
  *
- * Two sides of one module. A store owner keeps artists, tags their items,
- * and settles what each one is owed per store. An artist links their own
- * account - the same one they sell at conventions with - to see their items,
- * sales and payouts at every store that carries them. Artists, codes and
- * payouts live server-side; the items are ordinary catalogue products, so
- * the till sells them like anything else.
+ * The store owner keeps artists, tags their items, plans space and setups,
+ * runs store events and settles what each artist is owed per store. Artists
+ * invited here get the separate "My stores" module (consignment-artist) on
+ * their own account. Artists, invites and payouts live server-side; the
+ * items are ordinary catalogue products, so the till sells them like
+ * anything else.
  */
 export default defineModule({
   id: 'consignment',
-  version: '0.8.0',
+  version: '0.9.0',
   sdk: '^0.1.0',
   title: 'Consignment',
-  description: 'Sell work by consignment artists across your stores and settle what each is owed - or follow your own work in other stores.',
+  description: 'Sell work by consignment artists across your stores and settle what each is owed.',
   requires: ['catalog'],
   // Staff load it for the till (workshop places, artists' labels); the
   // screens are admin-only, and so is everything else on the server.
@@ -26,8 +27,20 @@ export default defineModule({
 
   setup(sdk: Sdk) {
     setSdk(sdk);
-    sdk.routes.add({ path: '', name: 'index', title: 'Consignment', minRole: 'admin', component: () => import('./views/ConsignmentView.vue') });
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'Consignment', icon: 'users', order: 140, minRole: 'admin' });
+    // One page per part, all in the sidebar's Stores section.
+    const page = (p: Page) => () => import('./views/ConsignmentView.vue').then((m) => defineComponent({ name: `Consignment-${p}`, render: () => h(m.default, { page: p }) }));
+    const PAGES: { page: Page; path: string; name: string; label: string; icon: string }[] = [
+      { page: 'artists', path: '', name: 'index', label: 'Artists', icon: 'users' },
+      { page: 'items', path: 'items', name: 'items', label: 'Consigned items', icon: 'package' },
+      { page: 'planner', path: 'planner', name: 'planner', label: 'Planner', icon: 'calendar' },
+      { page: 'programme', path: 'events', name: 'events', label: 'Store events', icon: 'sparkles' },
+      { page: 'statement', path: 'statement', name: 'statement', label: 'Statement', icon: 'file-text' },
+      { page: 'reports', path: 'reports', name: 'reports', label: 'Reports', icon: 'book' },
+    ];
+    PAGES.forEach((p, i) => {
+      sdk.routes.add({ path: p.path, name: p.name, title: p.label, minRole: 'admin', component: page(p.page) });
+      sdk.nav.add({ routeName: p.name, group: 'stores', label: p.label, icon: p.icon, order: 200 + i * 10, minRole: 'admin' });
+    });
     // An artist's label scanned at a store: share the item there if the artist has not yet.
     sdk.till.onLookup(async (code) => {
       const store = sdk.data.events.active();

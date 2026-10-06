@@ -12,6 +12,7 @@ import {
 } from '@zollify/shared';
 import { isEnabled, parseProfile, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, parseDoc, replay, type ConsignorRow } from './consignment';
+import type { Side } from './consignment';
 
 /**
  * Sharing - artists choose which of their own items a store sells.
@@ -231,106 +232,110 @@ function shareableItems(db: Database.Database, storeAccountId: string, row: Cons
 const ShareBody = z.object({ productIds: z.array(z.string().min(1).max(80)).min(1).max(500), shared: z.boolean() });
 const ScanBody = z.object({ code: z.string().trim().min(1).max(80) });
 
-export function registerSharing(app: FastifyInstance, ctx: ModuleContext): void {
+export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: Side): void {
   const { db } = ctx;
 
   // ── The artist's side ───────────────────────────────────────────────────
 
-  /** Linked artist: their own catalogue, with what this store may sell. */
-  app.get<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shares', async (req, reply) => {
-    const who = ctx.identity(req);
-    const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
-    if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
-    return {
-      artistCurrency: currencyOf(db, who.accountId),
-      storeCurrency: currencyOf(db, row.accountId),
-      items: shareableItems(db, row.accountId, row, who.accountId),
-    };
-  });
-
-  app.put<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shares', async (req, reply) => {
-    const who = ctx.identity(req);
-    const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
-    if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
-    const body = ShareBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the items to share.' });
-    const own = new Set(replay(db, who.accountId).products.filter((p) => !p.deletedAt).map((p) => p.id));
-    const ids = body.data.productIds.filter((id) => own.has(id));
-    setShared(ctx, row.accountId, row, ids, body.data.shared);
-    const name = parseDoc(row.doc).name;
-    ctx.notify(row.accountId, { kind: 'sharing',
-      title: `${name} ${body.data.shared ? 'shared' : 'stopped sharing'} ${ids.length} item${ids.length === 1 ? '' : 's'}`,
-      body: body.data.shared ? 'They are in your catalogue and on the till.' : 'They are off the till; sales already made keep them.',
-      link: '/m/consignment?tab=items',
-      minRole: 'admin',
+  if (side === 'artist') {
+    /** Linked artist: their own catalogue, with what this store may sell. */
+    app.get<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shares', async (req, reply) => {
+      const who = ctx.identity(req);
+      const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
+      if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
+      return {
+        artistCurrency: currencyOf(db, who.accountId),
+        storeCurrency: currencyOf(db, row.accountId),
+        items: shareableItems(db, row.accountId, row, who.accountId),
+      };
     });
-    return { items: shareableItems(db, row.accountId, row, who.accountId) };
-  });
+
+    app.put<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shares', async (req, reply) => {
+      const who = ctx.identity(req);
+      const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
+      if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
+      const body = ShareBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the items to share.' });
+      const own = new Set(replay(db, who.accountId).products.filter((p) => !p.deletedAt).map((p) => p.id));
+      const ids = body.data.productIds.filter((id) => own.has(id));
+      setShared(ctx, row.accountId, row, ids, body.data.shared);
+      const name = parseDoc(row.doc).name;
+      ctx.notify(row.accountId, { kind: 'sharing',
+        title: `${name} ${body.data.shared ? 'shared' : 'stopped sharing'} ${ids.length} item${ids.length === 1 ? '' : 's'}`,
+        body: body.data.shared ? 'They are in your catalogue and on the till.' : 'They are off the till; sales already made keep them.',
+        link: '/m/consignment/items',
+        minRole: 'admin',
+      });
+      return { items: shareableItems(db, row.accountId, row, who.accountId) };
+    });
+  }
 
   // ── The store's side ────────────────────────────────────────────────────
 
-  /** How this artist's shared items are priced here, with each item's artist and store price. */
-  app.get<{ Params: { id: string } }>('/consignors/:id/pricing', async (req, reply) => {
-    const who = ctx.identity(req);
-    const row = consignorRow(db, who.accountId, req.params.id);
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    const artist = artistOf(db, row);
-    return {
-      artistCurrency: artist ? currencyOf(db, artist) : null,
-      storeCurrency: currencyOf(db, who.accountId),
-      pricing: pricingOf(db, who.accountId, row.id),
-      items: artist ? shareableItems(db, who.accountId, row, artist).filter((i) => i.shared) : [],
-    };
-  });
-
-  app.put<{ Params: { id: string } }>('/consignors/:id/pricing', async (req, reply) => {
-    const who = ctx.identity(req);
-    const row = consignorRow(db, who.accountId, req.params.id);
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    const body = SharePricingSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That pricing is not valid.' });
-    db.prepare(
-      `INSERT INTO consignment_pricing (accountId, consignorId, doc, updatedAt) VALUES (?, ?, ?, ?)
-       ON CONFLICT(accountId, consignorId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
-    ).run(who.accountId, row.id, JSON.stringify(body.data), Date.now());
-    syncShared(ctx, who.accountId, row);
-    return { pricing: body.data };
-  });
-
-  /**
-   * The till scanned a code it does not know. If a linked artist's item
-   * carries it, share that item here now and tell the artist - the item is
-   * physically in the shop, so it should be sellable.
-   */
-  app.post('/scan', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const who = ctx.identity(req);
-    const body = ScanBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const code = body.data.code.toLowerCase();
-    const rows = db.prepare('SELECT * FROM consignors WHERE accountId = ? AND linkedAccountId IS NOT NULL').all(who.accountId) as ConsignorRow[];
-    for (const row of rows) {
+  if (side === 'store') {
+    /** How this artist's shared items are priced here, with each item's artist and store price. */
+    app.get<{ Params: { id: string } }>('/consignors/:id/pricing', async (req, reply) => {
+      const who = ctx.identity(req);
+      const row = consignorRow(db, who.accountId, req.params.id);
+      if (!row) return reply.code(404).send({ error: 'not_found' });
       const artist = artistOf(db, row);
-      if (!artist || parseDoc(row.doc).archived) continue;
-      for (const p of replay(db, artist).products) {
-        if (p.deletedAt || !p.forSale) continue;
-        const hit = matchCode(p, code);
-        if (!hit) continue;
-        const already = sharedIds(db, who.accountId, row.id).has(p.id);
-        if (!already) {
-          setShared(ctx, who.accountId, row, [p.id], true, true);
-          ctx.notify(artist, { kind: 'sharing',
-            title: `${p.title} was scanned at ${accountName(db, who.accountId)} and is now shared`,
-            body: 'It is on their till. Stop sharing it under Consignment → Where I consign if that was a mistake.',
-            link: '/m/consignment?tab=mine',
-            minRole: 'admin',
-          });
+      return {
+        artistCurrency: artist ? currencyOf(db, artist) : null,
+        storeCurrency: currencyOf(db, who.accountId),
+        pricing: pricingOf(db, who.accountId, row.id),
+        items: artist ? shareableItems(db, who.accountId, row, artist).filter((i) => i.shared) : [],
+      };
+    });
+
+    app.put<{ Params: { id: string } }>('/consignors/:id/pricing', async (req, reply) => {
+      const who = ctx.identity(req);
+      const row = consignorRow(db, who.accountId, req.params.id);
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      const body = SharePricingSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That pricing is not valid.' });
+      db.prepare(
+        `INSERT INTO consignment_pricing (accountId, consignorId, doc, updatedAt) VALUES (?, ?, ?, ?)
+         ON CONFLICT(accountId, consignorId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
+      ).run(who.accountId, row.id, JSON.stringify(body.data), Date.now());
+      syncShared(ctx, who.accountId, row);
+      return { pricing: body.data };
+    });
+
+    /**
+     * The till scanned a code it does not know. If a linked artist's item
+     * carries it, share that item here now and tell the artist - the item is
+     * physically in the shop, so it should be sellable.
+     */
+    app.post('/scan', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req, reply) => {
+      const who = ctx.identity(req);
+      const body = ScanBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
+      const code = body.data.code.toLowerCase();
+      const rows = db.prepare('SELECT * FROM consignors WHERE accountId = ? AND linkedAccountId IS NOT NULL').all(who.accountId) as ConsignorRow[];
+      for (const row of rows) {
+        const artist = artistOf(db, row);
+        if (!artist || parseDoc(row.doc).archived) continue;
+        for (const p of replay(db, artist).products) {
+          if (p.deletedAt || !p.forSale) continue;
+          const hit = matchCode(p, code);
+          if (!hit) continue;
+          const already = sharedIds(db, who.accountId, row.id).has(p.id);
+          if (!already) {
+            setShared(ctx, who.accountId, row, [p.id], true, true);
+            ctx.notify(artist, { kind: 'sharing',
+              title: `${p.title} was scanned at ${accountName(db, who.accountId)} and is now shared`,
+              body: 'It is on their till. Stop sharing it under Consignment → Where I consign if that was a mistake.',
+              link: '/m/consignment-artist',
+              minRole: 'admin',
+            });
+          }
+          const priced = sharedPrice(p.price, `${p.id}:`, currencyOf(db, artist) === currencyOf(db, who.accountId), pricingOf(db, who.accountId, row.id)) != null;
+          return { productId: p.id, variantId: hit.variantId, consignorName: parseDoc(row.doc).name, autoShared: !already, priced };
         }
-        const priced = sharedPrice(p.price, `${p.id}:`, currencyOf(db, artist) === currencyOf(db, who.accountId), pricingOf(db, who.accountId, row.id)) != null;
-        return { productId: p.id, variantId: hit.variantId, consignorName: parseDoc(row.doc).name, autoShared: !already, priced };
       }
-    }
-    return reply.code(404).send({ error: 'not_found' });
-  });
+      return reply.code(404).send({ error: 'not_found' });
+    });
+  }
 }
 
 /** The same exact matches the till makes: SKU, or the short code printed on a label. */

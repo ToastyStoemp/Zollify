@@ -52,6 +52,7 @@ const SECTIONS: { id: Group; icon: string }[] = [
   { id: 'selling', icon: 'shopping-cart' },
   { id: 'stock', icon: 'package' },
   { id: 'events', icon: 'calendar' },
+  { id: 'stores', icon: 'store' },
   { id: 'books', icon: 'book' },
   { id: 'suppliers', icon: 'truck' },
   { id: 'addons', icon: 'puzzle' },

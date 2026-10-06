@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   ConsignorInputSchema,
@@ -22,6 +23,7 @@ import {
 } from '@zollify/shared';
 import {
   isEnabled,
+  setEnabled,
   parseProfile,
   reduceEvents,
   reduceMerges,
@@ -54,6 +56,10 @@ import { announceConsignedSales, consignmentSummary, followStoreDiscounts, regis
  */
 
 export const MODULE_ID = 'consignment';
+/** The artist's half: "My stores". */
+export const ARTIST_MODULE_ID = 'consignment-artist';
+/** Which half a route file is registering for. */
+export type Side = 'store' | 'artist';
 
 /** All a staff account may call: the till's view of workshops and artists' items. */
 const TILL_ROUTES = new Set(['GET /till/workshops', 'POST /workshops/:id/signups', 'POST /scan']);
@@ -221,7 +227,6 @@ export const consignmentServerModule: ServerModule = {
   publicRoutes: (ctx) => async (app) => registerProgrammePublic(app, ctx),
 
   routes: (ctx: ModuleContext) => async (app) => {
-    const { db } = ctx;
     // Commissions, payouts and artists' details are not staff business. Staff
     // get exactly what the till needs: workshop places to charge, booking a
     // walk-in, and resolving a scanned artist's label.
@@ -231,233 +236,267 @@ export const consignmentServerModule: ServerModule = {
       if (TILL_ROUTES.has(route)) return undefined;
       return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can do that.' });
     });
-    registerPlanner(app, ctx);
+    registerPlanner(app, ctx, 'store');
     registerProgramme(app, ctx);
-    registerSharing(app, ctx);
-    registerStock(app, ctx);
-    registerBooks(app, ctx);
-    registerArtistDiscounts(app, ctx);
-
-    // ── The store owner's side ────────────────────────────────────────────
-
-    app.get('/consignors', async (req) => {
-      const who = ctx.identity(req);
-      return { consignors: consignorRows(db, who.accountId).map((r) => toConsignor(db, r)) };
-    });
-
-    app.put<{ Params: { id: string } }>('/consignors/:id', async (req, reply) => {
-      const who = ctx.identity(req);
-      const id = IdParam.safeParse(req.params.id);
-      const body = ConsignorInputSchema.safeParse(req.body);
-      if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That artist is not valid.' });
-      const before = consignorRow(db, who.accountId, id.data);
-      const renamed = !!before && parseDoc(before.doc).name !== body.data.name;
-      const now = Date.now();
-      db.prepare(
-        `INSERT INTO consignors (accountId, id, doc, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(accountId, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
-      ).run(who.accountId, id.data, JSON.stringify(body.data), now, now);
-      const saved = consignorRow(db, who.accountId, id.data)!;
-      // Shared items carry the artist's name; a rename follows them.
-      if (renamed) syncShared(ctx, who.accountId, saved);
-      return { consignor: toConsignor(db, saved) };
-    });
-
-    /**
-     * Removing an artist who has sold or been paid would erase the trail a
-     * payout is checked against, so that is refused - archive them instead.
-     */
-    app.delete<{ Params: { id: string } }>('/consignors/:id', async (req, reply) => {
-      const who = ctx.identity(req);
-      const row = consignorRow(db, who.accountId, req.params.id);
-      if (!row) return reply.code(404).send({ error: 'not_found' });
-      const { transactions } = replay(db, who.accountId);
-      const sold = transactions.some((tx) => tx.items.some((i) => i.consignorId === row.id));
-      if (sold || payoutsFor(db, who.accountId, row.id).length) {
-        return reply.code(409).send({ error: 'has_history', message: 'This artist has sales or payouts on record - archive them instead.' });
-      }
-      db.prepare('DELETE FROM consignors WHERE accountId = ? AND id = ?').run(who.accountId, row.id);
-      return { ok: true };
-    });
-
-    /**
-     * A fresh code for the artist to link their own account with. Only its
-     * hash is kept, so asking again simply replaces it; it works once.
-     */
-    app.post<{ Params: { id: string } }>('/consignors/:id/link-code', async (req, reply) => {
-      const who = ctx.identity(req);
-      const row = consignorRow(db, who.accountId, req.params.id);
-      if (!row) return reply.code(404).send({ error: 'not_found' });
-      const raw = randomBytes(5).toString('hex').toUpperCase();
-      const expiresAt = Date.now() + LINK_TTL;
-      db.prepare('UPDATE consignors SET linkCodeHash = ?, linkExpiresAt = ? WHERE accountId = ? AND id = ?').run(sha256(raw), expiresAt, who.accountId, row.id);
-      return { code: `${raw.slice(0, 5)}-${raw.slice(5)}`, expiresAt };
-    });
-
-    app.delete<{ Params: { id: string } }>('/consignors/:id/link', async (req, reply) => {
-      const who = ctx.identity(req);
-      const info = db
-        .prepare('UPDATE consignors SET linkedAccountId = NULL, linkCodeHash = NULL, linkExpiresAt = NULL WHERE accountId = ? AND id = ?')
-        .run(who.accountId, req.params.id);
-      if (!info.changes) return reply.code(404).send({ error: 'not_found' });
-      return { ok: true };
-    });
-
-    /**
-     * The linked artist's catalogue, to import from. Selling fields only:
-     * the artist's costs and stock counts stay theirs.
-     */
-    app.get<{ Params: { id: string } }>('/consignors/:id/catalog', async (req, reply) => {
-      const who = ctx.identity(req);
-      const row = consignorRow(db, who.accountId, req.params.id);
-      if (!row) return reply.code(404).send({ error: 'not_found' });
-      if (!row.linkedAccountId || accountName(db, row.linkedAccountId) === null) {
-        return reply.code(409).send({ error: 'not_linked', message: 'This artist has not linked their Zollify account yet.' });
-      }
-      const { products } = replay(db, row.linkedAccountId);
-      return {
-        products: products
-          .filter((p) => p.forSale)
-          .sort((a, b) => a.title.localeCompare(b.title))
-          .map((p) => ({
-            id: p.id,
-            title: p.title,
-            ...(p.sku ? { sku: p.sku } : {}),
-            ...(p.type ? { type: p.type } : {}),
-            price: p.price,
-            ...(p.priceNote ? { priceNote: p.priceNote } : {}),
-            ...(p.weightG != null ? { weightG: p.weightG } : {}),
-            ...(p.material ? { material: p.material } : {}),
-            ...(p.year != null ? { year: p.year } : {}),
-            ...(p.originCountry ? { originCountry: p.originCountry } : {}),
-            ...(p.tariffNo ? { tariffNo: p.tariffNo } : {}),
-            ...(p.taxClass ? { taxClass: p.taxClass } : {}),
-            variants: (p.variants ?? [])
-              .filter((v) => !v.unlisted)
-              .map((v) => ({
-                id: v.id,
-                name: v.name,
-                ...(v.sku ? { sku: v.sku } : {}),
-                ...(v.price != null ? { price: v.price } : {}),
-                ...(v.weightG != null ? { weightG: v.weightG } : {}),
-                ...(v.material ? { material: v.material } : {}),
-              })),
-          })),
-      };
-    });
-
-    /** Every artist's sales, per store, against what they were paid. */
-    app.get('/statement', async (req) => {
-      const who = ctx.identity(req);
-      const consignors = consignorRows(db, who.accountId).map((r) => toConsignor(db, r));
-      const { events, transactions } = replay(db, who.accountId);
-      const lines = consignmentLines(transactions, consignors, cardFeesOf(booksSettings(db, who.accountId)));
-      const payouts = payoutsFor(db, who.accountId);
-      const fees = feesOf(db, who.accountId);
-      const byId = new Map(events.map((e) => [e.id, e]));
-      const venueIds = new Set([...events.filter((e) => !e.deletedAt).map((e) => e.id), ...lines.map((l) => l.storeId)]);
-      return {
-        consignors,
-        venues: [...venueIds].map((id) => venueOf(byId.get(id), id)),
-        lines,
-        payouts,
-        fees,
-        statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today()), feesDue(fees)),
-      };
-    });
-
-    app.post('/payouts', async (req, reply) => {
-      const who = ctx.identity(req);
-      const body = PayoutInputSchema.safeParse(req.body);
-      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A payout needs an artist, an amount, a currency and a date.' });
-      if (!consignorRow(db, who.accountId, body.data.consignorId)) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
-      const payout: ConsignmentPayout = { ...body.data, id: randomUUID(), createdAt: Date.now() };
-      db.prepare('INSERT INTO consignment_payouts (accountId, id, consignorId, doc, createdAt) VALUES (?, ?, ?, ?, ?)').run(
-        who.accountId,
-        payout.id,
-        payout.consignorId,
-        JSON.stringify(body.data),
-        payout.createdAt,
-      );
-      return reply.code(201).send({ payout });
-    });
-
-    app.delete<{ Params: { id: string } }>('/payouts/:id', async (req, reply) => {
-      const who = ctx.identity(req);
-      const info = db.prepare('DELETE FROM consignment_payouts WHERE accountId = ? AND id = ?').run(who.accountId, req.params.id);
-      if (!info.changes) return reply.code(404).send({ error: 'not_found' });
-      return { ok: true };
-    });
-
-    // ── The artist's side ─────────────────────────────────────────────────
-    // The caller here is the artist's own account; every read is scoped by
-    // `linkedAccountId = caller`, so a code is the only way in.
-
-    app.post('/links', CODE_RATE_LIMIT, async (req, reply) => {
-      const who = ctx.identity(req);
-      const body = AcceptBody.safeParse(req.body);
-      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Enter the code the store gave you.' });
-      const row = db
-        .prepare('SELECT * FROM consignors WHERE linkCodeHash = ? AND linkExpiresAt > ?')
-        .get(sha256(normaliseCode(body.data.code)), Date.now()) as ConsignorRow | undefined;
-      if (!row) return reply.code(404).send({ error: 'invalid_code', message: 'That code is not valid or has expired - ask the store for a new one.' });
-      if (row.accountId === who.accountId) {
-        return reply.code(400).send({ error: 'own_store', message: 'That code is for one of your own stores - give it to the artist.' });
-      }
-      const other = db
-        .prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?')
-        .get(row.accountId, who.accountId, row.id);
-      if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
-      db.prepare('UPDATE consignors SET linkedAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL WHERE accountId = ? AND id = ?').run(
-        who.accountId,
-        row.accountId,
-        row.id,
-      );
-      return { storeAccountName: accountName(db, row.accountId) ?? '', consignorName: parseDoc(row.doc).name };
-    });
-
-    app.get('/links', async (req) => {
-      const who = ctx.identity(req);
-      const rows = db.prepare('SELECT * FROM consignors WHERE linkedAccountId = ? ORDER BY createdAt').all(who.accountId) as ConsignorRow[];
-      const out: ArtistConsignment[] = [];
-      for (const row of rows) {
-        const storeAccountName = accountName(db, row.accountId);
-        if (storeAccountName === null) continue; // the store's account is gone
-        const doc = parseDoc(row.doc);
-        const profile = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(row.accountId) as { profile: string | null };
-        const base = {
-          storeAccountId: row.accountId,
-          storeAccountName,
-          currency: parseProfile(profile.profile).defaultCurrency,
-          consignorId: row.id,
-          consignorName: doc.name,
-          commissionPct: doc.commissionPct,
-          storeCommission: doc.storeCommission,
-        };
-        // The owner switched consignment off: the link stays, the sharing stops.
-        if (!isEnabled(db, row.accountId, MODULE_ID)) {
-          out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], shipments: [], stockChanges: [], fees: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
-          continue;
-        }
-        const programme = programmeForArtist(db, row.accountId, row.id);
-        const planner = plannerForArtist(db, row.accountId, row.id);
-        // Every store the artist hears about must have a name on their side.
-        const mentioned = [...programme.features.flatMap((f) => f.storeIds), ...programme.workshops.map((w) => w.storeId), ...planner.rentals.map((r) => r.storeId), ...planner.setups.map((s) => s.storeId)];
-        out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme, ...stockForArtist(db, row.accountId, row.id), ...booksForArtist(db, row.accountId, row.id) });
-      }
-      return { links: out };
-    });
-
-    app.delete<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId', async (req, reply) => {
-      const who = ctx.identity(req);
-      const info = db
-        .prepare('UPDATE consignors SET linkedAccountId = NULL WHERE accountId = ? AND id = ? AND linkedAccountId = ?')
-        .run(req.params.storeAccountId, req.params.consignorId, who.accountId);
-      if (!info.changes) return reply.code(404).send({ error: 'not_found' });
-      return { ok: true };
-    });
+    registerSharing(app, ctx, 'store');
+    registerStock(app, ctx, 'store');
+    registerBooks(app, ctx, 'store');
+    registerStoreSide(app, ctx);
   },
 };
+
+/**
+ * My stores - the artist's half (module "consignment-artist"). Its own
+ * module, so an artist's account carries none of the store owner's screens,
+ * and every route here is scoped by the caller as the linked artist.
+ */
+export const consignmentArtistServerModule: ServerModule = {
+  id: ARTIST_MODULE_ID,
+  minRole: 'admin',
+  /**
+   * Artists linked before the split had their side inside "consignment":
+   * switch "My stores" on for them once. An account that switched it off
+   * since keeps it off - only accounts with no setting at all are touched.
+   */
+  migrate: (db) => {
+    const linked = db.prepare('SELECT DISTINCT linkedAccountId AS id FROM consignors WHERE linkedAccountId IS NOT NULL').all() as { id: string }[];
+    const known = db.prepare('SELECT 1 FROM account_modules WHERE accountId = ? AND moduleId = ?');
+    for (const { id } of linked) if (!known.get(id, ARTIST_MODULE_ID)) setEnabled(db, id, ARTIST_MODULE_ID, true);
+  },
+  routes: (ctx: ModuleContext) => async (app) => {
+    registerArtistSide(app, ctx);
+    registerPlanner(app, ctx, 'artist');
+    registerSharing(app, ctx, 'artist');
+    registerStock(app, ctx, 'artist');
+    registerBooks(app, ctx, 'artist');
+    registerArtistDiscounts(app, ctx);
+  },
+};
+
+function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
+  const { db } = ctx;
+  // ── The store owner's side ────────────────────────────────────────────
+
+  app.get('/consignors', async (req) => {
+    const who = ctx.identity(req);
+    return { consignors: consignorRows(db, who.accountId).map((r) => toConsignor(db, r)) };
+  });
+
+  app.put<{ Params: { id: string } }>('/consignors/:id', async (req, reply) => {
+    const who = ctx.identity(req);
+    const id = IdParam.safeParse(req.params.id);
+    const body = ConsignorInputSchema.safeParse(req.body);
+    if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That artist is not valid.' });
+    const before = consignorRow(db, who.accountId, id.data);
+    const renamed = !!before && parseDoc(before.doc).name !== body.data.name;
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO consignors (accountId, id, doc, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(accountId, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
+    ).run(who.accountId, id.data, JSON.stringify(body.data), now, now);
+    const saved = consignorRow(db, who.accountId, id.data)!;
+    // Shared items carry the artist's name; a rename follows them.
+    if (renamed) syncShared(ctx, who.accountId, saved);
+    return { consignor: toConsignor(db, saved) };
+  });
+
+  /**
+   * Removing an artist who has sold or been paid would erase the trail a
+   * payout is checked against, so that is refused - archive them instead.
+   */
+  app.delete<{ Params: { id: string } }>('/consignors/:id', async (req, reply) => {
+    const who = ctx.identity(req);
+    const row = consignorRow(db, who.accountId, req.params.id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const { transactions } = replay(db, who.accountId);
+    const sold = transactions.some((tx) => tx.items.some((i) => i.consignorId === row.id));
+    if (sold || payoutsFor(db, who.accountId, row.id).length) {
+      return reply.code(409).send({ error: 'has_history', message: 'This artist has sales or payouts on record - archive them instead.' });
+    }
+    db.prepare('DELETE FROM consignors WHERE accountId = ? AND id = ?').run(who.accountId, row.id);
+    return { ok: true };
+  });
+
+  /**
+   * A fresh code for the artist to link their own account with. Only its
+   * hash is kept, so asking again simply replaces it; it works once.
+   */
+  app.post<{ Params: { id: string } }>('/consignors/:id/link-code', async (req, reply) => {
+    const who = ctx.identity(req);
+    const row = consignorRow(db, who.accountId, req.params.id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    const raw = randomBytes(5).toString('hex').toUpperCase();
+    const expiresAt = Date.now() + LINK_TTL;
+    db.prepare('UPDATE consignors SET linkCodeHash = ?, linkExpiresAt = ? WHERE accountId = ? AND id = ?').run(sha256(raw), expiresAt, who.accountId, row.id);
+    return { code: `${raw.slice(0, 5)}-${raw.slice(5)}`, expiresAt };
+  });
+
+  app.delete<{ Params: { id: string } }>('/consignors/:id/link', async (req, reply) => {
+    const who = ctx.identity(req);
+    const info = db
+      .prepare('UPDATE consignors SET linkedAccountId = NULL, linkCodeHash = NULL, linkExpiresAt = NULL WHERE accountId = ? AND id = ?')
+      .run(who.accountId, req.params.id);
+    if (!info.changes) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+  /**
+   * The linked artist's catalogue, to import from. Selling fields only:
+   * the artist's costs and stock counts stay theirs.
+   */
+  app.get<{ Params: { id: string } }>('/consignors/:id/catalog', async (req, reply) => {
+    const who = ctx.identity(req);
+    const row = consignorRow(db, who.accountId, req.params.id);
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!row.linkedAccountId || accountName(db, row.linkedAccountId) === null) {
+      return reply.code(409).send({ error: 'not_linked', message: 'This artist has not linked their Zollify account yet.' });
+    }
+    const { products } = replay(db, row.linkedAccountId);
+    return {
+      products: products
+        .filter((p) => p.forSale)
+        .sort((a, b) => a.title.localeCompare(b.title))
+        .map((p) => ({
+          id: p.id,
+          title: p.title,
+          ...(p.sku ? { sku: p.sku } : {}),
+          ...(p.type ? { type: p.type } : {}),
+          price: p.price,
+          ...(p.priceNote ? { priceNote: p.priceNote } : {}),
+          ...(p.weightG != null ? { weightG: p.weightG } : {}),
+          ...(p.material ? { material: p.material } : {}),
+          ...(p.year != null ? { year: p.year } : {}),
+          ...(p.originCountry ? { originCountry: p.originCountry } : {}),
+          ...(p.tariffNo ? { tariffNo: p.tariffNo } : {}),
+          ...(p.taxClass ? { taxClass: p.taxClass } : {}),
+          variants: (p.variants ?? [])
+            .filter((v) => !v.unlisted)
+            .map((v) => ({
+              id: v.id,
+              name: v.name,
+              ...(v.sku ? { sku: v.sku } : {}),
+              ...(v.price != null ? { price: v.price } : {}),
+              ...(v.weightG != null ? { weightG: v.weightG } : {}),
+              ...(v.material ? { material: v.material } : {}),
+            })),
+        })),
+    };
+  });
+
+  /** Every artist's sales, per store, against what they were paid. */
+  app.get('/statement', async (req) => {
+    const who = ctx.identity(req);
+    const consignors = consignorRows(db, who.accountId).map((r) => toConsignor(db, r));
+    const { events, transactions } = replay(db, who.accountId);
+    const lines = consignmentLines(transactions, consignors, cardFeesOf(booksSettings(db, who.accountId)));
+    const payouts = payoutsFor(db, who.accountId);
+    const fees = feesOf(db, who.accountId);
+    const byId = new Map(events.map((e) => [e.id, e]));
+    const venueIds = new Set([...events.filter((e) => !e.deletedAt).map((e) => e.id), ...lines.map((l) => l.storeId)]);
+    return {
+      consignors,
+      venues: [...venueIds].map((id) => venueOf(byId.get(id), id)),
+      lines,
+      payouts,
+      fees,
+      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today()), feesDue(fees)),
+    };
+  });
+
+  app.post('/payouts', async (req, reply) => {
+    const who = ctx.identity(req);
+    const body = PayoutInputSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A payout needs an artist, an amount, a currency and a date.' });
+    if (!consignorRow(db, who.accountId, body.data.consignorId)) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
+    const payout: ConsignmentPayout = { ...body.data, id: randomUUID(), createdAt: Date.now() };
+    db.prepare('INSERT INTO consignment_payouts (accountId, id, consignorId, doc, createdAt) VALUES (?, ?, ?, ?, ?)').run(
+      who.accountId,
+      payout.id,
+      payout.consignorId,
+      JSON.stringify(body.data),
+      payout.createdAt,
+    );
+    return reply.code(201).send({ payout });
+  });
+
+  app.delete<{ Params: { id: string } }>('/payouts/:id', async (req, reply) => {
+    const who = ctx.identity(req);
+    const info = db.prepare('DELETE FROM consignment_payouts WHERE accountId = ? AND id = ?').run(who.accountId, req.params.id);
+    if (!info.changes) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+
+}
+
+function registerArtistSide(app: FastifyInstance, ctx: ModuleContext): void {
+  const { db } = ctx;
+  // The caller here is the artist's own account; every read is scoped by
+  // `linkedAccountId = caller`, so an invite is the only way in.
+
+  app.post('/links', CODE_RATE_LIMIT, async (req, reply) => {
+    const who = ctx.identity(req);
+    const body = AcceptBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Enter the code the store gave you.' });
+    const row = db
+      .prepare('SELECT * FROM consignors WHERE linkCodeHash = ? AND linkExpiresAt > ?')
+      .get(sha256(normaliseCode(body.data.code)), Date.now()) as ConsignorRow | undefined;
+    if (!row) return reply.code(404).send({ error: 'invalid_code', message: 'That code is not valid or has expired - ask the store for a new one.' });
+    if (row.accountId === who.accountId) {
+      return reply.code(400).send({ error: 'own_store', message: 'That code is for one of your own stores - give it to the artist.' });
+    }
+    const other = db
+      .prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?')
+      .get(row.accountId, who.accountId, row.id);
+    if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
+    db.prepare('UPDATE consignors SET linkedAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL WHERE accountId = ? AND id = ?').run(
+      who.accountId,
+      row.accountId,
+      row.id,
+    );
+    return { storeAccountName: accountName(db, row.accountId) ?? '', consignorName: parseDoc(row.doc).name };
+  });
+
+  app.get('/links', async (req) => {
+    const who = ctx.identity(req);
+    const rows = db.prepare('SELECT * FROM consignors WHERE linkedAccountId = ? ORDER BY createdAt').all(who.accountId) as ConsignorRow[];
+    const out: ArtistConsignment[] = [];
+    for (const row of rows) {
+      const storeAccountName = accountName(db, row.accountId);
+      if (storeAccountName === null) continue; // the store's account is gone
+      const doc = parseDoc(row.doc);
+      const profile = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(row.accountId) as { profile: string | null };
+      const base = {
+        storeAccountId: row.accountId,
+        storeAccountName,
+        currency: parseProfile(profile.profile).defaultCurrency,
+        consignorId: row.id,
+        consignorName: doc.name,
+        commissionPct: doc.commissionPct,
+        storeCommission: doc.storeCommission,
+      };
+      // The owner switched consignment off: the link stays, the sharing stops.
+      if (!isEnabled(db, row.accountId, MODULE_ID)) {
+        out.push({ ...base, paused: true, venues: [], items: [], lines: [], payouts: [], rentals: [], setups: [], features: [], workshops: [], shipments: [], stockChanges: [], fees: [], statement: { consignorId: row.id, byStore: [], totals: [] } });
+        continue;
+      }
+      const programme = programmeForArtist(db, row.accountId, row.id);
+      const planner = plannerForArtist(db, row.accountId, row.id);
+      // Every store the artist hears about must have a name on their side.
+      const mentioned = [...programme.features.flatMap((f) => f.storeIds), ...programme.workshops.map((w) => w.storeId), ...planner.rentals.map((r) => r.storeId), ...planner.setups.map((s) => s.storeId)];
+      out.push({ ...base, paused: false, ...artistView(db, row.accountId, { id: row.id, ...doc }, mentioned), ...planner, ...programme, ...stockForArtist(db, row.accountId, row.id), ...booksForArtist(db, row.accountId, row.id) });
+    }
+    return { links: out };
+  });
+
+  app.delete<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId', async (req, reply) => {
+    const who = ctx.identity(req);
+    const info = db
+      .prepare('UPDATE consignors SET linkedAccountId = NULL WHERE accountId = ? AND id = ? AND linkedAccountId = ?')
+      .run(req.params.storeAccountId, req.params.consignorId, who.accountId);
+    if (!info.changes) return reply.code(404).send({ error: 'not_found' });
+    return { ok: true };
+  });
+}
 
 /** What one store account shows the artist behind one of its consignors. */
 function artistView(

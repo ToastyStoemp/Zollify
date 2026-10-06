@@ -175,7 +175,7 @@ export function followStoreDiscounts(svc: ModuleServices, storeAccountId: string
       kind: 'discounts',
       title: `${accountName(svc.db, storeAccountId) ?? 'The store'} ended your discount`,
       body: rule?.name ?? '',
-      link: '/m/consignment?tab=mine',
+      link: '/m/consignment-artist',
       minRole: 'admin',
     });
   }

@@ -538,7 +538,7 @@ export function registerProgrammePublic(app: FastifyInstance, ctx: PublicModuleC
     ctx.notify(accountId, { kind: 'programme',
       title: `${signup.name} ${signup.status === 'booked' ? 'signed up for' : 'joined the waitlist for'} ${w.title}`,
       body: `${signup.seats} place${signup.seats === 1 ? '' : 's'} · ${taken} of ${w.capacity} booked`,
-      link: '/m/consignment?tab=programme',
+      link: '/m/consignment/events',
       minRole: 'admin',
     });
     // The cancel link goes back to the page too: without email it is the only copy.
@@ -572,7 +572,7 @@ export function registerProgrammePublic(app: FastifyInstance, ctx: PublicModuleC
     ctx.notify(row.accountId, { kind: 'programme',
       title: `${s.name} cancelled ${s.seats === 1 ? 'their place' : `${s.seats} places`} for ${w.title}`,
       body: promoted ? `${promoted} from the waitlist moved up.` : '',
-      link: '/m/consignment?tab=programme',
+      link: '/m/consignment/events',
       minRole: 'admin',
     });
     return { ...info, status: 'cancelled' };

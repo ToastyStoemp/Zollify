@@ -21,6 +21,7 @@ import {
 } from '@zollify/shared';
 import { isEnabled, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, consignorRows, parseDoc, payoutsFor, replay, toConsignor } from './consignment';
+import type { Side } from './consignment';
 import { accountEmail, get, rentalsOf, tellArtist } from './consignment-planner';
 import { endArtistDiscounts } from './consignment-discounts';
 
@@ -157,7 +158,7 @@ export async function sendClosedReports(svc: ModuleServices, now = Date.now()): 
     const report = reportFor(db, accountId, closed);
     if (!report.totals.length && !report.artists.length) continue;
     const name = accountName(db, accountId) ?? 'Your store';
-    svc.notify(accountId, { kind: 'reports', title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment?tab=reports', minRole: 'admin' });
+    svc.notify(accountId, { kind: 'reports', title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment/reports', minRole: 'admin' });
     const to = accountEmail(db, accountId);
     if (to && svc.mail.enabled && (await svc.mail.send({ to, ...reportMail(name, report, venueNamer(db, accountId)) }))) sent++;
   }
@@ -174,99 +175,107 @@ export function booksForArtist(db: Database.Database, storeAccountId: string, co
   return { fees: feesOf(db, storeAccountId, consignorId) };
 }
 
-export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
+export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Side): void {
   const { db } = ctx;
 
   // An hourly look for periods that just closed. The work is idempotent, so a
   // second gateway or a restart costs nothing but a query.
-  const timer = setInterval(() => void sendClosedReports(ctx).catch(() => undefined), 3600_000);
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  if (side === 'store') {
+    const timer = setInterval(() => void sendClosedReports(ctx).catch(() => undefined), 3600_000);
+    timer.unref();
+    app.addHook('onClose', async () => clearInterval(timer));
+  }
 
-  app.get('/books/settings', async (req) => ({ settings: booksSettings(db, ctx.identity(req).accountId) }));
+  if (side === 'store') {
+    app.get('/books/settings', async (req) => ({ settings: booksSettings(db, ctx.identity(req).accountId) }));
 
-  app.put('/books/settings', async (req, reply) => {
-    const who = ctx.identity(req);
-    const body = BooksSettingsSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Check the settings.' });
-    if (!isTimeZone(body.data.timeZone)) return reply.code(400).send({ error: 'invalid_request', message: 'Unknown time zone.' });
-    const before = booksSettings(db, who.accountId);
-    db.prepare('INSERT INTO consignment_settings (accountId, doc) VALUES (?, ?) ON CONFLICT(accountId) DO UPDATE SET doc = excluded.doc').run(who.accountId, JSON.stringify(body.data));
-    // No longer allowing artists' own discounts ends the ones running.
-    if (before.artistDiscounts && !body.data.artistDiscounts) endArtistDiscounts(ctx, who.accountId);
-    // Switching period or anchor must not email a stack of old periods.
-    const current = reportPeriod(body.data, localDay(Date.now(), body.data.timeZone));
-    db.prepare('INSERT OR IGNORE INTO consignment_reports_sent (accountId, periodFrom, sentAt) VALUES (?, ?, ?)').run(who.accountId, recentPeriods(body.data, current.from, 2)[1]!.from, Date.now());
-    return { settings: body.data };
-  });
+    app.put('/books/settings', async (req, reply) => {
+      const who = ctx.identity(req);
+      const body = BooksSettingsSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Check the settings.' });
+      if (!isTimeZone(body.data.timeZone)) return reply.code(400).send({ error: 'invalid_request', message: 'Unknown time zone.' });
+      const before = booksSettings(db, who.accountId);
+      db.prepare('INSERT INTO consignment_settings (accountId, doc) VALUES (?, ?) ON CONFLICT(accountId) DO UPDATE SET doc = excluded.doc').run(who.accountId, JSON.stringify(body.data));
+      // No longer allowing artists' own discounts ends the ones running.
+      if (before.artistDiscounts && !body.data.artistDiscounts) endArtistDiscounts(ctx, who.accountId);
+      // Switching period or anchor must not email a stack of old periods.
+      const current = reportPeriod(body.data, localDay(Date.now(), body.data.timeZone));
+      db.prepare('INSERT OR IGNORE INTO consignment_reports_sent (accountId, periodFrom, sentAt) VALUES (?, ?, ?)').run(who.accountId, recentPeriods(body.data, current.from, 2)[1]!.from, Date.now());
+      return { settings: body.data };
+    });
+  }
 
   // ── Fees ────────────────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { consignorId?: string } }>('/fees', async (req) => ({ fees: feesOf(db, ctx.identity(req).accountId, req.query.consignorId || undefined) }));
+  if (side === 'store') {
+    app.get<{ Querystring: { consignorId?: string } }>('/fees', async (req) => ({ fees: feesOf(db, ctx.identity(req).accountId, req.query.consignorId || undefined) }));
 
-  app.post('/fees', async (req, reply) => {
-    const who = ctx.identity(req);
-    const body = FeeInputSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A fee needs an artist, a reason, an amount and a date.' });
-    const row = consignorRow(db, who.accountId, body.data.consignorId);
-    if (!row) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
-    let setup: SetupMoment | undefined;
-    if (body.data.setupId) {
-      setup = get<SetupMoment>(db, who.accountId, 'setups', body.data.setupId);
-      if (!setup || setup.consignorId !== row.id) return reply.code(404).send({ error: 'not_found', message: 'No such setup moment for this artist.' });
-      if (feesOf(db, who.accountId, row.id).some((f) => f.setupId === setup!.id && f.status === 'charged')) {
-        return reply.code(409).send({ error: 'already_charged', message: 'That setup already has a fee.' });
+    app.post('/fees', async (req, reply) => {
+      const who = ctx.identity(req);
+      const body = FeeInputSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A fee needs an artist, a reason, an amount and a date.' });
+      const row = consignorRow(db, who.accountId, body.data.consignorId);
+      if (!row) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
+      let setup: SetupMoment | undefined;
+      if (body.data.setupId) {
+        setup = get<SetupMoment>(db, who.accountId, 'setups', body.data.setupId);
+        if (!setup || setup.consignorId !== row.id) return reply.code(404).send({ error: 'not_found', message: 'No such setup moment for this artist.' });
+        if (feesOf(db, who.accountId, row.id).some((f) => f.setupId === setup!.id && f.status === 'charged')) {
+          return reply.code(409).send({ error: 'already_charged', message: 'That setup already has a fee.' });
+        }
       }
-    }
-    const fee: ConsignmentFee = { ...body.data, storeId: body.data.storeId ?? setup?.storeId ?? null, id: randomUUID(), status: 'charged', waivedAt: null, waiveNote: '', dispute: null, disputedAt: null, createdAt: Date.now() };
-    saveFee(db, who.accountId, fee);
-    const shop = accountName(db, who.accountId) ?? 'The store';
-    const what = `${FEE_REASONS[fee.reason]}${setup ? ` (${setup.date} ${setup.time})` : ''}`;
-    const delivery = await tellArtist(ctx, who.accountId, row, { kind: 'fees',
-      title: `${shop} charged a fee: ${money(fee.amount, fee.currency)}`,
-      body: `${what}${fee.note ? ` - ${fee.note}` : ''}. It comes off your balance.`,
-      subject: `${shop} charged a fee of ${money(fee.amount, fee.currency)}`,
-      text: [
-        `${shop} charged you a fee of ${money(fee.amount, fee.currency)}.`,
-        '',
-        `Reason: ${what}`,
-        ...(fee.note ? [`Note: ${fee.note}`] : []),
-        '',
-        'It comes off what the store owes you. If you think it is wrong, reply to this email or object to it in Zollify under Consignment → Where I consign.',
-      ].join('\n'),
+      const fee: ConsignmentFee = { ...body.data, storeId: body.data.storeId ?? setup?.storeId ?? null, id: randomUUID(), status: 'charged', waivedAt: null, waiveNote: '', dispute: null, disputedAt: null, createdAt: Date.now() };
+      saveFee(db, who.accountId, fee);
+      const shop = accountName(db, who.accountId) ?? 'The store';
+      const what = `${FEE_REASONS[fee.reason]}${setup ? ` (${setup.date} ${setup.time})` : ''}`;
+      const delivery = await tellArtist(ctx, who.accountId, row, { kind: 'fees',
+        title: `${shop} charged a fee: ${money(fee.amount, fee.currency)}`,
+        body: `${what}${fee.note ? ` - ${fee.note}` : ''}. It comes off your balance.`,
+        subject: `${shop} charged a fee of ${money(fee.amount, fee.currency)}`,
+        text: [
+          `${shop} charged you a fee of ${money(fee.amount, fee.currency)}.`,
+          '',
+          `Reason: ${what}`,
+          ...(fee.note ? [`Note: ${fee.note}`] : []),
+          '',
+          'It comes off what the store owes you. If you think it is wrong, reply to this email or object to it in Zollify under Consignment → Where I consign.',
+        ].join('\n'),
+      });
+      return reply.code(201).send({ fee, delivery });
     });
-    return reply.code(201).send({ fee, delivery });
-  });
 
-  app.post<{ Params: { id: string } }>('/fees/:id/waive', async (req, reply) => {
-    const who = ctx.identity(req);
-    const fee = feesOf(db, who.accountId).find((f) => f.id === req.params.id);
-    if (!fee) return reply.code(404).send({ error: 'not_found' });
-    if (fee.status === 'waived') return reply.code(409).send({ error: 'waived', message: 'Already waived.' });
-    const body = WaiveBody.safeParse(req.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const done: ConsignmentFee = { ...fee, status: 'waived', waivedAt: Date.now(), waiveNote: body.data.note };
-    saveFee(db, who.accountId, done);
-    const row = consignorRow(db, who.accountId, fee.consignorId);
-    const shop = accountName(db, who.accountId) ?? 'The store';
-    const delivery = row
-      ? await tellArtist(ctx, who.accountId, row, { kind: 'fees',
-          title: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
-          body: body.data.note || 'It no longer comes off your balance.',
-          subject: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
-          text: [`${shop} waived the fee of ${money(fee.amount, fee.currency)} (${FEE_REASONS[fee.reason]}). It no longer comes off your balance.`, ...(body.data.note ? ['', body.data.note] : [])].join('\n'),
-        })
-      : null;
-    return { fee: done, delivery };
-  });
+    app.post<{ Params: { id: string } }>('/fees/:id/waive', async (req, reply) => {
+      const who = ctx.identity(req);
+      const fee = feesOf(db, who.accountId).find((f) => f.id === req.params.id);
+      if (!fee) return reply.code(404).send({ error: 'not_found' });
+      if (fee.status === 'waived') return reply.code(409).send({ error: 'waived', message: 'Already waived.' });
+      const body = WaiveBody.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
+      const done: ConsignmentFee = { ...fee, status: 'waived', waivedAt: Date.now(), waiveNote: body.data.note };
+      saveFee(db, who.accountId, done);
+      const row = consignorRow(db, who.accountId, fee.consignorId);
+      const shop = accountName(db, who.accountId) ?? 'The store';
+      const delivery = row
+        ? await tellArtist(ctx, who.accountId, row, { kind: 'fees',
+            title: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
+            body: body.data.note || 'It no longer comes off your balance.',
+            subject: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
+            text: [`${shop} waived the fee of ${money(fee.amount, fee.currency)} (${FEE_REASONS[fee.reason]}). It no longer comes off your balance.`, ...(body.data.note ? ['', body.data.note] : [])].join('\n'),
+          })
+        : null;
+      return { fee: done, delivery };
+    });
+  }
 
   // ── Reports ─────────────────────────────────────────────────────────────
 
-  app.get('/reports', async (req) => {
-    const who = ctx.identity(req);
-    const settings = booksSettings(db, who.accountId);
-    return { settings, periods: recentPeriods(settings, localDay(Date.now(), settings.timeZone), 12) };
-  });
+  if (side === 'store') {
+    app.get('/reports', async (req) => {
+      const who = ctx.identity(req);
+      const settings = booksSettings(db, who.accountId);
+      return { settings, periods: recentPeriods(settings, localDay(Date.now(), settings.timeZone), 12) };
+    });
+  }
 
   /** A period, named by its first day - which must be the first day of a period. */
   const periodAt = (accountId: string, from: string): ReportPeriod | null => {
@@ -275,78 +284,82 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
     return p.from === from ? p : null;
   };
 
-  app.get<{ Params: { from: string } }>('/reports/:from', async (req, reply) => {
-    const who = ctx.identity(req);
-    const period = periodAt(who.accountId, req.params.from);
-    if (!period) return reply.code(404).send({ error: 'not_found', message: 'No report period starts that day.' });
-    const names = venueNamer(db, who.accountId);
-    const report = reportFor(db, who.accountId, period);
-    return { report, venues: Object.fromEntries(report.byStore.map((s) => [s.storeId, names(s.storeId)])) };
-  });
+  if (side === 'store') {
+    app.get<{ Params: { from: string } }>('/reports/:from', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found', message: 'No report period starts that day.' });
+      const names = venueNamer(db, who.accountId);
+      const report = reportFor(db, who.accountId, period);
+      return { report, venues: Object.fromEntries(report.byStore.map((s) => [s.storeId, names(s.storeId)])) };
+    });
 
-  app.get<{ Params: { from: string } }>('/reports/:from/csv', async (req, reply) => {
-    const who = ctx.identity(req);
-    const period = periodAt(who.accountId, req.params.from);
-    if (!period) return reply.code(404).send({ error: 'not_found' });
-    return reply
-      .header('content-type', 'text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename="report-${period.from}.csv"`)
-      .send(reportCsv(reportFor(db, who.accountId, period), venueNamer(db, who.accountId)));
-  });
+    app.get<{ Params: { from: string } }>('/reports/:from/csv', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      return reply
+        .header('content-type', 'text/csv; charset=utf-8')
+        .header('content-disposition', `attachment; filename="report-${period.from}.csv"`)
+        .send(reportCsv(reportFor(db, who.accountId, period), venueNamer(db, who.accountId)));
+    });
 
-  /**
-   * Pay out what the period left owing. Each artist gets what they were owed
-   * at its end, less anything paid since - so pressing it twice, or after a
-   * manual payout, never pays twice.
-   */
-  app.post<{ Params: { from: string } }>('/reports/:from/payouts', async (req, reply) => {
-    const who = ctx.identity(req);
-    const period = periodAt(who.accountId, req.params.from);
-    if (!period) return reply.code(404).send({ error: 'not_found' });
-    const body = PayBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the date the payouts were made.' });
-    const report = reportFor(db, who.accountId, period);
-    const since = payoutsFor(db, who.accountId).filter((p) => p.date > period.to);
-    const insert = db.prepare('INSERT INTO consignment_payouts (accountId, id, consignorId, doc, createdAt) VALUES (?, ?, ?, ?, ?)');
-    const made: { consignorId: string; amount: number; currency: string }[] = [];
-    for (const a of report.artists) {
-      if (body.data.consignorIds && !body.data.consignorIds.includes(a.consignorId)) continue;
-      if (!consignorRow(db, who.accountId, a.consignorId)) continue;
-      const already = since.filter((p) => p.consignorId === a.consignorId && p.currency === a.currency).reduce((s, p) => s + Math.round(p.amount * 100), 0);
-      const amount = (Math.round(a.balance * 100) - already) / 100;
-      if (amount <= 0) continue;
-      const doc = { consignorId: a.consignorId, storeId: null, amount, currency: a.currency, date: body.data.date, note: `Report ${periodLabel(period)}` };
-      insert.run(who.accountId, randomUUID(), a.consignorId, JSON.stringify(doc), Date.now());
-      made.push({ consignorId: a.consignorId, amount, currency: a.currency });
-    }
-    return { payouts: made };
-  });
+    /**
+     * Pay out what the period left owing. Each artist gets what they were owed
+     * at its end, less anything paid since - so pressing it twice, or after a
+     * manual payout, never pays twice.
+     */
+    app.post<{ Params: { from: string } }>('/reports/:from/payouts', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      const body = PayBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the date the payouts were made.' });
+      const report = reportFor(db, who.accountId, period);
+      const since = payoutsFor(db, who.accountId).filter((p) => p.date > period.to);
+      const insert = db.prepare('INSERT INTO consignment_payouts (accountId, id, consignorId, doc, createdAt) VALUES (?, ?, ?, ?, ?)');
+      const made: { consignorId: string; amount: number; currency: string }[] = [];
+      for (const a of report.artists) {
+        if (body.data.consignorIds && !body.data.consignorIds.includes(a.consignorId)) continue;
+        if (!consignorRow(db, who.accountId, a.consignorId)) continue;
+        const already = since.filter((p) => p.consignorId === a.consignorId && p.currency === a.currency).reduce((s, p) => s + Math.round(p.amount * 100), 0);
+        const amount = (Math.round(a.balance * 100) - already) / 100;
+        if (amount <= 0) continue;
+        const doc = { consignorId: a.consignorId, storeId: null, amount, currency: a.currency, date: body.data.date, note: `Report ${periodLabel(period)}` };
+        insert.run(who.accountId, randomUUID(), a.consignorId, JSON.stringify(doc), Date.now());
+        made.push({ consignorId: a.consignorId, amount, currency: a.currency });
+      }
+      return { payouts: made };
+    });
+  }
 
   // ── The artist's side ───────────────────────────────────────────────────
 
-  /** The artist objects to a fee; the owner hears about it. */
-  app.post<{ Params: { storeAccountId: string; consignorId: string; id: string } }>('/links/:storeAccountId/:consignorId/fees/:id/dispute', async (req, reply) => {
-    const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
-    if (!row || row.linkedAccountId !== ctx.identity(req).accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
-    const fee = feesOf(db, row.accountId, row.id).find((f) => f.id === req.params.id);
-    if (!fee) return reply.code(404).send({ error: 'not_found' });
-    if (fee.status === 'waived') return reply.code(409).send({ error: 'waived', message: 'The store already waived this fee.' });
-    const body = DisputeBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Say why you think the fee is wrong.' });
-    const done: ConsignmentFee = { ...fee, dispute: body.data.note, disputedAt: Date.now() };
-    saveFee(db, row.accountId, done);
-    const name = parseDoc(row.doc).name;
-    ctx.notify(row.accountId, { kind: 'fees', title: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`, body: body.data.note, link: '/m/consignment?tab=statement', minRole: 'admin' });
-    const to = accountEmail(db, row.accountId);
-    if (to && ctx.mail.enabled) {
-      const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
-      await ctx.mail.send({
-        to,
-        subject: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`,
-        text: [`${name} objects to the fee of ${money(fee.amount, fee.currency)} (${FEE_REASONS[fee.reason]}, ${fee.date}):`, '', body.data.note, '', 'You can waive it in Zollify under Consignment → Statement.'].join('\n'),
-        ...(replyTo ? { replyTo } : {}),
-      });
-    }
-    return { fee: done };
-  });
+  if (side === 'artist') {
+    /** The artist objects to a fee; the owner hears about it. */
+    app.post<{ Params: { storeAccountId: string; consignorId: string; id: string } }>('/links/:storeAccountId/:consignorId/fees/:id/dispute', async (req, reply) => {
+      const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
+      if (!row || row.linkedAccountId !== ctx.identity(req).accountId || !isEnabled(db, row.accountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
+      const fee = feesOf(db, row.accountId, row.id).find((f) => f.id === req.params.id);
+      if (!fee) return reply.code(404).send({ error: 'not_found' });
+      if (fee.status === 'waived') return reply.code(409).send({ error: 'waived', message: 'The store already waived this fee.' });
+      const body = DisputeBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Say why you think the fee is wrong.' });
+      const done: ConsignmentFee = { ...fee, dispute: body.data.note, disputedAt: Date.now() };
+      saveFee(db, row.accountId, done);
+      const name = parseDoc(row.doc).name;
+      ctx.notify(row.accountId, { kind: 'fees', title: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`, body: body.data.note, link: '/m/consignment/statement', minRole: 'admin' });
+      const to = accountEmail(db, row.accountId);
+      if (to && ctx.mail.enabled) {
+        const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
+        await ctx.mail.send({
+          to,
+          subject: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`,
+          text: [`${name} objects to the fee of ${money(fee.amount, fee.currency)} (${FEE_REASONS[fee.reason]}, ${fee.date}):`, '', body.data.note, '', 'You can waive it in Zollify under Consignment → Statement.'].join('\n'),
+          ...(replyTo ? { replyTo } : {}),
+        });
+      }
+      return { fee: done };
+    });
+  }
 }

@@ -17,6 +17,7 @@ import {
 } from '@zollify/shared';
 import { isEnabled, type ModuleContext } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, parseDoc, replay, type ConsignorRow } from './consignment';
+import type { Side } from './consignment';
 
 /**
  * The consignment planner - the server half.
@@ -184,7 +185,7 @@ export async function tellArtist(
   note: { kind: string; title: string; body: string; subject: string; text: string; ics?: string },
 ): Promise<Delivery> {
   const linked = row.linkedAccountId && accountName(ctx.db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-  if (linked) ctx.notify(linked, { kind: note.kind, title: note.title, body: note.body, link: '/m/consignment?tab=mine', minRole: 'admin' });
+  if (linked) ctx.notify(linked, { kind: note.kind, title: note.title, body: note.body, link: '/m/consignment-artist', minRole: 'admin' });
   const to = parseDoc(row.doc).email || (linked ? accountEmail(ctx.db, linked) : null);
   const base = { notified: !!linked };
   if (!to) return { ...base, emailedTo: null, emailSkipped: 'no_address' };
@@ -199,44 +200,48 @@ export async function tellArtist(
 const Id = z.string().min(1).max(80);
 const EndBody = z.object({ on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
 
-export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void {
+export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: Side): void {
   const { db } = ctx;
   const bad = (message: string) => ({ error: 'invalid_request', message });
 
-  /** Everything the planner screen needs. */
-  app.get('/planner', async (req) => {
-    const who = ctx.identity(req);
-    return {
-      spaces: list<ConsignmentSpace>(db, who.accountId, 'spaces'),
-      rentals: list<ConsignmentRental>(db, who.accountId, 'rentals'),
-      setups: list<SetupMoment>(db, who.accountId, 'setups').sort(bySoonest),
-      emailEnabled: ctx.mail.enabled,
-    };
-  });
+  if (side === 'store') {
+    /** Everything the planner screen needs. */
+    app.get('/planner', async (req) => {
+      const who = ctx.identity(req);
+      return {
+        spaces: list<ConsignmentSpace>(db, who.accountId, 'spaces'),
+        rentals: list<ConsignmentRental>(db, who.accountId, 'rentals'),
+        setups: list<SetupMoment>(db, who.accountId, 'setups').sort(bySoonest),
+        emailEnabled: ctx.mail.enabled,
+      };
+    });
+  }
 
   // ── Spaces ────────────────────────────────────────────────────────────────
 
-  app.put<{ Params: { id: string } }>('/spaces/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    const id = Id.safeParse(req.params.id);
-    const body = SpaceInputSchema.safeParse(req.body);
-    if (!id.success || !body.success) return reply.code(400).send(bad('A space needs a store, a name and a monthly fee.'));
-    const existing = get<ConsignmentSpace>(db, who.accountId, 'spaces', id.data);
-    const now = Date.now();
-    const space: ConsignmentSpace = { ...body.data, id: id.data, createdAt: existing?.createdAt ?? now, updatedAt: now };
-    put(db, who.accountId, 'spaces', space);
-    return { space };
-  });
+  if (side === 'store') {
+    app.put<{ Params: { id: string } }>('/spaces/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      const id = Id.safeParse(req.params.id);
+      const body = SpaceInputSchema.safeParse(req.body);
+      if (!id.success || !body.success) return reply.code(400).send(bad('A space needs a store, a name and a monthly fee.'));
+      const existing = get<ConsignmentSpace>(db, who.accountId, 'spaces', id.data);
+      const now = Date.now();
+      const space: ConsignmentSpace = { ...body.data, id: id.data, createdAt: existing?.createdAt ?? now, updatedAt: now };
+      put(db, who.accountId, 'spaces', space);
+      return { space };
+    });
 
-  /** A space someone has rented stays for the record - archive it instead. */
-  app.delete<{ Params: { id: string } }>('/spaces/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    if (list<ConsignmentRental>(db, who.accountId, 'rentals').some((r) => r.spaceId === req.params.id)) {
-      return reply.code(409).send({ error: 'in_use', message: 'This space has rentals on record - archive it instead.' });
-    }
-    if (!remove(db, who.accountId, 'spaces', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-    return { ok: true };
-  });
+    /** A space someone has rented stays for the record - archive it instead. */
+    app.delete<{ Params: { id: string } }>('/spaces/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      if (list<ConsignmentRental>(db, who.accountId, 'rentals').some((r) => r.spaceId === req.params.id)) {
+        return reply.code(409).send({ error: 'in_use', message: 'This space has rentals on record - archive it instead.' });
+      }
+      if (!remove(db, who.accountId, 'spaces', req.params.id)) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true };
+    });
+  }
 
   // ── Rentals ───────────────────────────────────────────────────────────────
 
@@ -255,95 +260,97 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void 
     const line = `${space?.name ?? 'Space'} at ${store?.name ?? 'the store'}, ${rental.startDate} to ${rentalEnd(rental)} (${rental.months} month${rental.months === 1 ? '' : 's'}, ${rental.currency} ${rental.monthlyFee.toFixed(2)}/month)`;
     // Rentals are agreed in person; the in-app note is a record of it, not news worth an email.
     const linked = row.linkedAccountId && accountName(db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-    if (linked) ctx.notify(linked, { kind: 'planner', title: `${what}: ${space?.name ?? 'space'} at ${accountName(db, accountId)}`, body: line, link: '/m/consignment?tab=mine', minRole: 'admin' });
+    if (linked) ctx.notify(linked, { kind: 'planner', title: `${what}: ${space?.name ?? 'space'} at ${accountName(db, accountId)}`, body: line, link: '/m/consignment-artist', minRole: 'admin' });
     return { notified: !!linked, emailedTo: null };
   }
 
-  app.post('/rentals', async (req, reply) => {
-    const who = ctx.identity(req);
-    const body = RentalInputSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send(bad('A rental needs an artist, a space, a start date and a number of months.'));
-    const problem = checkRental(who.accountId, body.data);
-    if (problem) return reply.code(400).send(bad(problem));
-    const now = Date.now();
-    const rental: ConsignmentRental = { ...body.data, id: randomUUID(), endedOn: null, upgradedFromId: null, createdAt: now, updatedAt: now };
-    put(db, who.accountId, 'rentals', rental);
-    return reply.code(201).send({ rental, delivery: await announceRental(who.accountId, rental, 'Space booked') });
-  });
+  if (side === 'store') {
+    app.post('/rentals', async (req, reply) => {
+      const who = ctx.identity(req);
+      const body = RentalInputSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send(bad('A rental needs an artist, a space, a start date and a number of months.'));
+      const problem = checkRental(who.accountId, body.data);
+      if (problem) return reply.code(400).send(bad(problem));
+      const now = Date.now();
+      const rental: ConsignmentRental = { ...body.data, id: randomUUID(), endedOn: null, upgradedFromId: null, createdAt: now, updatedAt: now };
+      put(db, who.accountId, 'rentals', rental);
+      return reply.code(201).send({ rental, delivery: await announceRental(who.accountId, rental, 'Space booked') });
+    });
 
-  /** Edits a rental in place - extending it is changing its months. */
-  app.put<{ Params: { id: string } }>('/rentals/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    const existing = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
-    const body = RentalInputSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send(bad('That rental is not valid.'));
-    const problem = checkRental(who.accountId, body.data);
-    if (problem) return reply.code(400).send(bad(problem));
-    const rental: ConsignmentRental = { ...existing, ...body.data, updatedAt: Date.now() };
-    put(db, who.accountId, 'rentals', rental);
-    return { rental };
-  });
+    /** Edits a rental in place - extending it is changing its months. */
+    app.put<{ Params: { id: string } }>('/rentals/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      const existing = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      const body = RentalInputSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send(bad('That rental is not valid.'));
+      const problem = checkRental(who.accountId, body.data);
+      if (problem) return reply.code(400).send(bad(problem));
+      const rental: ConsignmentRental = { ...existing, ...body.data, updatedAt: Date.now() };
+      put(db, who.accountId, 'rentals', rental);
+      return { rental };
+    });
 
-  /**
-   * Moves the artist to another space from a date: the current rental stops
-   * there and a new one starts, so both stay on record with their own price.
-   */
-  app.post<{ Params: { id: string } }>('/rentals/:id/upgrade', async (req, reply) => {
-    const who = ctx.identity(req);
-    const old = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
-    if (!old) return reply.code(404).send({ error: 'not_found' });
-    const body = UpgradeInputSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send(bad('An upgrade needs a space, a start date and a number of months.'));
-    const { spaceId, from, months, monthlyFee } = body.data;
-    if (from <= old.startDate || from > rentalEnd(old)) {
-      return reply.code(400).send(bad(`Start the upgrade after ${old.startDate} and no later than ${rentalEnd(old)} - edit the rental instead to change it from its start.`));
-    }
-    const problem = checkRental(who.accountId, { consignorId: old.consignorId, storeId: old.storeId, spaceId });
-    if (problem) return reply.code(400).send(bad(problem));
-    const space = get<ConsignmentSpace>(db, who.accountId, 'spaces', spaceId)!;
-    const now = Date.now();
-    const next: ConsignmentRental = {
-      id: randomUUID(),
-      consignorId: old.consignorId,
-      storeId: old.storeId,
-      spaceId,
-      startDate: from,
-      months,
-      monthlyFee,
-      currency: space.currency,
-      deductFromSales: old.deductFromSales,
-      note: '',
-      endedOn: null,
-      upgradedFromId: old.id,
-      createdAt: now,
-      updatedAt: now,
-    };
-    db.transaction(() => {
-      const ended: ConsignmentRental = { ...old, endedOn: from, updatedAt: now };
-      if (from < rentalEnd(old)) put(db, who.accountId, 'rentals', ended);
-      put(db, who.accountId, 'rentals', next);
-    })();
-    return reply.code(201).send({ rental: next, delivery: await announceRental(who.accountId, next, 'Space upgraded') });
-  });
+    /**
+     * Moves the artist to another space from a date: the current rental stops
+     * there and a new one starts, so both stay on record with their own price.
+     */
+    app.post<{ Params: { id: string } }>('/rentals/:id/upgrade', async (req, reply) => {
+      const who = ctx.identity(req);
+      const old = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
+      if (!old) return reply.code(404).send({ error: 'not_found' });
+      const body = UpgradeInputSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send(bad('An upgrade needs a space, a start date and a number of months.'));
+      const { spaceId, from, months, monthlyFee } = body.data;
+      if (from <= old.startDate || from > rentalEnd(old)) {
+        return reply.code(400).send(bad(`Start the upgrade after ${old.startDate} and no later than ${rentalEnd(old)} - edit the rental instead to change it from its start.`));
+      }
+      const problem = checkRental(who.accountId, { consignorId: old.consignorId, storeId: old.storeId, spaceId });
+      if (problem) return reply.code(400).send(bad(problem));
+      const space = get<ConsignmentSpace>(db, who.accountId, 'spaces', spaceId)!;
+      const now = Date.now();
+      const next: ConsignmentRental = {
+        id: randomUUID(),
+        consignorId: old.consignorId,
+        storeId: old.storeId,
+        spaceId,
+        startDate: from,
+        months,
+        monthlyFee,
+        currency: space.currency,
+        deductFromSales: old.deductFromSales,
+        note: '',
+        endedOn: null,
+        upgradedFromId: old.id,
+        createdAt: now,
+        updatedAt: now,
+      };
+      db.transaction(() => {
+        const ended: ConsignmentRental = { ...old, endedOn: from, updatedAt: now };
+        if (from < rentalEnd(old)) put(db, who.accountId, 'rentals', ended);
+        put(db, who.accountId, 'rentals', next);
+      })();
+      return reply.code(201).send({ rental: next, delivery: await announceRental(who.accountId, next, 'Space upgraded') });
+    });
 
-  /** Stops a rental early; months that have not started are no longer charged. */
-  app.post<{ Params: { id: string } }>('/rentals/:id/end', async (req, reply) => {
-    const who = ctx.identity(req);
-    const r = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
-    if (!r) return reply.code(404).send({ error: 'not_found' });
-    const body = EndBody.safeParse(req.body);
-    if (!body.success || body.data.on < r.startDate) return reply.code(400).send(bad(`End it on or after ${r.startDate}.`));
-    const rental = { ...r, endedOn: body.data.on, updatedAt: Date.now() };
-    put(db, who.accountId, 'rentals', rental);
-    return { rental };
-  });
+    /** Stops a rental early; months that have not started are no longer charged. */
+    app.post<{ Params: { id: string } }>('/rentals/:id/end', async (req, reply) => {
+      const who = ctx.identity(req);
+      const r = get<ConsignmentRental>(db, who.accountId, 'rentals', req.params.id);
+      if (!r) return reply.code(404).send({ error: 'not_found' });
+      const body = EndBody.safeParse(req.body);
+      if (!body.success || body.data.on < r.startDate) return reply.code(400).send(bad(`End it on or after ${r.startDate}.`));
+      const rental = { ...r, endedOn: body.data.on, updatedAt: Date.now() };
+      put(db, who.accountId, 'rentals', rental);
+      return { rental };
+    });
 
-  app.delete<{ Params: { id: string } }>('/rentals/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    if (!remove(db, who.accountId, 'rentals', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-    return { ok: true };
-  });
+    app.delete<{ Params: { id: string } }>('/rentals/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      if (!remove(db, who.accountId, 'rentals', req.params.id)) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true };
+    });
+  }
 
   // ── Setup moments ─────────────────────────────────────────────────────────
 
@@ -377,90 +384,94 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void 
     });
   }
 
-  app.post('/setups', async (req, reply) => {
-    const who = ctx.identity(req);
-    const body = SetupInputSchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send(bad('A setup needs an artist, a store, a date and a time.'));
-    if (!consignorRow(db, who.accountId, body.data.consignorId)) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
-    const now = Date.now();
-    const setup: SetupMoment = { ...body.data, id: randomUUID(), status: 'scheduled', artistNote: '', respondedAt: null, createdAt: now, updatedAt: now };
-    put(db, who.accountId, 'setups', setup);
-    return reply.code(201).send({ setup, delivery: await announceSetup(who.accountId, setup, 'new') });
-  });
+  if (side === 'store') {
+    app.post('/setups', async (req, reply) => {
+      const who = ctx.identity(req);
+      const body = SetupInputSchema.safeParse(req.body);
+      if (!body.success) return reply.code(400).send(bad('A setup needs an artist, a store, a date and a time.'));
+      if (!consignorRow(db, who.accountId, body.data.consignorId)) return reply.code(404).send({ error: 'not_found', message: 'No such artist.' });
+      const now = Date.now();
+      const setup: SetupMoment = { ...body.data, id: randomUUID(), status: 'scheduled', artistNote: '', respondedAt: null, createdAt: now, updatedAt: now };
+      put(db, who.accountId, 'setups', setup);
+      return reply.code(201).send({ setup, delivery: await announceSetup(who.accountId, setup, 'new') });
+    });
 
-  /** Moving a setup asks the artist again: whatever they said about the old time no longer holds. */
-  app.put<{ Params: { id: string } }>('/setups/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    const existing = get<SetupMoment>(db, who.accountId, 'setups', req.params.id);
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
-    const body = SetupInputSchema.safeParse(req.body);
-    if (!body.success || body.data.consignorId !== existing.consignorId) return reply.code(400).send(bad('That setup is not valid.'));
-    const moved = body.data.date !== existing.date || body.data.time !== existing.time || body.data.storeId !== existing.storeId;
-    const setup: SetupMoment = {
-      ...existing,
-      ...body.data,
-      ...(moved ? { status: 'scheduled' as const, artistNote: '', respondedAt: null } : {}),
-      updatedAt: Date.now(),
-    };
-    put(db, who.accountId, 'setups', setup);
-    return { setup, delivery: moved ? await announceSetup(who.accountId, setup, 'moved') : null };
-  });
+    /** Moving a setup asks the artist again: whatever they said about the old time no longer holds. */
+    app.put<{ Params: { id: string } }>('/setups/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      const existing = get<SetupMoment>(db, who.accountId, 'setups', req.params.id);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      const body = SetupInputSchema.safeParse(req.body);
+      if (!body.success || body.data.consignorId !== existing.consignorId) return reply.code(400).send(bad('That setup is not valid.'));
+      const moved = body.data.date !== existing.date || body.data.time !== existing.time || body.data.storeId !== existing.storeId;
+      const setup: SetupMoment = {
+        ...existing,
+        ...body.data,
+        ...(moved ? { status: 'scheduled' as const, artistNote: '', respondedAt: null } : {}),
+        updatedAt: Date.now(),
+      };
+      put(db, who.accountId, 'setups', setup);
+      return { setup, delivery: moved ? await announceSetup(who.accountId, setup, 'moved') : null };
+    });
 
-  app.post<{ Params: { id: string } }>('/setups/:id/cancel', async (req, reply) => {
-    const who = ctx.identity(req);
-    const existing = get<SetupMoment>(db, who.accountId, 'setups', req.params.id);
-    if (!existing) return reply.code(404).send({ error: 'not_found' });
-    if (existing.status === 'cancelled') return { setup: existing, delivery: null };
-    const setup: SetupMoment = { ...existing, status: 'cancelled', updatedAt: Date.now() };
-    put(db, who.accountId, 'setups', setup);
-    return { setup, delivery: await announceSetup(who.accountId, setup, 'cancelled') };
-  });
+    app.post<{ Params: { id: string } }>('/setups/:id/cancel', async (req, reply) => {
+      const who = ctx.identity(req);
+      const existing = get<SetupMoment>(db, who.accountId, 'setups', req.params.id);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      if (existing.status === 'cancelled') return { setup: existing, delivery: null };
+      const setup: SetupMoment = { ...existing, status: 'cancelled', updatedAt: Date.now() };
+      put(db, who.accountId, 'setups', setup);
+      return { setup, delivery: await announceSetup(who.accountId, setup, 'cancelled') };
+    });
 
-  app.delete<{ Params: { id: string } }>('/setups/:id', async (req, reply) => {
-    const who = ctx.identity(req);
-    if (!remove(db, who.accountId, 'setups', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-    return { ok: true };
-  });
+    app.delete<{ Params: { id: string } }>('/setups/:id', async (req, reply) => {
+      const who = ctx.identity(req);
+      if (!remove(db, who.accountId, 'setups', req.params.id)) return reply.code(404).send({ error: 'not_found' });
+      return { ok: true };
+    });
+  }
 
   // ── The artist answering ──────────────────────────────────────────────────
 
-  /**
-   * The artist's account confirms or declines a setup at a store it is
-   * linked to. The link is checked here, so a setup id alone gets nowhere.
-   */
-  app.post<{ Params: { storeAccountId: string; consignorId: string; id: string } }>(
-    '/links/:storeAccountId/:consignorId/setups/:id/respond',
-    async (req, reply) => {
-      const who = ctx.identity(req);
-      const { storeAccountId, consignorId, id } = req.params;
-      const row = consignorRow(db, storeAccountId, consignorId);
-      if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, storeAccountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
-      const existing = get<SetupMoment>(db, storeAccountId, 'setups', id);
-      if (!existing || existing.consignorId !== consignorId) return reply.code(404).send({ error: 'not_found' });
-      if (existing.status === 'cancelled') return reply.code(409).send({ error: 'cancelled', message: 'The store has cancelled this setup.' });
-      const body = SetupResponseSchema.safeParse(req.body);
-      if (!body.success) return reply.code(400).send(bad('Confirm or decline.'));
-      const now = Date.now();
-      const setup: SetupMoment = { ...existing, status: body.data.status, artistNote: body.data.note.trim(), respondedAt: now, updatedAt: now };
-      put(db, storeAccountId, 'setups', setup);
+  if (side === 'artist') {
+    /**
+     * The artist's account confirms or declines a setup at a store it is
+     * linked to. The link is checked here, so a setup id alone gets nowhere.
+     */
+    app.post<{ Params: { storeAccountId: string; consignorId: string; id: string } }>(
+      '/links/:storeAccountId/:consignorId/setups/:id/respond',
+      async (req, reply) => {
+        const who = ctx.identity(req);
+        const { storeAccountId, consignorId, id } = req.params;
+        const row = consignorRow(db, storeAccountId, consignorId);
+        if (!row || row.linkedAccountId !== who.accountId || !isEnabled(db, storeAccountId, MODULE_ID)) return reply.code(404).send({ error: 'not_found' });
+        const existing = get<SetupMoment>(db, storeAccountId, 'setups', id);
+        if (!existing || existing.consignorId !== consignorId) return reply.code(404).send({ error: 'not_found' });
+        if (existing.status === 'cancelled') return reply.code(409).send({ error: 'cancelled', message: 'The store has cancelled this setup.' });
+        const body = SetupResponseSchema.safeParse(req.body);
+        if (!body.success) return reply.code(400).send(bad('Confirm or decline.'));
+        const now = Date.now();
+        const setup: SetupMoment = { ...existing, status: body.data.status, artistNote: body.data.note.trim(), respondedAt: now, updatedAt: now };
+        put(db, storeAccountId, 'setups', setup);
 
-      // Back to the store: the bell for its admins, and an email to its owner.
-      const artist = parseDoc(row.doc).name;
-      const store = storeOf(db, storeAccountId, setup.storeId);
-      const verb = setup.status === 'confirmed' ? 'confirmed' : "can't make";
-      const title = `${artist} ${verb} the setup on ${setup.date} ${setup.time}`;
-      ctx.notify(storeAccountId, { kind: 'planner', title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment?tab=planner', minRole: 'admin' });
-      const to = accountEmail(db, storeAccountId);
-      if (to && ctx.mail.enabled) {
-        const replyTo = accountEmail(db, who.accountId) ?? undefined;
-        await ctx.mail.send({
-          to,
-          subject: title,
-          text: [`${title}${store ? ` at ${store.name}` : ''}.`, ...(setup.artistNote ? ['', setup.artistNote] : [])].join('\n'),
-          ...(replyTo ? { replyTo } : {}),
-        });
-      }
-      return { setup };
-    },
-  );
+        // Back to the store: the bell for its admins, and an email to its owner.
+        const artist = parseDoc(row.doc).name;
+        const store = storeOf(db, storeAccountId, setup.storeId);
+        const verb = setup.status === 'confirmed' ? 'confirmed' : "can't make";
+        const title = `${artist} ${verb} the setup on ${setup.date} ${setup.time}`;
+        ctx.notify(storeAccountId, { kind: 'planner', title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment/planner', minRole: 'admin' });
+        const to = accountEmail(db, storeAccountId);
+        if (to && ctx.mail.enabled) {
+          const replyTo = accountEmail(db, who.accountId) ?? undefined;
+          await ctx.mail.send({
+            to,
+            subject: title,
+            text: [`${title}${store ? ` at ${store.name}` : ''}.`, ...(setup.artistNote ? ['', setup.artistNote] : [])].join('\n'),
+            ...(replyTo ? { replyTo } : {}),
+          });
+        }
+        return { setup };
+      },
+    );
+  }
 }

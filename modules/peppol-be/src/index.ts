@@ -19,7 +19,7 @@ export default defineModule({
   setup(sdk: Sdk) {
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'E-invoices', component: () => import('./views/InvoicesView.vue'), minRole: 'admin' });
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'E-invoices (Peppol)', icon: 'file-text', order: 60, minRole: 'admin' });
+    sdk.nav.add({ routeName: 'index', group: 'books', label: 'E-invoices (Peppol)', icon: 'file-text', order: 220, minRole: 'admin' });
     sdk.settings.panel({ id: 'peppol', label: 'E-invoices (Peppol)', component: () => import('./views/PeppolSettings.vue'), minRole: 'admin', order: 120 });
   },
 

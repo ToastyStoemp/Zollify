@@ -1,11 +1,11 @@
 {
-  "name": "@zollify/consignment",
-  "version": "0.9.0",
+  "name": "@zollify/consignment-artist",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "zollify": {
-    "moduleId": "consignment",
+    "moduleId": "consignment-artist",
     "entry": "./src/index.ts"
   },
   "scripts": {

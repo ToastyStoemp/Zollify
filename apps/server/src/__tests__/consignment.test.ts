@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled } from '@zollify/server-core';
 import type { ArtistConsignment } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * Consignment crosses accounts, so what is worth proving is the boundary: a
@@ -35,11 +35,12 @@ async function newAccount(email: string, accountName: string): Promise<string> {
   });
   expect(res.statusCode).toBe(200);
   setEnabled(app.zollify.db, res.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, res.json().user.accountId, 'consignment-artist', true);
   return res.json().accessToken;
 }
 
 const call = (token: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(token), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(token), ...(payload ? { payload } : {}) });
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-consign-'));
@@ -51,8 +52,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,

@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled, type MailMessage } from '@zollify/server-core';
 import { addMonths, type ArtistConsignment, type AppNotification } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * The planner tells people things, so besides the bookkeeping the tests pin
@@ -25,7 +25,7 @@ let storeAccountId: string;
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 const bell = async (t: string) =>
   (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(t) })).json() as { notifications: AppNotification[]; unread: number };
 const today = new Date().toISOString().slice(0, 10);
@@ -46,8 +46,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -62,6 +62,7 @@ beforeAll(async () => {
   const a = await register('ana@example.test', { newAccount: true });
   artist = a.token;
   setEnabled(app.zollify.db, a.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, a.accountId, 'consignment-artist', true);
   helper = (await register('helper@example.test', { role: 'member' })).token;
 
   await app.inject({
@@ -142,7 +143,7 @@ describe('consignment planner', () => {
 
     const { notifications, unread } = await bell(artist);
     expect(unread).toBe(3); // booked, upgraded, setup
-    expect(notifications[0]).toMatchObject({ title: 'Setup scheduled at Zurich shop', link: '/m/consignment?tab=mine', moduleId: 'consignment' });
+    expect(notifications[0]).toMatchObject({ title: 'Setup scheduled at Zurich shop', link: '/m/consignment-artist', moduleId: 'consignment' });
     // The store's own bell is quiet - it did this itself.
     expect((await bell(store)).unread).toBe(0);
   });

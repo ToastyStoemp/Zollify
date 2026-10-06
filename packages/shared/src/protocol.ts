@@ -214,7 +214,7 @@ export interface AppNotification {
   moduleId: string | null;
   title: string;
   body: string;
-  /** In-app path to open, e.g. "/m/consignment?tab=mine". */
+  /** In-app path to open, e.g. "/m/consignment/planner". */
   link: string | null;
   createdAt: number;
   readAt: number | null;

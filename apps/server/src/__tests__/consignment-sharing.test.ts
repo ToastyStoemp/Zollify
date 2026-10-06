@@ -73,6 +73,8 @@ beforeAll(async () => {
   await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 40 });
   const { code } = (await call(store, 'POST', '/consignors/ana/link-code')).json();
   await call(artist, 'POST', '/links', { code });
+  // The store heard about the link; start each test from a read bell.
+  await app.inject({ method: 'POST', url: '/api/notifications/read', headers: auth(store), payload: {} });
 });
 
 afterAll(async () => {

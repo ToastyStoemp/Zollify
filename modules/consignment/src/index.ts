@@ -2,7 +2,7 @@ import { defineComponent, h } from 'vue';
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { isStore } from '@zollify/shared';
 import { clearSdk, setSdk } from './runtime';
-import { loadPlanner } from './api';
+import { loadPlanner, loadProgramme } from './api';
 import type { Page } from './views/ConsignmentView.vue';
 
 /**
@@ -65,21 +65,35 @@ export default defineModule({
     // Artists' setup times on the home calendar, beside the sales events.
     sdk.calendar.source(async ({ from, to }) => {
       if (sdk.account()?.role === 'member') return [];
-      const [{ setups }, names] = await Promise.all([
+      const [{ setups }, names, { workshops }] = await Promise.all([
         loadPlanner(),
         sdk.http.get<{ consignors: { id: string; name: string }[] }>('consignors').then((r) => new Map(r.consignors.map((c) => [c.id, c.name]))),
+        loadProgramme().catch(() => ({ workshops: [] as Awaited<ReturnType<typeof loadProgramme>>['workshops'] })),
       ]);
-      return setups
-        .filter((s) => s.date >= from && s.date <= to)
+      const inRange = (d: string): boolean => d >= from && d <= to;
+      const sessions = workshops
+        .filter((w) => inRange(w.date))
+        .map((w) => ({
+          id: `workshop:${w.id}`,
+          date: w.date,
+          time: w.time,
+          title: `${w.title} · ${w.booked}/${w.capacity}`,
+          icon: 'users',
+          tone: w.cancelledAt ? ('muted' as const) : ('normal' as const),
+          link: '/m/consignment/events',
+        }));
+      return [...sessions, ...setups
+        .filter((s) => inRange(s.date))
         .map((s) => ({
           id: `setup:${s.id}`,
           date: s.date,
           time: s.time,
           title: `Setup · ${names.get(s.consignorId) ?? 'artist'}`,
+          icon: 'layers',
           // The artist can't make it: the store has to find another time.
           tone: s.status === 'declined' ? ('attention' as const) : s.status === 'cancelled' ? ('muted' as const) : ('normal' as const),
           link: '/m/consignment/planner',
-        }));
+        }))];
     });
     // Taking payment for a workshop place, right at the till.
     sdk.till.action({ id: 'workshops', label: 'Workshop', icon: 'calendar', component: () => import('./views/TillWorkshops.vue') });

@@ -457,8 +457,19 @@ export interface CalendarEntry {
   title: string;
   /** `attention` draws it as needing an answer (a setup to confirm). */
   tone?: 'normal' | 'attention' | 'muted';
+  /** Icon name (as for nav items), drawn before the title. */
+  icon?: string;
   /** In-app path to open when it is clicked, e.g. "/m/consignment/planner". */
   link?: string;
+}
+/** A card a module puts on the home screen, below the shell's own. */
+export interface HomeCard {
+  id: string;
+  component: ComponentLoader;
+  /** Lower comes first. */
+  order?: number;
+  /** Hidden from users below this role. Defaults to the module's minRole. */
+  minRole?: Role;
 }
 /** Asked for the days on screen, `from` to `to` inclusive (YYYY-MM-DD). Throwing just leaves the source out. */
 export type CalendarSource = (range: { from: string; to: string }) => Promise<CalendarEntry[]>;
@@ -480,6 +491,8 @@ export interface Sdk {
   settings: { panel(panel: SettingsPanel): void };
   /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
   calendar: { source(source: CalendarSource): void };
+  /** Adds a card to the home screen (low stock at the stores you consign with, say). */
+  home: { card(card: HomeCard): void };
 
   events: EventBus;
   http: HttpClient;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, markRaw, ref, watch } from 'vue';
 import type { CalendarEntry } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { useRouter } from 'vue-router';
@@ -175,6 +175,12 @@ async function loadEntries(): Promise<void> {
   if (mine === asked) moduleEntries.value = results.flat();
 }
 watch([calMonth, () => contributions.calendarSources.length], () => void loadEntries(), { immediate: true });
+/** Cards modules add (low stock at the stores an artist consigns with…), for this role. */
+const moduleCards = computed(() =>
+  account.value
+    ? contributions.homeCardsFor(account.value.role).map((c) => ({ id: c.id, comp: markRaw(defineAsyncComponent(c.component as () => Promise<never>)) }))
+    : [],
+);
 function openEntry(e: CalendarEntry): void {
   if (e.link) void router.push(e.link);
 }
@@ -311,7 +317,7 @@ const syncLine = computed(() => {
                   class="cal-name"
                   :class="[e.event.status, { left: e.continuesLeft, right: e.continuesRight }]"
                   :title="`${e.event.name} · ${e.event.status}`"
-                  >{{ e.event.name }}</span
+                  ><Icon v-if="!e.continuesLeft" name="calendar" :size="10" class="cal-ico" />{{ e.event.name }}</span
                 >
                 <!-- Module entries (setups…) share the two visible lines with events. -->
                 <span
@@ -324,7 +330,7 @@ const syncLine = computed(() => {
                   tabindex="0"
                   @click.stop.prevent="openEntry(x)"
                   @keydown.enter.stop.prevent="openEntry(x)"
-                  ><b v-if="x.time" class="cal-time">{{ x.time }}</b>{{ x.title }}</span
+                  ><Icon :name="x.icon ?? 'clock'" :size="10" class="cal-ico" /><b v-if="x.time" class="cal-time">{{ x.time }}</b>{{ x.title }}</span
                 >
                 <span v-if="d.events.length + d.entries.length > 2" class="cal-more">+{{ d.events.length + d.entries.length - 2 }} more</span>
               </span>
@@ -371,6 +377,9 @@ const syncLine = computed(() => {
           <router-link v-if="isAdmin" :to="{ name: 'catalog' }">Products <Icon name="chevron-right" :size="14" /></router-link>
         </footer>
       </article>
+
+      <!-- ── Cards from modules ──────────────────────────────────────────── -->
+      <article v-for="c in moduleCards" :key="c.id" class="card"><component :is="c.comp" /></article>
     </div>
   </section>
 </template>
@@ -415,6 +424,7 @@ h2 { margin: 0; font-size: 1rem; }
 .icon-btn { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid var(--zfy-line); background: var(--zfy-bg); color: inherit; border-radius: 8px; padding: .3rem .55rem; font-size: .78rem; cursor: pointer; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
 .cal-entry { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .68rem; line-height: 1.35; padding: 0 .3rem; border-radius: 4px; border-left: 3px solid var(--zfy-warning); background: var(--zfy-bg); color: var(--zfy-ink); cursor: pointer; }
+.cal-ico { display: inline-block; vertical-align: -1px; margin-right: .25em; opacity: .8; }
 .cal-time { font-weight: 600; margin-right: .3em; }
 .cal-entry.attention { border-left-color: var(--zfy-danger); background: var(--zfy-signal-soft); font-weight: 600; }
 .cal-entry.muted { color: var(--zfy-muted); text-decoration: line-through; }

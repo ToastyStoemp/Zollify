@@ -35,6 +35,7 @@ import { migrateProgramme, programmeForArtist, registerProgramme, registerProgra
 import { followArtistChanges, migrateSharing, registerSharing, syncShared } from './consignment-sharing';
 import { booksForArtist, booksSettings, feesOf, migrateBooks, registerBooks } from './consignment-books';
 import { migrateStock, registerStock, stockForArtist } from './consignment-stock';
+import { announceConsignedSales, consignmentSummary, followStoreDiscounts, registerArtistDiscounts } from './consignment-discounts';
 
 /**
  * Consignment - the server half.
@@ -207,7 +208,14 @@ export const consignmentServerModule: ServerModule = {
   },
 
   /** An artist's devices changed products: stores sharing them follow. */
-  onOps: (svc, accountId, ops) => followArtistChanges(svc, accountId, ops),
+  onOps: (svc, accountId, ops) => {
+    followArtistChanges(svc, accountId, ops);
+    followStoreDiscounts(svc, accountId, ops);
+    announceConsignedSales(svc, accountId, ops);
+  },
+
+  /** Daily and weekly webhook summaries: artists' work in a store, and an artist's sales in stores. */
+  webhookReport: (svc, accountId, period) => consignmentSummary(svc, accountId, period),
 
   /** The store's public events-and-workshops page, and cancelling a place on it. */
   publicRoutes: (ctx) => async (app) => registerProgrammePublic(app, ctx),
@@ -228,6 +236,7 @@ export const consignmentServerModule: ServerModule = {
     registerSharing(app, ctx);
     registerStock(app, ctx);
     registerBooks(app, ctx);
+    registerArtistDiscounts(app, ctx);
 
     // ── The store owner's side ────────────────────────────────────────────
 

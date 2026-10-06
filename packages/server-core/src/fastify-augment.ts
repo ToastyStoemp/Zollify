@@ -15,6 +15,7 @@ declare module 'fastify' {
     zollify: {
       db: Database.Database;
       store: Map<string, PublishedModule>;
+      webhooks: import('./webhooks').Webhooks;
       seedDefaults(accountId: string): void;
     };
   }

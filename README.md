@@ -250,6 +250,26 @@ without ever paying the same money twice, it downloads as a spreadsheet, and
 when a period closes the owner gets it by email with the spreadsheet
 attached.
 
+**Discounts.** A store's discount rules can be a plain percent off, aimed at
+product types, products, variants or one or more artists' work, and limited
+to some days or some events and stores. Linked artists can put their own work
+in a store on discount from *Where I consign* - within the store's limit
+(Consignment → Reports → Settings), on all their items there or some, for
+some days or until ended. It becomes an ordinary rule in the store (every
+till applies it, offline too), the store can end it under Discounts, and
+both sides are told.
+
+*Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as
+signed JSON anywhere: each sale, a daily or weekly summary (in the webhook's
+time zone), and the in-app notifications by category - rentals and setups,
+restocks and packages, store events and workshops, shared items, artist
+discounts, fees, consignment reports. An artist's account can also hear each
+sale of its work in a store, and its summaries count those sales. Server
+modules post through `ctx.webhooks.emit()` and add summary lines with
+`webhookReport`. Deliveries go out one at a time per webhook, never hold up
+a sale, and a webhook that keeps failing switches itself off. The server only
+posts to public https addresses unless `WEBHOOK_ALLOW_PRIVATE=1`.
+
 *Notifications and email* - platform features any server module can use
 through its context: `ctx.notify(accountId, …)` puts a note under the shell's
 bell (rung live over the WebSocket), and `ctx.mail.send(…)` sends email when

@@ -8,6 +8,7 @@ import {
   allProducts,
   currentAccount,
   deleteDiscount,
+  visibleEvents,
   discountsLoaded,
   loadDiscounts,
   shellConfirm,
@@ -19,7 +20,9 @@ import {
  *
  * Rules live in core rather than POS because they reference products and must
  * survive POS being switched off. A rule targets whole product types, single
- * products, or single variants; the POS reads them at every keystroke.
+ * products, single variants or a consignment artist's work, optionally only
+ * between two dates or at some events and stores; the POS reads them at
+ * every keystroke.
  */
 
 const account = currentAccount;
@@ -34,7 +37,8 @@ const editing = ref(false);
 const editId = ref<string | null>(null);
 const form = reactive({
   name: '',
-  type: 'bxgy' as DiscountRule['type'],
+  /** 'pct' is a plain "percent off every item": stored as nth_pct with nth 1. */
+  type: 'pct' as DiscountRule['type'] | 'pct',
   productIds: [] as string[],
   /** "pid:vid" keys - only relevant when the product itself isn't selected. */
   variantIds: [] as string[],
@@ -47,6 +51,17 @@ const form = reactive({
   tierContinue: false,
   hideQuickAdd: false,
   comboDiscountAmount: '',
+  consignorIds: [] as string[],
+  validFrom: '',
+  validUntil: '',
+  eventIds: [] as string[],
+});
+
+/** Consignment artists with work in the catalogue, by the name their items carry. */
+const artists = computed(() => {
+  const seen = new Map<string, string>();
+  for (const p of allProducts.value) if (p.consignorId && !seen.has(p.consignorId)) seen.set(p.consignorId, p.consignorName ?? 'Artist');
+  return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 });
 
 const types = computed(() => [...new Set(allProducts.value.map((p) => p.type).filter((t): t is string => !!t))].sort());
@@ -58,7 +73,7 @@ const productList = computed(() => {
     [p.title, p.sku, p.type, ...p.variants.flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(needle),
   );
 });
-const targetCount = computed(() => form.productTypes.length + form.productIds.length + form.variantIds.length);
+const targetCount = computed(() => form.productTypes.length + form.productIds.length + form.variantIds.length + form.consignorIds.length);
 
 const typeOf = (pid: string): string | undefined => allProducts.value.find((p) => p.id === pid)?.type;
 /** Everything the form covers, resolved down to product ids + types. */
@@ -88,7 +103,7 @@ function openNew(): void {
   productSearch.value = '';
   Object.assign(form, {
     name: '',
-    type: 'bxgy',
+    type: 'pct',
     productIds: [],
     variantIds: [],
     productTypes: [],
@@ -100,6 +115,10 @@ function openNew(): void {
     tierContinue: false,
     hideQuickAdd: false,
     comboDiscountAmount: '',
+    consignorIds: [],
+    validFrom: '',
+    validUntil: '',
+    eventIds: [],
   });
   editing.value = true;
 }
@@ -109,7 +128,7 @@ function openEdit(d: DiscountRule): void {
   productSearch.value = '';
   Object.assign(form, {
     name: d.name,
-    type: d.type,
+    type: d.type === 'nth_pct' && d.nth === 1 ? 'pct' : d.type,
     productIds: [...d.productIds],
     variantIds: [...(d.variantIds ?? [])],
     productTypes: [...(d.productTypes ?? [])],
@@ -121,13 +140,19 @@ function openEdit(d: DiscountRule): void {
     tierContinue: !!d.tierContinue,
     hideQuickAdd: !!d.hideQuickAdd,
     comboDiscountAmount: d.comboDiscountAmount ? String(d.comboDiscountAmount) : '',
+    consignorIds: [...(d.consignorIds ?? [])],
+    validFrom: d.validFrom ?? '',
+    validUntil: d.validUntil ?? '',
+    eventIds: [...(d.eventIds ?? [])],
   });
   editing.value = true;
 }
 
 async function save(): Promise<void> {
   if (!form.name.trim()) return fail('Give the rule a name so it can be recognised on a receipt.');
-  if (!targetCount.value) return fail('Pick at least one product type, product or variant.');
+  if (!targetCount.value) return fail('Pick at least one product type, product, variant or artist.');
+  if (form.type === 'pct' && !(parseFloat(form.percent) > 0 && parseFloat(form.percent) <= 100)) return fail('Enter a percentage between 1 and 100.');
+  if (form.validFrom && form.validUntil && form.validUntil < form.validFrom) return fail('The last day is before the first.');
   if (form.type === 'combo' && targetCount.value < 2) return fail('A bundle needs at least two members.');
   if (form.type === 'combo' && !(parseFloat(form.comboDiscountAmount) > 0)) return fail('Enter a bundle discount amount.');
   const existing = editId.value ? allDiscounts.value.find((d) => d.id === editId.value) : undefined;
@@ -135,7 +160,7 @@ async function save(): Promise<void> {
     ...existing,
     id: editId.value ?? crypto.randomUUID(),
     name: form.name.trim(),
-    type: form.type,
+    type: form.type === 'pct' ? 'nth_pct' : form.type,
     // Targets a selected type already covers are redundant - drop them.
     productIds: form.productIds.filter((id) => {
       const t = typeOf(id);
@@ -145,12 +170,16 @@ async function save(): Promise<void> {
     productTypes: [...form.productTypes],
     buyQty: parseInt(form.buyQty) || 2,
     freeQty: parseInt(form.freeQty) || 1,
-    nth: parseInt(form.nth) || 3,
+    nth: form.type === 'pct' ? 1 : parseInt(form.nth) || 3,
     percent: parseFloat(form.percent) || 50,
     tiers: form.tiers.map((t) => ({ qty: parseInt(t.qty) || 0, total: parseFloat(t.total) || 0 })).filter((t) => t.qty > 1 && t.total > 0),
     tierContinue: form.tierContinue,
     hideQuickAdd: form.hideQuickAdd || undefined,
     comboDiscountAmount: parseFloat(form.comboDiscountAmount) || 0,
+    consignorIds: form.consignorIds.length ? [...form.consignorIds] : undefined,
+    validFrom: form.validFrom || undefined,
+    validUntil: form.validUntil || undefined,
+    eventIds: form.eventIds.length ? [...form.eventIds] : undefined,
     updatedAt: Date.now(),
   };
   error.value = null;
@@ -187,7 +216,10 @@ function targets(d: DiscountRule): string {
   if (d.productTypes?.length) parts.push(`type ${d.productTypes.join(', ')}`);
   const count = d.productIds.length + (d.variantIds?.length ?? 0);
   if (count) parts.push(`${count} product${count === 1 ? '' : 's'}`);
-  if (d.consignorIds?.length) parts.push(`${d.consignorIds.length === 1 ? 'one artist' : `${d.consignorIds.length} artists`}' work`);
+  if (d.consignorIds?.length) {
+    const names = d.consignorIds.map((id) => artists.value.find((a) => a.id === id)?.name).filter(Boolean);
+    parts.push(names.length === d.consignorIds.length && names.length <= 2 ? `work by ${names.join(' and ')}` : `${d.consignorIds.length === 1 ? 'one artist' : `${d.consignorIds.length} artists`}' work`);
+  }
   return parts.join(' + ') || 'no targets';
 }
 /** When and where a rule is limited to, if at all. */
@@ -198,7 +230,9 @@ function scope(d: DiscountRule): string {
   return parts.join(' · ');
 }
 /** A rule a module maintains is edited where it came from, or this form would drop what it cannot show. */
-const MANAGED: Record<string, string> = { consignment: 'Consignment → Store events' };
+const MANAGED: Record<string, string> = { consignment: 'Consignment → Store events', 'consignment-artist': 'by the artist' };
+/** The artist's own discounts can be stopped here; the store-events one is edited there. */
+const removable = (d: DiscountRule): boolean => !d.managedBy || d.managedBy === 'consignment-artist';
 </script>
 
 <template>
@@ -219,13 +253,13 @@ const MANAGED: Record<string, string> = { consignment: 'Consignment → Store ev
         <div v-if="d.managedBy" class="row managed">
           <strong>{{ d.name }}</strong>
           <span>{{ summary(d) }} · {{ targets(d) }}<template v-if="scope(d)"> · {{ scope(d) }}</template></span>
-          <small>Set under {{ MANAGED[d.managedBy] ?? d.managedBy }}</small>
+          <small>{{ d.managedBy === 'consignment-artist' ? 'Set by the artist' : `Set under ${MANAGED[d.managedBy] ?? d.managedBy}` }}</small>
         </div>
         <button v-else type="button" class="row" @click="openEdit(d)">
           <strong>{{ d.name }}</strong>
           <span>{{ summary(d) }} · {{ targets(d) }}<template v-if="scope(d)"> · {{ scope(d) }}</template></span>
         </button>
-        <button v-if="!d.managedBy" type="button" class="quiet danger" @click="remove(d)">Remove</button>
+        <button v-if="removable(d)" type="button" class="quiet danger" @click="remove(d)">Remove</button>
       </li>
     </ul>
 
@@ -236,6 +270,7 @@ const MANAGED: Record<string, string> = { consignment: 'Consignment → Store ev
         <label>
           <span>Kind</span>
           <select v-model="form.type">
+            <option value="pct">Percent off</option>
             <option value="bxgy">Buy X get Y free</option>
             <option value="nth_pct">Every Nth item % off</option>
             <option value="tiered">Tiered (e.g. 3 for 25)</option>
@@ -243,7 +278,8 @@ const MANAGED: Record<string, string> = { consignment: 'Consignment → Store ev
           </select>
         </label>
 
-        <div v-if="form.type === 'bxgy'" class="two">
+        <label v-if="form.type === 'pct'"><span>% off every item it applies to</span><input v-model="form.percent" type="number" min="1" max="100" inputmode="decimal" /></label>
+        <div v-else-if="form.type === 'bxgy'" class="two">
           <label><span>Buy</span><input v-model="form.buyQty" type="number" min="1" inputmode="numeric" /></label>
           <label><span>Get free</span><input v-model="form.freeQty" type="number" min="1" inputmode="numeric" /></label>
         </div>
@@ -269,6 +305,13 @@ const MANAGED: Record<string, string> = { consignment: 'Consignment → Store ev
 
         <fieldset class="targets">
           <legend>{{ form.type === 'combo' ? 'Bundle members (all required)' : 'Applies to' }} <em v-if="targetCount">{{ targetCount }} selected</em></legend>
+          <div v-if="artists.length" class="types">
+            <label v-for="a in artists" :key="a.id" class="inline">
+              <input v-model="form.consignorIds" type="checkbox" :value="a.id" />
+              <span class="type">{{ a.name }}</span>
+              <small>all {{ allProducts.filter((p) => p.consignorId === a.id).length }} items by this artist</small>
+            </label>
+          </div>
           <div v-if="types.length" class="types">
             <label v-for="t in types" :key="t" class="inline">
               <input v-model="form.productTypes" type="checkbox" :value="t" />
@@ -292,6 +335,21 @@ const MANAGED: Record<string, string> = { consignment: 'Consignment → Store ev
             </template>
           </div>
           <p v-if="overlapping.length" class="warn"><Icon name="alert-triangle" :size="14" /> Also targeted by {{ overlapping.map((d) => `"${d.name}"`).join(', ') }} - discounts on the same items stack.</p>
+        </fieldset>
+
+        <fieldset class="targets">
+          <legend>When and where <em v-if="form.validFrom || form.validUntil || form.eventIds.length">limited</em></legend>
+          <div class="two">
+            <label><span>From</span><input v-model="form.validFrom" type="date" /></label>
+            <label><span>Until</span><input v-model="form.validUntil" type="date" /></label>
+          </div>
+          <div v-if="visibleEvents.length > 1" class="types">
+            <label v-for="e in visibleEvents" :key="e.id" class="inline">
+              <input v-model="form.eventIds" type="checkbox" :value="e.id" />
+              <span class="type">{{ e.name }}</span>
+            </label>
+          </div>
+          <p class="hint">Leave the dates empty for always, and no event or store ticked for everywhere.</p>
         </fieldset>
       </div>
       <template #footer>

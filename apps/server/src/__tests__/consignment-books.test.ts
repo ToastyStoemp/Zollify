@@ -175,5 +175,5 @@ describe('reports', () => {
 
 /** The services a module's timer gets, built the way the gateway builds them. */
 function servicesFor() {
-  return { db: app.zollify.db, notify: () => undefined, mail: { enabled: true, send: async (m: MailMessage) => (sent.push(m), true) }, writeOps: () => 0 };
+  return { db: app.zollify.db, notify: () => undefined, mail: { enabled: true, send: async (m: MailMessage) => (sent.push(m), true) }, writeOps: () => 0, webhooks: { emit: () => undefined } };
 }

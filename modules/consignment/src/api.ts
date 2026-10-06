@@ -8,6 +8,8 @@ import {
   type Workshop,
   type WorkshopInput,
   type ArtistConsignment,
+  type ArtistDiscount,
+  type ArtistDiscountInput,
   type BooksSettings,
   type ConsignmentFee,
   type FeeInput,
@@ -137,6 +139,19 @@ export const loadReports = (): Promise<{ settings: BooksSettings; periods: Repor
 export const loadReport = (from: string): Promise<{ report: StoreReport; venues: Record<string, string> }> => sdk().http.get(`reports/${encodeURIComponent(from)}`);
 export const payReport = (from: string, date: string, consignorIds?: string[]): Promise<{ payouts: { consignorId: string; amount: number; currency: string }[] }> =>
   sdk().http.post(`reports/${encodeURIComponent(from)}/payouts`, { date, ...(consignorIds ? { consignorIds } : {}) });
+export interface ArtistDiscounts {
+  allowed: boolean;
+  maxPct: number;
+  discounts: ArtistDiscount[];
+  items: { productId: string; title: string }[];
+  stores: { id: string; name: string }[];
+}
+const discountsPath = (storeAccountId: string, consignorId: string): string => `links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/discounts`;
+export const loadArtistDiscounts = (storeAccountId: string, consignorId: string): Promise<ArtistDiscounts> => sdk().http.get(`${discountsPath(storeAccountId, consignorId)}`);
+export const saveArtistDiscount = (storeAccountId: string, consignorId: string, id: string, input: ArtistDiscountInput): Promise<{ discount: ArtistDiscount }> =>
+  sdk().http.put(`${discountsPath(storeAccountId, consignorId)}/${encodeURIComponent(id)}`, input);
+export const endArtistDiscount = (storeAccountId: string, consignorId: string, id: string): Promise<unknown> =>
+  sdk().http.del(`${discountsPath(storeAccountId, consignorId)}/${encodeURIComponent(id)}`);
 export const disputeFee = (storeAccountId: string, consignorId: string, feeId: string, note: string): Promise<{ fee: ConsignmentFee }> =>
   sdk().http.post(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/fees/${encodeURIComponent(feeId)}/dispute`, { note });
 

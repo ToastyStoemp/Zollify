@@ -4,7 +4,8 @@ import { isEnabled } from './entitlements';
 import type { Mailer } from '../mailer';
 import type { Notify } from '../notifications';
 import type { ServerOpInput } from '../routes/sync';
-import type { WireOp } from '@zollify/shared';
+import type { WebhookMessage, WireOp } from '@zollify/shared';
+import type { Webhooks } from '../webhooks';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -33,6 +34,8 @@ export interface ModuleServices {
    * restocking their shelf in a store, say. Returns how many were written.
    */
   writeOps(accountId: string, ops: ServerOpInput[]): number;
+  /** Posts to the account's webhooks that listen for the event (Discord, Slack, JSON). */
+  webhooks: Pick<Webhooks, 'emit'>;
 }
 
 export interface ModuleContext extends ModuleServices {
@@ -68,18 +71,21 @@ export interface ServerModule {
    * (an artist editing a product a store shares, say). Must not throw.
    */
   onOps?(ctx: ModuleServices, accountId: string, ops: WireOp[]): void;
+  /** Lines the module adds to an account's daily and weekly webhook summaries. */
+  webhookReport?(ctx: ModuleServices, accountId: string, period: { from: string; to: string; timeZone: string }): WebhookMessage['fields'];
 }
 
 /** Builds the per-module services: notifications carry the module's id, server writes its name. */
 export function moduleServices(
   mod: Pick<ServerModule, 'id'>,
   db: Database.Database,
-  base: { notify: Notify; mail: Mailer; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
+  base: { notify: Notify; mail: Mailer; webhooks: Pick<Webhooks, 'emit'>; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
 ): ModuleServices {
   return {
     db,
     notify: (accountId, n) => base.notify(accountId, { ...n, moduleId: mod.id }),
     mail: base.mail,
+    webhooks: base.webhooks,
     writeOps: (accountId, ops) => base.writeOps(accountId, mod.id, ops),
   };
 }

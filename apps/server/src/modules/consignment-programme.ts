@@ -253,7 +253,7 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
     const where = feature.storeIds.map((id) => stores.get(id)?.name).filter(Boolean).join(', ') || accountName(db, who.accountId) || 'the store';
     const title = feature.title || 'Artist of the month';
     const off = feature.discountPct ? ` Your work is ${feature.discountPct}% off at the till during it.` : '';
-    const delivery = await tellArtist(ctx, who.accountId, row, {
+    const delivery = await tellArtist(ctx, who.accountId, row, { kind: 'programme',
       title: `You're featured: ${title} at ${where}`,
       body: `${feature.startDate} to ${feature.endDate}.${off}`,
       subject: `You're featured at ${where}: ${feature.startDate} to ${feature.endDate}`,
@@ -297,7 +297,7 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
     let delivery = null;
     if (host && (!existing || existing.hostConsignorId !== w.hostConsignorId || moved)) {
       const store = eventsById(db, who.accountId).get(w.storeId);
-      delivery = await tellArtist(ctx, who.accountId, host, {
+      delivery = await tellArtist(ctx, who.accountId, host, { kind: 'programme',
         title: `${existing?.hostConsignorId === w.hostConsignorId ? 'Workshop moved' : "You're hosting"}: ${w.title}`,
         body: `${fmtWhen(w)} at ${store?.name ?? 'the store'}`,
         subject: `Workshop: ${w.title}, ${w.date} ${w.time}`,
@@ -522,7 +522,7 @@ export function registerProgrammePublic(app: FastifyInstance, ctx: PublicModuleC
     const link = cancelUrl(originOf(req), token);
     const emailed = await tellParticipant(ctx.mail, db, accountId, w, signup, signup.status === 'booked' ? 'booked' : 'waitlist', link);
     const taken = seatsTaken(signupsOf(db, accountId, w.id));
-    ctx.notify(accountId, {
+    ctx.notify(accountId, { kind: 'programme',
       title: `${signup.name} ${signup.status === 'booked' ? 'signed up for' : 'joined the waitlist for'} ${w.title}`,
       body: `${signup.seats} place${signup.seats === 1 ? '' : 's'} · ${taken} of ${w.capacity} booked`,
       link: '/m/consignment?tab=programme',
@@ -556,7 +556,7 @@ export function registerProgrammePublic(app: FastifyInstance, ctx: PublicModuleC
     saveSignup(db, row.accountId, next);
     await tellParticipant(ctx.mail, db, row.accountId, w, { ...s }, 'left', null);
     const promoted = was === 'booked' ? await promote(ctx.mail, db, row.accountId, w) : 0;
-    ctx.notify(row.accountId, {
+    ctx.notify(row.accountId, { kind: 'programme',
       title: `${s.name} cancelled ${s.seats === 1 ? 'their place' : `${s.seats} places`} for ${w.title}`,
       body: promoted ? `${promoted} from the waitlist moved up.` : '',
       link: '/m/consignment?tab=programme',

@@ -181,10 +181,10 @@ export async function tellArtist(
   ctx: ModuleContext,
   storeAccountId: string,
   row: ConsignorRow,
-  note: { title: string; body: string; subject: string; text: string; ics?: string },
+  note: { kind: string; title: string; body: string; subject: string; text: string; ics?: string },
 ): Promise<Delivery> {
   const linked = row.linkedAccountId && accountName(ctx.db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-  if (linked) ctx.notify(linked, { title: note.title, body: note.body, link: '/m/consignment?tab=mine', minRole: 'admin' });
+  if (linked) ctx.notify(linked, { kind: note.kind, title: note.title, body: note.body, link: '/m/consignment?tab=mine', minRole: 'admin' });
   const to = parseDoc(row.doc).email || (linked ? accountEmail(ctx.db, linked) : null);
   const base = { notified: !!linked };
   if (!to) return { ...base, emailedTo: null, emailSkipped: 'no_address' };
@@ -255,7 +255,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void 
     const line = `${space?.name ?? 'Space'} at ${store?.name ?? 'the store'}, ${rental.startDate} to ${rentalEnd(rental)} (${rental.months} month${rental.months === 1 ? '' : 's'}, ${rental.currency} ${rental.monthlyFee.toFixed(2)}/month)`;
     // Rentals are agreed in person; the in-app note is a record of it, not news worth an email.
     const linked = row.linkedAccountId && accountName(db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-    if (linked) ctx.notify(linked, { title: `${what}: ${space?.name ?? 'space'} at ${accountName(db, accountId)}`, body: line, link: '/m/consignment?tab=mine', minRole: 'admin' });
+    if (linked) ctx.notify(linked, { kind: 'planner', title: `${what}: ${space?.name ?? 'space'} at ${accountName(db, accountId)}`, body: line, link: '/m/consignment?tab=mine', minRole: 'admin' });
     return { notified: !!linked, emailedTo: null };
   }
 
@@ -368,7 +368,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void 
         ? 'Reply to this email if you have questions.'
         : 'Confirm or let them know you cannot make it in Zollify under Consignment → Where I consign, or reply to this email.',
     ];
-    return tellArtist(ctx, accountId, row, {
+    return tellArtist(ctx, accountId, row, { kind: 'planner',
       title: `${head} at ${storeName}`,
       body: kind === 'cancelled' ? `${when} is off.` : `${when}${where ? ` · ${where}` : ''}`,
       subject: `${head}: ${storeName}, ${setup.date} ${setup.time}`,
@@ -449,7 +449,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext): void 
       const store = storeOf(db, storeAccountId, setup.storeId);
       const verb = setup.status === 'confirmed' ? 'confirmed' : "can't make";
       const title = `${artist} ${verb} the setup on ${setup.date} ${setup.time}`;
-      ctx.notify(storeAccountId, { title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment?tab=planner', minRole: 'admin' });
+      ctx.notify(storeAccountId, { kind: 'planner', title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment?tab=planner', minRole: 'admin' });
       const to = accountEmail(db, storeAccountId);
       if (to && ctx.mail.enabled) {
         const replyTo = accountEmail(db, who.accountId) ?? undefined;

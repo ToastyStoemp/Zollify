@@ -120,6 +120,8 @@ export function registerSyncRoutes(
 
     let accepted = 0;
     let txCount = 0;
+    /** Ops the server did not have yet: what onOps hears, so a retried push is never announced twice. */
+    const fresh: typeof ops = [];
     const result = db.transaction((): PushResponse => {
       let seq = (maxSeq.get(claims.accountId) as { m: number }).m;
       for (const op of ops) {
@@ -136,6 +138,7 @@ export function registerSyncRoutes(
         if (r.changes > 0) {
           seq++;
           accepted++;
+          fresh.push(op);
           if (op.type === 'tx.create') txCount++;
         }
       }
@@ -149,7 +152,7 @@ export function registerSyncRoutes(
       if (txCount > 0) bumpMetric(db, claims.accountId, 'txCount', txCount);
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
       try {
-        onOps(claims.accountId, ops);
+        onOps(claims.accountId, fresh);
       } catch (err) {
         req.log.error({ err }, 'a module failed to handle pushed ops');
       }

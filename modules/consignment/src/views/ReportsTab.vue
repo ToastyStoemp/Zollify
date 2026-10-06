@@ -102,6 +102,8 @@ const form = reactive({
   cardFeeFixed: '' as string | number,
   passCardFees: false,
   presets: {} as Record<string, string | number>,
+  artistDiscounts: true,
+  artistDiscountMaxPct: 30 as string | number,
 });
 const formError = ref<string | null>(null);
 const reasons = Object.entries(FEE_REASONS) as [FeeReason, string][];
@@ -117,6 +119,8 @@ function openSettings(): void {
     cardFeeFixed: s.cardFeeFixed || '',
     passCardFees: s.passCardFees,
     presets: Object.fromEntries(reasons.map(([id]) => [id, s.feePresets[id] ?? ''])),
+    artistDiscounts: s.artistDiscounts,
+    artistDiscountMaxPct: s.artistDiscountMaxPct,
   });
   formError.value = null;
   editing.value = true;
@@ -134,6 +138,8 @@ async function saveSettings(): Promise<void> {
       cardFeeFixed: num(form.cardFeeFixed),
       passCardFees: form.passCardFees,
       feePresets: presets,
+      artistDiscounts: form.artistDiscounts,
+      artistDiscountMaxPct: Math.min(100, Math.max(1, num(form.artistDiscountMaxPct) || 30)),
     });
     settings.value = res.settings;
     editing.value = false;
@@ -256,7 +262,7 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
       </div>
     </template>
 
-    <ModalShell v-if="editing" title="Reports and fees" @close="editing = false">
+    <ModalShell v-if="editing" title="Reports, fees and discounts" @close="editing = false">
       <div class="form">
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
         <fieldset>
@@ -279,6 +285,12 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           </div>
           <label class="check"><input v-model="form.passCardFees" type="checkbox" /> Artists carry their part of card costs on their own sales</label>
           <small class="hint">Their part follows the split: on a sale where the artist gets 60%, they carry 60% of what the card cost.</small>
+        </fieldset>
+        <fieldset>
+          <legend>Artists' discounts</legend>
+          <label class="check"><input v-model="form.artistDiscounts" type="checkbox" /> Linked artists may put their own work on discount</label>
+          <label v-if="form.artistDiscounts"><span>At most (% off)</span><input v-model="form.artistDiscountMaxPct" type="number" min="1" max="100" inputmode="decimal" /></label>
+          <small class="hint">Their discounts show under Discounts, where you can end one. Switching this off ends the ones running.</small>
         </fieldset>
         <fieldset>
           <legend>Usual fees</legend>

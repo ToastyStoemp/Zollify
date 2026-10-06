@@ -6,6 +6,7 @@ import { FEE_REASONS, commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@
 import { Icon, ModalShell } from '@zollify/ui';
 import ShareItems from './ShareItems.vue';
 import StockDialog from './StockDialog.vue';
+import ArtistDiscounts from './ArtistDiscounts.vue';
 import { acceptCode, disputeFee, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
 import { sdk } from '../runtime';
 
@@ -62,6 +63,9 @@ function stockDone(message: string): void {
   void refresh();
 }
 const sentCount = (l: ArtistConsignment): number => (l.shipments ?? []).filter((s) => s.status === 'sent').length;
+
+/** The store whose discounts are open, if any. */
+const discounting = ref<ArtistConsignment | null>(null);
 
 /** The store whose sharing is open, if any. */
 const sharing = ref<ArtistConsignment | null>(null);
@@ -140,6 +144,7 @@ function commissionLine(l: ArtistConsignment): string {
         </div>
         <span class="grow" />
         <button v-if="!l.paused" type="button" @click="sharing = l"><Icon name="tag" :size="14" /> Share items</button>
+        <button v-if="!l.paused && l.items.length" type="button" @click="discounting = l"><Icon name="tag" :size="14" /> Discounts</button>
         <button v-if="!l.paused && l.items.length" type="button" @click="stocking = { link: l, mode: 'restock' }"><Icon name="layers" :size="14" /> Restock</button>
         <button v-if="!l.paused && l.items.length" type="button" @click="stocking = { link: l, mode: 'package' }"><Icon name="truck" :size="14" /> Send a package<em v-if="sentCount(l)" class="badge">{{ sentCount(l) }}</em></button>
         <button type="button" class="quiet" @click="leave(l)">Unlink</button>
@@ -274,6 +279,10 @@ function commissionLine(l: ArtistConsignment): string {
 
     <ModalShell v-if="stocking" :title="stocking.mode === 'restock' ? `Restock at ${stocking.link.storeAccountName}` : `Package for ${stocking.link.storeAccountName}`" @close="stocking = null">
       <StockDialog :link="stocking.link" :mode="stocking.mode" @done="stockDone" @close="stocking = null" />
+    </ModalShell>
+
+    <ModalShell v-if="discounting" :title="`Discounts at ${discounting.storeAccountName}`" @close="discounting = null">
+      <ArtistDiscounts :store-account-id="discounting.storeAccountId" :consignor-id="discounting.consignorId" :store-name="discounting.storeAccountName" @close="discounting = null" />
     </ModalShell>
 
     <ModalShell v-if="sharing" :title="`Share with ${sharing.storeAccountName}`" @close="closeSharing">

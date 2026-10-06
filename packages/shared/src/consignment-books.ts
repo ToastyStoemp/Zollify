@@ -90,6 +90,10 @@ export const BooksSettingsSchema = z.object({
   passCardFees: z.boolean().default(false),
   /** Suggested amount per fee reason, in the books' currency. */
   feePresets: z.partialRecord(FeeReasonSchema, z.number().min(0).max(1_000_000)).default({}),
+  /** Linked artists may put their own work on discount at the till. */
+  artistDiscounts: z.boolean().default(true),
+  /** The deepest discount an artist may set, in percent. */
+  artistDiscountMaxPct: z.number().min(1).max(100).default(30),
 });
 export type BooksSettings = z.infer<typeof BooksSettingsSchema>;
 export const DEFAULT_BOOKS_SETTINGS: BooksSettings = BooksSettingsSchema.parse({});
@@ -435,3 +439,29 @@ export function reportCsv(r: StoreReport, storeName: (id: string) => string = (i
   ];
   return out.join('\n') + '\n';
 }
+
+// ── Artists' own discounts ──────────────────────────────────────────────────
+
+/**
+ * A discount an artist puts on their own work in a store: percent off, on
+ * all their items there or some, optionally only for some days or at some
+ * of the store's shops. It becomes an ordinary discount rule in the store,
+ * so every till applies it offline too; the store can end it.
+ */
+export const ArtistDiscountInputSchema = z.object({
+  name: z.string().trim().min(1).max(80),
+  percent: z.number().min(1).max(100),
+  /** The store's ids of the artist's items; empty = all their work there. */
+  productIds: z.array(z.string().min(1).max(80)).max(500).default([]),
+  validFrom: IsoDate.optional(),
+  validUntil: IsoDate.optional(),
+  /** The store's shops it applies at; empty = all of them. */
+  eventIds: z.array(z.string().min(1).max(80)).max(200).default([]),
+});
+export type ArtistDiscountInput = z.infer<typeof ArtistDiscountInputSchema>;
+export interface ArtistDiscount extends ArtistDiscountInput {
+  id: string;
+  updatedAt: number;
+}
+/** The store-side id of an artist's discount rule. */
+export const artistDiscountRuleId = (consignorId: string, id: string): string => `artist:${consignorId}:${id}`;

@@ -224,7 +224,7 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext): void {
     const change: StockChange = { id: randomUUID(), consignorId: row.id, kind: body.data.mode === 'add' ? 'restock' : 'recount', storeId: body.data.storeId, lines: applied, at: Date.now() };
     logChange(db, row.accountId, change);
     const name = parseDoc(row.doc).name;
-    ctx.notify(row.accountId, {
+    ctx.notify(row.accountId, { kind: 'stock',
       title: body.data.mode === 'add' ? `${name} restocked ${plural(units(applied), 'item')}` : `${name} recounted ${plural(applied.length, 'item')}`,
       body: `At ${storeName(row.accountId, body.data.storeId)}.`,
       link: '/m/consignment?tab=items',
@@ -249,7 +249,7 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext): void {
     saveShipment(db, row.accountId, shipment);
     const name = parseDoc(row.doc).name;
     const title = `${name} sent a package: ${plural(units(lines), 'item')}`;
-    ctx.notify(row.accountId, { title, body: `For ${storeName(row.accountId, shipment.storeId)}${shipment.tracking ? ` · ${shipment.carrier} ${shipment.tracking}`.trim() : ''}. Confirm it when it arrives.`, link: '/m/consignment?tab=items', minRole: 'admin' });
+    ctx.notify(row.accountId, { kind: 'stock', title, body: `For ${storeName(row.accountId, shipment.storeId)}${shipment.tracking ? ` · ${shipment.carrier} ${shipment.tracking}`.trim() : ''}. Confirm it when it arrives.`, link: '/m/consignment?tab=items', minRole: 'admin' });
     const to = accountEmail(db, row.accountId);
     if (to && ctx.mail.enabled) {
       const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
@@ -305,7 +305,7 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext): void {
     const diffs = s.lines.filter((l) => (got.get(key(l.productId, l.variantId)) ?? 0) !== l.qty).map((l) => `${l.title}: sent ${l.qty}, counted ${got.get(key(l.productId, l.variantId)) ?? 0}`);
     const shop = accountName(db, who.accountId) ?? 'The store';
     const title = `${shop} received your package: ${plural(units(received), 'item')}`;
-    if (artist) ctx.notify(artist, { title, body: diffs.length ? diffs.join(' · ') : 'Everything as you listed it - now on the shelf.', link: '/m/consignment?tab=mine', minRole: 'admin' });
+    if (artist) ctx.notify(artist, { kind: 'stock', title, body: diffs.length ? diffs.join(' · ') : 'Everything as you listed it - now on the shelf.', link: '/m/consignment?tab=mine', minRole: 'admin' });
     const to = (row && parseDoc(row.doc).email) || (artist ? accountEmail(db, artist) : null);
     if (to && ctx.mail.enabled) {
       const replyTo = accountEmail(db, who.accountId) ?? undefined;

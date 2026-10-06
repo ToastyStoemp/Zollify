@@ -26,7 +26,8 @@ import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
 import { createMailer, type Mailer } from './mailer';
-import { createNotifier, registerNotificationRoutes } from './notifications';
+import { createNotifier, registerNotificationRoutes, type Notify } from './notifications';
+import { createWebhooks, migrateWebhooks, registerWebhookRoutes } from './webhooks';
 
 export interface GatewayOptions {
   dataDir: string;
@@ -206,16 +207,33 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // root instance rather than inside the /api scope below.
 
   const rooms = new Rooms();
-  const notify = createNotifier(db, rooms);
+  const ring = createNotifier(db, rooms);
   const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
+  // Webhooks hear every notification by its category, and modules add to the summaries.
+  migrateWebhooks(db);
+  const webhooks = createWebhooks(db, {
+    notify: ring,
+    contributors: () =>
+      opts.serverModules
+        .filter((m) => m.webhookReport)
+        .map((m) => (accountId: string, period: { from: string; to: string; timeZone: string }) =>
+          isEnabled(db, accountId, m.id) ? m.webhookReport!(services(m), accountId, period) : []),
+    log: (err) => app.log.warn({ err }, 'webhook failed'),
+  });
+  app.addHook('onClose', async () => webhooks.stop());
+  const notify: Notify = (accountId, n) => {
+    ring(accountId, n);
+    webhooks.notification(accountId, n);
+  };
   // One set of services per module, built once: notifications carry its id, server writes its name.
   const servicesByModule = new Map<string, ModuleServices>();
   const services = (mod: ServerModule): ModuleServices => {
     let s = servicesByModule.get(mod.id);
-    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
+    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, webhooks, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
     return s;
   };
   registerSyncRoutes(app, db, rooms, (accountId, ops) => {
+    webhooks.onOps(accountId, ops);
     for (const mod of opts.serverModules) {
       if (mod.onOps && isEnabled(db, accountId, mod.id)) mod.onOps(services(mod), accountId, ops);
     }
@@ -223,6 +241,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db);
   registerNotificationRoutes(app, db);
+  registerWebhookRoutes(app, db, webhooks);
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
@@ -249,7 +268,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // Public halves: no session, resolved by the module from a slug or token.
   mountPublicModules(app, db, opts.serverModules, services);
 
-  app.decorate('zollify', { db, store, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+  app.decorate('zollify', { db, store, webhooks, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 
   /**
    * Liveness probe. Deliberately unauthenticated and free of detail: a load

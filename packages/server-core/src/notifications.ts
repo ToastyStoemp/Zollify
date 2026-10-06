@@ -26,6 +26,8 @@ export interface NotificationInput {
   link?: string;
   moduleId?: string;
   minRole?: Role;
+  /** Its category, for webhooks that listen for some kinds only (see WEBHOOK_EVENTS). */
+  kind?: string;
 }
 
 export type Notify = (accountId: string, n: NotificationInput) => void;

@@ -22,6 +22,7 @@ import {
 import { isEnabled, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, consignorRows, parseDoc, payoutsFor, replay, toConsignor } from './consignment';
 import { accountEmail, get, rentalsOf, tellArtist } from './consignment-planner';
+import { endArtistDiscounts } from './consignment-discounts';
 
 /**
  * The store's books: fees it charges artists, how it accounts card costs,
@@ -156,7 +157,7 @@ export async function sendClosedReports(svc: ModuleServices, now = Date.now()): 
     const report = reportFor(db, accountId, closed);
     if (!report.totals.length && !report.artists.length) continue;
     const name = accountName(db, accountId) ?? 'Your store';
-    svc.notify(accountId, { title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment?tab=reports', minRole: 'admin' });
+    svc.notify(accountId, { kind: 'reports', title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment?tab=reports', minRole: 'admin' });
     const to = accountEmail(db, accountId);
     if (to && svc.mail.enabled && (await svc.mail.send({ to, ...reportMail(name, report, venueNamer(db, accountId)) }))) sent++;
   }
@@ -189,7 +190,10 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
     const body = BooksSettingsSchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Check the settings.' });
     if (!isTimeZone(body.data.timeZone)) return reply.code(400).send({ error: 'invalid_request', message: 'Unknown time zone.' });
+    const before = booksSettings(db, who.accountId);
     db.prepare('INSERT INTO consignment_settings (accountId, doc) VALUES (?, ?) ON CONFLICT(accountId) DO UPDATE SET doc = excluded.doc').run(who.accountId, JSON.stringify(body.data));
+    // No longer allowing artists' own discounts ends the ones running.
+    if (before.artistDiscounts && !body.data.artistDiscounts) endArtistDiscounts(ctx, who.accountId);
     // Switching period or anchor must not email a stack of old periods.
     const current = reportPeriod(body.data, localDay(Date.now(), body.data.timeZone));
     db.prepare('INSERT OR IGNORE INTO consignment_reports_sent (accountId, periodFrom, sentAt) VALUES (?, ?, ?)').run(who.accountId, recentPeriods(body.data, current.from, 2)[1]!.from, Date.now());
@@ -218,7 +222,7 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
     saveFee(db, who.accountId, fee);
     const shop = accountName(db, who.accountId) ?? 'The store';
     const what = `${FEE_REASONS[fee.reason]}${setup ? ` (${setup.date} ${setup.time})` : ''}`;
-    const delivery = await tellArtist(ctx, who.accountId, row, {
+    const delivery = await tellArtist(ctx, who.accountId, row, { kind: 'fees',
       title: `${shop} charged a fee: ${money(fee.amount, fee.currency)}`,
       body: `${what}${fee.note ? ` - ${fee.note}` : ''}. It comes off your balance.`,
       subject: `${shop} charged a fee of ${money(fee.amount, fee.currency)}`,
@@ -246,7 +250,7 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
     const row = consignorRow(db, who.accountId, fee.consignorId);
     const shop = accountName(db, who.accountId) ?? 'The store';
     const delivery = row
-      ? await tellArtist(ctx, who.accountId, row, {
+      ? await tellArtist(ctx, who.accountId, row, { kind: 'fees',
           title: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
           body: body.data.note || 'It no longer comes off your balance.',
           subject: `${shop} waived a fee of ${money(fee.amount, fee.currency)}`,
@@ -332,7 +336,7 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext): void {
     const done: ConsignmentFee = { ...fee, dispute: body.data.note, disputedAt: Date.now() };
     saveFee(db, row.accountId, done);
     const name = parseDoc(row.doc).name;
-    ctx.notify(row.accountId, { title: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`, body: body.data.note, link: '/m/consignment?tab=statement', minRole: 'admin' });
+    ctx.notify(row.accountId, { kind: 'fees', title: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`, body: body.data.note, link: '/m/consignment?tab=statement', minRole: 'admin' });
     const to = accountEmail(db, row.accountId);
     if (to && ctx.mail.enabled) {
       const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;

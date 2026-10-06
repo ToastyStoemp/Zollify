@@ -3,6 +3,7 @@ import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
 import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import EventNotesModal from './EventNotesModal.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -14,6 +15,7 @@ import {
   eventPricing,
   fetchExchangeRate,
   recentTransactions,
+  removeAllEventFiles,
   setActiveEvent,
   setClaim,
   shellConfirm,
@@ -118,8 +120,19 @@ async function remove(e: SalesEvent): Promise<void> {
     `Delete ${what}?`,
   );
   if (!ok) return;
-  await guard(() => deleteSalesEvent(e.id));
+  await guard(async () => {
+    await removeAllEventFiles(e);
+    await deleteSalesEvent(e.id);
+  });
 }
+
+// ── Notes & files ───────────────────────────────────────────────────────────
+const notesFor = ref<string | null>(null);
+/** Whether a card has anything to read, so a helper only gets the button when there is. */
+const notesBadge = (e: SalesEvent): string => {
+  const files = e.attachments?.length ?? 0;
+  return files ? String(files) : e.notes?.trim() ? '•' : '';
+};
 
 // ── Editor ──────────────────────────────────────────────────────────────────
 const ROUNDING = [
@@ -392,6 +405,7 @@ async function save(): Promise<void> {
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" class="btn"><Icon name="coins" :size="14" /> Prices</router-link>
             <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" class="btn"><Icon name="file-text" :size="14" /> Customs</router-link>
+            <button v-if="canEdit || notesBadge(e)" type="button" @click="notesFor = e.id"><Icon name="paperclip" :size="14" /> Notes &amp; files<template v-if="notesBadge(e)"> · {{ notesBadge(e) }}</template></button>
             <button v-if="canEdit" type="button" @click="openEdit(e)">Edit</button>
             <button v-if="canEdit" type="button" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
             <!-- Only meaningful for an active event - close() on a planned one
@@ -412,6 +426,8 @@ async function save(): Promise<void> {
         </li>
       </ul>
     </template>
+
+    <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
 
     <ModalShell v-if="editing" :title="`${editId ? 'Edit' : 'New'} ${kindLabel}`" @close="editing = false">
       <div class="form">

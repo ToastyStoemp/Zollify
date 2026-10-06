@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
+import { rm } from 'node:fs/promises';
 import { ProfileUpdateSchema, VatProfileSchema, type AccountProfile } from '@zollify/shared';
+import { eventFilesDir } from './event-files';
 import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth';
 
 /**
@@ -9,7 +11,7 @@ import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth'
  * per account with no offline write path worth building - the wizard runs on
  * a signed-in device, and every other device reads it at its next login.
  */
-export function registerAccountRoutes(app: FastifyInstance, db: Database.Database): void {
+export function registerAccountRoutes(app: FastifyInstance, db: Database.Database, dataDir?: string): void {
   /**
    * Starts the booth over: every synced op, image and metric row for the
    * account is dropped and the sync epoch is bumped, so devices that still
@@ -24,10 +26,12 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
     const removed = db.transaction((accountId: string) => {
       const ops = db.prepare('DELETE FROM ops WHERE accountId = ?').run(accountId).changes;
       db.prepare('DELETE FROM images WHERE accountId = ?').run(accountId);
+      db.prepare('DELETE FROM event_files WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM metrics WHERE accountId = ?').run(accountId);
       db.prepare('UPDATE accounts SET syncEpoch = syncEpoch + 1 WHERE id = ?').run(accountId);
       return ops;
     })(claims.accountId);
+    if (dataDir) await rm(eventFilesDir(dataDir, claims.accountId), { recursive: true, force: true });
     return { ok: true, removedOps: removed };
   });
 

@@ -54,6 +54,7 @@ async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> 
     doc.open();
     doc.write(html);
     doc.close();
+    applyPrintStyles(doc);
 
     await new Promise<void>((resolve) => {
       if (doc.readyState === 'complete') resolve();
@@ -83,6 +84,8 @@ async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> 
     // A new document always starts a new page; only the very first page of a fresh PDF is already there.
     for (let y = 0, first = !existing; y < canvas.height; y += pageHeightPx, first = false) {
       const sliceHeightPx = Math.min(pageHeightPx, canvas.height - y);
+      // A page-tall sheet can round a pixel or two over A4 - not worth a blank page.
+      if (!first && sliceHeightPx < pxPerMm * 2) break;
       slice.height = sliceHeightPx;
       sliceCtx.clearRect(0, 0, slice.width, slice.height);
       sliceCtx.drawImage(canvas, 0, y, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
@@ -94,4 +97,42 @@ async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> 
   } finally {
     document.body.removeChild(iframe);
   }
+}
+
+/**
+ * Renders the document the way it prints, not the way it shows on screen.
+ *
+ * html2canvas has no print media, so the screen-only parts of a document -
+ * the "Print / Save PDF" bar, the grey backdrop, the margin around the sheet
+ * - used to land in the PDF too, and pushed a full-height form onto a second
+ * page. A document that sets `data-pdf-media="print"` on its <html> has its
+ * own `@media print` rules copied into a plain stylesheet, so they apply here
+ * exactly as they would on paper.
+ */
+function applyPrintStyles(doc: Document): void {
+  // Opt-in: most documents' print rules lean on the printer's page margins
+  // (@page), which a PDF rendered here doesn't have.
+  if (doc.documentElement.getAttribute('data-pdf-media') !== 'print') return;
+  const rules: string[] = [];
+  const collect = (list: CSSRuleList): void => {
+    for (const rule of Array.from(list)) {
+      if (rule instanceof doc.defaultView!.CSSMediaRule) {
+        if (/\bprint\b/.test(rule.conditionText ?? rule.media.mediaText)) {
+          for (const inner of Array.from(rule.cssRules)) {
+            // @page has no meaning outside a print pipeline.
+            if (!/^@page/i.test(inner.cssText)) rules.push(inner.cssText);
+          }
+        }
+      }
+    }
+  };
+  try {
+    for (const sheet of Array.from(doc.styleSheets)) collect(sheet.cssRules);
+  } catch {
+    return; // a stylesheet we may not read - render as on screen
+  }
+  if (!rules.length) return;
+  const style = doc.createElement('style');
+  style.textContent = rules.join('\n');
+  doc.head.appendChild(style);
 }

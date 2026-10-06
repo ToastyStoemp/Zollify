@@ -73,6 +73,12 @@ export interface ServerModule {
   onOps?(ctx: ModuleServices, accountId: string, ops: WireOp[]): void;
   /** Lines the module adds to an account's daily and weekly webhook summaries. */
   webhookReport?(ctx: ModuleServices, accountId: string, period: { from: string; to: string; timeZone: string }): WebhookMessage['fields'];
+  /**
+   * A new account was just created with an invite code. Called for every
+   * module, enabled or not, so a module that issued the invite (a store
+   * inviting an artist) can set the account up. Must not throw.
+   */
+  onAccountCreated?(ctx: ModuleServices, e: { accountId: string; userId: string; inviteCode: string }): void;
 }
 
 /** Builds the per-module services: notifications carry the module's id, server writes its name. */

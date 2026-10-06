@@ -143,7 +143,7 @@ describe('consignment planner', () => {
 
     const { notifications, unread } = await bell(artist);
     expect(unread).toBe(3); // booked, upgraded, setup
-    expect(notifications[0]).toMatchObject({ title: 'Setup scheduled at Zurich shop', link: '/m/consignment-artist', moduleId: 'consignment' });
+    expect(notifications[0]).toMatchObject({ title: 'Setup scheduled at Zurich shop', link: '/m/consignment-artist', moduleId: 'consignment', level: 'urgent' });
     // The store's own bell is quiet - it did this itself.
     expect((await bell(store)).unread).toBe(0);
   });

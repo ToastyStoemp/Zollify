@@ -89,6 +89,11 @@ function migrate(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_consignment_payouts_consignor ON consignment_payouts(accountId, consignorId);
   `);
+  // An invite doubles as a sign-up code: the core invite it created, and the
+  // account it created, waiting for the artist's yes or no.
+  const cols = new Set((db.prepare('PRAGMA table_info(consignors)').all() as { name: string }[]).map((c) => c.name));
+  if (!cols.has('inviteCode')) db.exec('ALTER TABLE consignors ADD COLUMN inviteCode TEXT');
+  if (!cols.has('offerAccountId')) db.exec('ALTER TABLE consignors ADD COLUMN offerAccountId TEXT');
 }
 
 // ── Data access ─────────────────────────────────────────────────────────────
@@ -100,6 +105,10 @@ export interface ConsignorRow {
   linkedAccountId: string | null;
   linkCodeHash: string | null;
   linkExpiresAt: number | null;
+  /** The sign-up invite (core `invites.code`) issued with the link code, while unused. */
+  inviteCode: string | null;
+  /** An account created from the invite, waiting to accept or decline. */
+  offerAccountId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -107,6 +116,8 @@ export interface ConsignorRow {
 /** Rent is charged by the server's calendar day. */
 const today = (): string => new Date().toISOString().slice(0, 10);
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
+/** No look-alike characters: the code is read off a screen or a message and typed. */
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 /** Codes are typed by hand, so dashes, spaces and case are forgiven. */
 const normaliseCode = (code: string): string => code.replace(/[^0-9a-z]/gi, '').toUpperCase();
 
@@ -130,7 +141,7 @@ export function toConsignor(db: Database.Database, row: ConsignorRow): Consignor
     ...doc,
     linked: linkedAccountName !== null,
     linkedAccountName,
-    linkPending: !!row.linkCodeHash && (row.linkExpiresAt ?? 0) > Date.now(),
+    linkPending: (!!row.linkCodeHash && (row.linkExpiresAt ?? 0) > Date.now()) || !!row.offerAccountId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -263,6 +274,26 @@ export const consignmentArtistServerModule: ServerModule = {
     const known = db.prepare('SELECT 1 FROM account_modules WHERE accountId = ? AND moduleId = ?');
     for (const { id } of linked) if (!known.get(id, ARTIST_MODULE_ID)) setEnabled(db, id, ARTIST_MODULE_ID, true);
   },
+  /**
+   * Someone signed up with a store's artist invite: their new account gets
+   * "My stores" switched on, and the invite waits there for a yes or no.
+   */
+  onAccountCreated: (svc, e) => {
+    const { db } = svc;
+    const row = db.prepare('SELECT * FROM consignors WHERE inviteCode = ? AND linkExpiresAt > ?').get(e.inviteCode, Date.now()) as ConsignorRow | undefined;
+    if (!row) return;
+    db.prepare('UPDATE consignors SET offerAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL, inviteCode = NULL WHERE accountId = ? AND id = ?').run(e.accountId, row.accountId, row.id);
+    setEnabled(db, e.accountId, ARTIST_MODULE_ID, true);
+    svc.notify(e.accountId, {
+      kind: 'sharing',
+      level: 'urgent',
+      title: `${accountName(db, row.accountId) ?? 'A store'} invites you to consign`,
+      body: 'Accept or decline under Stores → My stores.',
+      link: '/m/consignment-artist',
+      minRole: 'admin',
+    });
+  },
+
   routes: (ctx: ModuleContext) => async (app) => {
     registerArtistSide(app, ctx);
     registerPlanner(app, ctx, 'artist');
@@ -313,22 +344,31 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
     if (sold || payoutsFor(db, who.accountId, row.id).length) {
       return reply.code(409).send({ error: 'has_history', message: 'This artist has sales or payouts on record - archive them instead.' });
     }
+    if (row.inviteCode) db.prepare('DELETE FROM invites WHERE code = ? AND usedBy IS NULL').run(row.inviteCode);
     db.prepare('DELETE FROM consignors WHERE accountId = ? AND id = ?').run(who.accountId, row.id);
     return { ok: true };
   });
 
   /**
-   * A fresh code for the artist to link their own account with. Only its
-   * hash is kept, so asking again simply replaces it; it works once.
+   * An invite for the artist: a code that creates their Zollify account if
+   * they have none, or links the one they have. Asking again replaces it;
+   * it works once.
    */
   app.post<{ Params: { id: string } }>('/consignors/:id/link-code', async (req, reply) => {
     const who = ctx.identity(req);
     const row = consignorRow(db, who.accountId, req.params.id);
     if (!row) return reply.code(404).send({ error: 'not_found' });
-    const raw = randomBytes(5).toString('hex').toUpperCase();
+    // One code for both cases: someone new creates their Zollify account with
+    // it (it is also a sign-up invite), someone with an account enters it
+    // under My stores. Either way the artist accepts before anything is shared.
+    const raw = [...randomBytes(16)].map((b) => INVITE_ALPHABET[b % 32]).join('');
     const expiresAt = Date.now() + LINK_TTL;
-    db.prepare('UPDATE consignors SET linkCodeHash = ?, linkExpiresAt = ? WHERE accountId = ? AND id = ?').run(sha256(raw), expiresAt, who.accountId, row.id);
-    return { code: `${raw.slice(0, 5)}-${raw.slice(5)}`, expiresAt };
+    db.transaction(() => {
+      if (row.inviteCode) db.prepare('DELETE FROM invites WHERE code = ? AND usedBy IS NULL').run(row.inviteCode);
+      db.prepare("INSERT INTO invites (code, accountId, role, createdBy, createdAt, expiresAt) VALUES (?, NULL, 'admin', ?, ?, ?)").run(raw, who.userId, Date.now(), expiresAt);
+      db.prepare('UPDATE consignors SET linkCodeHash = ?, linkExpiresAt = ?, inviteCode = ?, offerAccountId = NULL WHERE accountId = ? AND id = ?').run(sha256(raw), expiresAt, raw, who.accountId, row.id);
+    })();
+    return { code: raw.match(/.{4}/g)!.join('-'), expiresAt };
   });
 
   app.delete<{ Params: { id: string } }>('/consignors/:id/link', async (req, reply) => {
@@ -448,12 +488,49 @@ function registerArtistSide(app: FastifyInstance, ctx: ModuleContext): void {
       .prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?')
       .get(row.accountId, who.accountId, row.id);
     if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
-    db.prepare('UPDATE consignors SET linkedAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL WHERE accountId = ? AND id = ?').run(
-      who.accountId,
-      row.accountId,
-      row.id,
-    );
+    db.transaction(() => {
+      // Linked with the code: the same code can no longer create an account.
+      if (row.inviteCode) db.prepare('DELETE FROM invites WHERE code = ? AND usedBy IS NULL').run(row.inviteCode);
+      db.prepare('UPDATE consignors SET linkedAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL, inviteCode = NULL, offerAccountId = NULL WHERE accountId = ? AND id = ?').run(
+        who.accountId,
+        row.accountId,
+        row.id,
+      );
+    })();
+    ctx.notify(row.accountId, { kind: 'sharing', level: 'normal', title: `${parseDoc(row.doc).name} linked their account`, body: 'They can now share items with you.', link: '/m/consignment', minRole: 'admin' });
     return { storeAccountName: accountName(db, row.accountId) ?? '', consignorName: parseDoc(row.doc).name };
+  });
+
+  /** Invites from stores waiting for this account's answer. */
+  app.get('/links/offers', async (req) => {
+    const who = ctx.identity(req);
+    const rows = db.prepare('SELECT * FROM consignors WHERE offerAccountId = ? ORDER BY createdAt').all(who.accountId) as ConsignorRow[];
+    return {
+      offers: rows.flatMap((row) => {
+        const storeAccountName = accountName(db, row.accountId);
+        if (storeAccountName === null) return [];
+        const doc = parseDoc(row.doc);
+        return [{ storeAccountId: row.accountId, storeAccountName, consignorId: row.id, consignorName: doc.name, commissionPct: doc.commissionPct }];
+      }),
+    };
+  });
+
+  app.post<{ Params: { storeAccountId: string; consignorId: string } }>('/links/offers/:storeAccountId/:consignorId', CODE_RATE_LIMIT, async (req, reply) => {
+    const who = ctx.identity(req);
+    const accept = (req.body as { accept?: unknown } | undefined)?.accept === true;
+    const row = consignorRow(db, req.params.storeAccountId, req.params.consignorId);
+    if (!row || row.offerAccountId !== who.accountId) return reply.code(404).send({ error: 'not_found', message: 'That invite is no longer open.' });
+    const name = parseDoc(row.doc).name;
+    if (!accept) {
+      db.prepare('UPDATE consignors SET offerAccountId = NULL WHERE accountId = ? AND id = ?').run(row.accountId, row.id);
+      ctx.notify(row.accountId, { kind: 'sharing', level: 'normal', title: `${name} declined your invite`, body: 'Send a new invite if that was a mistake.', link: '/m/consignment', minRole: 'admin' });
+      return { ok: true };
+    }
+    const other = db.prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?').get(row.accountId, who.accountId, row.id);
+    if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
+    db.prepare('UPDATE consignors SET linkedAccountId = ?, offerAccountId = NULL WHERE accountId = ? AND id = ?').run(who.accountId, row.accountId, row.id);
+    ctx.notify(row.accountId, { kind: 'sharing', level: 'normal', title: `${name} accepted your invite`, body: 'They can now share items with you.', link: '/m/consignment', minRole: 'admin' });
+    return { storeAccountName: accountName(db, row.accountId) ?? '', consignorName: name };
   });
 
   app.get('/links', async (req) => {

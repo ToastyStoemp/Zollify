@@ -73,6 +73,13 @@ async function checkFirstRun(): Promise<void> {
   if (firstRun.value) mode.value = 'register';
 }
 
+/** An invite link (`/login?invite=…`, e.g. a store inviting an artist) opens straight on Create account. */
+const invitedWith = typeof route.query.invite === 'string' ? route.query.invite.slice(0, 40) : '';
+if (invitedWith) {
+  inviteCode.value = invitedWith;
+  mode.value = 'register';
+}
+
 onMounted(async () => {
   if (!native || getServerUrl()) await checkFirstRun();
   // The device identity lives in the account's database, so before the first

@@ -214,7 +214,18 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
   configureCaptchaKey(opts.jwtSecret);
-  registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
+  registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir, {
+    // Modules set up accounts their invites created (a store's artist gets "My stores").
+    accountCreated: (e) => {
+      for (const m of opts.serverModules) {
+        try {
+          m.onAccountCreated?.(services(m), e);
+        } catch (err) {
+          app.log.error({ err, moduleId: m.id }, 'onAccountCreated failed');
+        }
+      }
+    },
+  });
   registerDeviceLinkRoutes(app, db);
   registerDeviceUserRoutes(app, db, opts.jwtSecret);
 

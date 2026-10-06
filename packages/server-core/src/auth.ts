@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   ArtistDetailsSchema,
   VatProfileSchema,
+  SellsAtSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
   RegisterRequestSchema,
@@ -142,6 +143,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
       staffSeesTotals: parsed.staffSeesTotals === true,
+      ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
     };
   } catch {
     return emptyProfile();

@@ -5,6 +5,7 @@ import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
   currentAccount,
   getDeviceAccount,
+  visibleEvents,
   loadNotifications,
   lockTill,
   tillLocked,
@@ -26,7 +27,7 @@ import { booted, contributions, events, signOutAndReload } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import LockScreen from './views/LockScreen.vue';
 import { Icon, ModalShell } from '@zollify/ui';
-import type { AppNotification } from '@zollify/shared';
+import { isStore, sellsAt, type AppNotification } from '@zollify/shared';
 
 const account = currentAccount;
 const route = useRoute();
@@ -67,6 +68,8 @@ const coreNav: Entry[] = [
   { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
   { routeName: 'discounts', label: 'Discounts', icon: 'tag', group: 'stock', order: 30, minRole: 'admin' },
   { routeName: 'events', label: 'Events', icon: 'calendar', group: 'events', order: 10 },
+  // Heads the Stores section, above the consignment pages (200+).
+  { routeName: 'stores', label: 'Stores', icon: 'store', group: 'stores', order: 10 },
 ];
 
 interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
@@ -79,7 +82,11 @@ interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
 const allNav = computed<Entry[]>(() => {
   const acct = account.value;
   if (!acct) return [];
-  const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
+  // Events and Stores show for what the account runs (asked at setup).
+  const runs = sellsAt(acct.profile, visibleEvents.value.some((e) => isStore(e) && !e.deletedAt));
+  const mine = coreNav.filter(
+    (e) => (!e.minRole || roleAtLeast(acct.role, e.minRole)) && (e.routeName !== 'events' || runs.events) && (e.routeName !== 'stores' || runs.stores),
+  );
   const theirs: Entry[] = contributions.navFor(acct.role).map((item) => ({
     routeName: item.routeName,
     label: item.label,

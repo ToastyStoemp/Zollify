@@ -66,6 +66,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
       defaultCurrency: body.defaultCurrency ?? current.defaultCurrency,
       vat: VatProfileSchema.parse({ ...current.vat, ...(body.vat ?? {}) }),
       staffSeesTotals: body.staffSeesTotals ?? current.staffSeesTotals ?? false,
+      ...(body.sells ?? current.sells ? { sells: body.sells ?? current.sells } : {}),
     };
 
     db.transaction(() => {

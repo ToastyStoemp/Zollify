@@ -147,7 +147,18 @@ describe('account profile', () => {
     expect((await get(token)).staffSeesTotals).toBe(true);
   });
 
-  it('rejects a profile that fails validation', async () => {
+  it('remembers what the account runs, and needs at least one', async () => {
+    const put = (payload: Record<string, unknown>) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload });
+    // Not asked yet: unset, so the app falls back to what the account has.
+    const before = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(before.sells).toBeUndefined();
+    expect((await put({ sells: { events: false, stores: true } })).json().user.profile.sells).toEqual({ events: false, stores: true });
+    expect((await put({ sells: { events: false, stores: false } })).statusCode).toBe(400);
+    // Other settings leave it alone.
+    expect((await put({ defaultCurrency: 'CHF' })).json().user.profile.sells).toEqual({ events: false, stores: true });
+  });
+
+    it('rejects a profile that fails validation', async () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/api/account/profile',

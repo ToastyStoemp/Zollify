@@ -14,7 +14,7 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice, seesSalesTotals } from '@zollify/shared';
+import { fmtPrice, isStore, seesSalesTotals, sellsAt } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -29,6 +29,10 @@ const account = currentAccount;
 const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Events, stores or both - what the account runs decides the shortcuts here. */
+const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
+/** Where the active event or store is managed. */
+const placesRoute = computed(() => ({ name: event.value && isStore(event.value) ? 'stores' : runs.value.events ? 'events' : 'stores' }));
 /** Staff see takings only when the owner allows it (Settings → Team). */
 const showTotals = computed(() => seesSalesTotals(account.value));
 
@@ -238,7 +242,8 @@ const syncLine = computed(() => {
       <div class="actions">
         <router-link v-if="canSell" :to="{ name: 'pos:index' }" class="btn primary"><Icon name="shopping-cart" :size="16" /> Open the till</router-link>
         <router-link v-if="isAdmin" :to="{ name: 'catalog' }" class="btn"><Icon name="plus" :size="16" /> Product</router-link>
-        <router-link v-if="isAdmin" :to="{ name: 'events' }" class="btn"><Icon name="calendar" :size="16" /> Event</router-link>
+        <router-link v-if="isAdmin && runs.events" :to="{ name: 'events' }" class="btn"><Icon name="calendar" :size="16" /> Event</router-link>
+        <router-link v-if="isAdmin && runs.stores && !runs.events" :to="{ name: 'stores' }" class="btn"><Icon name="store" :size="16" /> Store</router-link>
       </div>
     </header>
 
@@ -247,8 +252,8 @@ const syncLine = computed(() => {
       <article class="card wide">
         <header class="chead">
           <h2>Today</h2>
-          <router-link v-if="event" :to="{ name: 'events' }" class="sub">at {{ event.name }}</router-link>
-          <router-link v-else :to="{ name: 'events' }" class="sub warn"><Icon name="alert-triangle" :size="14" /> No active event - sales won't be filed against one</router-link>
+          <router-link v-if="event" :to="placesRoute" class="sub">at {{ event.name }}</router-link>
+          <router-link v-else :to="placesRoute" class="sub warn"><Icon name="alert-triangle" :size="14" /> {{ runs.events ? "No active event - sales won't be filed against one" : "No store open - sales won't be filed against one" }}</router-link>
         </header>
         <p v-if="!showTotals" class="hint">Sales totals are kept for the owner. Ring up sales in the till; your own sales are under History.</p>
         <div v-if="showTotals" class="figures">
@@ -259,7 +264,7 @@ const syncLine = computed(() => {
           </div>
           <div class="figure"><span class="label">Cash</span><strong>{{ fmtPrice(todayCash, currency) }}</strong></div>
           <div class="figure"><span class="label">Card</span><strong>{{ fmtPrice(todayCard, currency) }}</strong></div>
-          <div v-if="event" class="figure"><span class="label">Whole event</span><strong>{{ fmtPrice(eventTotal, currency) }}</strong><small>{{ eventSales.length }} sales</small></div>
+          <div v-if="event" class="figure"><span class="label">{{ isStore(event) ? "Since it opened" : "Whole event" }}</span><strong>{{ fmtPrice(eventTotal, currency) }}</strong><small>{{ eventSales.length }} sales</small></div>
         </div>
         <div v-if="showTotals && bestToday.length" class="best">
           <span class="label">Selling best</span>
@@ -329,7 +334,7 @@ const syncLine = computed(() => {
       </article>
 
       <!-- ── Coming up ───────────────────────────────────────────────────── -->
-      <article class="card">
+      <article v-if="runs.events" class="card">
         <header class="chead"><h2>Coming up</h2></header>
         <p v-if="!upcoming.length" class="empty">No upcoming events. <router-link :to="{ name: 'events' }">Plan one</router-link>.</p>
         <ul v-else class="list">

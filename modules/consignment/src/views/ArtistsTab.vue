@@ -163,7 +163,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
     </div>
 
     <p v-if="!stores.length" class="warn">
-      You have no stores yet. Add one under Events → New store, then assign artists to it. Artists can also be sold at events without a store.
+      You have no stores yet. Add one under Stores → New store, then assign artists to it. Artists can also be sold at events without a store.
     </p>
     <p v-if="!list.length" class="empty">No artists yet.</p>
 
@@ -207,7 +207,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
 
         <fieldset>
           <legend>Stores that carry this artist</legend>
-          <p v-if="!stores.length" class="hint">No stores yet - add one under Events.</p>
+          <p v-if="!stores.length" class="hint">No stores yet - add one under Stores.</p>
           <div v-for="s in stores" :key="s.id" class="store-row">
             <label class="check"><input v-model="form.storeIds" type="checkbox" :value="s.id" /> {{ s.name }}<span v-if="s.venue?.city" class="hint"> · {{ s.venue.city }}</span></label>
             <input

@@ -96,6 +96,15 @@ export {
   blobToBase64,
   base64ToBlob,
 } from './images';
+export {
+  setEventNotes,
+  addEventFile,
+  removeEventFile,
+  removeAllEventFiles,
+  eventFileBlob,
+  eventFileCached,
+  retryEventFileUploads,
+} from './event-files';
 export { transactionsToCsv, csvFilename } from './csv';
 export {
   loadInventory,

@@ -7,6 +7,7 @@ import { join } from 'node:path';
  * All data lives under DATA_DIR (a Docker volume in production):
  *   DATA_DIR/zollify.db       the database
  *   DATA_DIR/images/<acct>/   full-size product images
+ *   DATA_DIR/event-files/<acct>/   files attached to events
  */
 
 const MIGRATIONS: string[] = [
@@ -221,12 +222,28 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN badgeIssuedAt INTEGER;
   CREATE UNIQUE INDEX idx_users_badge ON users(badgeHash) WHERE badgeHash IS NOT NULL;
   `,
+  // v14 - files attached to events (tickets, plans). Bytes live on disk under
+  // DATA_DIR/event-files/<acct>/<id>; this table is the index and the quota.
+  `
+  CREATE TABLE event_files (
+    id        TEXT NOT NULL,
+    accountId TEXT NOT NULL REFERENCES accounts(id),
+    eventId   TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    mime      TEXT NOT NULL,
+    size      INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    PRIMARY KEY (id, accountId)
+  );
+  CREATE INDEX idx_event_files_event ON event_files(accountId, eventId);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, 'images'), { recursive: true });
   mkdirSync(join(dataDir, 'logs'), { recursive: true });
+  mkdirSync(join(dataDir, 'event-files'), { recursive: true });
   const db = new Database(join(dataDir, 'zollify.db'));
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');

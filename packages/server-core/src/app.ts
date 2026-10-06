@@ -21,6 +21,7 @@ import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
+import { registerEventFileRoutes } from './routes/event-files';
 import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
@@ -254,12 +255,13 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     }
   });
   registerDeviceRoutes(app, db);
-  registerAccountRoutes(app, db);
+  registerAccountRoutes(app, db, opts.dataDir);
   registerNotificationRoutes(app, db);
   registerWebhookRoutes(app, db, webhooks);
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
+  registerEventFileRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
   if (opts.shellStoreDir) registerShellUpdateRoutes(app, opts.shellStoreDir);
   await registerWs(app, rooms, db);

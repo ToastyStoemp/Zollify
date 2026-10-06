@@ -36,6 +36,14 @@ export interface OutboxOp extends Op {
   userId?: string;
 }
 
+/** A file attached to an event, cached on this device. `uploaded` 0 = still waiting to reach the server. */
+export interface EventFileRec {
+  id: string;
+  eventId: string;
+  blob: Blob;
+  uploaded: 0 | 1;
+}
+
 export interface SettingRow {
   key: string;
   value: unknown;
@@ -53,6 +61,7 @@ export type CoreDb = Dexie & {
   transactions: EntityTable<Transaction, 'id'>;
   discounts: EntityTable<DiscountRule, 'id'>;
   images: EntityTable<ImageRec, 'id'>;
+  eventFiles: EntityTable<EventFileRec, 'id'>;
   ops: Dexie.Table<OutboxOp, number>;
   settings: Dexie.Table<SettingRow, string>;
 };
@@ -115,6 +124,9 @@ export function openCoreDb(accountId: string): CoreDb {
 
       if (largest.size) await tx.table('inventory').bulkPut([...largest.values()]);
     });
+
+  /** v3: files attached to events (tickets, plans), cached for offline use. */
+  db.version(3).stores({ eventFiles: 'id, eventId' });
 
   open.set(name, db);
   return db;

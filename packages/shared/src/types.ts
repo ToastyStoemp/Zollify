@@ -19,6 +19,19 @@ export interface Venue {
   tin?: string;
 }
 
+/**
+ * A file attached to an event - a ticket, a floor plan, the organiser's
+ * schedule. Only this description rides on the event; the bytes live in the
+ * server's file store and in a local cache (see event-files.ts).
+ */
+export interface EventAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  addedAt: number;
+}
+
 export interface SalesEvent {
   id: string;
   name: string;
@@ -45,6 +58,10 @@ export interface SalesEvent {
   customsDe?: Record<string, unknown>;
   /** VAT at this event - see resolveEventVat. Absent = from the country and the booth's exemptions. */
   vat?: EventVat;
+  /** Free-text notes for the team: setup times, stand number, who to ask. */
+  notes?: string;
+  /** Tickets, plans and other files. See EventAttachment. */
+  attachments?: EventAttachment[];
   updatedAt: number;
   deletedAt?: number;
 }

@@ -176,7 +176,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
   [...groups.values()].forEach((g, idx) => {
     const hsCode = toEdecHsCode(g.tariffNo);
     // Declared as they are - no rounding to 100 g or down to whole units.
-    // Sold values are already whole units (discountedLineValues); these only
+    // Sold values are already whole units (declaredLineValues); these only
     // trim floating-point noise: weight to the gram, value to the cent.
     const weightKg = Math.round(g.weightKg * 1000) / 1000;
     const statValue = Math.round(g.statValue * 100) / 100;

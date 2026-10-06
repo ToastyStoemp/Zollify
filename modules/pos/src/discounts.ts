@@ -1,5 +1,5 @@
 import type { DiscountRule } from '@zollify/shared';
-import { round2 } from '@zollify/shared';
+import { round2, splitAmount } from '@zollify/shared';
 
 /** A resolved cart line: variant lines carry vid, plain products vid=null. */
 export interface CartLine {
@@ -17,6 +17,8 @@ export interface CartLine {
 export interface RuleDiscountResult {
   rule: DiscountRule;
   amount: number;
+  /** Indexes of the cart lines the rule matched - the only lines its discount lands on. */
+  lines: number[];
 }
 
 export interface CustomDiscount {
@@ -83,9 +85,11 @@ export function computeRuleDiscounts(lines: CartLine[], rules: DiscountRule[]): 
     if (rule.deletedAt) continue;
     if (!rule.productIds.length && !rule.variantIds.length && !rule.productTypes?.length) continue;
 
+    const matched = lines.flatMap((line, i) => (line.qty && ruleTargetsLine(rule, line) ? [i] : []));
+
     if (rule.type === 'combo') {
       const amount = computeComboDiscount(lines, rule);
-      if (amount > 0.001) results.push({ rule, amount });
+      if (amount > 0.001) results.push({ rule, amount, lines: matched });
       continue;
     }
 
@@ -133,7 +137,7 @@ export function computeRuleDiscounts(lines: CartLine[], rules: DiscountRule[]): 
       amount = normalTotal - tieredTotal;
     }
 
-    if (amount > 0.001) results.push({ rule, amount });
+    if (amount > 0.001) results.push({ rule, amount, lines: matched });
   }
   return results;
 }
@@ -175,6 +179,38 @@ export function computeCartTotals(
   const customDiscountAmount = round2(computeCustomDiscount(afterRules, custom));
   const grandTotal = round2(Math.max(0, afterRules - customDiscountAmount));
   return { subtotal, ruleDiscounts, ruleDiscountTotal, customDiscountAmount, grandTotal };
+}
+
+/**
+ * Which line carries how much of the discounts - so a sale records what each
+ * item actually cost, not just the basket total.
+ *
+ * Each rule's discount is split only over the lines that rule matched (two
+ * pins in a "2 for 22" bundle share its 2 off; a sticker sheet bought
+ * alongside keeps its full price). A one-off discount on the whole sale is
+ * split over every line, after the rules. Splits are in whole units when
+ * the discount and the prices are whole - see splitAmount - and never take a
+ * line below zero.
+ *
+ * Returns one amount per line; they add up to the rule and one-off
+ * discounts in `totals`, so list minus these is the grand total.
+ */
+export function allocateDiscounts(lines: CartLine[], totals: Pick<CartTotals, 'ruleDiscounts' | 'customDiscountAmount'>): number[] {
+  const left = lines.map((l) => round2(l.lineTotal || 0));
+  const taken = lines.map(() => 0);
+  const take = (amount: number, idx: number[]): void => {
+    const shares = splitAmount(amount, idx.map((i) => left[i]!));
+    idx.forEach((i, k) => {
+      const share = Math.min(shares[k]!, left[i]!);
+      taken[i] = round2(taken[i]! + share);
+      left[i] = round2(left[i]! - share);
+    });
+  };
+  for (const r of totals.ruleDiscounts) {
+    if (r.amount > 0 && r.lines.length) take(r.amount, r.lines);
+  }
+  if (totals.customDiscountAmount > 0) take(totals.customDiscountAmount, lines.map((_, i) => i));
+  return taken;
 }
 
 /**

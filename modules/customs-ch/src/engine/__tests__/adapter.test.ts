@@ -131,7 +131,7 @@ describe('buildCustomsState - combining sales from other events (same trip, two 
   };
   const tx2: Transaction = {
     id: 't2', eventId: 'ev2', deviceId: 'd1', timestamp: 2, method: 'cash', payments: [], discounts: [],
-    total: 10, currency: 'CHF', items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 2, unitPrice: 10, lineTotal: 20 }],
+    total: 20, currency: 'CHF', items: [{ pid: 'p1', vid: null, title: 'Thing', qty: 2, unitPrice: 10, lineTotal: 20 }],
   };
 
   it('without combinedEventIds, only this event\'s own sales and stock count', () => {

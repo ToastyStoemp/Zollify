@@ -36,6 +36,7 @@ export function registerShellUpdateRoutes(app: FastifyInstance, shellStoreDir: s
     // root - `version` never reaches the filesystem as anything but one path
     // segment name, so `../` components can't escape shellStoreDir.
     const { version } = req.params as { version: string };
+    if (!/^[\w.+-]+$/.test(version) || version.includes('..')) return reply.code(404).send({ error: 'not_found' });
     const zipPath = join(shellStoreDir, version, 'bundle.zip');
     if (!zipPath.startsWith(shellStoreDir) || !existsSync(zipPath)) {
       return reply.code(404).send({ error: 'not_found' });

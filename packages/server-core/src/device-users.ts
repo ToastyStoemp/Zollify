@@ -104,6 +104,11 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     lockedUntil: b && b.lockedUntil > Date.now() ? b.lockedUntil : null,
   });
 
+  /** Who is on a till, and taking them off: an admin, or the till's own session. */
+  const mayManage = (claims: JwtClaims, deviceId: string): boolean =>
+    claims.role !== 'member' ||
+    (claims.till === undefined && !!db.prepare('SELECT 1 FROM refresh_tokens WHERE userId = ? AND deviceId = ? AND expiresAt > ?').get(claims.sub, deviceId, Date.now()));
+
   // The device session's own user has no binding; their misses are counted per person here.
   db.exec('CREATE TABLE IF NOT EXISTS pin_misses (userId TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0, lockedUntil INTEGER NOT NULL DEFAULT 0)');
 
@@ -156,6 +161,7 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
     const claims = req.user as JwtClaims;
     const deviceId = String(req.query.deviceId ?? '');
     if (!deviceId) return reply.code(400).send({ error: 'deviceId is required' });
+    if (!mayManage(claims, deviceId)) return { people: [] };
     const rows = db.prepare('SELECT * FROM device_users WHERE accountId = ? AND deviceId = ? ORDER BY createdAt').all(claims.accountId, deviceId) as Binding[];
     const people = rows.flatMap((b) => {
       const u = userById(b.userId);
@@ -195,6 +201,7 @@ export function registerDeviceUserRoutes(app: FastifyInstance, db: Database.Data
 
   app.delete<{ Params: { userId: string }; Querystring: { deviceId?: string } }>('/api/device-users/:userId', auth, async (req, reply) => {
     const claims = req.user as JwtClaims;
+    if (req.params.userId !== claims.sub && !mayManage(claims, String(req.query.deviceId ?? ''))) return reply.code(404).send({ error: 'Not on this device.' });
     const info = db
       .prepare('DELETE FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?')
       .run(claims.accountId, String(req.query.deviceId ?? ''), req.params.userId);

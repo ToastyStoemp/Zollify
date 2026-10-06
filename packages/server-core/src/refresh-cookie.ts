@@ -39,8 +39,17 @@ const COOKIE_MAX_AGE_SEC = 90 * 24 * 3600;
 /** Native shells keep the token in platform secure storage, not a cookie. */
 const NATIVE_CLIENT_HEADER = 'x-zollify-client';
 
+const NATIVE_ORIGINS = new Set(['http://localhost', 'https://localhost', 'capacitor://localhost']);
+
+/**
+ * Only a real native shell gets the refresh token in the body. Browsers always
+ * send Origin on these POSTs, so a script on the web app (an XSS) claiming to
+ * be native still gets the HttpOnly cookie, never a token it could carry off.
+ */
 function wantsBodyToken(req: { headers: Record<string, unknown> }): boolean {
-  return String(req.headers[NATIVE_CLIENT_HEADER] ?? '').toLowerCase() === 'native';
+  if (String(req.headers[NATIVE_CLIENT_HEADER] ?? '').toLowerCase() !== 'native') return false;
+  const origin = req.headers.origin;
+  return origin === undefined || NATIVE_ORIGINS.has(String(origin));
 }
 
 interface AuthPayload {

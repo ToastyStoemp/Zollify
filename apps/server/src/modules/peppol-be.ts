@@ -259,7 +259,9 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const problems = validatePeppol(found.doc, settings);
         if (problems.length) return reply.code(422).send({ error: 'invalid', message: 'Fix these first.', problems });
 
-        const issued = db.transaction((): { doc: PeppolDocument; xml: string } => {
+        const issued = db.transaction((): { doc: PeppolDocument; xml: string } | null => {
+          // Checked again inside the transaction: one draft never takes two numbers.
+          if (docOf(db, who(req), req.params.id)?.doc.status !== 'draft') return null;
           const year = found.doc.issueDate.slice(0, 4);
           const prefix = found.doc.kind === 'credit' ? settings.creditPrefix : settings.invoicePrefix;
           const series = `${found.doc.kind}:${prefix}:${year}`;
@@ -273,7 +275,8 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
           const xml = peppolUbl(doc, settings);
           saveDoc(db, accountId, doc, xml);
           return { doc, xml };
-        })();
+        }).immediate();
+        if (!issued) return reply.code(409).send({ error: 'issued', message: 'Already issued.' });
         return { document: issued.doc };
       });
 

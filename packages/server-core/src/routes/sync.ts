@@ -93,8 +93,15 @@ export function registerSyncRoutes(
   }
   // Which ops a restricted user is allowed to WRITE: only sales/stock for their
   // events (never catalog, discounts, other events, or account settings).
-  function opWritable(allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
-    if (op.type === 'tx.revert') return true; // only reverts a tx already on their device
+  function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }, batch: { type: string; payload: unknown }[]): boolean {
+    if (op.type === 'tx.revert') {
+      // Only a sale of one of their events: one already on the server, or one in this same push.
+      const txId = (op.payload as { txId?: string } | null)?.txId;
+      if (!txId) return false;
+      const inBatch = batch.find((o) => o.type === 'tx.create' && (o.payload as { id?: string } | null)?.id === txId);
+      const eid = inBatch ? eventIdOf(inBatch) : (txEventOf.get(accountId, txId) as { eid?: string } | undefined)?.eid;
+      return !!eid && allowed.has(eid);
+    }
     if (op.type === 'tx.create' || op.type === 'stock.set') {
       const eid = eventIdOf(op);
       return !!eid && allowed.has(eid);
@@ -112,7 +119,7 @@ export function registerSyncRoutes(
     // Disallowed ops are DROPPED (not stored), never rejected with 403 - a 403
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
-    const scoped = allowed ? rawOps.filter((op) => opWritable(allowed, op)) : rawOps;
+    const scoped = allowed ? rawOps.filter((op) => opWritable(claims.accountId, allowed, op, rawOps)) : rawOps;
     const staff = claims.role === 'member';
     const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff, deviceId));
     const dropped = rawOps.length - ops.length;

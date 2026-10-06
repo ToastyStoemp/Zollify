@@ -59,6 +59,8 @@ describe('Belgian numbers', () => {
     expect(isBelgianEnterpriseNumber(`${SELLER_KBO.slice(0, 9)}${(Number(SELLER_KBO[9]) + 1) % 10}`)).toBe(false);
     expect(normaliseBelgianVat(`be ${SELLER_KBO.slice(0, 4)}.${SELLER_KBO.slice(4, 7)}.${SELLER_KBO.slice(7)}`)).toBe(`BE${SELLER_KBO}`);
     expect(normaliseBelgianVat('BE0123456789')).toBeNull();
+    // Old 9-digit numbers lost their leading 0.
+    expect(normaliseBelgianVat(SELLER_KBO.slice(1))).toBe(`BE${SELLER_KBO}`);
   });
 
   it('makes and checks structured payment references, and IBANs', () => {

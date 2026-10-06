@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { PeppolSettingsSchema, type PeppolSettings } from '@zollify/shared';
+import { emptyPeppolSettings, type PeppolSettings } from '@zollify/shared';
 import { errorText, loadSettings, saveAccessPoint, saveSettings, type AccessPointInfo, type ProviderInfo } from '../api';
 import PartyFields from './PartyFields.vue';
 
@@ -9,10 +9,10 @@ import PartyFields from './PartyFields.vue';
  * numbering, the small-business exemption, and the Peppol access point that
  * sends your invoices.
  */
-const settings = ref<PeppolSettings>(PeppolSettingsSchema.parse({}));
+const settings = ref<PeppolSettings>(emptyPeppolSettings());
 const providers = ref<ProviderInfo[]>([]);
 const access = ref<AccessPointInfo | null>(null);
-const ap = reactive({ provider: '', apiKey: '', sandbox: true });
+const ap = reactive({ provider: '', apiKey: '', accountRef: '', sandbox: true });
 const error = ref<string | null>(null);
 const ok = ref<string | null>(null);
 
@@ -22,7 +22,7 @@ onMounted(async () => {
     settings.value = res.settings;
     providers.value = res.providers;
     access.value = res.accessPoint;
-    Object.assign(ap, { provider: res.accessPoint?.provider ?? res.providers[0]?.id ?? '', apiKey: '', sandbox: res.accessPoint?.sandbox ?? true });
+    Object.assign(ap, { provider: res.accessPoint?.provider ?? res.providers[0]?.id ?? '', apiKey: '', accountRef: res.accessPoint?.accountRef ?? '', sandbox: res.accessPoint?.sandbox ?? true });
   } catch (err) {
     error.value = errorText(err, 'Could not load the settings.');
   }
@@ -40,7 +40,7 @@ async function save(): Promise<void> {
 async function saveAp(): Promise<void> {
   error.value = ok.value = null;
   try {
-    access.value = (await saveAccessPoint({ provider: ap.provider, apiKey: ap.apiKey.trim(), sandbox: ap.sandbox })).accessPoint;
+    access.value = (await saveAccessPoint({ provider: ap.provider, apiKey: ap.apiKey.trim(), accountRef: ap.accountRef.trim(), sandbox: ap.sandbox })).accessPoint;
     ap.apiKey = '';
     ok.value = 'Access point saved.';
   } catch (err) {
@@ -75,17 +75,17 @@ async function removeAp(): Promise<void> {
     <button type="button" class="primary" @click="save">Save details</button>
 
     <h3>Sending</h3>
-    <p class="hint">Peppol invoices travel through an access point: a certified provider you have an account with. Connect yours with its API key and Zollify sends issued invoices for you. Without one, download each invoice's XML and upload it to your provider.</p>
-    <p v-if="access" class="ok">Connected: {{ providers.find((p) => p.id === access!.provider)?.name ?? access.provider }}{{ access.sandbox ? ' (test environment)' : '' }}.</p>
+    <p class="hint">Peppol invoices travel through an access point: a certified provider you have an account with, which also registers you to receive invoices (required too). Connect yours with its API key and Zollify sends issued invoices for you. With any other provider, download each invoice's XML and upload it there.</p>
+    <p v-if="access" class="ok">Connected: {{ providers.find((p) => p.id === access!.provider)?.name ?? access.provider }}.</p>
     <div class="grid">
       <label>
         <span>Access point</span>
         <select v-model="ap.provider"><option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option></select>
       </label>
       <label><span>API key{{ access ? ' (leave empty to keep)' : '' }}</span><input v-model="ap.apiKey" type="password" autocomplete="off" /></label>
+      <label><span>Your account id there</span><input v-model="ap.accountRef" type="text" placeholder="Storecove legal entity id" /></label>
     </div>
     <p v-if="providers.find((p) => p.id === ap.provider)" class="hint">{{ providers.find((p) => p.id === ap.provider)!.note }} <a :href="providers.find((p) => p.id === ap.provider)!.site" target="_blank" rel="noopener noreferrer">Website</a></p>
-    <label class="check"><input v-model="ap.sandbox" type="checkbox" /> <span>Test environment (nothing reaches real customers)</span></label>
     <div class="row">
       <button type="button" class="primary" :disabled="!ap.provider" @click="saveAp">Save access point</button>
       <button v-if="access" type="button" class="quiet" @click="removeAp">Disconnect</button>

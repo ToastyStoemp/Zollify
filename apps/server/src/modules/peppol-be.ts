@@ -5,6 +5,7 @@ import {
   PeppolDocumentInputSchema,
   PeppolPartySchema,
   PeppolSettingsSchema,
+  emptyPeppolSettings,
   peppolTotals,
   peppolUbl,
   structuredReference,
@@ -72,7 +73,9 @@ function migrate(db: Database.Database): void {
 
 function settingsOf(db: Database.Database, accountId: string): PeppolSettings {
   const row = db.prepare('SELECT doc FROM peppol_settings WHERE accountId = ?').get(accountId) as { doc: string } | undefined;
-  return PeppolSettingsSchema.parse(row ? JSON.parse(row.doc) : {});
+  if (!row) return emptyPeppolSettings();
+  const parsed = PeppolSettingsSchema.safeParse(JSON.parse(row.doc));
+  return parsed.success ? parsed.data : emptyPeppolSettings();
 }
 function docsOf(db: Database.Database, accountId: string): PeppolDocument[] {
   return (db.prepare('SELECT doc FROM peppol_documents WHERE accountId = ? ORDER BY createdAt DESC').all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as PeppolDocument);
@@ -126,7 +129,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
       app.get('/settings', async (req) => {
         const ap = accessPointOf(who(req));
         // The key never leaves the server; the screen only learns one is set.
-        return { settings: settingsOf(db, who(req)), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
+        return { settings: settingsOf(db, who(req)), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, accountRef: ap.accountRef, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
       });
 
       app.put('/settings', async (req, reply) => {
@@ -154,7 +157,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
           JSON.stringify(settingsOf(db, who(req))),
           box.encrypt(config),
         );
-        return { accessPoint: { provider: config.provider, sandbox: config.sandbox, hasKey: true } };
+        return { accessPoint: { provider: config.provider, sandbox: config.sandbox, accountRef: config.accountRef, hasKey: true } };
       });
 
       // ── Customers ───────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ export interface DocumentSummary {
 export interface AccessPointInfo {
   provider: string;
   sandbox: boolean;
+  accountRef: string;
   hasKey: boolean;
 }
 export interface ProviderInfo {
@@ -30,7 +31,7 @@ export type Customer = PeppolParty & { id: string };
 
 export const loadSettings = (): Promise<{ settings: PeppolSettings; accessPoint: AccessPointInfo | null; providers: ProviderInfo[] }> => sdk().http.get('settings');
 export const saveSettings = (s: PeppolSettings): Promise<{ settings: PeppolSettings }> => sdk().http.put('settings', s);
-export const saveAccessPoint = (ap: { provider: string; apiKey: string; sandbox: boolean } | null): Promise<{ accessPoint: AccessPointInfo | null }> =>
+export const saveAccessPoint = (ap: { provider: string; apiKey: string; accountRef: string; sandbox: boolean } | null): Promise<{ accessPoint: AccessPointInfo | null }> =>
   sdk().http.put('access-point', ap ?? { provider: null });
 
 export const loadCustomers = async (): Promise<Customer[]> => (await sdk().http.get<{ customers: Customer[] }>('customers')).customers;

@@ -18,15 +18,21 @@ export const PEPPOL_PROFILE_ID = 'urn:fdc:peppol.eu:2017:poacc:billing:01:1.0';
 const digits = (s: string): string => s.replace(/\D/g, '');
 
 /** A Belgian enterprise number (KBO/BCE): 10 digits, the last two a mod-97 check on the first eight. */
-export function isBelgianEnterpriseNumber(raw: string): boolean {
+/** Old 9-digit enterprise numbers are the same number without the leading 0. */
+const enterpriseDigits = (raw: string): string => {
   const d = digits(raw);
+  return d.length === 9 ? `0${d}` : d;
+};
+
+export function isBelgianEnterpriseNumber(raw: string): boolean {
+  const d = enterpriseDigits(raw);
   if (d.length !== 10 || !/^[01]/.test(d)) return false;
   return 97 - (Number(d.slice(0, 8)) % 97) === Number(d.slice(8));
 }
 
 /** "BE0123.456.789" or "0123456789" → "BE0123456789", or null when it is not a valid Belgian VAT number. */
 export function normaliseBelgianVat(raw: string): string | null {
-  const d = digits(raw.replace(/^\s*BE/i, ''));
+  const d = enterpriseDigits(raw.replace(/^\s*BE/i, ''));
   return isBelgianEnterpriseNumber(d) ? `BE${d}` : null;
 }
 
@@ -71,7 +77,8 @@ export const PEPPOL_SCHEMES = ['0208', '9925', '0106', '0088', '9944', '0007', '
 
 const Country = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/);
 export const PeppolPartySchema = z.object({
-  name: z.string().trim().min(1).max(200),
+  /** Required to issue (BR-06/BR-07), not to save a draft. */
+  name: z.string().trim().max(200).default(''),
   /** VAT number with country prefix, e.g. BE0123456789; empty when not VAT-registered. */
   vatNumber: z.string().trim().max(30).default(''),
   /** Company registration number - for Belgium the enterprise number (KBO/BCE). */
@@ -99,6 +106,8 @@ export const PeppolSettingsSchema = PeppolPartySchema.extend({
   defaultNote: z.string().max(1000).default(''),
 });
 export type PeppolSettings = z.infer<typeof PeppolSettingsSchema>;
+/** Settings before the business has filled anything in (the name is required to save, not to start). */
+export const emptyPeppolSettings = (): PeppolSettings => PeppolSettingsSchema.parse({});
 
 /**
  * VAT categories (UNCL5305 as Peppol uses them): S standard, Z zero rated,
@@ -286,11 +295,11 @@ const qty = (n: number): string => String(Math.round(n * 10000) / 10000);
 
 function party(p: PeppolParty, role: 'supplier' | 'customer', vatOverride?: string | null): string {
   const vat = vatOverride ?? (p.country === 'BE' ? (normaliseBelgianVat(p.vatNumber) ?? p.vatNumber) : p.vatNumber);
-  const companyId = p.companyId ? (p.country === 'BE' ? digits(p.companyId) : p.companyId) : '';
+  const companyId = p.companyId ? (p.country === 'BE' ? enterpriseDigits(p.companyId) : p.companyId) : '';
   const tag = role === 'supplier' ? 'cac:AccountingSupplierParty' : 'cac:AccountingCustomerParty';
   return `  <${tag}>
     <cac:Party>
-      <cbc:EndpointID schemeID="${esc(p.peppolScheme)}">${esc(p.peppolScheme === '0208' ? digits(p.peppolId) : p.peppolId)}</cbc:EndpointID>
+      <cbc:EndpointID schemeID="${esc(p.peppolScheme)}">${esc(p.peppolScheme === '0208' ? enterpriseDigits(p.peppolId) : p.peppolId)}</cbc:EndpointID>
       <cac:PostalAddress>
 ${p.street ? `        <cbc:StreetName>${esc(p.street)}</cbc:StreetName>\n` : ''}${p.city ? `        <cbc:CityName>${esc(p.city)}</cbc:CityName>\n` : ''}${p.postalCode ? `        <cbc:PostalZone>${esc(p.postalCode)}</cbc:PostalZone>\n` : ''}        <cac:Country><cbc:IdentificationCode>${esc(p.country)}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>

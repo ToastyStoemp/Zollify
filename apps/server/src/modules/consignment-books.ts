@@ -238,7 +238,7 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
           `Reason: ${what}`,
           ...(fee.note ? [`Note: ${fee.note}`] : []),
           '',
-          'It comes off what the store owes you. If you think it is wrong, reply to this email or object to it in Zollify under Consignment → Where I consign.',
+          'It comes off what the store owes you. If you think it is wrong, reply to this email or object to it in Zollify under Stores → My stores.',
         ].join('\n'),
       });
       return reply.code(201).send({ fee, delivery });

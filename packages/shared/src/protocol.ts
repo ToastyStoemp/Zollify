@@ -208,6 +208,9 @@ export interface NotificationMessage {
   type: 'notification';
 }
 
+/** How much a notification asks for attention: urgent needs an answer soon, low needs nothing. */
+export type NotificationLevel = 'urgent' | 'normal' | 'low';
+
 /** A short note for an account, shown under the shell's bell. */
 export interface AppNotification {
   id: string;
@@ -218,6 +221,7 @@ export interface AppNotification {
   link: string | null;
   createdAt: number;
   readAt: number | null;
+  level: NotificationLevel;
 }
 
 /**

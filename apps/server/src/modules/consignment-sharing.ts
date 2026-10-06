@@ -260,9 +260,11 @@ export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: 
       const ids = body.data.productIds.filter((id) => own.has(id));
       setShared(ctx, row.accountId, row, ids, body.data.shared);
       const name = parseDoc(row.doc).name;
-      ctx.notify(row.accountId, { kind: 'sharing',
-        title: `${name} ${body.data.shared ? 'shared' : 'stopped sharing'} ${ids.length} item${ids.length === 1 ? '' : 's'}`,
-        body: body.data.shared ? 'They are in your catalogue and on the till.' : 'They are off the till; sales already made keep them.',
+      const total = sharedIds(db, row.accountId, row.id).size;
+      // One note per artist, however often they press share: it says where things stand now.
+      if (ids.length) ctx.notify(row.accountId, { kind: 'sharing', level: 'low', groupKey: `sharing:${row.id}`,
+        title: `${name} updated the items they share`,
+        body: `${total} item${total === 1 ? '' : 's'} shared with you now - in your catalogue and on the till. Items taken off keep the sales already made.`,
         link: '/m/consignment/items',
         minRole: 'admin',
       });
@@ -322,9 +324,9 @@ export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: 
           const already = sharedIds(db, who.accountId, row.id).has(p.id);
           if (!already) {
             setShared(ctx, who.accountId, row, [p.id], true, true);
-            ctx.notify(artist, { kind: 'sharing',
+            ctx.notify(artist, { kind: 'sharing', level: 'low', groupKey: `scanned:${row.accountId}:${row.id}`,
               title: `${p.title} was scanned at ${accountName(db, who.accountId)} and is now shared`,
-              body: 'It is on their till. Stop sharing it under Consignment → Where I consign if that was a mistake.',
+              body: 'It is on their till. Stop sharing it under Stores → My stores if that was a mistake.',
               link: '/m/consignment-artist',
               minRole: 'admin',
             });

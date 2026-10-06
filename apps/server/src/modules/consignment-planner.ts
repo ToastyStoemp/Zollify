@@ -14,6 +14,7 @@ import {
   type Delivery,
   type SalesEvent,
   type SetupMoment,
+  type NotificationLevel,
 } from '@zollify/shared';
 import { isEnabled, type ModuleContext } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, parseDoc, replay, type ConsignorRow } from './consignment';
@@ -182,10 +183,10 @@ export async function tellArtist(
   ctx: ModuleContext,
   storeAccountId: string,
   row: ConsignorRow,
-  note: { kind: string; title: string; body: string; subject: string; text: string; ics?: string },
+  note: { kind: string; title: string; body: string; subject: string; text: string; ics?: string; level?: NotificationLevel },
 ): Promise<Delivery> {
   const linked = row.linkedAccountId && accountName(ctx.db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-  if (linked) ctx.notify(linked, { kind: note.kind, title: note.title, body: note.body, link: '/m/consignment-artist', minRole: 'admin' });
+  if (linked) ctx.notify(linked, { kind: note.kind, title: note.title, body: note.body, link: '/m/consignment-artist', minRole: 'admin', ...(note.level ? { level: note.level } : {}) });
   const to = parseDoc(row.doc).email || (linked ? accountEmail(ctx.db, linked) : null);
   const base = { notified: !!linked };
   if (!to) return { ...base, emailedTo: null, emailSkipped: 'no_address' };
@@ -373,9 +374,10 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: 
       '',
       kind === 'cancelled'
         ? 'Reply to this email if you have questions.'
-        : 'Confirm or let them know you cannot make it in Zollify under Consignment → Where I consign, or reply to this email.',
+        : 'Confirm or let them know you cannot make it in Zollify under Stores → My stores, or reply to this email.',
     ];
-    return tellArtist(ctx, accountId, row, { kind: 'planner',
+    // A setup to confirm is the one thing here that needs an answer soon.
+    return tellArtist(ctx, accountId, row, { kind: 'planner', level: kind === 'cancelled' ? 'normal' : 'urgent',
       title: `${head} at ${storeName}`,
       body: kind === 'cancelled' ? `${when} is off.` : `${when}${where ? ` · ${where}` : ''}`,
       subject: `${head}: ${storeName}, ${setup.date} ${setup.time}`,
@@ -459,7 +461,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: 
         const store = storeOf(db, storeAccountId, setup.storeId);
         const verb = setup.status === 'confirmed' ? 'confirmed' : "can't make";
         const title = `${artist} ${verb} the setup on ${setup.date} ${setup.time}`;
-        ctx.notify(storeAccountId, { kind: 'planner', title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment/planner', minRole: 'admin' });
+        ctx.notify(storeAccountId, { kind: 'planner', level: setup.status === 'declined' ? 'urgent' : 'normal', title, body: setup.artistNote || (store ? `At ${store.name}.` : ''), link: '/m/consignment/planner', minRole: 'admin' });
         const to = accountEmail(db, storeAccountId);
         if (to && ctx.mail.enabled) {
           const replyTo = accountEmail(db, who.accountId) ?? undefined;

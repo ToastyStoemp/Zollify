@@ -179,7 +179,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
 
     <ModalShell v-if="code" title="Link code" @close="code = null">
       <div class="form">
-        <p>Give this code to {{ code.name }}. They enter it under <strong>Consignment → Where I consign</strong> in their own Zollify account - the same one they use for their events.</p>
+        <p>Give this code to {{ code.name }}. They enter it under <strong>Stores → My stores</strong> in their own Zollify account - the same one they use for their events.</p>
         <p class="code">{{ code.code }}</p>
         <p class="hint">Works once, until {{ fmtDate(code.expiresAt) }}. Once linked, they see their items, sales and payouts at your stores, and you can import items from their catalogue.</p>
       </div>

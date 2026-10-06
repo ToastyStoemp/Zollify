@@ -91,7 +91,7 @@ async function save(): Promise<void> {
             <button type="button" :disabled="fetching" @click="fetchRate">{{ fetching ? 'Fetching…' : "Today's rate" }}</button>
           </div>
         </template>
-        <p v-if="!data.items.length" class="hint">Nothing shared yet - {{ name }} picks what you sell under Where I consign.</p>
+        <p v-if="!data.items.length" class="hint">Nothing shared yet - {{ name }} picks what you sell under My stores on their account.</p>
         <table v-else>
           <thead><tr><th>Item</th><th class="num">{{ data.artistCurrency }}</th><th class="num">Till</th><th class="num">Your price</th></tr></thead>
           <tbody>

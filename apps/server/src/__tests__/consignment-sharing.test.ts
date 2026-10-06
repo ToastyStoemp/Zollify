@@ -101,8 +101,19 @@ describe('sharing items with a store', () => {
     const img = (await storeOps()).find((o) => o.type === 'image.meta');
     expect(img?.payload).toMatchObject({ imageId: 'img1', thumbB64: 'AAAA' });
     expect(img?.deviceId).toBe('server:consignment-artist');
-    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[];
-    expect(bell[0]?.title).toBe('Ana shared 1 item');
+    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json();
+    expect((bell.notifications as AppNotification[])[0]).toMatchObject({ title: 'Ana updated the items they share', level: 'low' });
+    // Shared news needs nothing from the store: listed, not counted on the bell.
+    expect(bell.unread).toBe(0);
+  });
+
+  it('keeps one note per artist however often they share', async () => {
+    const before = ((await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[]).length;
+    await call(artist, 'PUT', sharesPath(), { productIds: ['a1'], shared: false });
+    await call(artist, 'PUT', sharesPath(), { productIds: ['a1'], shared: true });
+    const after = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[];
+    expect(after.length).toBe(before);
+    expect(after[0]?.body).toMatch(/^1 item shared/);
   });
 
   it('prices it in the store currency once the store sets a rate', async () => {

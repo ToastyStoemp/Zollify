@@ -19,17 +19,17 @@ function state(soldQty: number): CustomsState {
 }
 
 describe('swissDocuments', () => {
-  it('before: import packing list and proforma, in the event currency', () => {
+  it('before: import packing list, proforma and forms 11.74/11.87, in the event currency', () => {
     const b = swissDocuments(state(0), 'before', 'Con');
     expect(b.currency).toBe('CHF');
-    expect(b.docs.map((d) => d.title)).toEqual(['Packing list (import)', 'Proforma invoice']);
+    expect(b.docs.map((d) => d.title)).toEqual(['Packing list (import)', 'Proforma invoice', 'Form 11.74', 'Form 11.87']);
     expect(b.files).toEqual([]);
     expect(b.links).toEqual([]);
   });
 
-  it('after: return and sold goods lists, the e-dec XML and the e-dec web link', () => {
+  it('after: return and sold goods lists, forms 11.74/11.87, the e-dec XML and the e-dec web link', () => {
     const b = swissDocuments(state(3), 'after', 'Con');
-    expect(b.docs.map((d) => d.title)).toEqual(['Return goods list', 'Sold goods list']);
+    expect(b.docs.map((d) => d.title)).toEqual(['Return goods list', 'Sold goods list', 'Form 11.74', 'Form 11.87']);
     expect(b.files).toHaveLength(1);
     expect(b.files[0]!.mimeType).toBe('application/xml');
     expect(b.files[0]!.content).toContain('<commodityCode>7117.1900</commodityCode>');

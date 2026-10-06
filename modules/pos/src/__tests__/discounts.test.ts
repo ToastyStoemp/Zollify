@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DiscountRule } from '@zollify/shared';
 import {
+  allocateDiscounts,
   computeCartTotals,
   computeCustomDiscount,
   computeRuleDiscounts,
@@ -277,5 +278,56 @@ describe('artist-targeted rules', () => {
     ];
     const [hit] = computeRuleDiscounts(lines, [rule({ type: 'nth_pct', nth: 1, percent: 20, productIds: [], consignorIds: ['ana'] })]);
     expect(hit?.amount).toBeCloseTo(12);
+  });
+
+  it("lands only on the artist's lines when the sale records who got what", () => {
+    const lines = [{ ...line('print', null, 2, 30), consignorId: 'ana' }, { ...line('vase', null, 1, 80), consignorId: 'leo' }];
+    const totals = computeCartTotals(lines, [rule({ type: 'nth_pct', nth: 1, percent: 20, productIds: [], consignorIds: ['ana'] })], null);
+    expect(totals.ruleDiscounts[0]!.lines).toEqual([0]);
+    expect(allocateDiscounts(lines, totals)).toEqual([12, 0]);
+  });
+});
+
+describe('allocateDiscounts', () => {
+  const typed = (pid: string, type: string, qty: number, unitPrice: number): CartLine => ({ ...line(pid, null, qty, unitPrice), type });
+  const enamel = rule({ id: 'en', name: 'Enamel Pin Bundle', type: 'tiered', productTypes: ['Enamel'], tiers: [{ qty: 2, total: 22 }, { qty: 3, total: 30 }] });
+
+  it('a rule\'s discount lands only on the lines it matched', () => {
+    // Two pins "2 for 22" plus a sticker sheet that isn't in the bundle.
+    const lines = [typed('cow', 'Enamel', 1, 12), typed('shiba', 'Enamel', 1, 12), typed('sheet', 'Sticker', 1, 7)];
+    const totals = computeCartTotals(lines, [enamel], null);
+    expect(totals.grandTotal).toBe(29);
+    expect(totals.ruleDiscounts[0]!.lines).toEqual([0, 1]);
+    expect(allocateDiscounts(lines, totals)).toEqual([1, 1, 0]);
+  });
+
+  it('splits in whole units', () => {
+    // "3 for 105" on prints at 40: 15 off, 5 each.
+    const a3 = rule({ id: 'a3', type: 'tiered', productIds: ['kyoto', 'oslo', 'sky'], tiers: [{ qty: 3, total: 105 }] });
+    const lines = [line('kyoto', null, 1, 40), line('oslo', null, 1, 40), line('sky', null, 1, 40)];
+    const shares = allocateDiscounts(lines, computeCartTotals(lines, [a3], null));
+    expect(shares).toEqual([5, 5, 5]);
+    // "3 for 30" pins at 12/12/15: 9 off, never cents.
+    const pins = [typed('a', 'Enamel', 1, 12), typed('b', 'Enamel', 1, 12), typed('c', 'Enamel', 1, 15)];
+    const pinShares = allocateDiscounts(pins, computeCartTotals(pins, [enamel], null));
+    expect(pinShares.every(Number.isInteger)).toBe(true);
+    expect(pinShares.reduce((a, b) => a + b, 0)).toBe(9);
+  });
+
+  it('a one-off discount is spread over the whole sale after the rules', () => {
+    const lines = [typed('cow', 'Enamel', 1, 12), typed('shiba', 'Enamel', 1, 12), typed('sheet', 'Sticker', 1, 7)];
+    const totals = computeCartTotals(lines, [enamel], { type: 'amount', value: 4, name: 'Friend' });
+    const shares = allocateDiscounts(lines, totals);
+    expect(shares.reduce((a, b) => a + b, 0)).toBe(totals.ruleDiscountTotal + totals.customDiscountAmount);
+    expect(lines.reduce((s, l, i) => s + l.lineTotal - shares[i]!, 0)).toBe(totals.grandTotal);
+  });
+
+  it('list minus the shares always adds up to the grand total', () => {
+    const bxgy = rule({ id: 'mp', type: 'bxgy', buyQty: 2, freeQty: 1, productIds: ['ebi', 'tuna'] });
+    const lines = [line('ebi', null, 2, 15), line('tuna', null, 1, 15), line('print', null, 1, 50)];
+    const totals = computeCartTotals(lines, [bxgy], { type: 'percent', value: 10, name: 'Ten' });
+    const shares = allocateDiscounts(lines, totals);
+    expect(shares[2]).toBeGreaterThan(0); // only the one-off reaches the print
+    expect(Math.round(lines.reduce((s, l, i) => s + l.lineTotal - shares[i]!, 0) * 100) / 100).toBe(totals.grandTotal);
   });
 });

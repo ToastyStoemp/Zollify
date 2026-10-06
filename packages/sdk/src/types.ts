@@ -180,7 +180,12 @@ export interface SaleEvent {
    * (paired with `lines` by index) and each named discount, in `currency`.
    * The line totals above already include the discounts.
    */
-  asCharged?: { listTotals: number[]; discounts: { name: string; amount: number }[] };
+  asCharged?: {
+    listTotals: number[];
+    /** Each line's share of the discounts, paired with `lines` - see @zollify/shared AsCharged. */
+    lineDiscounts?: number[];
+    discounts: { name: string; amount: number; ruleId?: string; lines?: number[] }[];
+  };
   /** VAT as applied: rates per line (paired with `lines`) or the exemption. */
   tax?: SaleTax;
   payment: {

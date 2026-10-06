@@ -183,6 +183,20 @@ describe('consignment planner', () => {
     expect(respond.statusCode).toBe(409);
   });
 
+  it('removes setups: a cancelled one quietly, one still on after telling the artist', async () => {
+    const [old] = (await call(store, 'GET', '/planner')).json().setups;
+    sent.length = 0;
+    expect((await call(store, 'DELETE', `/setups/${old.id}`)).json()).toMatchObject({ ok: true, delivery: null });
+    expect(sent).toHaveLength(0);
+    const next = (await call(store, 'POST', '/setups', { consignorId: 'ana', storeId: 'zh', date: '2099-01-05', time: '09:00' })).json().setup;
+    sent.length = 0;
+    const res = await call(store, 'DELETE', `/setups/${next.id}`);
+    expect(res.json().delivery).toMatchObject({ notified: true });
+    expect(sent[0]?.subject).toMatch(/^Setup cancelled/);
+    expect((await call(store, 'GET', '/planner')).json().setups).toEqual([]);
+    expect((await call(store, 'DELETE', `/setups/${next.id}`)).statusCode).toBe(404);
+  });
+
   it('marks notifications read', async () => {
     await app.inject({ method: 'POST', url: '/api/notifications/read', headers: auth(artist), payload: {} });
     expect((await bell(artist)).unread).toBe(0);

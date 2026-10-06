@@ -125,6 +125,33 @@ describe('buildEdecXml - description', () => {
   });
 });
 
+describe('buildEdecXml - permit and non-customs-law obligations', () => {
+  // As e-dec accepted them on a real declaration.
+  it('keychains (3926.90): permit 2, non-customs law 0', () => {
+    const xml = buildEdecXml(state([product({ id: 'k', title: 'Keychain', tariffNo: '3926.90.00', material: 'Acrylic' })]))!.xml;
+    expect(xml).toContain('<permitObligation>2</permitObligation>');
+    expect(xml).toContain('<nonCustomsLawObligation>0</nonCustomsLawObligation>');
+  });
+
+  it('enamel pins (7117.19): 2 for both', () => {
+    const xml = buildEdecXml(state([product({ id: 'p', title: 'Pin', tariffNo: '7117.19.00', material: 'Zinc alloy' })]))!.xml;
+    expect(xml).toContain('<permitObligation>2</permitObligation>');
+    expect(xml).toContain('<nonCustomsLawObligation>2</nonCustomsLawObligation>');
+  });
+
+  it('art prints (4911.91): 0 for both', () => {
+    const xml = buildEdecXml(state([product({ id: 'a', title: 'Print', tariffNo: '4911.91.00', material: 'Paper' })]))!.xml;
+    expect(xml).toContain('<permitObligation>0</permitObligation>');
+    expect(xml).toContain('<nonCustomsLawObligation>0</nonCustomsLawObligation>');
+  });
+
+  it('a product\'s own override still sets both', () => {
+    const xml = buildEdecXml(state([product({ id: 'k', title: 'Keychain', tariffNo: '3926.90.00', material: 'Acrylic', permitOverride: 0 })]))!.xml;
+    expect(xml).toContain('<permitObligation>0</permitObligation>');
+    expect(xml).toContain('<nonCustomsLawObligation>0</nonCustomsLawObligation>');
+  });
+});
+
 describe('buildEdecXml - amounts declared as they are', () => {
   it('keeps the weight to the gram instead of rounding to 100 g', () => {
     const xml = buildEdecXml(state([product({ id: 'a', title: 'Pin', material: 'Zinc', weightG: 37, soldQty: 3, soldValue: 30 })]))!.xml;

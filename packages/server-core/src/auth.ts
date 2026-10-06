@@ -63,6 +63,13 @@ export interface UserRow {
   recoveryCodes?: string | null;
 }
 
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newInviteCode(): string {
+  return [...randomBytes(16)].map((b) => INVITE_ALPHABET[b % 32]).join('');
+}
+/** Codes are typed by hand: case, spaces and dashes are forgiven. */
+export const normaliseInviteCode = (raw: string): string => raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
 export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
@@ -275,7 +282,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     if (inviteCode) {
       invite = db
         .prepare('SELECT code, accountId, role, allowedEventIds FROM invites WHERE code = ? AND usedBy IS NULL AND expiresAt > ?')
-        .get(inviteCode.trim().toUpperCase(), Date.now()) as typeof invite;
+        .get(normaliseInviteCode(inviteCode), Date.now()) as typeof invite;
       if (!invite && !open) return reply.code(403).send({ error: 'Invalid or expired invite code' });
     } else if (!open && !firstUser) {
       return reply.code(403).send({ error: 'An invite code is required' });
@@ -536,7 +543,8 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // A restricted "helper" invite: a member bound to one or more events.
     const events = Array.isArray(body.allowedEventIds) ? body.allowedEventIds.filter((e) => typeof e === 'string' && e) : [];
     const allowedEventIds = !body.newAccount && events.length ? JSON.stringify(events) : null;
-    const code = randomBytes(4).toString('hex').toUpperCase();
+    // 16 characters without look-alikes, about 80 bits: not guessable in an invite's 14 days.
+    const code = newInviteCode();
     db.prepare('INSERT INTO invites (code, accountId, role, allowedEventIds, createdBy, createdAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       code,
       body.newAccount ? null : claims.accountId,

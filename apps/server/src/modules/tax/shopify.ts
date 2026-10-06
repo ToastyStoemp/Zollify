@@ -79,6 +79,8 @@ export class ShopifyOrdersClient {
         if (t) out.push(t);
       }
       url = nextPageUrl(link);
+      // Pages only ever come from the shop itself, never wherever a header points.
+      if (url && new URL(url).origin !== new URL(this.base).origin) url = null;
     }
     return out;
   }
@@ -97,12 +99,12 @@ export class ShopifyOrdersClient {
 
   private async get(url: string): Promise<{ json: unknown; link: string }> {
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { headers: { 'X-Shopify-Access-Token': await this.token(), accept: 'application/json' } });
+      const res = await fetch(url, { redirect: 'error', headers: { 'X-Shopify-Access-Token': await this.token(), accept: 'application/json' } });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;
       }
-      if (!res.ok) throw new SourceError(`Shopify API ${res.status}: ${await res.text()}`, res.status);
+      if (!res.ok) throw new SourceError(`Shopify API ${res.status}: ${(await res.text()).slice(0, 300)}`, res.status);
       return { json: await res.json(), link: res.headers.get('link') ?? '' };
     }
   }
@@ -119,7 +121,7 @@ export class ShopifyOrdersClient {
 
   private async fetchAccessToken(): Promise<string> {
     const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: this.config.clientId, client_secret: this.config.clientSecret });
-    const res = await fetch(`https://${this.config.shop}/admin/oauth/access_token`, {
+    const res = await fetch(`https://${this.config.shop}/admin/oauth/access_token`, { redirect: 'error',
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
       body,

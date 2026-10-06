@@ -135,12 +135,12 @@ export class MyposClient {
     if (!this.config.clientId || !this.config.clientSecret) throw new SourceError('Missing myPOS integration client id / secret.');
     const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: this.config.clientId, client_secret: this.config.clientSecret });
     if (this.config.scope) body.set('scope', this.config.scope);
-    const res = await fetch(`${this.config.gatewayUrl}/api/v1/oauth/token`, {
+    const res = await fetch(`${this.config.gatewayUrl}/api/v1/oauth/token`, { redirect: 'error',
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
       body,
     });
-    if (!res.ok) throw new SourceError(`myPOS OAuth token request failed (${res.status}): ${await res.text()}`, res.status);
+    if (!res.ok) throw new SourceError(`myPOS OAuth token request failed (${res.status}): ${(await res.text()).slice(0, 300)}`, res.status);
     const json = (await res.json()) as { access_token?: string; expires_in?: number };
     if (!json.access_token) throw new SourceError('myPOS OAuth response had no access_token.');
     this.token = { value: json.access_token, expiresAt: now + (json.expires_in ?? 3600) * 1000 };
@@ -152,12 +152,12 @@ export class MyposClient {
     if (!force && this.session && this.session.expiresAt > now + 30_000) return this.session.value;
     if (!this.config.merchantClientId || !this.config.merchantClientSecret) throw new SourceError('Missing myPOS merchant client id / secret.');
     const token = await this.accessToken(force);
-    const res = await fetch(`${this.config.gatewayUrl}/api/v1/auth/session`, {
+    const res = await fetch(`${this.config.gatewayUrl}/api/v1/auth/session`, { redirect: 'error',
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ client_id: this.config.merchantClientId, client_secret: this.config.merchantClientSecret }),
     });
-    if (!res.ok) throw new SourceError(`myPOS session request failed (${res.status}): ${await res.text()}`, res.status);
+    if (!res.ok) throw new SourceError(`myPOS session request failed (${res.status}): ${(await res.text()).slice(0, 300)}`, res.status);
     const json = (await res.json()) as { session?: string; expires_in?: number };
     if (!json.session) throw new SourceError('myPOS session response had no session id.');
     this.session = { value: json.session, expiresAt: now + (json.expires_in ?? 300) * 1000 };
@@ -203,7 +203,7 @@ export class MyposClient {
     for (let attempt = 0; ; attempt++) {
       const token = await this.accessToken();
       const session = await this.sessionId();
-      const res = await fetch(url, {
+      const res = await fetch(url, { redirect: 'error',
         headers: {
           authorization: `Bearer ${token}`,
           'x-session': session,
@@ -220,7 +220,7 @@ export class MyposClient {
         await this.sessionId(true);
         continue;
       }
-      if (!res.ok) throw new SourceError(`myPOS Banking API ${res.status}: ${await res.text()}`, res.status);
+      if (!res.ok) throw new SourceError(`myPOS Banking API ${res.status}: ${(await res.text()).slice(0, 300)}`, res.status);
       return res.json();
     }
   }

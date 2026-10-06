@@ -11,7 +11,7 @@ import {
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
-import { CONFIG_GROUPS, applyConfigPatch, effectiveValues, emptyConfig, enabledMap, redactConfig, type TaxConfig } from './config';
+import { CONFIG_GROUPS, applyConfigPatch, endpointProblem, effectiveValues, emptyConfig, enabledMap, redactConfig, type TaxConfig } from './config';
 import { MyposClient, loadMyposConfig, summarize } from './mypos';
 import { SumupClient, loadSumupConfig } from './sumup';
 import { ShopifyOrdersClient, loadShopifyConfig } from './shopify';
@@ -254,6 +254,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const parsed = ConfigPatch.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: 'Malformed settings.' });
         const next = applyConfigPatch(readConfig(accountId), parsed.data);
+        const problem = Object.keys(parsed.data.set ?? {}).map((k) => endpointProblem(k, next.values[k] ?? '')).find(Boolean);
+        if (problem) return reply.code(400).send({ error: 'invalid', message: problem });
         writeConfig(accountId, next);
         return { ok: true, values: redactConfig(next), enabled: enabledMap(next) };
       });

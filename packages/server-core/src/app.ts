@@ -25,6 +25,7 @@ import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
+import { configureCaptchaKey } from './captcha';
 import { createMailer, type Mailer } from './mailer';
 import { createNotifier, registerNotificationRoutes, type Notify } from './notifications';
 import { createWebhooks, migrateWebhooks, registerWebhookRoutes } from './webhooks';
@@ -198,6 +199,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
+  configureCaptchaKey(opts.jwtSecret);
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir);
   registerDeviceLinkRoutes(app, db);
   registerDeviceUserRoutes(app, db, opts.jwtSecret);

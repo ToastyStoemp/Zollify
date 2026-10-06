@@ -61,7 +61,7 @@ export class LexwareClient {
       payload = JSON.stringify(opts.json);
     }
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(`${this.apiUrl}${path}`, { method, headers, body: payload });
+      const res = await fetch(`${this.apiUrl}${path}`, { redirect: 'error', method, headers, body: payload });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;

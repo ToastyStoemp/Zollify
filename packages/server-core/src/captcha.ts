@@ -4,17 +4,25 @@
  * begins with N zero bits before registering. Cheap for a real device, expensive
  * for mass automated signups. (Swappable for Turnstile later.)
  */
-import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHmac, createHash, hkdfSync, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const DIFFICULTY = Math.min(24, Math.max(8, Number(process.env.CAPTCHA_BITS || 18)));
 const TTL_MS = 10 * 60 * 1000;
 
-function secret(): string {
-  return process.env.JWT_SECRET || 'zolltool-captcha-secret';
+/**
+ * The signing key. Derived from the gateway's own secret (configureCaptchaKey,
+ * called at boot); until then a random per-process key - never a value from
+ * the source, which anyone could use to forge an easy challenge.
+ */
+let key: Buffer = randomBytes(32);
+export function configureCaptchaKey(gatewaySecret: string): void {
+  key = Buffer.from(hkdfSync('sha256', gatewaySecret, 'zollify-captcha', 'challenge-signing-v1', 32));
 }
+/** The least work a challenge may ask for, whatever it says: a forged or tampered easy one fails. */
+const MIN_BITS: Record<ChallengePurpose, number> = { register: DIFFICULTY, receipt: 10, signup: 10 };
 const b64url = (buf: Buffer): string =>
   buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-const sign = (payload: string): string => b64url(createHmac('sha256', secret()).update(payload).digest());
+const sign = (payload: string): string => b64url(createHmac('sha256', key).update(payload).digest());
 
 /**
  * A challenge is bound to what it unlocks. The online receipt page uses a far
@@ -80,7 +88,7 @@ export function verifyChallenge(
   if (!data.exp || Date.now() > data.exp) return { ok: false, error: 'CAPTCHA expired - please retry.' };
   if (usedNonces.has(data.nonce)) return { ok: false, error: 'CAPTCHA already used.' };
   const digest = createHash('sha256').update(`${data.nonce}:${solution}`).digest();
-  if (leadingZeroBits(digest) < data.difficulty) return { ok: false, error: 'CAPTCHA not solved.' };
+  if (!(data.difficulty >= MIN_BITS[purpose]) || leadingZeroBits(digest) < data.difficulty) return { ok: false, error: 'CAPTCHA not solved.' };
   usedNonces.set(data.nonce, data.exp);
   return { ok: true };
 }

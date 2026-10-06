@@ -102,7 +102,8 @@ describe('fees', () => {
     expect(mine!.statement.totals[0]).toMatchObject({ fees: 25, balance: 35 });
 
     // Once per setup.
-    expect((await call(store, 'POST', '/fees', { consignorId: 'ana', reason: 'no_show', amount: 25, currency: 'CHF', date: today, setupId: setup.id })).statusCode).toBe(409);
+    expect((await call(store, 'POST', '/fees', { consignorId: 'ana', reason: 'no_show', amount: 25, currency: 'CHF', date: today, setupId: setup.id })).statusCode).toBe(409);    // The setup is the fee's record: it cannot be removed while the fee stands.
+    expect((await call(store, 'DELETE', `/setups/${setup.id}`)).statusCode).toBe(409);
   });
 
   it('lets the artist object, which reaches the store', async () => {

@@ -160,6 +160,7 @@ export const deleteRental = (rentalId: string): Promise<unknown> => sdk().http.d
 export const scheduleSetup = (input: SetupInput): Promise<{ setup: SetupMoment; delivery: Delivery }> => sdk().http.post('setups', input);
 export const moveSetup = (setupId: string, input: SetupInput): Promise<{ setup: SetupMoment; delivery: Delivery | null }> => sdk().http.put(`setups/${id(setupId)}`, input);
 export const cancelSetup = (setupId: string): Promise<{ setup: SetupMoment; delivery: Delivery | null }> => sdk().http.post(`setups/${id(setupId)}/cancel`);
+export const deleteSetup = (setupId: string): Promise<{ ok: true; delivery: Delivery | null }> => sdk().http.del(`setups/${id(setupId)}`);
 
 /** One line on who heard about it, for a toast. */
 export function deliveryText(name: string, d: Delivery | null | undefined): string {

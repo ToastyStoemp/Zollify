@@ -426,10 +426,25 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: 
       return { setup, delivery: await announceSetup(who.accountId, setup, 'cancelled') };
     });
 
+    /**
+     * Removes a setup from the planner altogether. One still on and still to
+     * come is called off first, so the artist is never left expecting it; one
+     * with a missed-setup fee charged stays, as the fee's record.
+     */
     app.delete<{ Params: { id: string } }>('/setups/:id', async (req, reply) => {
       const who = ctx.identity(req);
-      if (!remove(db, who.accountId, 'setups', req.params.id)) return reply.code(404).send({ error: 'not_found' });
-      return { ok: true };
+      const existing = get<SetupMoment>(db, who.accountId, 'setups', req.params.id);
+      if (!existing) return reply.code(404).send({ error: 'not_found' });
+      const fee = db
+        .prepare("SELECT 1 FROM consignment_fees WHERE accountId = ? AND json_extract(doc, '$.setupId') = ? AND json_extract(doc, '$.status') = 'charged'")
+        .get(who.accountId, existing.id);
+      if (fee) return reply.code(409).send(bad('A fee is charged for this setup - waive the fee first, then remove the setup.'));
+      let delivery: Delivery | null = null;
+      if (existing.status !== 'cancelled' && existing.date >= new Date().toISOString().slice(0, 10)) {
+        delivery = await announceSetup(who.accountId, { ...existing, status: 'cancelled', updatedAt: Date.now() }, 'cancelled');
+      }
+      remove(db, who.accountId, 'setups', existing.id);
+      return { ok: true, delivery };
     });
   }
 

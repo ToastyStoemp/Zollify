@@ -6,6 +6,7 @@ import { Icon, ModalShell } from '@zollify/ui';
 import {
   bookRental,
   cancelSetup,
+  deleteSetup,
   consignors,
   deleteRental,
   deleteSpace,
@@ -290,6 +291,18 @@ async function cancel(s: SetupMoment): Promise<void> {
   }, 'Could not cancel the setup.');
   if (ok) sdk().ui.toast(note, { kind: 'success', timeoutMs: 6000 });
 }
+/** Off the planner altogether - a setup still on is called off first, so the artist hears. */
+async function removeSetup(s: SetupMoment): Promise<void> {
+  const stillOn = s.status !== 'cancelled' && s.date >= now;
+  const text = stillOn ? `${nameOf(s.consignorId)} is told the setup on ${s.date} at ${s.time} is off, and it disappears from the planner.` : `The setup on ${s.date} at ${s.time} disappears from the planner.`;
+  if (!(await sdk().ui.confirm(text, 'Remove setup?', { confirm: 'Remove', cancel: 'Keep' }))) return;
+  let note = 'Setup removed.';
+  const ok = await guard(async () => {
+    const res = await deleteSetup(s.id);
+    if (res.delivery) note = deliveryText(nameOf(s.consignorId), res.delivery);
+  }, 'Could not remove the setup.');
+  if (ok) sdk().ui.toast(note, { kind: 'success', timeoutMs: 6000 });
+}
 const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 </script>
 
@@ -338,6 +351,7 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
                 <button type="button" @click="openSetup(s)">Move</button>
                 <button type="button" class="quiet" @click="cancel(s)">Cancel</button>
               </template>
+              <button v-if="!feeFor(s)" type="button" class="quiet" :aria-label="`Remove setup with ${nameOf(s.consignorId)}`" @click="removeSetup(s)"><Icon name="trash" :size="14" /></button>
             </li>
           </ul>
           <details v-if="past.length">
@@ -348,6 +362,7 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
                 <span class="grow" />
                 <span v-if="feeFor(s)" class="pill fee">fee {{ fmtPrice(feeFor(s)!.amount, feeFor(s)!.currency) }}</span>
                 <button v-else-if="chargeable(s)" type="button" class="quiet" @click="missed = s">Didn't show - charge a fee</button>
+                <button v-if="!feeFor(s)" type="button" class="quiet" :aria-label="`Remove setup with ${nameOf(s.consignorId)}`" @click="removeSetup(s)"><Icon name="trash" :size="14" /></button>
               </li>
             </ul>
           </details>

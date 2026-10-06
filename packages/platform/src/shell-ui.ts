@@ -17,6 +17,8 @@ let nextId = 1;
 export interface ConfirmRequest {
   title: string;
   message: string;
+  confirmLabel: string;
+  cancelLabel: string;
   resolve(answer: boolean): void;
 }
 
@@ -57,7 +59,7 @@ export function createShellUi(moduleId: string): ShellUi {
     saveFile: (filename, content, mimeType) => saveFile(filename, content, mimeType),
     openDocument: (filename, content, mimeType) => openDocument(filename, content, mimeType),
 
-    confirm(message: string, title = 'Confirm') {
+    confirm(message: string, title = 'Confirm', labels: { confirm?: string; cancel?: string } = {}) {
       // Queue-free by design: a second confirm while one is open resolves the
       // first as declined rather than stacking dialogs the user can't reach.
       const previous = pendingConfirm.current;
@@ -67,6 +69,8 @@ export function createShellUi(moduleId: string): ShellUi {
         pendingConfirm.current = {
           title: String(title),
           message: String(message),
+          confirmLabel: String(labels.confirm ?? 'Confirm').slice(0, 40),
+          cancelLabel: String(labels.cancel ?? 'Cancel').slice(0, 40),
           resolve(answer: boolean) {
             pendingConfirm.current = null;
             resolve(answer);

@@ -57,7 +57,7 @@ export interface RouteDef {
  * doing, not by which package the screen came from - a seller looking for the
  * till should not need to know it is a module.
  */
-export type NavGroup = 'selling' | 'stock' | 'events' | 'books' | 'suppliers' | 'account';
+export type NavGroup = 'selling' | 'stock' | 'events' | 'stores' | 'books' | 'suppliers' | 'account';
 
 export interface NavItem {
   /** Route name registered via `routes.add`. */
@@ -437,12 +437,31 @@ export interface ToastOptions {
 
 export interface ShellUi {
   toast(message: string, options?: ToastOptions): void;
-  confirm(message: string, title?: string): Promise<boolean>;
+  /** Yes or no. `labels` names the two buttons (defaults: Confirm / Cancel). */
+  confirm(message: string, title?: string, labels?: { confirm?: string; cancel?: string }): Promise<boolean>;
   /** Hands the user a file: a download on the web, the save dialog in the Android app. */
   saveFile(filename: string, content: string | Blob, mimeType: string): Promise<void>;
   /** Opens a document to read or print: a new tab on the web, the device viewer in the app. False if a pop-up was blocked. */
   openDocument(filename: string, content: string, mimeType?: string): Promise<boolean>;
 }
+
+// ── The home calendar ───────────────────────────────────────────────────────
+
+/** Something dated a module puts on the home screen's calendar, beside the sales events. */
+export interface CalendarEntry {
+  id: string;
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string;
+  /** HH:mm, when it has one. */
+  time?: string;
+  title: string;
+  /** `attention` draws it as needing an answer (a setup to confirm). */
+  tone?: 'normal' | 'attention' | 'muted';
+  /** In-app path to open when it is clicked, e.g. "/m/consignment/planner". */
+  link?: string;
+}
+/** Asked for the days on screen, `from` to `to` inclusive (YYYY-MM-DD). Throwing just leaves the source out. */
+export type CalendarSource = (range: { from: string; to: string }) => Promise<CalendarEntry[]>;
 
 // ── The SDK surface ─────────────────────────────────────────────────────────
 
@@ -459,6 +478,8 @@ export interface Sdk {
   routes: { add(route: RouteDef): void; addAll(routes: RouteDef[]): void };
   nav: { add(item: NavItem): void };
   settings: { panel(panel: SettingsPanel): void };
+  /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
+  calendar: { source(source: CalendarSource): void };
 
   events: EventBus;
   http: HttpClient;

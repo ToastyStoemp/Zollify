@@ -1,100 +1,62 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { consignors, errorText, loadConsignors, loaded, stores } from '../api';
+import { onMounted, onUnmounted, ref } from 'vue';
+import { errorText, loadConsignors, loaded } from '../api';
 import { sdk } from '../runtime';
 import ArtistsTab from './ArtistsTab.vue';
 import ItemsTab from './ItemsTab.vue';
 import StatementTab from './StatementTab.vue';
-import MyStoresTab from './MyStoresTab.vue';
 import PlannerTab from './PlannerTab.vue';
 import ProgrammeTab from './ProgrammeTab.vue';
 import ReportsTab from './ReportsTab.vue';
 
 /**
- * Consignment. The first six tabs are the store owner's: who the artists
- * are and which stores carry them, which items are theirs, who rents which
- * space and when they come in to set up, what happens in the stores
- * (featured artists, workshops), what each artist is owed, and the
- * store's periodic report. "Where I
- * consign" is the artist's side - the stores this account's own work sells
- * in. An account can be both.
+ * One consignment page for the store owner. Each part (artists, items,
+ * planner, store events, statement, reports) is its own page in the
+ * sidebar's Stores section, so no screen carries all of them at once. The
+ * artist's side is the separate "My stores" module.
  */
-type Tab = 'artists' | 'items' | 'planner' | 'programme' | 'statement' | 'reports' | 'mine';
-const TABS: Tab[] = ['artists', 'items', 'planner', 'programme', 'statement', 'reports', 'mine'];
-const tab = ref<Tab>('artists');
+export type Page = 'artists' | 'items' | 'planner' | 'programme' | 'statement' | 'reports';
+const props = defineProps<{ page: Page }>();
+const TITLES: Record<Page, string> = { artists: 'Artists', items: 'Consigned items', planner: 'Planner', programme: 'Store events', statement: 'Statement', reports: 'Reports' };
 
-/** A notification links to a tab ("/m/consignment?tab=mine"); the shell uses hash routes. */
-function tabOf(link: string | null | undefined): Tab | null {
-  const t = new URLSearchParams(link?.split('?')[1] ?? '').get('tab');
-  return TABS.includes(t as Tab) ? (t as Tab) : null;
-}
-const tabFromUrl = (): Tab | null => tabOf(location.hash);
-/** Bumped when one of our notifications is opened, so its tab reloads even if it was already showing. */
+/** Bumped when one of our notifications is opened, so the page reloads even if it was already showing. */
 const revision = ref(0);
 let off: (() => void) | null = null;
 onMounted(() => {
   off = sdk().events.on('notification:opened', (n) => {
-    const t = n.moduleId === 'consignment' ? tabOf(n.link) : null;
-    if (!t) return;
-    tab.value = t;
-    revision.value++;
+    if (n.moduleId === 'consignment') revision.value++;
   });
 });
 onUnmounted(() => off?.());
 const error = ref<string | null>(null);
 /** Handed from Artists to Items when "Items" is clicked on one artist. */
-const focus = ref<string>('');
+const focus = ref<string>(new URLSearchParams(location.hash.split('?')[1] ?? '').get('consignor') ?? '');
 
 onMounted(async () => {
   try {
     await loadConsignors();
-    // An artist's account with no stores of its own opens on its own side.
-    const asked = tabFromUrl();
-    if (asked) tab.value = asked;
-    else if (!consignors.value.length && !stores.value.length) tab.value = 'mine';
   } catch (err) {
     error.value = errorText(err, 'Could not load consignment.');
   }
 });
 
-const active = computed(() => consignors.value.filter((c) => !c.archived).length);
-const tabs = computed<{ id: Tab; label: string; badge?: number }[]>(() => [
-  { id: 'artists', label: 'Artists', badge: active.value },
-  { id: 'items', label: 'Items' },
-  { id: 'planner', label: 'Planner' },
-  { id: 'programme', label: 'Store events' },
-  { id: 'statement', label: 'Statement' },
-  { id: 'reports', label: 'Reports' },
-  { id: 'mine', label: 'Where I consign' },
-]);
-function pick(id: Tab): void {
-  tab.value = id;
-  error.value = null;
-}
 function showItems(consignorId: string): void {
-  focus.value = consignorId;
-  pick('items');
+  location.hash = `#/m/consignment/items?consignor=${encodeURIComponent(consignorId)}`;
 }
 </script>
 
 <template>
   <section class="consignment">
-    <header>
-      <h1>Consignment</h1>
-      <nav class="seg" aria-label="Consignment sections">
-        <button v-for="t in tabs" :key="t.id" type="button" :class="{ on: tab === t.id }" @click="pick(t.id)">{{ t.label }}<em v-if="t.badge">{{ t.badge }}</em></button>
-      </nav>
-    </header>
+    <header><h1>{{ TITLES[props.page] }}</h1></header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="!loaded && !error" class="hint">Loading…</p>
     <template v-else-if="loaded">
-      <ArtistsTab v-if="tab === 'artists'" :key="revision" @error="error = $event" @items="showItems" />
-      <ItemsTab v-else-if="tab === 'items'" :key="revision" v-model:consignor="focus" @error="error = $event" />
-      <PlannerTab v-else-if="tab === 'planner'" :key="revision" @error="error = $event" />
-      <ProgrammeTab v-else-if="tab === 'programme'" :key="revision" @error="error = $event" />
-      <StatementTab v-else-if="tab === 'statement'" :key="revision" @error="error = $event" />
-      <ReportsTab v-else-if="tab === 'reports'" :key="revision" @error="error = $event" />
-      <MyStoresTab v-else :key="revision" @error="error = $event" />
+      <ArtistsTab v-if="props.page === 'artists'" :key="revision" @error="error = $event" @items="showItems" />
+      <ItemsTab v-else-if="props.page === 'items'" :key="revision" v-model:consignor="focus" @error="error = $event" />
+      <PlannerTab v-else-if="props.page === 'planner'" :key="revision" @error="error = $event" />
+      <ProgrammeTab v-else-if="props.page === 'programme'" :key="revision" @error="error = $event" />
+      <StatementTab v-else-if="props.page === 'statement'" :key="revision" @error="error = $event" />
+      <ReportsTab v-else :key="revision" @error="error = $event" />
     </template>
   </section>
 </template>

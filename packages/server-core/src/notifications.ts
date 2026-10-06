@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import type { AppNotification } from '@zollify/shared';
+import type { AppNotification, NotificationLevel } from '@zollify/shared';
 import type { JwtClaims } from './auth';
 import type { Rooms } from './ws';
 
@@ -28,7 +28,22 @@ export interface NotificationInput {
   minRole?: Role;
   /** Its category, for webhooks that listen for some kinds only (see WEBHOOK_EVENTS). */
   kind?: string;
+  /**
+   * How much it asks for attention. `urgent`: something to answer or act on
+   * soon (a setup to confirm). `low`: news that needs nothing (items shared).
+   * Without one, the kind decides (see LEVEL_OF_KIND), else `normal`.
+   */
+  level?: NotificationLevel;
+  /**
+   * Same news again while the last one is still unread: it replaces that one
+   * (moved to the top) instead of adding another. E.g. one per artist and
+   * store for sharing, however many times they press share.
+   */
+  groupKey?: string;
 }
+
+/** What a kind asks for when the caller does not say. */
+const LEVEL_OF_KIND: Record<string, NotificationLevel> = { sharing: 'low', discounts: 'low', reports: 'normal' };
 
 export type Notify = (accountId: string, n: NotificationInput) => void;
 
@@ -38,23 +53,22 @@ const safeLink = (link: string | undefined): string | null =>
 
 export function createNotifier(db: Database.Database, rooms: Rooms): Notify {
   const insert = db.prepare(
-    'INSERT INTO notifications (id, accountId, moduleId, minRole, title, body, link, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO notifications (id, accountId, moduleId, minRole, title, body, link, createdAt, level, groupKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  const regroup = db.prepare(
+    'UPDATE notifications SET title = ?, body = ?, link = ?, createdAt = ?, level = ? WHERE accountId = ? AND groupKey = ? AND readAt IS NULL',
   );
   // Bounded per account: a bell nobody opens must not grow forever.
   const trim = db.prepare(
     'DELETE FROM notifications WHERE accountId = ? AND id NOT IN (SELECT id FROM notifications WHERE accountId = ? ORDER BY createdAt DESC LIMIT ?)',
   );
   return (accountId, n) => {
-    insert.run(
-      randomUUID(),
-      accountId,
-      n.moduleId ?? null,
-      n.minRole ?? 'member',
-      n.title.slice(0, 160),
-      (n.body ?? '').slice(0, 1000),
-      safeLink(n.link),
-      Date.now(),
-    );
+    const level = n.level ?? LEVEL_OF_KIND[n.kind ?? ''] ?? 'normal';
+    const title = n.title.slice(0, 160);
+    const body = (n.body ?? '').slice(0, 1000);
+    const groupKey = n.groupKey ? n.groupKey.slice(0, 200) : null;
+    const replaced = groupKey ? regroup.run(title, body, safeLink(n.link), Date.now(), level, accountId, groupKey).changes > 0 : false;
+    if (!replaced) insert.run(randomUUID(), accountId, n.moduleId ?? null, n.minRole ?? 'member', title, body, safeLink(n.link), Date.now(), level, groupKey);
     trim.run(accountId, accountId, KEEP);
     rooms.notify(accountId);
   };
@@ -68,11 +82,13 @@ export function registerNotificationRoutes(app: FastifyInstance, db: Database.Da
     const roles = visible(claims.role);
     const rows = db
       .prepare(
-        `SELECT id, moduleId, title, body, link, createdAt, readAt FROM notifications
+        `SELECT id, moduleId, title, body, link, createdAt, readAt, level FROM notifications
          WHERE accountId = ? AND minRole IN (${roles.map(() => '?').join(',')}) ORDER BY createdAt DESC LIMIT 50`,
       )
       .all(claims.accountId, ...roles) as AppNotification[];
-    return { notifications: rows, unread: rows.filter((r) => r.readAt == null).length };
+    // Low-level news is listed but never counted on the bell.
+    const unread = rows.filter((r) => r.readAt == null && r.level !== 'low');
+    return { notifications: rows, unread: unread.length, urgent: unread.filter((r) => r.level === 'urgent').length };
   });
 
   /** Marks the given notifications read, or all of them when no ids are given. */

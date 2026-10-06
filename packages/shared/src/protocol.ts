@@ -155,6 +155,23 @@ export interface AccountProfile {
   vat?: VatProfile;
   /** Staff see sales totals (takings, stats, expected cash). Off: they see single sales only, and cash up blind. */
   staffSeesTotals?: boolean;
+  /** What the business runs, asked at setup: events (fairs, markets), stores, or both. Unset: see sellsAt. */
+  sells?: SellsAt;
+}
+
+/** What a business runs. Decides which of the Events and Stores pages it gets. */
+export interface SellsAt {
+  events: boolean;
+  stores: boolean;
+}
+export const SellsAtSchema = z.object({ events: z.boolean(), stores: z.boolean() }).refine((s) => s.events || s.stores, 'Pick events, stores or both.');
+
+/**
+ * What an account runs. Accounts from before the question was asked keep
+ * what they had: events, plus stores once they have one.
+ */
+export function sellsAt(profile: Pick<AccountProfile, 'sells'> | null | undefined, hasStores = false): SellsAt {
+  return profile?.sells ?? { events: true, stores: hasStores };
 }
 
 /** Whether this person may see sales totals: owners and admins always, staff when the account allows it. */
@@ -173,6 +190,7 @@ export const ProfileUpdateSchema = z.object({
   setupCompleted: z.boolean().optional(),
   vat: VatProfileUpdateSchema.optional(),
   staffSeesTotals: z.boolean().optional(),
+  sells: SellsAtSchema.optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
@@ -208,16 +226,20 @@ export interface NotificationMessage {
   type: 'notification';
 }
 
+/** How much a notification asks for attention: urgent needs an answer soon, low needs nothing. */
+export type NotificationLevel = 'urgent' | 'normal' | 'low';
+
 /** A short note for an account, shown under the shell's bell. */
 export interface AppNotification {
   id: string;
   moduleId: string | null;
   title: string;
   body: string;
-  /** In-app path to open, e.g. "/m/consignment?tab=mine". */
+  /** In-app path to open, e.g. "/m/consignment/planner". */
   link: string | null;
   createdAt: number;
   readAt: number | null;
+  level: NotificationLevel;
 }
 
 /**

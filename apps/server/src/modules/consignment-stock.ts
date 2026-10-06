@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { EventStock, InventoryItem, Product, WireOp } from '@zollify/shared';
 import { isEnabled, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, parseDoc, replay, type ConsignorRow } from './consignment';
+import type { Side } from './consignment';
 import { accountEmail } from './consignment-planner';
 
 /**
@@ -196,7 +197,7 @@ const ReceiveBody = z.object({ lines: z.array(Line).max(500).optional() });
 const units = (lines: StockLine[]): number => lines.reduce((n, l) => n + l.qty, 0);
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-export function registerStock(app: FastifyInstance, ctx: ModuleContext): void {
+export function registerStock(app: FastifyInstance, ctx: ModuleContext, side: Side): void {
   const { db } = ctx;
 
   /** The link a linked artist acts through, or null - never someone else's. */
@@ -212,105 +213,109 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext): void {
 
   // ── The artist's side ───────────────────────────────────────────────────
 
-  /** The artist filled their shelf in person: add what they brought, or recount. */
-  app.post<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/stock', async (req, reply) => {
-    const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    const body = RestockBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'List the items and how many.' });
-    const lines = body.data.lines.filter((l) => body.data.mode === 'set' || l.qty > 0);
-    const applied = applyStock(ctx, row.accountId, row.id, lines, body.data.mode, body.data.storeId);
-    if (!applied.length) return reply.code(400).send({ error: 'invalid_request', message: 'None of those are your items in this store.' });
-    const change: StockChange = { id: randomUUID(), consignorId: row.id, kind: body.data.mode === 'add' ? 'restock' : 'recount', storeId: body.data.storeId, lines: applied, at: Date.now() };
-    logChange(db, row.accountId, change);
-    const name = parseDoc(row.doc).name;
-    ctx.notify(row.accountId, { kind: 'stock',
-      title: body.data.mode === 'add' ? `${name} restocked ${plural(units(applied), 'item')}` : `${name} recounted ${plural(applied.length, 'item')}`,
-      body: `At ${storeName(row.accountId, body.data.storeId)}.`,
-      link: '/m/consignment?tab=items',
-      minRole: 'admin',
-    });
-    return { change };
-  });
-
-  /** A remote artist sends a package; nothing changes until the store confirms it. */
-  app.post<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shipments', async (req, reply) => {
-    const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    const body = ShipBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A package needs a store and what is in it.' });
-    const { products } = stockState(db, row.accountId);
-    const lines = body.data.lines
-      .map((l) => ({ ...l, product: products.get(l.productId) }))
-      .filter((l) => l.product?.consignorId === row.id)
-      .map(({ product, ...l }) => ({ ...l, title: l.variantId ? `${product!.title} · ${product!.variants.find((v) => v.id === l.variantId)?.name ?? ''}` : product!.title }));
-    if (!lines.length) return reply.code(400).send({ error: 'invalid_request', message: 'None of those are your items in this store.' });
-    const shipment: Shipment = { id: randomUUID(), consignorId: row.id, storeId: body.data.storeId, status: 'sent', lines, received: null, note: body.data.note, carrier: body.data.carrier, tracking: body.data.tracking, sentAt: Date.now(), receivedAt: null };
-    saveShipment(db, row.accountId, shipment);
-    const name = parseDoc(row.doc).name;
-    const title = `${name} sent a package: ${plural(units(lines), 'item')}`;
-    ctx.notify(row.accountId, { kind: 'stock', title, body: `For ${storeName(row.accountId, shipment.storeId)}${shipment.tracking ? ` · ${shipment.carrier} ${shipment.tracking}`.trim() : ''}. Confirm it when it arrives.`, link: '/m/consignment?tab=items', minRole: 'admin' });
-    const to = accountEmail(db, row.accountId);
-    if (to && ctx.mail.enabled) {
-      const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
-      await ctx.mail.send({
-        to,
-        subject: title,
-        text: [`${title}, for ${storeName(row.accountId, shipment.storeId)}.`, '', ...lines.map((l) => `  ${l.qty} × ${l.title}`), ...(shipment.tracking ? ['', `Tracking: ${shipment.carrier} ${shipment.tracking}`.trim()] : []), ...(shipment.note ? ['', shipment.note] : []), '', 'Confirm it in Zollify under Consignment → Items when it arrives - the counts go straight onto the shelf.'].join('\n'),
-        ...(replyTo ? { replyTo } : {}),
+  if (side === 'artist') {
+    /** The artist filled their shelf in person: add what they brought, or recount. */
+    app.post<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/stock', async (req, reply) => {
+      const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      const body = RestockBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'List the items and how many.' });
+      const lines = body.data.lines.filter((l) => body.data.mode === 'set' || l.qty > 0);
+      const applied = applyStock(ctx, row.accountId, row.id, lines, body.data.mode, body.data.storeId);
+      if (!applied.length) return reply.code(400).send({ error: 'invalid_request', message: 'None of those are your items in this store.' });
+      const change: StockChange = { id: randomUUID(), consignorId: row.id, kind: body.data.mode === 'add' ? 'restock' : 'recount', storeId: body.data.storeId, lines: applied, at: Date.now() };
+      logChange(db, row.accountId, change);
+      const name = parseDoc(row.doc).name;
+      ctx.notify(row.accountId, { kind: 'stock',
+        title: body.data.mode === 'add' ? `${name} restocked ${plural(units(applied), 'item')}` : `${name} recounted ${plural(applied.length, 'item')}`,
+        body: `At ${storeName(row.accountId, body.data.storeId)}.`,
+        link: '/m/consignment/items',
+        minRole: 'admin',
       });
-    }
-    return reply.code(201).send({ shipment });
-  });
+      return { change };
+    });
 
-  app.delete<{ Params: { storeAccountId: string; consignorId: string; id: string } }>('/links/:storeAccountId/:consignorId/shipments/:id', async (req, reply) => {
-    const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
-    if (!row) return reply.code(404).send({ error: 'not_found' });
-    const s = shipmentsOf(db, row.accountId, row.id).find((x) => x.id === req.params.id);
-    if (!s) return reply.code(404).send({ error: 'not_found' });
-    if (s.status !== 'sent') return reply.code(409).send({ error: 'received', message: 'The store already confirmed this package.' });
-    saveShipment(db, row.accountId, { ...s, status: 'cancelled' });
-    return { ok: true };
-  });
+    /** A remote artist sends a package; nothing changes until the store confirms it. */
+    app.post<{ Params: { storeAccountId: string; consignorId: string } }>('/links/:storeAccountId/:consignorId/shipments', async (req, reply) => {
+      const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      const body = ShipBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'A package needs a store and what is in it.' });
+      const { products } = stockState(db, row.accountId);
+      const lines = body.data.lines
+        .map((l) => ({ ...l, product: products.get(l.productId) }))
+        .filter((l) => l.product?.consignorId === row.id)
+        .map(({ product, ...l }) => ({ ...l, title: l.variantId ? `${product!.title} · ${product!.variants.find((v) => v.id === l.variantId)?.name ?? ''}` : product!.title }));
+      if (!lines.length) return reply.code(400).send({ error: 'invalid_request', message: 'None of those are your items in this store.' });
+      const shipment: Shipment = { id: randomUUID(), consignorId: row.id, storeId: body.data.storeId, status: 'sent', lines, received: null, note: body.data.note, carrier: body.data.carrier, tracking: body.data.tracking, sentAt: Date.now(), receivedAt: null };
+      saveShipment(db, row.accountId, shipment);
+      const name = parseDoc(row.doc).name;
+      const title = `${name} sent a package: ${plural(units(lines), 'item')}`;
+      ctx.notify(row.accountId, { kind: 'stock', title, body: `For ${storeName(row.accountId, shipment.storeId)}${shipment.tracking ? ` · ${shipment.carrier} ${shipment.tracking}`.trim() : ''}. Confirm it when it arrives.`, link: '/m/consignment/items', minRole: 'admin' });
+      const to = accountEmail(db, row.accountId);
+      if (to && ctx.mail.enabled) {
+        const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
+        await ctx.mail.send({
+          to,
+          subject: title,
+          text: [`${title}, for ${storeName(row.accountId, shipment.storeId)}.`, '', ...lines.map((l) => `  ${l.qty} × ${l.title}`), ...(shipment.tracking ? ['', `Tracking: ${shipment.carrier} ${shipment.tracking}`.trim()] : []), ...(shipment.note ? ['', shipment.note] : []), '', 'Confirm it in Zollify under Consignment → Items when it arrives - the counts go straight onto the shelf.'].join('\n'),
+          ...(replyTo ? { replyTo } : {}),
+        });
+      }
+      return reply.code(201).send({ shipment });
+    });
+
+    app.delete<{ Params: { storeAccountId: string; consignorId: string; id: string } }>('/links/:storeAccountId/:consignorId/shipments/:id', async (req, reply) => {
+      const row = linkOf(req, req.params.storeAccountId, req.params.consignorId);
+      if (!row) return reply.code(404).send({ error: 'not_found' });
+      const s = shipmentsOf(db, row.accountId, row.id).find((x) => x.id === req.params.id);
+      if (!s) return reply.code(404).send({ error: 'not_found' });
+      if (s.status !== 'sent') return reply.code(409).send({ error: 'received', message: 'The store already confirmed this package.' });
+      saveShipment(db, row.accountId, { ...s, status: 'cancelled' });
+      return { ok: true };
+    });
+  }
 
   // ── The store's side ────────────────────────────────────────────────────
 
-  app.get('/shipments', async (req) => {
-    const who = ctx.identity(req);
-    return { shipments: shipmentsOf(db, who.accountId).slice(0, 100) };
-  });
+  if (side === 'store') {
+    app.get('/shipments', async (req) => {
+      const who = ctx.identity(req);
+      return { shipments: shipmentsOf(db, who.accountId).slice(0, 100) };
+    });
 
-  /**
-   * The package arrived. The store says what was actually in it (by default,
-   * what the artist listed) and that is added to the shelf; the artist hears
-   * what was counted, especially where it differs.
-   */
-  app.post<{ Params: { id: string } }>('/shipments/:id/receive', async (req, reply) => {
-    const who = ctx.identity(req);
-    const s = shipmentsOf(db, who.accountId).find((x) => x.id === req.params.id);
-    if (!s) return reply.code(404).send({ error: 'not_found' });
-    if (s.status !== 'sent') return reply.code(409).send({ error: 'not_open', message: s.status === 'received' ? 'Already received.' : 'The artist cancelled this package.' });
-    const body = ReceiveBody.safeParse(req.body ?? {});
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const counted = body.data.lines ?? s.lines.map(({ productId, variantId, qty }) => ({ productId, variantId, qty }));
-    const received = applyStock(ctx, who.accountId, s.consignorId, counted.filter((l) => l.qty > 0), 'add', s.storeId);
-    const done: Shipment = { ...s, status: 'received', received, receivedAt: Date.now() };
-    saveShipment(db, who.accountId, done);
-    logChange(db, who.accountId, { id: randomUUID(), consignorId: s.consignorId, kind: 'package', storeId: s.storeId, lines: received, at: Date.now() });
+    /**
+     * The package arrived. The store says what was actually in it (by default,
+     * what the artist listed) and that is added to the shelf; the artist hears
+     * what was counted, especially where it differs.
+     */
+    app.post<{ Params: { id: string } }>('/shipments/:id/receive', async (req, reply) => {
+      const who = ctx.identity(req);
+      const s = shipmentsOf(db, who.accountId).find((x) => x.id === req.params.id);
+      if (!s) return reply.code(404).send({ error: 'not_found' });
+      if (s.status !== 'sent') return reply.code(409).send({ error: 'not_open', message: s.status === 'received' ? 'Already received.' : 'The artist cancelled this package.' });
+      const body = ReceiveBody.safeParse(req.body ?? {});
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
+      const counted = body.data.lines ?? s.lines.map(({ productId, variantId, qty }) => ({ productId, variantId, qty }));
+      const received = applyStock(ctx, who.accountId, s.consignorId, counted.filter((l) => l.qty > 0), 'add', s.storeId);
+      const done: Shipment = { ...s, status: 'received', received, receivedAt: Date.now() };
+      saveShipment(db, who.accountId, done);
+      logChange(db, who.accountId, { id: randomUUID(), consignorId: s.consignorId, kind: 'package', storeId: s.storeId, lines: received, at: Date.now() });
 
-    // Tell the artist, naming any difference from what they listed.
-    const row = consignorRow(db, who.accountId, s.consignorId);
-    const artist = row?.linkedAccountId && accountName(db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
-    const got = new Map(received.map((l) => [key(l.productId, l.variantId), l.qty]));
-    const diffs = s.lines.filter((l) => (got.get(key(l.productId, l.variantId)) ?? 0) !== l.qty).map((l) => `${l.title}: sent ${l.qty}, counted ${got.get(key(l.productId, l.variantId)) ?? 0}`);
-    const shop = accountName(db, who.accountId) ?? 'The store';
-    const title = `${shop} received your package: ${plural(units(received), 'item')}`;
-    if (artist) ctx.notify(artist, { kind: 'stock', title, body: diffs.length ? diffs.join(' · ') : 'Everything as you listed it - now on the shelf.', link: '/m/consignment?tab=mine', minRole: 'admin' });
-    const to = (row && parseDoc(row.doc).email) || (artist ? accountEmail(db, artist) : null);
-    if (to && ctx.mail.enabled) {
-      const replyTo = accountEmail(db, who.accountId) ?? undefined;
-      await ctx.mail.send({ to, subject: title, text: [`${title}.`, '', ...(diffs.length ? ['What was counted differs from what you listed:', ...diffs.map((d) => `  ${d}`)] : ['Everything as you listed it - now on the shelf.'])].join('\n'), ...(replyTo ? { replyTo } : {}) });
-    }
-    return { shipment: done };
-  });
+      // Tell the artist, naming any difference from what they listed.
+      const row = consignorRow(db, who.accountId, s.consignorId);
+      const artist = row?.linkedAccountId && accountName(db, row.linkedAccountId) !== null ? row.linkedAccountId : null;
+      const got = new Map(received.map((l) => [key(l.productId, l.variantId), l.qty]));
+      const diffs = s.lines.filter((l) => (got.get(key(l.productId, l.variantId)) ?? 0) !== l.qty).map((l) => `${l.title}: sent ${l.qty}, counted ${got.get(key(l.productId, l.variantId)) ?? 0}`);
+      const shop = accountName(db, who.accountId) ?? 'The store';
+      const title = `${shop} received your package: ${plural(units(received), 'item')}`;
+      if (artist) ctx.notify(artist, { kind: 'stock', title, body: diffs.length ? diffs.join(' · ') : 'Everything as you listed it - now on the shelf.', link: '/m/consignment-artist', minRole: 'admin' });
+      const to = (row && parseDoc(row.doc).email) || (artist ? accountEmail(db, artist) : null);
+      if (to && ctx.mail.enabled) {
+        const replyTo = accountEmail(db, who.accountId) ?? undefined;
+        await ctx.mail.send({ to, subject: title, text: [`${title}.`, '', ...(diffs.length ? ['What was counted differs from what you listed:', ...diffs.map((d) => `  ${d}`)] : ['Everything as you listed it - now on the shelf.'])].join('\n'), ...(replyTo ? { replyTo } : {}) });
+      }
+      return { shipment: done };
+    });
+  }
 }

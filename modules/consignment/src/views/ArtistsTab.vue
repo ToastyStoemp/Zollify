@@ -2,7 +2,7 @@
 import { computed, reactive, ref } from 'vue';
 import type { Consignor } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { consignors, deleteConsignor, errorText, issueLinkCode, productsOf, saveConsignor, stores, unlinkConsignor } from '../api';
+import { consignors, deleteConsignor, errorText, issueLinkCode, productsOf, publicUrl, saveConsignor, stores, unlinkConsignor } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -129,7 +129,17 @@ async function link(c: Consignor): Promise<void> {
     const res = await issueLinkCode(c.id);
     code.value = { name: c.name, ...res };
   } catch (err) {
-    emit('error', errorText(err, 'Could not create a link code.'));
+    emit('error', errorText(err, 'Could not create an invite.'));
+  }
+}
+/** Opens Create account with the code filled in; someone with an account enters the code instead. */
+const signUpLink = (raw: string): string => publicUrl(`/#/login?invite=${encodeURIComponent(raw.replace(/-/g, ''))}`);
+async function copy(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    sdk().ui.toast('Copied.', { kind: 'success' });
+  } catch {
+    /* the text is on screen to copy by hand */
   }
 }
 async function unlink(c: Consignor): Promise<void> {
@@ -153,7 +163,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
     </div>
 
     <p v-if="!stores.length" class="warn">
-      You have no stores yet. Add one under Events → New store, then assign artists to it. Artists can also be sold at events without a store.
+      You have no stores yet. Add one under Stores → New store, then assign artists to it. Artists can also be sold at events without a store.
     </p>
     <p v-if="!list.length" class="empty">No artists yet.</p>
 
@@ -163,7 +173,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
           <strong>{{ c.name }}</strong>
           <span v-if="c.archived" class="pill">archived</span>
           <span v-else-if="c.linked" class="pill linked" :title="`Linked to the Zollify account ${c.linkedAccountName}`">linked</span>
-          <span v-else-if="c.linkPending" class="pill">code issued</span>
+          <span v-else-if="c.linkPending" class="pill">invited</span>
         </div>
         <p class="meta">{{ fmtPct(c.commissionPct) }} commission · {{ productsOf(c.id).length }} item{{ productsOf(c.id).length === 1 ? '' : 's' }}</p>
         <p class="meta"><Icon name="store" :size="13" /> {{ storesLine(c) }}</p>
@@ -171,17 +181,19 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
         <div class="actions">
           <button type="button" @click="emit('items', c.id)"><Icon name="tag" :size="14" /> Items</button>
           <button type="button" @click="openEdit(c)">Edit</button>
-          <button v-if="!c.linked" type="button" @click="link(c)"><Icon name="send" :size="14" /> Link code</button>
+          <button v-if="!c.linked" type="button" @click="link(c)"><Icon name="send" :size="14" /> {{ c.linkPending ? 'New invite' : 'Invite' }}</button>
           <button v-else type="button" class="quiet" @click="unlink(c)">Unlink</button>
         </div>
       </li>
     </ul>
 
-    <ModalShell v-if="code" title="Link code" @close="code = null">
+    <ModalShell v-if="code" :title="`Invite ${code.name}`" @close="code = null">
       <div class="form">
-        <p>Give this code to {{ code.name }}. They enter it under <strong>Consignment → Where I consign</strong> in their own Zollify account - the same one they use for their events.</p>
+        <p><strong>New to Zollify?</strong> Send them this link. It creates their account with “My stores” switched on, where they accept or decline your invite.</p>
+        <div class="copy-row"><input :value="signUpLink(code.code)" type="text" readonly aria-label="Sign-up link" @focus="($event.target as HTMLInputElement).select()" /><button type="button" @click="copy(signUpLink(code.code))">Copy</button></div>
+        <p><strong>Already on Zollify?</strong> They enter this code under <strong>Stores → My stores</strong> in the account they use for their events.</p>
         <p class="code">{{ code.code }}</p>
-        <p class="hint">Works once, until {{ fmtDate(code.expiresAt) }}. Once linked, they see their items, sales and payouts at your stores, and you can import items from their catalogue.</p>
+        <p class="hint">Works once, until {{ fmtDate(code.expiresAt) }}. Once they accept, they see their items, sales and payouts at your stores, can share items with you, and you can import from their catalogue.</p>
       </div>
       <template #footer><div class="footer"><button type="button" class="primary" @click="code = null">Done</button></div></template>
     </ModalShell>
@@ -195,7 +207,7 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
 
         <fieldset>
           <legend>Stores that carry this artist</legend>
-          <p v-if="!stores.length" class="hint">No stores yet - add one under Events.</p>
+          <p v-if="!stores.length" class="hint">No stores yet - add one under Stores.</p>
           <div v-for="s in stores" :key="s.id" class="store-row">
             <label class="check"><input v-model="form.storeIds" type="checkbox" :value="s.id" /> {{ s.name }}<span v-if="s.venue?.city" class="hint"> · {{ s.venue.city }}</span></label>
             <input
@@ -256,4 +268,6 @@ legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .code { font-size: 1.6rem; font-weight: 700; letter-spacing: .12em; text-align: center; font-variant-numeric: tabular-nums; margin: .3rem 0; }
 .footer { display: flex; align-items: center; gap: .5rem; }
 .grow { flex: 1; }
+.copy-row { display: flex; gap: .4rem; }
+.copy-row input { flex: 1; min-width: 0; font-size: .8rem; }
 </style>

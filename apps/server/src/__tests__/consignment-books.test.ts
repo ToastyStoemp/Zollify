@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled, type MailMessage } from '@zollify/server-core';
 import { localDay, reportPeriod, type ArtistConsignment, type ConsignmentFee, type ReportPeriod, type StoreReport } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 import { sendClosedReports } from '../modules/consignment-books';
 
 /**
@@ -25,7 +25,7 @@ let artist: string;
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 let n = 0;
 const push = (t: string, ops: { type: string; payload: unknown }[]) =>
   app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-books-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
@@ -41,8 +41,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -57,12 +57,16 @@ beforeAll(async () => {
   const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'ana@example.test', password: PASSWORD, inviteCode: invite.json().code } });
   artist = reg.json().accessToken;
   setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist', true);
 
   // Ana sold a 100 print today, by card, at 40% commission: she is owed 60.
   await push(store, [
     { type: 'event.upsert', payload: { id: 'zh', name: 'Zurich shop', kind: 'store', venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } },
     { type: 'product.upsert', payload: { id: 'p1', title: 'Fox print', forSale: true, unlisted: false, price: 100, variants: [], consignorId: 'ana', sortOrder: 0, updatedAt: 1 } },
     { type: 'tx.create', payload: { id: 't1', eventId: 'zh', deviceId: 'dev', timestamp: Date.now(), method: 'card', payments: [{ kind: 'card', amount: 100 }], items: [{ pid: 'p1', vid: null, title: 'Fox print', qty: 1, unitPrice: 100, lineTotal: 100, consignorId: 'ana' }], discounts: [], total: 100, currency: 'CHF' } },
+    // The same account also sells at a fair of its own: not the store's report.
+    { type: 'event.upsert', payload: { id: 'fair', name: 'Spring fair', venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } },
+    { type: 'tx.create', payload: { id: 't2', eventId: 'fair', deviceId: 'dev', timestamp: Date.now(), method: 'cash', payments: [{ kind: 'cash', amount: 500 }], items: [{ pid: 'own', vid: null, title: 'Own mug', qty: 1, unitPrice: 500, lineTotal: 500 }], discounts: [], total: 500, currency: 'CHF' } },
   ]);
   await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 40, storeIds: ['zh'] });
   const { code } = (await call(store, 'POST', '/consignors/ana/link-code')).json();

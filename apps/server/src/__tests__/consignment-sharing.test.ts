@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, reduceProducts, setEnabled } from '@zollify/server-core';
 import { shortBarcode, type AppNotification, type Product, type ShareableItem } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * Sharing crosses accounts in the other direction: the artist decides, and
@@ -24,7 +24,7 @@ let artist: string;
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 let n = 0;
 const push = (t: string, ops: { type: string; payload: unknown }[]) =>
   app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-share-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
@@ -45,8 +45,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -62,6 +62,7 @@ beforeAll(async () => {
   const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'ana@example.test', password: PASSWORD, inviteCode: invite.json().code, accountName: 'Ana Prints' } });
   artist = reg.json().accessToken;
   setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist', true);
   await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(artist), payload: { defaultCurrency: 'EUR' } });
 
   await push(artist, [
@@ -72,6 +73,8 @@ beforeAll(async () => {
   await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 40 });
   const { code } = (await call(store, 'POST', '/consignors/ana/link-code')).json();
   await call(artist, 'POST', '/links', { code });
+  // The store heard about the link; start each test from a read bell.
+  await app.inject({ method: 'POST', url: '/api/notifications/read', headers: auth(store), payload: {} });
 });
 
 afterAll(async () => {
@@ -99,9 +102,20 @@ describe('sharing items with a store', () => {
     expect(p).not.toHaveProperty('cost');
     const img = (await storeOps()).find((o) => o.type === 'image.meta');
     expect(img?.payload).toMatchObject({ imageId: 'img1', thumbB64: 'AAAA' });
-    expect(img?.deviceId).toBe('server:consignment');
-    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[];
-    expect(bell[0]?.title).toBe('Ana shared 1 item');
+    expect(img?.deviceId).toBe('server:consignment-artist');
+    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json();
+    expect((bell.notifications as AppNotification[])[0]).toMatchObject({ title: 'Ana updated the items they share', level: 'low' });
+    // Shared news needs nothing from the store: listed, not counted on the bell.
+    expect(bell.unread).toBe(0);
+  });
+
+  it('keeps one note per artist however often they share', async () => {
+    const before = ((await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[]).length;
+    await call(artist, 'PUT', sharesPath(), { productIds: ['a1'], shared: false });
+    await call(artist, 'PUT', sharesPath(), { productIds: ['a1'], shared: true });
+    const after = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications as AppNotification[];
+    expect(after.length).toBe(before);
+    expect(after[0]?.body).toMatch(/^1 item shared/);
   });
 
   it('prices it in the store currency once the store sets a rate', async () => {
@@ -128,7 +142,8 @@ describe('sharing items with a store', () => {
     const res = await call(store, 'POST', '/scan', { code });
     expect(res.json()).toMatchObject({ productId: 'a2', variantId: 'b', consignorName: 'Ana', autoShared: true, priced: true });
     const tote2 = (await storeProducts()).get('a2')!;
-    expect(tote2.variants.map((v) => [v.id, v.price])).toEqual([['n', undefined], ['b', 25.5]]);
+    // Only what was scanned: that variant, not the whole tote.
+    expect(tote2.variants.map((v) => [v.id, v.price])).toEqual([['b', 25.5]]);
     expect(tote2.price).toBe(24);
     const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(artist) })).json().notifications as AppNotification[];
     expect(bell[0]?.title).toMatch(/Heron tote was scanned at .* and is now shared/);
@@ -137,6 +152,26 @@ describe('sharing items with a store', () => {
 
     expect((await call(store, 'POST', '/scan', { code: 'NOPE' })).statusCode).toBe(404);
     expect((await call(store, 'POST', '/scan', { code: 'fox-a4' })).json()).toMatchObject({ productId: 'a1', autoShared: false });
+  });
+
+  it('shares single variants, and stopping one keeps the rest', async () => {
+    // Add the other variant to the scanned one, in one edit: the whole tote now.
+    await call(artist, 'PUT', sharesPath(), { share: ['a2:n'], unshare: [] });
+    expect((await storeProducts()).get('a2')!.variants.map((v) => v.id)).toEqual(['n', 'b']);
+    let mine = ((await call(artist, 'GET', sharesPath())).json().items as ShareableItem[]).find((i) => i.productId === 'a2')!;
+    expect(mine.variants.map((v) => [v.id, v.shared])).toEqual([['n', true], ['b', true]]);
+    // Stop one variant of a wholly shared product: the other stays on the till.
+    await call(artist, 'PUT', sharesPath(), { share: [], unshare: ['a2:b'] });
+    expect((await storeProducts()).get('a2')!.variants.map((v) => v.id)).toEqual(['n']);
+    mine = ((await call(artist, 'GET', sharesPath())).json().items as ShareableItem[]).find((i) => i.productId === 'a2')!;
+    expect(mine).toMatchObject({ shared: true });
+    expect(mine.variants.map((v) => [v.id, v.shared])).toEqual([['n', true], ['b', false]]);
+    // Stopping the last one takes the product off.
+    await call(artist, 'PUT', sharesPath(), { unshare: ['a2:n'] });
+    expect((await storeProducts()).get('a2')?.deletedAt).toBeTruthy();
+    // Someone else's items cannot be slipped in by key.
+    expect((await call(artist, 'PUT', sharesPath(), { share: ['not-mine:x'] })).statusCode).toBe(200);
+    expect((await storeProducts()).has('not-mine')).toBe(false);
   });
 
   it('unsharing takes it off the store till', async () => {

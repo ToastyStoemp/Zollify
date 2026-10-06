@@ -134,7 +134,7 @@ export {
 } from './inventory';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
-export { notifications, unreadNotifications, loadNotifications, markNotificationsRead } from './notifications';
+export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead } from './notifications';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting } from './synced-settings';

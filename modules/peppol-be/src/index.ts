@@ -10,7 +10,7 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'peppol-be',
-  version: '0.1.0',
+  version: '0.1.1',
   sdk: '^0.1.0',
   title: 'E-invoices for Belgium (Peppol)',
   description: 'Issue Belgian B2B invoices and credit notes in Peppol BIS 3.0, send them through your access point or download the UBL.',
@@ -19,7 +19,7 @@ export default defineModule({
   setup(sdk: Sdk) {
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'E-invoices', component: () => import('./views/InvoicesView.vue'), minRole: 'admin' });
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'E-invoices (Peppol)', icon: 'file-text', order: 60, minRole: 'admin' });
+    sdk.nav.add({ routeName: 'index', group: 'books', label: 'E-invoices (Peppol)', icon: 'file-text', order: 220, minRole: 'admin' });
     sdk.settings.panel({ id: 'peppol', label: 'E-invoices (Peppol)', component: () => import('./views/PeppolSettings.vue'), minRole: 'admin', order: 120 });
   },
 

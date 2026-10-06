@@ -3,9 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { buildGateway, setEnabled } from '@zollify/server-core';
+import { buildGateway, isEnabled, setEnabled } from '@zollify/server-core';
 import type { ArtistConsignment } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * Consignment crosses accounts, so what is worth proving is the boundary: a
@@ -35,11 +35,12 @@ async function newAccount(email: string, accountName: string): Promise<string> {
   });
   expect(res.statusCode).toBe(200);
   setEnabled(app.zollify.db, res.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, res.json().user.accountId, 'consignment-artist', true);
   return res.json().accessToken;
 }
 
 const call = (token: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(token), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(token), ...(payload ? { payload } : {}) });
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-consign-'));
@@ -51,8 +52,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -190,5 +191,45 @@ describe('consignment', () => {
     expect((await call(artist, 'DELETE', `/links/${owner}/ana`)).statusCode).toBe(200);
     expect((await call(artist, 'GET', '/links')).json().links).toEqual([]);
     expect((await call(store, 'GET', '/consignors/ana/catalog')).statusCode).toBe(409);
+  });
+
+  it('an invite creates the artist an account, which accepts or declines', async () => {
+    const owner = (await app.inject({ method: 'GET', url: '/api/auth/me', headers: auth(store) })).json().user.accountId as string;
+    expect((await call(store, 'PUT', '/consignors/cleo', { name: 'Cleo', commissionPct: 35, storeIds: ['zurich'] })).statusCode).toBe(200);
+    const { code } = (await call(store, 'POST', '/consignors/cleo/link-code')).json();
+    expect(code).toMatch(/^[A-Z2-9]{4}(-[A-Z2-9]{4}){3}$/);
+    // Someone new signs up with it - no other invite needed.
+    const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'cleo@example.test', password: PASSWORD, inviteCode: code, accountName: 'Cleo Ceramics' } });
+    expect(reg.statusCode).toBe(200);
+    const cleo = reg.json().accessToken as string;
+    // "My stores" is on, with the invite waiting and the bell saying so.
+    expect(isEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist')).toBe(true);
+    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(cleo) })).json();
+    expect(bell.notifications[0]).toMatchObject({ level: 'urgent', link: '/m/consignment-artist' });
+    const offers = (await call(cleo, 'GET', '/links/offers')).json().offers;
+    expect(offers).toEqual([expect.objectContaining({ storeAccountId: owner, consignorId: 'cleo', consignorName: 'Cleo', commissionPct: 35 })]);
+    // Nothing is shared before the answer.
+    expect((await call(cleo, 'GET', '/links')).json().links).toEqual([]);
+    // The code is spent: it neither creates a second account nor links another one.
+    expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'x2@example.test', password: PASSWORD, inviteCode: code } })).statusCode).toBe(403);
+    expect((await call(stranger, 'POST', '/links', { code })).statusCode).toBe(404);
+    // Only the invited account can answer.
+    expect((await call(stranger, 'POST', `/links/offers/${owner}/cleo`, { accept: true })).statusCode).toBe(404);
+
+    expect((await call(cleo, 'POST', `/links/offers/${owner}/cleo`, { accept: true })).statusCode).toBe(200);
+    expect((await call(cleo, 'GET', '/links')).json().links).toEqual([expect.objectContaining({ consignorId: 'cleo' })]);
+    expect((await call(store, 'GET', '/consignors')).json().consignors.find((c: { id: string }) => c.id === 'cleo')).toMatchObject({ linked: true, linkedAccountName: 'Cleo Ceramics' });
+  });
+
+  it('a declined invite links nothing and tells the store', async () => {
+    const owner = (await app.inject({ method: 'GET', url: '/api/auth/me', headers: auth(store) })).json().user.accountId as string;
+    expect((await call(store, 'PUT', '/consignors/dan', { name: 'Dan', commissionPct: 30, storeIds: ['zurich'] })).statusCode).toBe(200);
+    const { code } = (await call(store, 'POST', '/consignors/dan/link-code')).json();
+    const dan = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'dan@example.test', password: PASSWORD, inviteCode: code } })).json().accessToken as string;
+    expect((await call(dan, 'POST', `/links/offers/${owner}/dan`, { accept: false })).statusCode).toBe(200);
+    expect((await call(dan, 'GET', '/links/offers')).json().offers).toEqual([]);
+    expect((await call(dan, 'GET', '/links')).json().links).toEqual([]);
+    const bell = (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth(store) })).json().notifications;
+    expect(bell[0]).toMatchObject({ title: 'Dan declined your invite' });
   });
 });

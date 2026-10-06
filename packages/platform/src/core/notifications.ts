@@ -13,7 +13,12 @@ import { createShellUi } from '../shell-ui';
  */
 
 export const notifications = ref<AppNotification[]>([]);
-export const unreadNotifications = computed(() => notifications.value.filter((n) => n.readAt == null).length);
+/** What the bell counts: unread notes that ask for attention. Low-level news (items shared) is listed, not counted. */
+export const unreadNotifications = computed(() => notifications.value.filter((n) => n.readAt == null && n.level !== 'low').length);
+/** Unread notes that need an answer soon (a setup to confirm): the bell turns red for these. */
+export const urgentNotifications = computed(() => notifications.value.filter((n) => n.readAt == null && n.level === 'urgent').length);
+/** Anything unread at all, low-level news included. */
+export const anyUnreadNotifications = computed(() => notifications.value.some((n) => n.readAt == null));
 
 let loading: Promise<void> | null = null;
 
@@ -24,9 +29,10 @@ export function loadNotifications(announce = false): Promise<void> {
     try {
       const known = new Set(notifications.value.map((n) => n.id));
       const res = (await authFetch('/notifications')) as { notifications: AppNotification[] };
-      const fresh = res.notifications.filter((n) => !known.has(n.id) && n.readAt == null);
+      // Low-level news never pops up; it waits in the list.
+      const fresh = res.notifications.filter((n) => !known.has(n.id) && n.readAt == null && n.level !== 'low');
       notifications.value = res.notifications;
-      if (announce) for (const n of fresh.slice(0, 3)) createShellUi('core').toast(n.title, { kind: 'info', timeoutMs: 6000 });
+      if (announce) for (const n of fresh.slice(0, 3)) createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
     } catch {
       /* offline: the bell keeps what it had */
     } finally {

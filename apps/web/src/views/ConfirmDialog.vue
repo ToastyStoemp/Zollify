@@ -31,9 +31,9 @@ function onKey(event: KeyboardEvent): void {
       <h2 id="confirm-title">{{ pendingConfirm.current.title }}</h2>
       <p>{{ pendingConfirm.current.message }}</p>
       <div class="actions">
-        <button type="button" @click="pendingConfirm.current.resolve(false)">Cancel</button>
+        <button type="button" @click="pendingConfirm.current.resolve(false)">{{ pendingConfirm.current.cancelLabel }}</button>
         <button ref="confirmButton" type="button" class="primary" @click="pendingConfirm.current.resolve(true)">
-          Confirm
+          {{ pendingConfirm.current.confirmLabel }}
         </button>
       </div>
     </div>

@@ -254,7 +254,7 @@ async function exportSignups(): Promise<void> {
 
 <template>
   <div class="tab">
-    <p v-if="!stores.length" class="empty">Add a store under Events → New store to plan what happens in it.</p>
+    <p v-if="!stores.length" class="empty">Add a store under Stores → New store to plan what happens in it.</p>
     <p v-else-if="!data" class="hint">Loading…</p>
     <template v-else>
       <section class="link">

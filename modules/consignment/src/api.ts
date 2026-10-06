@@ -8,8 +8,6 @@ import {
   type Workshop,
   type WorkshopInput,
   type ArtistConsignment,
-  type ArtistDiscount,
-  type ArtistDiscountInput,
   type BooksSettings,
   type ConsignmentFee,
   type FeeInput,
@@ -139,22 +137,6 @@ export const loadReports = (): Promise<{ settings: BooksSettings; periods: Repor
 export const loadReport = (from: string): Promise<{ report: StoreReport; venues: Record<string, string> }> => sdk().http.get(`reports/${encodeURIComponent(from)}`);
 export const payReport = (from: string, date: string, consignorIds?: string[]): Promise<{ payouts: { consignorId: string; amount: number; currency: string }[] }> =>
   sdk().http.post(`reports/${encodeURIComponent(from)}/payouts`, { date, ...(consignorIds ? { consignorIds } : {}) });
-export interface ArtistDiscounts {
-  allowed: boolean;
-  maxPct: number;
-  discounts: ArtistDiscount[];
-  items: { productId: string; title: string }[];
-  stores: { id: string; name: string }[];
-}
-const discountsPath = (storeAccountId: string, consignorId: string): string => `links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/discounts`;
-export const loadArtistDiscounts = (storeAccountId: string, consignorId: string): Promise<ArtistDiscounts> => sdk().http.get(`${discountsPath(storeAccountId, consignorId)}`);
-export const saveArtistDiscount = (storeAccountId: string, consignorId: string, id: string, input: ArtistDiscountInput): Promise<{ discount: ArtistDiscount }> =>
-  sdk().http.put(`${discountsPath(storeAccountId, consignorId)}/${encodeURIComponent(id)}`, input);
-export const endArtistDiscount = (storeAccountId: string, consignorId: string, id: string): Promise<unknown> =>
-  sdk().http.del(`${discountsPath(storeAccountId, consignorId)}/${encodeURIComponent(id)}`);
-export const disputeFee = (storeAccountId: string, consignorId: string, feeId: string, note: string): Promise<{ fee: ConsignmentFee }> =>
-  sdk().http.post(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/fees/${encodeURIComponent(feeId)}/dispute`, { note });
-
 // ── Planner ────────────────────────────────────────────────────────────────
 
 export interface Planner {
@@ -273,20 +255,6 @@ export function publicUrl(path: string): string {
   }
 }
 
-// ── The artist's side ──────────────────────────────────────────────────────
-
-export const myLinks = async (): Promise<ArtistConsignment[]> => (await sdk().http.get<{ links: ArtistConsignment[] }>('links')).links;
-export const acceptCode = (code: string): Promise<{ storeAccountName: string; consignorName: string }> => sdk().http.post('links', { code });
-export interface Shares {
-  artistCurrency: string;
-  storeCurrency: string;
-  items: ShareableItem[];
-}
-export const loadShares = (storeAccountId: string, consignorId: string): Promise<Shares> =>
-  sdk().http.get(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/shares`);
-export const setShares = (storeAccountId: string, consignorId: string, productIds: string[], shared: boolean): Promise<{ items: ShareableItem[] }> =>
-  sdk().http.put(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/shares`, { productIds, shared });
-
 export interface Pricing {
   artistCurrency: string | null;
   storeCurrency: string;
@@ -304,24 +272,8 @@ export interface StockLineInput {
   qty: number;
 }
 export type Shipment = ArtistConsignment['shipments'][number] & { consignorId: string };
-const linkPath = (storeAccountId: string, consignorId: string, rest: string): string =>
-  `links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}/${rest}`;
-export const restock = (storeAccountId: string, consignorId: string, body: { lines: StockLineInput[]; mode: 'add' | 'set'; storeId: string | null }): Promise<unknown> =>
-  sdk().http.post(linkPath(storeAccountId, consignorId, 'stock'), body);
-export const sendShipment = (
-  storeAccountId: string,
-  consignorId: string,
-  body: { storeId: string; lines: StockLineInput[]; note: string; carrier: string; tracking: string },
-): Promise<unknown> => sdk().http.post(linkPath(storeAccountId, consignorId, 'shipments'), body);
-export const cancelShipment = (storeAccountId: string, consignorId: string, id: string): Promise<unknown> =>
-  sdk().http.del(linkPath(storeAccountId, consignorId, `shipments/${encodeURIComponent(id)}`));
 export const loadShipments = async (): Promise<Shipment[]> => (await sdk().http.get<{ shipments: Shipment[] }>('shipments')).shipments;
 export const receiveShipment = (id: string, lines: StockLineInput[]): Promise<unknown> => sdk().http.post(`shipments/${encodeURIComponent(id)}/receive`, { lines });
-
-export const respondToSetup = (storeAccountId: string, consignorId: string, setupId: string, status: 'confirmed' | 'declined', note = ''): Promise<{ setup: SetupMoment }> =>
-  sdk().http.post(`links/${id(storeAccountId)}/${id(consignorId)}/setups/${id(setupId)}/respond`, { status, note });
-export const leaveStore = (storeAccountId: string, consignorId: string): Promise<unknown> =>
-  sdk().http.del(`links/${encodeURIComponent(storeAccountId)}/${encodeURIComponent(consignorId)}`);
 
 // ── Catalogue edits ────────────────────────────────────────────────────────
 

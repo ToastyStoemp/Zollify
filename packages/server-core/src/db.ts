@@ -237,6 +237,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_event_files_event ON event_files(accountId, eventId);
   `,
+  // v15 - notification levels (a setup to answer outranks an item shared),
+  // and a group key so a burst of the same news is one note, not twenty.
+  `
+  ALTER TABLE notifications ADD COLUMN level TEXT NOT NULL DEFAULT 'normal';
+  ALTER TABLE notifications ADD COLUMN groupKey TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

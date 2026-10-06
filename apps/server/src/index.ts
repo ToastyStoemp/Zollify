@@ -9,7 +9,7 @@ import { publicEventsServerModule } from './modules/public-events';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
-import { consignmentServerModule } from './modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
 import { peppolServerModule } from './modules/peppol-be';
 
 loadDotEnv();
@@ -72,6 +72,7 @@ async function main(): Promise<void> {
     shopifyServerModule(jwtSecret),
     receiptsServerModule,
     consignmentServerModule,
+    consignmentArtistServerModule,
     peppolServerModule(jwtSecret),
   ];
 

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   ArtistDetailsSchema,
   VatProfileSchema,
+  SellsAtSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
   RegisterRequestSchema,
@@ -142,6 +143,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
       staffSeesTotals: parsed.staffSeesTotals === true,
+      ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
     };
   } catch {
     return emptyProfile();
@@ -258,7 +260,12 @@ export async function seedOwner(db: Database.Database): Promise<void> {
   );
 }
 
-export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string): void {
+export interface AuthHooks {
+  /** A new account was created with an invite code (not on joining an existing one). */
+  accountCreated?(e: { accountId: string; userId: string; inviteCode: string }): void;
+}
+
+export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string, hooks: AuthHooks = {}): void {
   const box = makeSecretBox(jwtSecret); // encrypts TOTP secrets at rest
   const requireCaptcha = process.env.REQUIRE_CAPTCHA !== '0';
   const has2fa = (u: UserRow): boolean => !!u.totpEnabled;
@@ -386,6 +393,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     }
 
     const user: UserRow = { id: userId, accountId: accountId!, email: emailLc, passwordHash, role };
+    if (invite && !invite.accountId) {
+      try {
+        hooks.accountCreated?.({ accountId: accountId!, userId, inviteCode: invite.code });
+      } catch (err) {
+        req.log.error({ err }, 'setting up a new account from its invite failed');
+      }
+    }
     bumpMetric(db, accountId!, 'logins');
     const b = (req.body ?? {}) as { flavor?: string };
     return issueTokens(app, db, user, {

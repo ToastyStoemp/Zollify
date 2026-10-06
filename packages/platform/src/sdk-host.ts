@@ -241,6 +241,13 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
 
+    calendar: {
+      source(source) {
+        guard();
+        services.contributions.addCalendarSource(moduleId, source);
+      },
+    },
+
     events: {
       on(name, handler) {
         guard();

@@ -5,6 +5,7 @@ import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
   currentAccount,
   getDeviceAccount,
+  visibleEvents,
   loadNotifications,
   lockTill,
   tillLocked,
@@ -14,6 +15,8 @@ import {
   pendingCount,
   realtimeConnected,
   unreadNotifications,
+  urgentNotifications,
+  anyUnreadNotifications,
   syncNow,
   syncProgress,
   syncState,
@@ -24,7 +27,7 @@ import { booted, contributions, events, signOutAndReload } from './boot';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import LockScreen from './views/LockScreen.vue';
 import { Icon, ModalShell } from '@zollify/ui';
-import type { AppNotification } from '@zollify/shared';
+import { isStore, sellsAt, type AppNotification } from '@zollify/shared';
 
 const account = currentAccount;
 const route = useRoute();
@@ -52,6 +55,7 @@ const SECTIONS: { id: Group; icon: string }[] = [
   { id: 'selling', icon: 'shopping-cart' },
   { id: 'stock', icon: 'package' },
   { id: 'events', icon: 'calendar' },
+  { id: 'stores', icon: 'store' },
   { id: 'books', icon: 'book' },
   { id: 'suppliers', icon: 'truck' },
   { id: 'addons', icon: 'puzzle' },
@@ -64,6 +68,8 @@ const coreNav: Entry[] = [
   { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
   { routeName: 'discounts', label: 'Discounts', icon: 'tag', group: 'stock', order: 30, minRole: 'admin' },
   { routeName: 'events', label: 'Events', icon: 'calendar', group: 'events', order: 10 },
+  // Heads the Stores section, above the consignment pages (200+).
+  { routeName: 'stores', label: 'Stores', icon: 'store', group: 'stores', order: 10 },
 ];
 
 interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
@@ -76,7 +82,11 @@ interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
 const allNav = computed<Entry[]>(() => {
   const acct = account.value;
   if (!acct) return [];
-  const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
+  // Events and Stores show for what the account runs (asked at setup).
+  const runs = sellsAt(acct.profile, visibleEvents.value.some((e) => isStore(e) && !e.deletedAt));
+  const mine = coreNav.filter(
+    (e) => (!e.minRole || roleAtLeast(acct.role, e.minRole)) && (e.routeName !== 'events' || runs.events) && (e.routeName !== 'stores' || runs.stores),
+  );
   const theirs: Entry[] = contributions.navFor(acct.role).map((item) => ({
     routeName: item.routeName,
     label: item.label,
@@ -244,7 +254,7 @@ const fmtAgo = (ms: number): string => {
                 :aria-label="unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'"
                 @click="openBell"
               >
-                <Icon name="bell" /><b v-if="unreadNotifications" class="count" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b>
+                <Icon name="bell" /><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b>
               </button>
               <button
                 type="button"
@@ -274,7 +284,7 @@ const fmtAgo = (ms: number): string => {
         <!-- Only shown when the bottom tab bar has no "More" tab of its own
              (few enough sections that they all fit as tabs) - otherwise this
              and the bottom tab would be two buttons opening the same drawer. -->
-        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i><b v-if="unreadNotifications" class="count" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b></button>
+        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b></button>
       </template>
     </aside>
 
@@ -319,8 +329,8 @@ const fmtAgo = (ms: number): string => {
       <p v-if="!notifications.length" class="bell-empty">Nothing yet. Notes from stores and artists you work with land here.</p>
       <ul v-else class="bell-list">
         <li v-for="n in notifications" :key="n.id">
-          <button type="button" :class="['bell-item', { unread: n.readAt == null }]" @click="openNotification(n)">
-            <strong>{{ n.title }}</strong>
+          <button type="button" :class="['bell-item', n.level, { unread: n.readAt == null }]" @click="openNotification(n)">
+            <strong><em v-if="n.level === 'urgent' && n.readAt == null" class="lvl">Needs an answer</em>{{ n.title }}</strong>
             <span v-if="n.body">{{ n.body }}</span>
             <small>{{ fmtAgo(n.createdAt) }}</small>
           </button>
@@ -328,7 +338,7 @@ const fmtAgo = (ms: number): string => {
       </ul>
       <template #footer>
         <div class="bell-foot">
-          <button type="button" class="quiet" :disabled="!unreadNotifications" @click="markNotificationsRead()">Mark all read</button>
+          <button type="button" class="quiet" :disabled="!anyUnreadNotifications" @click="markNotificationsRead()">Mark all read</button>
           <button type="button" class="primary" @click="bellOpen = false">Close</button>
         </div>
       </template>
@@ -394,7 +404,7 @@ nav { flex: 1; }
 /* Sync is an icon with a status dot; the words live in its tooltip and label. */
 .sync, .burger, .bell { position: relative; padding: .4rem .5rem; min-height: 0; }
 .bell .zfy-icon { color: var(--zfy-muted); }
-.count { position: absolute; top: .05rem; right: .05rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; border-radius: 999px; background: var(--zfy-danger); color: #fff; font-size: .62rem; line-height: 1rem; font-weight: 700; text-align: center; }
+.count { position: absolute; top: .05rem; right: .05rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; border-radius: 999px; background: var(--zfy-accent); color: #fff; font-size: .62rem; line-height: 1rem; font-weight: 700; text-align: center; }
 .bell-empty { margin: 0; color: var(--zfy-muted); font-size: .9rem; }
 .bell-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 .bell-item { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; text-align: left; padding: .6rem .75rem; border: 1px solid var(--zfy-line); border-radius: 10px; background: var(--zfy-surface); font-weight: 400; min-height: 0; }
@@ -402,6 +412,11 @@ nav { flex: 1; }
 .bell-item span { font-size: .84rem; color: var(--zfy-ink); }
 .bell-item small { font-size: .72rem; color: var(--zfy-muted); }
 .bell-item.unread { border-color: var(--zfy-accent); background: var(--zfy-accent-soft); }
+.count.urgent { background: var(--zfy-danger); }
+.bell-item.urgent.unread { border-color: var(--zfy-danger); background: var(--zfy-signal-soft); }
+.bell-item.low:not(.unread) { opacity: .75; }
+.bell-item.low.unread { border-color: var(--zfy-line); background: var(--zfy-surface); }
+.lvl { font-style: normal; font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-danger); margin-right: .4rem; }
 .bell-foot { display: flex; justify-content: space-between; gap: .5rem; }
 .sync .zfy-icon { color: var(--zfy-muted); }
 .sync.syncing .zfy-icon { animation: spin 1s linear infinite; }

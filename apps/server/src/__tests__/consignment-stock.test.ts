@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled, type MailMessage } from '@zollify/server-core';
 import type { ArtistConsignment, InventoryItem } from '@zollify/shared';
-import { consignmentServerModule } from '../modules/consignment';
+import { consignmentArtistServerModule, consignmentServerModule } from '../modules/consignment';
 
 /**
  * An artist's stock in a store changes from outside the store's own
@@ -25,7 +25,7 @@ let artist: string;
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 let n = 0;
 const push = (t: string, ops: { type: string; payload: unknown }[]) =>
   app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-stock-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
@@ -46,8 +46,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -62,6 +62,7 @@ beforeAll(async () => {
   const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'ana@example.test', password: PASSWORD, inviteCode: invite.json().code } });
   artist = reg.json().accessToken;
   setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist', true);
 
   // The store: a shop with Ana's print (counted at 4, sold 1 since) and its own mug.
   await push(store, [

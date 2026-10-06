@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { emptyProfile, type ArtistDetails, type SalesEvent } from '@zollify/shared';
+import { emptyProfile, isStore, sellsAt, type ArtistDetails, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
 import { loadEnabledModules, unloadModule } from '../boot';
 
 /**
- * First-run setup. Three short steps: who the booth is, which modules to
- * switch on, and where to go next. Every step can be skipped - skipping still
+ * First-run setup. Short steps: what the business runs (events, stores or
+ * both - it decides which pages it gets) and who it is, its next event or its
+ * store, which modules to switch on, and where to go next. Every step can be skipped - skipping still
  * marks setup as done so the wizard never nags, and it can be re-run from
  * Settings → Booth profile.
  */
@@ -45,6 +46,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   sourcing: { forWhom: 'Keep suppliers and draft reorders when stock runs low.', recommended: false },
   'shopify-sync': { forWhom: 'Only if you also run a Shopify store and want the catalogue matched against it.', recommended: false },
   migration: { forWhom: 'Only if you are moving from ZollTool. Import the backup once, then switch it off.', recommended: false },
+  consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
 };
 
 const router = useRouter();
@@ -55,7 +57,17 @@ const step = ref<1 | 2 | 3 | 4>(1);
 const busy = ref(false);
 const error = ref<string | null>(null);
 
-// ── Step 1: who ──────────────────────────────────────────────────────────────
+// ── Step 1: what you run, and who ────────────────────────────────────────────
+type Runs = 'events' | 'stores' | 'both';
+const RUNS: { id: Runs; title: string; text: string }[] = [
+  { id: 'events', title: 'Events', text: 'Fairs, markets, conventions - a booth for a few days at a time.' },
+  { id: 'stores', title: 'Stores', text: 'A shop, or several, open until you close them.' },
+  { id: 'both', title: 'Both', text: 'Events and stores.' },
+];
+const toRuns = (s: SellsAt): Runs => (s.events && s.stores ? 'both' : s.stores ? 'stores' : 'events');
+const runs = ref<Runs>(toRuns(sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e)))));
+const runsEvents = computed(() => runs.value !== 'stores');
+const runsStores = computed(() => runs.value !== 'events');
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
@@ -65,10 +77,17 @@ async function saveWho(): Promise<void> {
   error.value = null;
   try {
     await updateProfile({
+      sells: { events: runsEvents.value, stores: runsStores.value },
       artist: artist.value,
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
+    // A store selling artists' work wants Consignment; suggest it. Customs paperwork is for
+    // taking stock to fairs across a border, so a stores-only business starts without it.
+    const next = new Set(wanted.value);
+    if (runsStores.value && modules.value.some((m) => m.moduleId === 'consignment')) next.add('consignment');
+    if (!runsEvents.value) for (const id of ['customs-hub', 'customs-ch', 'customs-de']) next.delete(id);
+    wanted.value = next;
     step.value = 2;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save those details.';
@@ -80,28 +99,31 @@ async function saveWho(): Promise<void> {
 // ── Step 2: the next event ───────────────────────────────────────────────────
 // Everything happens inside an event: stock, sales and paperwork. Leave the
 // name empty to skip; events that already synced in make this step moot.
-const eventForm = ref({ name: '', dateStart: '', dateEnd: '' });
+const eventForm = ref({ name: '', dateStart: '', dateEnd: '', storeName: '', storeCity: '' });
+const step2Label = computed(() => (runs.value === 'both' ? 'Event & store' : runs.value === 'stores' ? 'Your store' : 'Next event'));
 async function saveEvent(): Promise<void> {
-  const name = eventForm.value.name.trim();
-  if (!name) {
+  const name = runsEvents.value ? eventForm.value.name.trim() : '';
+  const storeName = runsStores.value ? eventForm.value.storeName.trim() : '';
+  if (!name && !storeName) {
     step.value = 3;
     return;
   }
   busy.value = true;
   error.value = null;
   try {
-    const event: SalesEvent = {
-      id: crypto.randomUUID(),
-      name,
-      dateStart: eventForm.value.dateStart || undefined,
-      dateEnd: eventForm.value.dateEnd || undefined,
-      venue: { country: artist.value.countryOfOrigin || undefined },
-      currency: currency.value.trim().toUpperCase() || 'CHF',
-      status: 'active',
-      updatedAt: Date.now(),
-    };
-    await upsertSalesEvent(event);
-    await setActiveEvent(event.id);
+    const base = { venue: { country: artist.value.countryOfOrigin || undefined }, currency: currency.value.trim().toUpperCase() || 'CHF', status: 'active' as const, updatedAt: Date.now() };
+    let first: string | null = null;
+    if (storeName) {
+      const store: SalesEvent = { ...base, id: crypto.randomUUID(), name: storeName, kind: 'store', venue: { ...base.venue, city: eventForm.value.storeCity.trim() || undefined } };
+      await upsertSalesEvent(store);
+      first = store.id;
+    }
+    if (name) {
+      const event: SalesEvent = { ...base, id: crypto.randomUUID(), name, dateStart: eventForm.value.dateStart || undefined, dateEnd: eventForm.value.dateEnd || undefined };
+      await upsertSalesEvent(event);
+      first ??= event.id;
+    }
+    if (first) await setActiveEvent(first);
     step.value = 3;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create that event.';
@@ -134,7 +156,8 @@ onMounted(async () => {
 });
 
 function guideFor(mod: AvailableModule) {
-  return GUIDE[mod.moduleId] ?? { forWhom: mod.description ?? '', recommended: false };
+  const g = GUIDE[mod.moduleId] ?? { forWhom: mod.description ?? '', recommended: false };
+  return mod.moduleId === 'consignment' ? { ...g, recommended: runsStores.value } : g;
 }
 
 function toggleWanted(id: string): void {
@@ -191,7 +214,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <p class="brand">Zollify<span>.</span></p>
     <ol class="steps" aria-label="Setup progress">
       <li :class="{ current: step === 1, done: step > 1 }">Who you are</li>
-      <li :class="{ current: step === 2, done: step > 2 }">Next event</li>
+      <li :class="{ current: step === 2, done: step > 2 }">{{ step2Label }}</li>
       <li :class="{ current: step === 3, done: step > 3 }">Modules</li>
       <li :class="{ current: step === 4 }">Next steps</li>
     </ol>
@@ -207,6 +230,16 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         and you can change them any time under Settings.
       </p>
 
+      <fieldset class="runs">
+        <legend>What do you run?</legend>
+        <label v-for="r in RUNS" :key="r.id" :class="{ on: runs === r.id }">
+          <input v-model="runs" type="radio" name="runs" :value="r.id" />
+          <strong>{{ r.title }}</strong>
+          <span>{{ r.text }}</span>
+        </label>
+      </fieldset>
+      <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Booth profile.</p>
+
       <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
       <footer class="actions">
@@ -217,17 +250,21 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 
     <!-- ── 2 ─────────────────────────────────────────────────────────────── -->
     <form v-else-if="step === 2" class="card" @submit.prevent="saveEvent">
-      <h1>Your next event</h1>
-      <p class="lede">Everything in Zollify happens inside an event: stock, sales and customs documents. Name your next convention to get started, or leave it empty to skip.</p>
-      <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} event{{ visibleEvents.length === 1 ? '' : 's' }} already synced in - you can skip this.</p>
-      <div class="grid">
+      <h1>{{ runs === 'stores' ? 'Your store' : runs === 'both' ? 'Your next event and your store' : 'Your next event' }}</h1>
+      <p class="lede">Every sale is filed against an event or a store, with its stock and paperwork. Name {{ runs === 'stores' ? 'your store' : runs === 'both' ? 'them' : 'your next convention' }} to get started, or leave it empty to skip.</p>
+      <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} already synced in - you can skip this.</p>
+      <div v-if="runsEvents" class="grid">
         <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
         <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
       </div>
-      <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later under Events.</p>
+      <div v-if="runsStores" class="grid">
+        <label><span>Store name</span><input v-model="eventForm.storeName" type="text" placeholder="Atelier Zurich" /></label>
+        <label><span>City</span><input v-model="eventForm.storeCity" type="text" placeholder="Zurich" /></label>
+      </div>
+      <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later.</p>
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="step = 1">Back</button>
-        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : eventForm.name.trim() ? 'Create & continue' : 'Skip' }}</button>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : (runsEvents && eventForm.name.trim()) || (runsStores && eventForm.storeName.trim()) ? 'Create & continue' : 'Skip' }}</button>
       </footer>
     </form>
 
@@ -285,10 +322,15 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <span>One inventory for the whole booth. Events can claim a share of it.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'stock' })">Open Inventory</button>
         </li>
-        <li>
+        <li v-if="runsEvents">
           <strong>Create your first event</strong>
           <span>Every sale is filed against the active event, so make one before you sell.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'events' })">Open Events</button>
+        </li>
+        <li v-if="runsStores">
+          <strong>Add your stores</strong>
+          <span>Each shop sells through the till with its own stock on the shelves.</span>
+          <button type="button" :disabled="busy" @click="finish({ name: 'stores' })">Open Stores</button>
         </li>
         <li v-if="sellingOn">
           <strong>Pick how you take payment</strong>
@@ -316,6 +358,13 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .brand span { color: var(--zfy-accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
 .grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.runs { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; }
+.runs legend { font-weight: 600; margin-bottom: .4rem; font-size: .95rem; }
+.runs label { display: flex; flex-direction: column; gap: .2rem; padding: .7rem .8rem; border: 1px solid var(--zfy-line); border-radius: 10px; cursor: pointer; font-size: .85rem; }
+.runs label.on { border-color: var(--zfy-accent); background: var(--zfy-accent-soft); }
+.runs input { position: absolute; opacity: 0; pointer-events: none; }
+.runs label:focus-within { outline: 2px solid var(--zfy-accent); outline-offset: 2px; }
+.runs span { color: var(--zfy-muted); }
 .lede.small { font-size: .8rem; }
 .lede.ok { color: var(--zfy-accent-ink); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; gap: .5rem; counter-reset: step; }

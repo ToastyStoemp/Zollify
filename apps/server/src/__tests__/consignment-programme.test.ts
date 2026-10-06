@@ -8,7 +8,7 @@ import { buildGateway, setEnabled, type MailMessage } from '@zollify/server-core
 import { addMonths, type ArtistConsignment, type PublicProgramme, type Signup } from '@zollify/shared';
 
 process.env.SIGNUP_CAPTCHA_BITS = '10';
-const { consignmentServerModule } = await import('../modules/consignment');
+const { consignmentArtistServerModule, consignmentServerModule } = await import('../modules/consignment');
 
 /**
  * Sign-ups come from strangers on the open web, so the tests walk the public
@@ -29,7 +29,7 @@ const day = addMonths(new Date().toISOString().slice(0, 10), 1);
 
 const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
-  app.inject({ method, url: `/api/m/consignment${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
+  app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 
 function solve(nonce: string, difficulty: number): string {
   for (let i = 0; ; i++) {
@@ -63,8 +63,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [consignmentServerModule],
-    defaultModules: ['consignment'],
+    serverModules: [consignmentServerModule, consignmentArtistServerModule],
+    defaultModules: ['consignment', 'consignment-artist'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: true,
@@ -81,6 +81,7 @@ beforeAll(async () => {
   const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'ana@example.test', password: PASSWORD, inviteCode: invite.json().code } });
   artist = reg.json().accessToken;
   setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment', true);
+  setEnabled(app.zollify.db, reg.json().user.accountId, 'consignment-artist', true);
 
   await app.inject({
     method: 'POST',
@@ -207,6 +208,7 @@ describe('workshops', () => {
     setEnabled(app.zollify.db, storeAccountId, 'consignment', false);
     expect((await app.inject({ method: 'GET', url: `${publicPath}/data` })).statusCode).toBe(404);
     setEnabled(app.zollify.db, storeAccountId, 'consignment', true);
+  setEnabled(app.zollify.db, storeAccountId, 'consignment-artist', true);
   });
 
   it('serves the page and its script without data in them', async () => {

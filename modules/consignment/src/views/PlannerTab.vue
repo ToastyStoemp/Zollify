@@ -295,7 +295,7 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
 
 <template>
   <div class="tab">
-    <p v-if="!stores.length" class="empty">Add a store under Events → New store to plan its space.</p>
+    <p v-if="!stores.length" class="empty">Add a store under Stores → New store to plan its space.</p>
     <template v-else>
       <div class="bar">
         <label class="pick">

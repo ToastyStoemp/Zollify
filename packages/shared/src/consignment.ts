@@ -549,7 +549,9 @@ export interface ShareableItem {
   sku?: string;
   type?: string;
   price: number;
-  variants: { id: string; name: string; price: number }[];
+  /** `shared`: whether the store sells this variant (all of a shared product's, unless the artist picked some). */
+  variants: { id: string; name: string; price: number; shared: boolean }[];
+  /** Shared, in whole or for some variants. */
   shared: boolean;
   /** Shared because the store scanned its barcode, not because the artist chose it. */
   autoShared: boolean;

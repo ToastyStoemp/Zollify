@@ -32,6 +32,13 @@ import {
 
 const account = currentAccount;
 const router = useRouter();
+/**
+ * Events (fairs, markets, conventions - dated) and Stores (shops - open until
+ * closed) are separate pages on the same screen: an account sees the ones it
+ * runs (Settings → Booth profile → What you run).
+ */
+const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode: 'events' });
+const storesPage = computed(() => props.mode === 'stores');
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 /** Staff see takings only when the owner allows it (Settings → Team). */
 const showTotals = computed(() => seesSalesTotals(account.value));
@@ -49,6 +56,19 @@ const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '￿';
 const stores = computed(() =>
   visibleEvents.value.filter((e) => isStore(e)).sort((a, b) => Number(a.status === 'closed') - Number(b.status === 'closed') || a.name.localeCompare(b.name)),
 );
+/** What this page lists, in groups. */
+const groups = computed(() =>
+  storesPage.value
+    ? [
+        { label: '', list: stores.value.filter((e) => e.status !== 'closed') },
+        { label: 'Closed', list: stores.value.filter((e) => e.status === 'closed') },
+      ]
+    : [
+        { label: '', list: upcoming.value },
+        { label: 'Finished', list: finished.value },
+      ],
+);
+const listed = computed(() => groups.value.reduce((n, g) => n + g.list.length, 0));
 const upcoming = computed(() =>
   visibleEvents.value.filter((e) => !isStore(e) && e.status !== 'closed').sort((a, b) => dateKey(a).localeCompare(dateKey(b)) || a.name.localeCompare(b.name)),
 );
@@ -390,19 +410,20 @@ async function save(): Promise<void> {
 <template>
   <section class="events">
     <header>
-      <h1>Events</h1>
+      <h1>{{ storesPage ? 'Stores' : 'Events' }}</h1>
       <div v-if="canEdit" class="header-actions">
-        <button type="button" @click="openNew('store')"><Icon name="store" :size="16" /> New store</button>
-        <button type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
+        <button v-if="storesPage" type="button" class="primary" @click="openNew('store')"><Icon name="plus" :size="16" /> New store</button>
+        <button v-else type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
       </div>
     </header>
 
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
-    <p v-if="!visibleEvents.length" class="empty">No events yet. Create one to start selling - every sale is recorded against the active event. Running a shop? Add it as a store: it stays open with no end date.</p>
+    <p v-if="!listed && storesPage" class="empty">No stores yet. A store is open until you close it - no dates - and sells through the till like an event.</p>
+    <p v-else-if="!listed" class="empty">No events yet. Create one to start selling - every sale is recorded against the active event.</p>
 
-    <template v-for="group in [{ label: 'Stores', list: stores }, { label: stores.length ? 'Events' : '', list: upcoming }, { label: 'Finished', list: finished }]" :key="group.label">
+    <template v-for="group in groups" :key="group.label">
       <h2 v-if="group.label && group.list.length" class="group">{{ group.label }}</h2>
       <ul v-if="group.list.length" class="grid">
         <li v-for="e in group.list" :key="e.id" :class="['card', { active: e.id === activeEventId }]">

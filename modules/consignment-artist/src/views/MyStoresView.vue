@@ -7,27 +7,44 @@ import { Icon, ModalShell } from '@zollify/ui';
 import ShareItems from './ShareItems.vue';
 import StockDialog from './StockDialog.vue';
 import ArtistDiscounts from './ArtistDiscounts.vue';
-import { acceptCode, disputeFee, errorText, leaveStore, myLinks, respondToSetup, today } from '../api';
+import { acceptCode, answerOffer, disputeFee, errorText, leaveStore, loadOffers, myLinks, respondToSetup, today, type Offer } from '../api';
 import { sdk } from '../runtime';
 
 /**
- * The artist's side: stores that sell this account's work. The same account
- * keeps running its own events; linking only lets it see, read-only, what a
- * store owner records about its items there.
+ * My stores - the artist's side of consignment: stores that sell this
+ * account's work. The same account keeps running its own events; a store
+ * only sees what it sells, and the artist sees, read-only, what the store
+ * records about their items there. Invites from stores wait at the top
+ * for a yes or no.
  */
-const emit = defineEmits<{ error: [message: string | null] }>();
+const error = ref<string | null>(null);
+const emit = (_e: 'error', message: string | null): void => {
+  error.value = message;
+};
 
 const links = ref<ArtistConsignment[] | null>(null);
+const offers = ref<Offer[]>([]);
 const code = ref('');
 const busy = ref(false);
 async function refresh(): Promise<void> {
   try {
-    links.value = await myLinks();
+    [links.value, offers.value] = await Promise.all([myLinks(), loadOffers()]);
   } catch (err) {
     emit('error', errorText(err, 'Could not load your stores.'));
   }
 }
 onMounted(refresh);
+
+async function answerInvite(o: Offer, accept: boolean): Promise<void> {
+  emit('error', null);
+  try {
+    await answerOffer(o, accept);
+    sdk().ui.toast(accept ? `You now consign with ${o.storeAccountName}.` : `Declined - ${o.storeAccountName} has been told.`, { kind: 'success' });
+    await refresh();
+  } catch (err) {
+    emit('error', errorText(err, 'Could not send your answer.'));
+  }
+}
 
 async function link(): Promise<void> {
   if (!code.value.trim()) return;
@@ -124,17 +141,23 @@ function commissionLine(l: ArtistConsignment): string {
 
 <template>
   <div class="tab">
-    <form class="link" @submit.prevent="link">
-      <label>
-        <span>Consign with a store</span>
-        <input v-model="code" type="text" placeholder="Code from the store, e.g. 3F9A2-C71BE" autocomplete="off" autocapitalize="characters" />
-      </label>
-      <button type="submit" class="primary" :disabled="busy || !code.trim()"><Icon name="check" :size="14" /> Link</button>
-      <p class="hint">A store that sells your work can give you a code. Linking shows you your items, sales and payouts there, and lets the store import items from your catalogue. Your own events and sales are not shared.</p>
-    </form>
+    <h1>My stores</h1>
+    <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <article v-for="o in offers" :key="`${o.storeAccountId}:${o.consignorId}`" class="card offer">
+      <header>
+        <div>
+          <strong>{{ o.storeAccountName }} invites you to consign</strong>
+          <p class="hint">As “{{ o.consignorName }}” · {{ fmtPct(o.commissionPct) }} commission. Accepting shows you your items, sales and payouts there and lets them import items from your catalogue. Your own events and sales are not shared.</p>
+        </div>
+        <span class="grow" />
+        <button type="button" class="primary" @click="answerInvite(o, true)"><Icon name="check" :size="14" /> Accept</button>
+        <button type="button" @click="answerInvite(o, false)">Decline</button>
+      </header>
+    </article>
 
     <p v-if="!links" class="hint">Loading…</p>
-    <p v-else-if="!links.length" class="empty">You are not linked to any store yet.</p>
+    <p v-else-if="!links.length && !offers.length" class="empty">No store sells your work yet. When a store invites you, the invite shows up here.</p>
 
     <article v-for="l in links ?? []" :key="`${l.storeAccountId}:${l.consignorId}`" class="card">
       <header>
@@ -269,6 +292,18 @@ function commissionLine(l: ArtistConsignment): string {
         </details>
       </template>
     </article>
+
+    <details class="link-box">
+      <summary>Have a code from a store?</summary>
+      <form class="link" @submit.prevent="link">
+        <label>
+          <span>Code</span>
+          <input v-model="code" type="text" placeholder="e.g. 3F9A2-C71BE" autocomplete="off" autocapitalize="characters" />
+        </label>
+        <button type="submit" class="primary" :disabled="busy || !code.trim()"><Icon name="check" :size="14" /> Link</button>
+      </form>
+    </details>
+
     <ModalShell v-if="objecting" :title="`Object to a fee of ${fmtPrice(objecting.fee.amount, objecting.fee.currency)}`" @close="objecting = null">
       <div class="object">
         <p class="hint">{{ objecting.link.storeAccountName }} charged it for “{{ FEE_REASONS[objecting.fee.reason] }}”<template v-if="objecting.fee.note"> ({{ objecting.fee.note }})</template>. Say why you think it is wrong - they get it by notification and email, and can waive it.</p>
@@ -286,14 +321,18 @@ function commissionLine(l: ArtistConsignment): string {
     </ModalShell>
 
     <ModalShell v-if="sharing" :title="`Share with ${sharing.storeAccountName}`" @close="closeSharing">
-      <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" />
-      <template #footer><div class="foot"><button type="button" class="primary" @click="closeSharing">Done</button></div></template>
+      <ShareItems :store-account-id="sharing.storeAccountId" :consignor-id="sharing.consignorId" :store-name="sharing.storeAccountName" @changed="sharingChanged = true" @close="closeSharing" />
     </ModalShell>
   </div>
 </template>
 
 <style scoped>
-.tab { display: flex; flex-direction: column; gap: .8rem; }
+.tab { display: flex; flex-direction: column; gap: .8rem; max-width: 72rem; }
+h1 { margin: 0; font-size: 1.35rem; }
+.error { color: var(--zfy-danger, #c6512f); margin: 0; }
+.offer { border-color: var(--zfy-accent, #0f7a64); background: var(--zfy-accent-soft, #deeee9); }
+.link-box summary { color: var(--zfy-muted, #5a6472); font-weight: 500; }
+.link-box .link { margin-top: .5rem; }
 .link { display: flex; align-items: flex-end; gap: .6rem; flex-wrap: wrap; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
 .link label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; flex: 1 1 16rem; }
 .link input { text-transform: uppercase; letter-spacing: .06em; }

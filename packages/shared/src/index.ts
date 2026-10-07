@@ -31,3 +31,4 @@ export * from './artist-profile';
 export * from './event-pool';
 export * from './commissions';
 export * from './commission-customers';
+export * from './upload-limits';

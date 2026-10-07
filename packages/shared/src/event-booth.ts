@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { safeHttpUrl } from './csv';
+import { sanitizeBoothLayout, type BoothLayout } from './booth-layout';
 import type { StoredEventOverlay } from './public-events';
 import type { EventBooth, SalesEvent } from './types';
 
@@ -51,6 +52,25 @@ export function cleanBooth(raw: unknown): EventBooth | undefined {
     out[key] = v;
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * What Duplicate carries from an event's booth section to the copy: the booth
+ * details, the layout (validated and deep-copied, as "Use layout from" does)
+ * and noPool, so a private event's copy stays private. A store has no booth
+ * section, so nothing comes along.
+ */
+export function boothFieldsForDuplicate(
+  source: Pick<SalesEvent, 'kind' | 'booth' | 'boothLayout' | 'noPool'>,
+  now: number = Date.now(),
+): { booth?: EventBooth; boothLayout?: BoothLayout; noPool?: true } {
+  if (source.kind === 'store') return {};
+  const layout = sanitizeBoothLayout(source.boothLayout);
+  return {
+    booth: cleanBooth(source.booth),
+    boothLayout: layout ? { ...layout, importedAt: now } : undefined,
+    noPool: source.noPool ? true : undefined,
+  };
 }
 
 export interface ResolvedBooth {

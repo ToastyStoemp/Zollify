@@ -3,10 +3,12 @@ import type { FastifyRequest } from 'fastify';
 import {
   EMPTY_PROFILE_LINKS,
   adoptLegacyLinks,
+  base64BodyLimit,
   cleanProfileLinks,
   cleanReceiptToggles,
   fmtRate,
   isReceiptToken,
+  maxBytesFor,
   receiptBreakdown,
   receiptFooterLinks,
   vatBreakdown,
@@ -18,6 +20,7 @@ import {
   type Transaction,
 } from '@zollify/shared';
 import {
+  decodeUpload,
   issueChallenge,
   makeSecretBox,
   parseProfile,
@@ -90,9 +93,7 @@ function migrate(db: Database.Database): void {
 // device; a copy is kept here so the online receipt and every customer
 // display can carry them too.
 
-const LOGO_MAX_BYTES = 256 * 1024;
 const FOOTER_MAX = 500;
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface Branding {
   /** Base64 PNG, no data: prefix. */
@@ -109,11 +110,9 @@ function readBranding(db: Database.Database, accountId: string): Branding {
 function cleanLogo(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
-  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error('The logo must be a base64 PNG.');
-  const bytes = Buffer.from(value, 'base64');
-  if (bytes.length > LOGO_MAX_BYTES) throw new Error('The logo is too large.');
-  if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('The logo must be a PNG.');
-  return bytes.toString('base64');
+  const logo = decodeUpload('logo', value, { claimedMime: 'image/png' });
+  if (!logo.ok) throw Object.assign(new Error(logo.message), { status: logo.status });
+  return logo.bytes.toString('base64');
 }
 
 function cleanFooter(value: unknown): string | null | undefined {
@@ -572,7 +571,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     registerSmartpos(app, ctx, smartposApps(ctx.db, box));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
 
-    app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
+    app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: base64BodyLimit(maxBytesFor('logo'), 4096) }, async (req, reply) => {
       const who = ctx.identity(req);
       if (who.role !== 'owner' && who.role !== 'admin') {
         return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt branding.' });
@@ -583,7 +582,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         logo = cleanLogo(req.body?.logo);
         footer = cleanFooter(req.body?.footer);
       } catch (err) {
-        return reply.code(400).send({ error: 'invalid', message: (err as Error).message });
+        return reply.code((err as { status?: number }).status ?? 400).send({ error: 'invalid', message: (err as Error).message });
       }
       const current = readBranding(ctx.db, who.accountId);
       const next: Branding = { logo: logo === undefined ? current.logo : logo, footer: footer === undefined ? current.footer : footer };

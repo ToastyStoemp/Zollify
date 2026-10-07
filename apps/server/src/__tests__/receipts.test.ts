@@ -283,10 +283,15 @@ describe('online receipts', () => {
 
   it('keeps anything but a modest PNG out of the branding', async () => {
     const svg = Buffer.from('<svg onload="alert(1)"/>').toString('base64');
-    for (const logo of [svg, 'not base64!', Buffer.alloc(300 * 1024).toString('base64')]) {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]).toString('base64');
+    for (const [logo, status] of [[svg, 415], [jpeg, 415], ['not base64!', 400]] as const) {
       const res = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo } });
-      expect(res.statusCode).toBe(400);
+      expect(res.statusCode).toBe(status);
+      expect(res.json().message).toMatch(/\S/);
     }
+    // Over the cap: the body limit refuses it before the route reads it.
+    const big = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo: Buffer.alloc(300 * 1024).toString('base64') } });
+    expect(big.statusCode).toBe(413);
     expect((await app.inject({ method: 'PUT', url: '/api/m/pos/branding', payload: { footer: 'x' } })).statusCode).toBe(401);
   });
 

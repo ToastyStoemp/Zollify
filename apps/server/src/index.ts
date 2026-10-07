@@ -6,6 +6,7 @@ import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-cor
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
 import { publicEventsServerModule } from './modules/public-events';
+import { commissionsServerModule } from './modules/commissions';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
     receiptsServerModule(jwtSecret),
     consignmentServerModule,
     consignmentArtistServerModule,
+    commissionsServerModule,
     peppolServerModule(jwtSecret),
   ];
 

@@ -1,4 +1,5 @@
 /** Data model v2 - shared between app and server. Grows in Phase 1/3. */
+import type { BoothLayout } from './booth-layout';
 import type { EventVat, SaleTax, TaxClass } from './vat';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
@@ -79,6 +80,8 @@ export interface SalesEvent {
   notes?: string;
   /** Tickets, plans and other files. See EventAttachment. */
   attachments?: EventAttachment[];
+  /** Booth/cube layout imported from the configurator. See booth-layout.ts. */
+  boothLayout?: BoothLayout;
   updatedAt: number;
   deletedAt?: number;
 }

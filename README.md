@@ -297,11 +297,21 @@ also offer one app to accounts without their own - see `POYNT_*` in
 `apps/server/.env.example`. Nexi needs the server on a public https address
 to report payments back. Not yet tried against a live terminal.
 
+*Business profile* - one place says who the business is: name, address,
+contact, VAT number, EORI, a Belgian enterprise number, and the webstore and
+social links (Settings -> Business profile, asked once in the setup wizard).
+Modules read it by default and keep a value of their own only when it
+differs, as the customs declarant does: receipts, customs paperwork and the
+Peppol seller all follow it, and an artist's links appear under the online
+receipt (and on paper, if switched on in Receipts). Links are checked on the
+server (https only, length caps, Instagram and TikTok handles made canonical).
+
 *E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
 invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B
 invoices must be from 2026. Each one is checked against the Peppol and
 Belgian rules before it is issued (enterprise number, VAT categories, the
-small-business exemption, reverse charge, intra-EU delivery); numbers are
+small-business exemption, reverse charge, intra-EU delivery); the seller
+is the business profile unless the invoice settings override a field; numbers are
 taken only on issue, per series and year, without gaps, and an issued
 invoice is frozen - corrections are credit notes. Invoices can start from a
 till sale, customers are checked against the Peppol Directory, and sending

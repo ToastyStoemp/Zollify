@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { emptyPeppolSettings, type PeppolSettings } from '@zollify/shared';
+import { emptyPeppolSettings, peppolOverrides, peppolSellerFromProfile, type PeppolSeller, type PeppolSettings } from '@zollify/shared';
 import { errorText, loadSettings, saveAccessPoint, saveSettings, type AccessPointInfo, type ProviderInfo } from '../api';
+import { sdk } from '../runtime';
 import PartyFields from './PartyFields.vue';
 
 /**
- * Settings → E-invoices (Peppol): your business as it appears on invoices,
- * numbering, the small-business exemption, and the Peppol access point that
- * sends your invoices.
+ * Settings → E-invoices (Peppol): numbering, payment details, the
+ * small-business exemption, and the Peppol access point that sends your
+ * invoices. Who the seller is comes from the Business profile; a field here is
+ * only kept when invoices must differ from it, like the customs declarant.
  */
-const settings = ref<PeppolSettings>(emptyPeppolSettings());
+const settings = ref<PeppolSettings>({ ...emptyPeppolSettings(), country: '', peppolScheme: '' });
+/** What the Business profile gives, from the live profile until the server answers. */
+const fromProfile = ref<PeppolSeller>(peppolSellerFromProfile(sdk().account()?.profile.artist));
 const providers = ref<ProviderInfo[]>([]);
 const access = ref<AccessPointInfo | null>(null);
 const ap = reactive({ provider: '', apiKey: '', accountRef: '', sandbox: true });
@@ -19,7 +23,8 @@ const ok = ref<string | null>(null);
 onMounted(async () => {
   try {
     const res = await loadSettings();
-    settings.value = res.settings;
+    settings.value = res.overrides;
+    fromProfile.value = res.fromProfile;
     providers.value = res.providers;
     access.value = res.accessPoint;
     Object.assign(ap, { provider: res.accessPoint?.provider ?? res.providers[0]?.id ?? '', apiKey: '', accountRef: res.accessPoint?.accountRef ?? '', sandbox: res.accessPoint?.sandbox ?? true });
@@ -31,7 +36,10 @@ onMounted(async () => {
 async function save(): Promise<void> {
   error.value = ok.value = null;
   try {
-    settings.value = (await saveSettings(settings.value)).settings;
+    // Only what differs from the profile is stored; the rest keeps following it.
+    const res = await saveSettings(peppolOverrides(settings.value, sdk().account()?.profile.artist));
+    settings.value = res.overrides;
+    fromProfile.value = res.fromProfile;
     ok.value = 'Saved.';
   } catch (err) {
     error.value = errorText(err, 'Could not save.');
@@ -61,7 +69,12 @@ async function removeAp(): Promise<void> {
     <p v-if="ok" class="ok">{{ ok }}</p>
 
     <h3>Your business</h3>
-    <PartyFields v-model="settings" />
+    <p class="hint from-profile">
+      Name, address, VAT number, enterprise number and email come from your Business profile - change them once, there.
+      <router-link :to="{ name: 'settings', query: { panel: 'core.profile' } }">Edit Business profile</router-link>
+      Fill in a field below only when your invoices must say something different; a blank field follows the profile.
+    </p>
+    <PartyFields v-model="settings" :profile="fromProfile" />
     <div class="grid">
       <label><span>IBAN</span><input v-model="settings.iban" type="text" placeholder="BE68 5390 0754 7034" /></label>
       <label><span>BIC (optional)</span><input v-model="settings.bic" type="text" /></label>
@@ -98,6 +111,7 @@ async function removeAp(): Promise<void> {
 h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .6rem 0 0; font-size: .95rem; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .82rem; }
+.from-profile a { margin-left: .25rem; }
 .error { margin: 0; color: var(--zfy-danger, #c6512f); }
 .ok { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); font-size: .875rem; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem .7rem; }

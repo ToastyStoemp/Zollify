@@ -5,6 +5,7 @@ import type { SalesEvent, SalesEventKind } from '@zollify/shared';
 import { BOOTH_LIMITS, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
+import EventSeriesModal from '../components/EventSeriesModal.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -171,6 +172,12 @@ const layoutNote = (e: SalesEvent): string => {
 
 // ── Notes & files ───────────────────────────────────────────────────────────
 const notesFor = ref<string | null>(null);
+// ── Editions ────────────────────────────────────────────────────────────────
+const seriesFor = ref<string | null>(null);
+function openPlanner(id: string): void {
+  seriesFor.value = null;
+  void router.push({ name: 'event-plan', params: { eventId: id } });
+}
 /** Whether a card has anything to read, so a helper only gets the button when there is. */
 const notesBadge = (e: SalesEvent): string => {
   const files = e.attachments?.length ?? 0;
@@ -459,6 +466,7 @@ async function save(): Promise<void> {
         <li v-for="e in group.list" :key="e.id" :class="['card', { active: e.id === activeEventId }]">
           <div class="title">
             <strong>{{ e.name }}</strong>
+            <span v-if="e.edition" class="pill">{{ e.edition }}</span>
             <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
@@ -478,6 +486,7 @@ async function save(): Promise<void> {
                 <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" role="menuitem"><Icon name="file-text" :size="14" /> Customs</router-link>
                 <button v-if="canEdit" type="button" role="menuitem" @click="openEdit(e)"><Icon name="settings" :size="14" /> Edit</button>
                 <button v-if="canEdit" type="button" role="menuitem" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
+                <button v-if="(canEdit || e.seriesId) && !isStore(e)" type="button" role="menuitem" @click="seriesFor = e.id"><Icon name="calendar" :size="14" /> Editions</button>
                 <!-- Only meaningful for an active event - close() on a planned one
                      just re-confirms 'planned' (it parks a not-yet-started event
                      back there instead of closing it), so showing it there was
@@ -499,6 +508,7 @@ async function save(): Promise<void> {
       </ul>
     </template>
 
+    <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" />
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
     <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />
 

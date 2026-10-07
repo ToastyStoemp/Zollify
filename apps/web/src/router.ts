@@ -16,6 +16,7 @@ export const router: Router = createRouter({
     { path: '/home', name: 'home', component: () => import('./views/HomeView.vue') },
     { path: '/welcome', name: 'welcome', component: () => import('./views/WelcomeView.vue'), meta: { minRole: 'admin' } },
     { path: '/events', name: 'events', component: () => import('./views/EventsView.vue'), props: { mode: 'events' } },
+    { path: '/events/:eventId/plan', name: 'event-plan', component: () => import('./views/PrepPlannerView.vue'), meta: { minRole: 'admin' } },
     { path: '/stores', name: 'stores', component: () => import('./views/EventsView.vue'), props: { mode: 'stores' } },
     { path: '/catalog', name: 'catalog', component: () => import('./views/CatalogView.vue') },
     { path: '/stock', name: 'stock', component: () => import('./views/StockView.vue') },

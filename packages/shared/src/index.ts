@@ -12,6 +12,7 @@ export * from './public-events';
 export * from './price-rows';
 export * from './short-barcode';
 export * from './receipt-link';
+export * from './receipt-socials';
 export * from './charged-lines';
 export * from './split';
 export * from './vat';

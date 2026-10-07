@@ -105,6 +105,7 @@ export {
   eventFileCached,
   retryEventFileUploads,
 } from './event-files';
+export { setEventBoothLayout, copyEventBoothLayout, importEventBoothLayout, getConfiguratorUrl, setConfiguratorUrl } from './booth-layout';
 export { transactionsToCsv, csvFilename } from './csv';
 export {
   loadInventory,

@@ -50,7 +50,7 @@ function toast(text: string): void {
 // ── Editable customs settings (persisted into event.customs) ────────────────
 /** This event's own override only - blank means "inherit the account default", not "was blank when I last opened this page". */
 const artistOverride = ref<CustomsArtist>(defaultCustomsArtist());
-/** Booth profile layered under the declarant, for display only - shown as a placeholder so an untouched field keeps tracking it. */
+/** Business profile layered under the declarant, for display only - shown as a placeholder so an untouched field keeps tracking it. */
 const artistDefault = ref<CustomsArtist>(defaultCustomsArtist());
 /** What the generators actually use: the override wherever it's filled in, the account default everywhere else. */
 const artist = computed<CustomsArtist>(() => ({ ...artistDefault.value, ...stripEmpty<CustomsArtist>(artistOverride.value) }));
@@ -84,7 +84,7 @@ async function load(ev: SalesEvent): Promise<void> {
   loading = true;
   loadedEventId = ev.id;
   const blob = readCustomsBlob(ev);
-  // Layered, most specific last: booth profile, then the module's declarant.
+  // Layered, most specific last: business profile, then the module's declarant.
   const declarant = await sdk().config.get<Partial<CustomsArtist>>(DECLARANT_KEY);
   artistDefault.value = { ...defaultCustomsArtist(), ...stripEmpty<CustomsArtist>(sdk().account()?.profile.artist), ...stripEmpty<CustomsArtist>(declarant ?? undefined) };
   // This event's own record only - left blank wherever it never had its own value,
@@ -403,7 +403,7 @@ const TRANSPORT_MODES = [
           <label><span>Email</span><input v-model="artistOverride.email" type="email" :placeholder="artistDefault.email" /></label>
           <label><span>VAT / tax ID</span><input v-model="artistOverride.vatId" type="text" class="mono" :placeholder="artistDefault.vatId || 'DE123456789'" /></label>
         </div>
-        <p class="hint">Linked to the booth profile and the declarant under Settings - shown here as the greyed-out default. Type over a field to override it for this event only; leave it blank to keep following whatever the account default is.</p>
+        <p class="hint">Linked to the business profile and the declarant under Settings - shown here as the greyed-out default. Type over a field to override it for this event only; leave it blank to keep following whatever the account default is.</p>
         <p class="hint">VAT/tax ID is only shown on the EU proforma invoice - required by German export brokers as a seller identifier.</p>
       </article>
 

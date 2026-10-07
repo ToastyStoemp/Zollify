@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { isStore, sellsAt, type ArtistDetails } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, isStore, sellsAt, type ArtistDetails, type ProfileLinks } from '@zollify/shared';
 import { currentAccount, updateProfile, visibleEvents } from '@zollify/platform';
 import ArtistForm from '../components/ArtistForm.vue';
 
@@ -9,6 +9,7 @@ const canRename = computed(() => account.value?.role === 'owner');
 
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...account.value!.profile.artist });
+const links = ref<ProfileLinks>({ ...EMPTY_PROFILE_LINKS, ...account.value!.profile.links });
 const currency = ref(account.value!.profile.defaultCurrency);
 /** What the account runs: which of the Events and Stores pages it gets. */
 const runs = ref({ ...sellsAt(account.value!.profile, visibleEvents.value.some((e) => isStore(e))) });
@@ -27,9 +28,13 @@ async function save(): Promise<void> {
     await updateProfile({
       sells: { ...runs.value },
       artist: artist.value,
+      links: { ...links.value },
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
+    // Show what the server kept: links in their canonical form, the enterprise number dotted.
+    artist.value = { ...account.value!.profile.artist };
+    links.value = { ...EMPTY_PROFILE_LINKS, ...account.value!.profile.links };
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
   } catch (err) {
@@ -42,10 +47,10 @@ async function save(): Promise<void> {
 
 <template>
   <form class="profile" @submit.prevent="save">
-    <h2>Booth profile</h2>
+    <h2>Business profile</h2>
     <p class="hint">
-      Who is behind the table. Printed on receipts and customs paperwork, and shared by every device
-      on this account.
+      Who is behind the table. Filled in once here, and used by receipts, customs paperwork and e-invoices
+      instead of each asking again. Shared by every device on this account.
     </p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -57,7 +62,7 @@ async function save(): Promise<void> {
       <p class="hint">Shows the Events page, the Stores page, or both. Nothing is deleted when you switch one off.</p>
     </fieldset>
 
-    <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
+    <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
     <div class="row">
       <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save' }}</button>

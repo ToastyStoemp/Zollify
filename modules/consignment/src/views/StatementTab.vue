@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { ConsignmentFee, ConsignmentLine, ConsignorStatement } from '@zollify/shared';
-import { FEE_REASONS, fmtPrice, csvCell } from '@zollify/shared';
+import { FEE_REASONS, fmtPrice, csvCell, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import { addPayout, deletePayout, deliveryText, errorText, loadStatement, today, waiveFee, type Statement } from '../api';
 import { sdk } from '../runtime';
@@ -101,7 +101,7 @@ async function exportCsv(): Promise<void> {
   if (!data.value) return;
   const head = ['Date', 'Artist', 'Sold at', 'Item', 'Qty', 'Currency', 'Gross', 'Commission %', 'Commission', 'Artist share'];
   const rows = data.value.lines.map((l) => [
-    new Date(l.at).toISOString().slice(0, 10),
+    localIsoDay(l.at),
     consignorName(l.consignorId),
     venueName(l.storeId),
     l.variantLabel ? `${l.title} · ${l.variantLabel}` : l.title,

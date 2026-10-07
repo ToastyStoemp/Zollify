@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { fmtPrice, round2, seesSalesTotals } from '@zollify/shared';
+import { fmtPrice, localIsoDay, round2, seesSalesTotals } from '@zollify/shared';
 import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
@@ -81,7 +81,7 @@ const eventName = (id: string): string => (id ? (getSalesEvent(id)?.name ?? 'Rem
  * market rate for the transaction's own date, fetched per date below; those
  * fields remain only as the fallback while a rate is loading or unavailable.
  */
-const txDate = (tx: Transaction): string => new Date(tx.timestamp).toISOString().slice(0, 10);
+const txDate = (tx: Transaction): string => localIsoDay(tx.timestamp);
 const fxKey = (date: string, fromCurrency: string): string => `${date}:${fromCurrency}`;
 
 /**
@@ -191,7 +191,7 @@ function eventStats(eventId: string) {
   const txs = recentTransactions.value.filter((t) => t.eventId === eventId && !t.revertedAt);
   const revenue = txs.reduce((s, t) => s + amountOf(t), 0);
   const items = txs.reduce((s, t) => s + t.items.reduce((si, i) => si + i.qty, 0), 0);
-  const days = new Set(txs.map((t) => new Date(t.timestamp).toISOString().slice(0, 10))).size || 1;
+  const days = new Set(txs.map((t) => localIsoDay(t.timestamp))).size || 1;
   return { revenue, count: txs.length, items, days };
 }
 const deltaPct = (cur: number, other: number): number | null => (other ? Math.round(((cur - other) / other) * 100) : null);
@@ -249,7 +249,7 @@ const compareDaily = ref(false);
 const daily = computed(() => {
   const map = new Map<string, number>();
   for (const tx of live.value) {
-    const day = new Date(tx.timestamp).toISOString().slice(0, 10);
+    const day = localIsoDay(tx.timestamp);
     map.set(day, (map.get(day) ?? 0) + amountOf(tx));
   }
   const entries = [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -312,7 +312,7 @@ const hourly = computed(() => {
   const byDay = new Map<string, number[]>();
   for (const tx of live.value) {
     const d = new Date(tx.timestamp);
-    const day = d.toISOString().slice(0, 10);
+    const day = localIsoDay(d);
     const bucket = byDay.get(day) ?? new Array<number>(24).fill(0);
     bucket[d.getHours()] = (bucket[d.getHours()] ?? 0) + amountOf(tx);
     byDay.set(day, bucket);

@@ -4,6 +4,7 @@ import { api, type Expense, type InvoiceScan, type PnlRow } from '../api';
 import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
+import { localIsoDay } from '@zollify/shared';
 
 /**
  * Ledger: per-event profit and loss. Revenue comes from the till; costs -
@@ -21,7 +22,7 @@ const busy = ref<string | null>(null);
 const scan = ref<InvoiceScan | null>(null);
 const scanFile = ref<{ base64: string; name: string } | null>(null);
 
-const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: new Date().toISOString().slice(0, 10), vendor: '', note: '' });
+const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: localIsoDay(), vendor: '', note: '' });
 const form = ref(blank());
 const editingId = ref<string | null>(null);
 

@@ -9,6 +9,7 @@ import { bookings, clusters, config, domesticVat, events, loaded, loadWork, clea
 import { sdk } from '../runtime';
 import ClusterCard from './ClusterCard.vue';
 import { Icon } from '@zollify/ui';
+import { localIsoDay as iso } from '@zollify/shared';
 
 /**
  * Payments: turn the month's card and online takings into bookings.
@@ -42,7 +43,6 @@ const liveSources = computed(() => {
   return out;
 });
 
-const iso = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function preset(mode: 'last-month' | 'this-month' | 'last-3-months'): void {
   const now = new Date();
   if (mode === 'this-month') {

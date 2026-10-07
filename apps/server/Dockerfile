@@ -28,6 +28,7 @@ COPY modules/label-printer/package.json modules/label-printer/
 COPY modules/convention-checklist/package.json modules/convention-checklist/
 COPY modules/consignment/package.json modules/consignment/
 COPY modules/consignment-artist/package.json modules/consignment-artist/
+COPY modules/commissions/package.json modules/commissions/
 COPY modules/peppol-be/package.json modules/peppol-be/
 COPY modules/migration/package.json modules/migration/
 COPY apps/web/package.json apps/web/

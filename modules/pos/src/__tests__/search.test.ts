@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shortBarcode, type Product } from '@zollify/shared';
-import { findSearchMatch } from '../search';
+import { findSearchMatch, visibleTileActions } from '../search';
 
 function product(overrides: Partial<Product> = {}): Product {
   return {
@@ -42,5 +42,22 @@ describe('findSearchMatch - scanned short barcode', () => {
     const p = product();
     const code = shortBarcode(p.type, p.id);
     expect(findSearchMatch([p], code.toLowerCase())).toEqual({ productId: 'p1', variantId: null, label: 'Cow Pin' });
+  });
+});
+
+describe('visibleTileActions', () => {
+  const actions = [
+    { label: 'Workshop', tile: true },
+    { label: 'Other' },
+  ];
+  it('shows only tile actions when the search is empty', () => {
+    expect(visibleTileActions(actions, '', false)).toEqual([actions[0]]);
+  });
+  it('hides them for an unrelated search and keeps them for a matching one', () => {
+    expect(visibleTileActions(actions, 'enamel', false)).toEqual([]);
+    expect(visibleTileActions(actions, 'work', false)).toEqual([actions[0]]);
+  });
+  it('hides them inside an artist', () => {
+    expect(visibleTileActions(actions, '', true)).toEqual([]);
   });
 });

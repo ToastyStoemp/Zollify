@@ -51,6 +51,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
     recommended: false,
   },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
+  commissions: { forWhom: 'For artists taking custom work: save the customer, take a deposit at the till, and give them a QR code to follow progress.', recommended: false },
 };
 
 const router = useRouter();

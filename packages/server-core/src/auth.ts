@@ -69,6 +69,7 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link)(\/|$)/],
 ];
 
 /**

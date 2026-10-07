@@ -24,6 +24,10 @@ What the server guarantees, and the settings that matter for it. Regression test
 - Requests without a token may not send bodies over 256 KB.
 - Log uploads are rate-limited, and each account keeps only its newest 30.
 
+## Public pages with personal data
+
+- **Commission tracking** (`/p/commissions/<token>`): the token is 24 random bytes, one per commission, and an admin can replace it (the old link then answers "not available"). The page is built from a fixed list of fields (title, status, updates written for the customer, due date, amounts, pickup address); contact details, details and internal notes never leave. It is rendered on the server with every value escaped, has no script, is rate limited per IP, and is `noindex`, `no-store` and `no-referrer`. A wrong, malformed or retired token and a disabled module all give the same answer. Customer details live in the module's own server tables, not in the synced op-log, and an admin can erase a commission.
+
 ## Outgoing requests (SSRF)
 
 - **Webhooks**: public https addresses only. Loopback, private, link-local, carrier NAT, benchmark ranges and IPv6 forms that wrap them are refused. The address is checked again when connecting, so DNS rebinding does not help, and only a few KB of the answer is read.

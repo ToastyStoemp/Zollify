@@ -62,6 +62,10 @@ export interface SalesEvent {
   notes?: string;
   /** Tickets, plans and other files. See EventAttachment. */
   attachments?: EventAttachment[];
+  /** Events sharing a seriesId are editions of the same convention (see editions.ts). Absent = a one-off. */
+  seriesId?: string;
+  /** Which edition of the series this is, e.g. "2027" or "Spring 2027". */
+  edition?: string;
   updatedAt: number;
   deletedAt?: number;
 }

@@ -132,6 +132,19 @@ export {
   type Availability,
   type InventoryRow,
 } from './inventory';
+export {
+  editionsOf,
+  createNextEdition,
+  linkToSeries,
+  unlinkFromSeries,
+  setEditionLabel,
+  planEditionsFor,
+  prepPlanFor,
+  grantsFor,
+  applyPrepPlan,
+  type NextEditionInput,
+  type PlannerRow,
+} from './editions';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
 export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead } from './notifications';

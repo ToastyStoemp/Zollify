@@ -26,4 +26,5 @@ export * from './peppol';
 export * from './csv';
 export * from './restock';
 export * from './artist-profile';
+export * from './event-pool';
 export * from './commissions';

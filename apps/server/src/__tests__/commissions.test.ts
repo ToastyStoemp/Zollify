@@ -147,6 +147,22 @@ describe('the owner and staff side', () => {
     // Staff can still read the settings the till needs.
     expect((await call(staff, 'GET', '/settings')).statusCode).toBe(200);
   });
+
+  it('an admin unlocked at a shared till cannot change settings or retire a link from it', async () => {
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(owner), payload: { role: 'admin' } });
+    const reg = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'admin@example.test', password: PASSWORD, inviteCode: invite.json().code } });
+    const adminId = reg.json().user.id as string;
+    const grant = (await app.inject({ method: 'POST', url: '/api/device-users', headers: auth(owner), payload: { deviceId: 'counter', email: 'admin@example.test', password: PASSWORD, pin: '4711' } })).json().grant;
+    const till = (await app.inject({ method: 'POST', url: '/api/auth/unlock', headers: auth(owner), payload: { deviceId: 'counter', userId: adminId, pin: '4711', grant } })).json().accessToken as string;
+    expect((await call(till, 'PUT', '/settings', { pickupName: 'x' })).statusCode).toBe(403);
+    expect((await call(till, 'POST', `/commissions/${id}/link`)).statusCode).toBe(403);
+    // Everyday work at the till is fine.
+    expect((await call(till, 'GET', '/settings')).statusCode).toBe(200);
+    expect((await call(till, 'POST', `/commissions/${id}/updates`, { message: 'Hello' })).statusCode).not.toBe(403);
+    // The same admin signed in on their own device can.
+    const own = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'admin@example.test', password: PASSWORD } })).json().accessToken as string;
+    expect((await call(own, 'POST', `/commissions/${id}/link`)).statusCode).toBe(200);
+  });
 });
 
 describe('what was paid follows the till', () => {

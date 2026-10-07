@@ -323,7 +323,10 @@ the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ic
 (subscribable calendar) and `/instagram.txt` (bio text). Rendered on the gateway
 from the account's op-log, so it updates whenever an event is edited. Public
 module halves mount under `/p/` with no session; the module resolves the account
-from the slug and refuses unless the module is enabled for it.
+from the slug and refuses unless the module is enabled for it. Hall, booth number,
+link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
+Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
+handle) and legacy booth values, which fill in wherever the event has none.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

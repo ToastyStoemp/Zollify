@@ -14,7 +14,7 @@ function stripEmpty<T extends object>(obj: Partial<T> | undefined): Partial<T> {
 
 /**
  * The same state the German documents page builds, from what is saved:
- * booth profile, the declarant settings, then this event's own record - the
+ * business profile, the declarant settings, then this event's own record - the
  * page's own layering and fallbacks, field for field.
  */
 export async function storedCustomsDeState(ev: SalesEvent): Promise<CustomsDeState> {

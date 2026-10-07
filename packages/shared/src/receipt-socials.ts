@@ -1,5 +1,5 @@
 /**
- * Webstore and social links for the receipt footer.
+ * Webstore and social links, as shown on the receipt footer.
  *
  * What a booth types here ends up as a link on a page strangers open, so it is
  * cleaned once, on the server: https only, no credentials, no whitespace,
@@ -7,7 +7,11 @@
  * the canonical profile URL.
  */
 
-export interface ReceiptSocials {
+/**
+ * The webstore and social links. They live on the business profile - one place
+ * to edit them - and the receipt only reads them.
+ */
+export interface ProfileLinks {
   webstore: string;
   instagram: string;
   tiktok: string;
@@ -17,13 +21,19 @@ export interface ReceiptSocials {
   youtube: string;
   otherUrl: string;
   otherLabel: string;
+}
+
+/** What only the receipt decides: whether the links reach paper, and whether next events show. */
+export interface ReceiptToggles {
   /** Print the links as plain text lines on the thermal receipt. Default off: paper is tight. */
   showOnPrint: boolean;
   /** List the next public events on the online receipt. Needs the public-events page to be published. */
   showEvents: boolean;
 }
 
-export const EMPTY_RECEIPT_SOCIALS: ReceiptSocials = {
+export interface ReceiptSocials extends ProfileLinks, ReceiptToggles {}
+
+export const EMPTY_PROFILE_LINKS: ProfileLinks = {
   webstore: '',
   instagram: '',
   tiktok: '',
@@ -33,6 +43,10 @@ export const EMPTY_RECEIPT_SOCIALS: ReceiptSocials = {
   youtube: '',
   otherUrl: '',
   otherLabel: '',
+};
+
+export const EMPTY_RECEIPT_SOCIALS: ReceiptSocials = {
+  ...EMPTY_PROFILE_LINKS,
   showOnPrint: false,
   showEvents: false,
 };
@@ -42,7 +56,7 @@ export const RECEIPT_LABEL_MAX = 30;
 
 type UrlKey = 'webstore' | 'instagram' | 'tiktok' | 'facebook' | 'bluesky' | 'mastodon' | 'youtube' | 'otherUrl';
 
-const URL_KEYS: UrlKey[] = ['webstore', 'instagram', 'tiktok', 'facebook', 'bluesky', 'mastodon', 'youtube', 'otherUrl'];
+export const LINK_URL_KEYS: UrlKey[] = ['webstore', 'instagram', 'tiktok', 'facebook', 'bluesky', 'mastodon', 'youtube', 'otherUrl'];
 const HANDLE_RE = /^@?([A-Za-z0-9._]{1,30})$/;
 const HANDLE_URL: Partial<Record<UrlKey, (h: string) => string>> = {
   instagram: (h) => `https://www.instagram.com/${h}`,
@@ -82,18 +96,30 @@ function cleanUrl(key: UrlKey, value: unknown): string {
   return u.toString();
 }
 
-/** Validate and normalise what the settings form sends. Throws an Error with a message fit to show. */
-export function cleanReceiptSocials(input: unknown): ReceiptSocials {
+/** Validate and normalise the links. Throws an Error with a message fit to show. */
+export function cleanProfileLinks(input: unknown): ProfileLinks {
   const src = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
-  const out: ReceiptSocials = { ...EMPTY_RECEIPT_SOCIALS };
-  for (const key of URL_KEYS) out[key] = cleanUrl(key, src[key]);
+  const out: ProfileLinks = { ...EMPTY_PROFILE_LINKS };
+  for (const key of LINK_URL_KEYS) out[key] = cleanUrl(key, src[key]);
   if (src.otherLabel != null && typeof src.otherLabel !== 'string') throw new Error('The other link label must be text.');
   const label = String(src.otherLabel ?? '').replace(/\s+/g, ' ').trim();
   if (label.length > RECEIPT_LABEL_MAX) throw new Error(`The other link label is too long (max ${RECEIPT_LABEL_MAX} characters).`);
   out.otherLabel = out.otherUrl ? label || 'More' : '';
-  out.showOnPrint = src.showOnPrint === true;
-  out.showEvents = src.showEvents === true;
   return out;
+}
+
+/** Whether any link is set. */
+export const hasProfileLinks = (l: Partial<ProfileLinks> | null | undefined): boolean => !!l && LINK_URL_KEYS.some((k) => !!l[k]);
+
+/** The receipt-only switches; anything but `true` is off. */
+export function cleanReceiptToggles(input: unknown): ReceiptToggles {
+  const src = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  return { showOnPrint: src.showOnPrint === true, showEvents: src.showEvents === true };
+}
+
+/** Links and switches together, as the first version of the receipt settings stored them. */
+export function cleanReceiptSocials(input: unknown): ReceiptSocials {
+  return { ...cleanProfileLinks(input), ...cleanReceiptToggles(input) };
 }
 
 export interface ReceiptFooterLink {
@@ -102,7 +128,7 @@ export interface ReceiptFooterLink {
 }
 
 /** The links in display order, labelled. Blank ones are left out. */
-export function receiptFooterLinks(s: ReceiptSocials): ReceiptFooterLink[] {
+export function receiptFooterLinks(s: ProfileLinks): ReceiptFooterLink[] {
   const rows: [string, string][] = [
     ['Webstore', s.webstore],
     ['Instagram', s.instagram],

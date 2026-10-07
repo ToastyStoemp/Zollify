@@ -35,7 +35,7 @@ const router = useRouter();
 /**
  * Events (fairs, markets, conventions - dated) and Stores (shops - open until
  * closed) are separate pages on the same screen: an account sees the ones it
- * runs (Settings → Booth profile → What you run).
+ * runs (Settings → Business profile → What you run).
  */
 const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode: 'events' });
 const storesPage = computed(() => props.mode === 'stores');
@@ -524,7 +524,7 @@ async function save(): Promise<void> {
             <template v-if="pricesCarry">{{ overrideCount(pricesSource) }} price override{{ overrideCount(pricesSource) === 1 ? '' : 's' }} from {{ pricesSource.name }} come along.</template>
             <template v-else>The local currency no longer matches {{ pricesSource.name }}, so its price overrides are not copied.</template>
           </p>
-          <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Booth profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
+          <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Business profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
           <div class="three">
             <label><span>Local currency</span><CurrencyPicker v-model="form.localCurrency" placeholder="SEK" /></label>
             <label><span>Rate (1 {{ baseCurrency }} =)</span><input v-model="form.exchangeRate" type="number" min="0" step="0.0001" inputmode="decimal" /></label>

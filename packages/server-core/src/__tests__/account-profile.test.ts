@@ -158,7 +158,55 @@ describe('account profile', () => {
     expect((await put({ defaultCurrency: 'CHF' })).json().user.profile.sells).toEqual({ events: false, stores: true });
   });
 
-    it('rejects a profile that fails validation', async () => {
+  it('keeps webstore and social links clean, merged field by field, and refuses anything but https', async () => {
+    const put = (links: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links } });
+    const get = async () => (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect((await get()).links).toBeUndefined();
+
+    const res = await put({ webstore: ' https://shop.example.com ', instagram: '@harbourprints', otherUrl: 'https://news.example.com', otherLabel: 'News' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().user.profile.links).toMatchObject({ webstore: 'https://shop.example.com/', instagram: 'https://www.instagram.com/harbourprints', otherLabel: 'News' });
+    // Naming one link leaves the others alone.
+    await put({ tiktok: 'harbour.prints' });
+    expect((await get()).links).toMatchObject({ webstore: 'https://shop.example.com/', tiktok: 'https://www.tiktok.com/@harbour.prints' });
+
+    for (const bad of ['javascript:alert(1)', 'http://shop.example.com', 'https://user:pw@shop.example.com', 'shop.example.com', `https://shop.example.com/${'a'.repeat(200)}`]) {
+      const refused = await put({ webstore: bad });
+      expect(refused.statusCode, bad).toBe(400);
+      expect(refused.json().message).toMatch(/Webstore/);
+    }
+    expect((await put({ youtube: '@booth' })).statusCode).toBe(400);
+    expect((await put({ otherUrl: 'https://x.example.com', otherLabel: 'x'.repeat(31) })).statusCode).toBe(400);
+    // A refusal keeps what was saved, and clearing is a change like any other.
+    expect((await get()).links.webstore).toBe('https://shop.example.com/');
+    expect((await put({ webstore: '', instagram: '', tiktok: '', otherUrl: '' })).json().user.profile.links).toMatchObject({ webstore: '', instagram: '', otherLabel: '' });
+  });
+
+  it('stores a Belgian enterprise number in its dotted form, and refuses one that is not valid', async () => {
+    const put = (enterpriseNumber: string) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { artist: { enterpriseNumber } } });
+    const res = await put('BE 0403 170 701');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().user.profile.artist.enterpriseNumber).toBe('0403.170.701');
+    const bad = await put('0403170702');
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toMatch(/enterprise number/);
+    expect((await put('')).json().user.profile.artist.enterpriseNumber).toBe('');
+  });
+
+  it('loads a profile saved before links and the enterprise number existed, unchanged', async () => {
+    const db = app.zollify.db;
+    const accountId = (db.prepare('SELECT accountId FROM users LIMIT 1').get() as { accountId: string }).accountId;
+    db.prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(
+      JSON.stringify({ setupCompletedAt: 5, artist: { companyName: 'Old Booth', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '', vatId: '', eori: '' }, defaultCurrency: 'EUR' }),
+      accountId,
+    );
+    const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(profile.artist.companyName).toBe('Old Booth');
+    expect(profile.links).toBeUndefined();
+    expect(profile.artist.enterpriseNumber ?? '').toBe('');
+  });
+
+  it('rejects a profile that fails validation', async () => {
     const res = await app.inject({
       method: 'PUT',
       url: '/api/account/profile',

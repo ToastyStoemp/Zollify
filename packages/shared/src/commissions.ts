@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isTimeZone } from './consignment-books';
 import { round2 } from './money';
 
 /**
@@ -120,8 +121,13 @@ export const CommissionSettingsSchema = z.object({
   pickupAddress: z.string().trim().max(300).default(''),
   pickupNote: z.string().trim().max(300).default(''),
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).default('EUR'),
+  /** IANA zone the tracking page shows times in, e.g. Europe/Zurich. */
+  timeZone: z.string().trim().min(1).max(64).refine(isTimeZone, 'Unknown time zone.').default('UTC'),
 });
 export type CommissionSettings = z.infer<typeof CommissionSettingsSchema>;
+
+/** Statuses at which the tracking page keeps asking the server for news; closed ones will not change. */
+export const isWatchedStatus = (s: CommissionStatus): boolean => !isClosedStatus(s);
 
 /** What the tracking page gets, and all of it: nothing else about the customer or the commission leaves. */
 export interface PublicCommission {
@@ -130,6 +136,8 @@ export interface PublicCommission {
   status: CommissionStatus;
   statusLabel: string;
   dueDate: string;
+  /** Zone the update times are shown in. */
+  timeZone: string;
   currency: string;
   price: number;
   paid: number;

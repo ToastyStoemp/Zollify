@@ -1,4 +1,4 @@
-import { COMMISSION_STATUSES, COMMISSION_STATUS_LABEL, type CommissionStatus, type PublicCommission } from '@zollify/shared';
+import { COMMISSION_STATUSES, COMMISSION_STATUS_LABEL, isWatchedStatus, type CommissionStatus, type PublicCommission } from '@zollify/shared';
 
 /**
  * The customer's tracking page, rendered on the server as plain HTML with no
@@ -18,7 +18,18 @@ export function fmtDay(d: string): string {
   return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1] ?? ''} ${m[1]}` : '';
 }
 
-const fmtStamp = (at: number): string => fmtDay(new Date(at).toISOString().slice(0, 10));
+/** How often an open page asks for news, in seconds. */
+export const REFRESH_SECONDS = 300;
+
+/** A moment as "5 Mar 2099, 00:30" on the clock of `timeZone`; UTC when the zone is not known. */
+export function fmtStamp(at: number, timeZone: string): string {
+  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  try {
+    return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone }).format(at);
+  } catch {
+    return new Intl.DateTimeFormat('en-GB', { ...opts, timeZone: 'UTC' }).format(at);
+  }
+}
 
 export function fmtMoney(amount: number, currency: string): string {
   try {
@@ -65,7 +76,7 @@ dd{text-align:right;font-weight:600}
 footer{margin-top:24px;text-align:center;color:var(--muted);font-size:.72rem}
 `;
 
-function shell(title: string, body: string): string {
+function shell(title: string, body: string, head = ''): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -73,7 +84,7 @@ function shell(title: string, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow, noarchive" />
 <meta name="referrer" content="no-referrer" />
-<title>${h(title)}</title>
+${head}<title>${h(title)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
@@ -111,7 +122,7 @@ export function renderCommission(c: PublicCommission): string {
     ? `<div class="card"><h2>Updates</h2><ul class="tl">${c.updates
         .map(
           (u) =>
-            `<li><div class="what">${h(u.statusLabel)}</div><div class="when">${h(fmtStamp(u.at))}</div>${u.message ? `<div class="msg">${h(u.message)}</div>` : ''}</li>`,
+            `<li><div class="what">${h(u.statusLabel)}</div><div class="when">${h(fmtStamp(u.at, c.timeZone))}</div>${u.message ? `<div class="msg">${h(u.message)}</div>` : ''}</li>`,
         )
         .join('')}</ul></div>`
     : '';
@@ -126,6 +137,8 @@ export function renderCommission(c: PublicCommission): string {
     `<header>${c.shop ? `<div class="shop">${h(c.shop)}</div>` : ''}<h1>${h(c.title)}</h1></header>
 <div class="card"><div class="status">${h(c.statusLabel)}</div>${progress}</div>
 ${updates}${due}${money}${pickup}
-<footer>Bookmark this page to check on your commission.</footer>`,
+<footer>Bookmark this page to check on your commission.<br />Times are shown in ${h(c.timeZone)}.</footer>`,
+    // A plain meta refresh, so an open page picks up a status change with no script; closed ones stay put.
+    isWatchedStatus(c.status) ? `<meta http-equiv="refresh" content="${REFRESH_SECONDS}" />\n` : '',
   );
 }

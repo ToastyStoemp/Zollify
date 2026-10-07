@@ -31,14 +31,21 @@ packages/
   ui/             @zollify/ui           design tokens + components
 modules/
   pos/            cart, checkout, receipts + nested payment provider plugins
-  customs/        EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
+  customs-ch/     Swiss EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
+  customs-de/     German customs paperwork
+  customs-hub/    one Customs entry point over the country modules
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
+  label-printer/  Bluetooth label printer for price tags and staff badges
+  costs/          per-item cost from shipment batches, margins in the catalogue
+  convention-checklist/  packing checklist per convention
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
-  consignment/    artists' work sold in your stores, commission and payouts; artists' own view (client + server half)
+  consignment/    artists' work sold in your stores, commission and payouts (client + server half)
+  consignment-artist/  the artist's own view of the stores that carry their work
   commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
+  peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -134,7 +141,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (156 tests):**
+**Built and passing (840 tests):**
 
 *Platform*
 - `@zollify/sdk` - the boundary, with a host-compatibility checker.
@@ -159,8 +166,10 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
   sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
-*Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events, Tax & books, Consignment, Commissions.
+*Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
+Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
+Public events, Tax & books, Consignment (and the artist's own view), Commissions,
+E-invoices for Belgium (Peppol).
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
@@ -198,7 +207,10 @@ customer follows progress at `/p/commissions/<token>`, reached by a QR code:
 the token is 192 random bits per commission and an admin can replace it, the
 page is plain server-rendered HTML with no script, rate limited and noindex,
 and shows only the title, status, customer-visible updates, due date, amounts
-and the pickup address - no contact details and no internal notes.
+and the pickup address - no contact details and no internal notes. Times are
+shown in the time zone set in the module's settings, and an open page reloads
+itself every five minutes until the commission is collected or cancelled. At
+the till, a commission already in the sale can have its amount replaced.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally
@@ -367,13 +379,12 @@ handle) and legacy booth values, which fill in wherever the event has none.
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway
 serving the built shell. See *Deploying on a VPS* below.
 
+*Android shell* - `android/`, three flavours, self-update for compat/full via
+`/api/updates/*`; see `.github/workflows/android.yml`.
+
 **Not built:**
 
-- **Android shell** - built (`android/`, three flavours, self-update for
-  compat/full via `/api/updates/*`; see `.github/workflows/android.yml`).
 - **Billing** - deferred. The per-account enabled-modules list is its seam.
-- Smaller carry-overs from ZollTool: customer display mode, QR scanning, price
-  comparison, PIN lock, cost tracking and PDF reports.
 
 The twenty-point security baseline is tracked in [SECURITY.md](./SECURITY.md),
 with each control pointing at where it is enforced. Two items remain open, both

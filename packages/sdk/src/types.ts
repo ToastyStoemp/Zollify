@@ -150,6 +150,21 @@ export interface TillLine {
   ref?: { kind: string; id: string };
 }
 
+/** A line a module put in the cart, as it stands now. */
+export interface TillLineInfo {
+  key: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+}
+
+/** The till's side of reading and changing the lines modules added. */
+export interface TillLineAccess {
+  find(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null;
+  /** Swaps name, quantity and price of the line with `line.key`, in place. False when there is none. */
+  replace(line: Omit<TillLine, 'ref'>): boolean;
+}
+
 /**
  * Emitted by POS after a completed checkout. This is the contract that lets Tax
  * book revenue without importing POS - the reason it lives in the SDK and not
@@ -563,6 +578,12 @@ export interface Sdk {
     actions(): (TillAction & { moduleId: string })[];
     /** False when no till is open to take it (or it refused, e.g. no active event). */
     addLine(line: TillLine): boolean;
+    /** The line this module already has in the cart under `key` (never another module's), or null. */
+    findLine(key: string): TillLineInfo | null;
+    /** Changes the amount of a line this module added, keeping its place in the cart. False when it has no such line or no till is open. */
+    replaceLine(line: Omit<TillLine, 'ref'>): boolean;
+    /** The till's side: read and change the lines modules added. Only one till listens at a time. */
+    onLineAccess(access: TillLineAccess): Unsubscribe;
     /** The till's side: receive lines modules add. Only one till listens at a time. */
     onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
     /**

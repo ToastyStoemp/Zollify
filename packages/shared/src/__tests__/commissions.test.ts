@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CommissionInputSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextStatuses } from '../commissions';
+import { CommissionInputSchema, CommissionSettingsSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextStatuses } from '../commissions';
 
 describe('commissionTotals', () => {
   it('sums payments to the cent and never goes negative', () => {
@@ -40,5 +40,14 @@ describe('input schemas', () => {
   it('only knows the fixed statuses', () => {
     expect(CommissionUpdateSchema.safeParse({ status: 'ready' }).success).toBe(true);
     expect(CommissionUpdateSchema.safeParse({ status: 'shipped' }).success).toBe(false);
+  });
+});
+
+describe('settings time zone', () => {
+  it('defaults to UTC and only takes a zone the runtime knows', () => {
+    expect(CommissionSettingsSchema.parse({}).timeZone).toBe('UTC');
+    expect(CommissionSettingsSchema.parse({ timeZone: ' Europe/Zurich ' }).timeZone).toBe('Europe/Zurich');
+    expect(CommissionSettingsSchema.safeParse({ timeZone: 'Mars/Olympus' }).success).toBe(false);
+    expect(CommissionSettingsSchema.safeParse({ timeZone: '' }).success).toBe(false);
   });
 });

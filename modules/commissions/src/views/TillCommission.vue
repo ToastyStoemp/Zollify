@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { COMMISSION_REF_KIND, CommissionInputSchema, fmtPrice, isClosedStatus, round2 } from '@zollify/shared';
 import { api, errorText, pendingPaid, type CommissionView } from '../api';
 import { sdk } from '../runtime';
+import { decideCharge } from '../till-line';
 
 /**
  * Over the till: take a deposit or the final balance for a commission, or
@@ -58,23 +59,31 @@ function pick(k: typeof kind.value, value: number): void {
 
 const parsed = computed(() => round2(Number(amount.value.replace(',', '.')) || 0));
 
-function charge(c: CommissionView): void {
-  if (parsed.value <= 0) {
-    error.value = 'Enter an amount to charge.';
+async function charge(c: CommissionView): Promise<void> {
+  error.value = null;
+  const key = `commission:${c.id}`;
+  const line = { key, name: `${kind.value} · ${c.title}`, qty: 1, unitPrice: parsed.value };
+  const there = sdk().till.findLine(key);
+  const decision = decideCharge({ amount: parsed.value, commissionCurrency: c.currency, tillCurrency: currency.value, inCart: there ? there.unitPrice : null });
+  if (decision.kind === 'invalid' || decision.kind === 'blocked') {
+    error.value = decision.message;
     return;
   }
-  if (c.currency !== currency.value) {
-    error.value = `This commission is in ${c.currency} but the till is working in ${currency.value}. Open the till for an event or store in ${c.currency}.`;
+  if (decision.kind === 'unchanged') {
+    sdk().ui.toast(decision.message);
+    emit('close');
     return;
   }
-  const added = sdk().till.addLine({
-    key: `commission:${c.id}`,
-    name: `${kind.value} · ${c.title}`,
-    qty: 1,
-    unitPrice: parsed.value,
-    ref: { kind: COMMISSION_REF_KIND, id: c.id },
-  });
-  if (!added) {
+  if (decision.kind === 'replace') {
+    if (!(await sdk().ui.confirm(decision.message, decision.title, { confirm: decision.confirm }))) return;
+    if (!sdk().till.replaceLine(line)) {
+      error.value = 'That line is no longer in the sale. Add it again.';
+      return;
+    }
+    emit('close');
+    return;
+  }
+  if (!sdk().till.addLine({ ...line, ref: { kind: COMMISSION_REF_KIND, id: c.id } })) {
     error.value = 'Open the till for an event or store first.';
     return;
   }

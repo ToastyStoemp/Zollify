@@ -265,6 +265,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Address <textarea v-model="pickup.pickupAddress" rows="2" maxlength="300" /></label>
           <label>Note <input v-model="pickup.pickupNote" type="text" maxlength="300" placeholder="Opening hours, what to bring" /></label>
           <label>Default currency <input v-model="pickup.currency" type="text" maxlength="3" class="short" /></label>
+          <label>Time zone <small>(times on the customer's page, e.g. Europe/Zurich)</small><input v-model="pickup.timeZone" type="text" maxlength="64" placeholder="UTC" /></label>
           <button type="button" :disabled="busy" @click="saveSettings">Save</button>
         </details>
       </section>

@@ -9,6 +9,8 @@ import {
   addLine,
   addMisc,
   addModuleLine,
+  findModuleLine,
+  replaceModuleLine,
   appliedDiscounts,
   chargeTotals,
   customDiscountCharged,
@@ -569,7 +571,11 @@ const offTill = sdk().till.onAddLine((line) => {
   }
   return addModuleLine(line);
 });
-onUnmounted(offTill);
+const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
+onUnmounted(() => {
+  offTill();
+  offTillLines();
+});
 
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });

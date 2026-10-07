@@ -79,6 +79,10 @@ async function register(email: string, accountName: string): Promise<string> {
   return reg.json().accessToken;
 }
 
+// Listing ids are random, so a short pattern can match inside one by chance.
+// Leak checks look at everything but the ids.
+const withoutIds = (body: string): string => JSON.stringify(JSON.parse(body), (k, v) => (k === 'id' ? undefined : v));
+
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-pool-'));
   process.env.OWNER_EMAIL = 'ana@example.test';
@@ -154,7 +158,7 @@ describe('shared event pool', () => {
       added: false,
     });
     // Costs, notes, booth hall and number, attachments, ids: none of it is in any response.
-    expect(res.body).not.toMatch(/SECRET|8\.1|HALL-9|BOOTH-77|ticket\.pdf|att1|ana@|Ben|accountId/);
+    expect(withoutIds(res.body)).not.toMatch(/SECRET|8\.1|HALL-9|BOOTH-77|ticket\.pdf|att1|ana@|Ben|accountId/);
   });
 
   it('shows no contributor count, name, id or timestamp anywhere', async () => {
@@ -162,7 +166,7 @@ describe('shared event pool', () => {
       (await pool(cleo, 'GET', '/listings?includeAdded=1&past=1')).body,
       (await pool(ana, 'GET', '/listings?includeAdded=1&past=1')).body,
       (await pool(ana, 'GET', '/settings')).body,
-    ].join('\n');
+    ].map(withoutIds).join('\n');
     expect(bodies).not.toMatch(/going|\bnames\b|displayName|\bcount\b|\bmine\b|updatedAt|contrib|accountId/i);
   });
 

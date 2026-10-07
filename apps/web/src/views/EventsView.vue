@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -229,8 +229,15 @@ const form = reactive({
   pricesFrom: '',
 });
 
+/** Booth layout carried over by Duplicate; stored with the new event on save. */
+const carriedLayout = ref<BoothLayout | undefined>();
+/** Set when Duplicate filled in booth details or a layout, so the dialog can ask for a check. */
+const boothCopied = ref(false);
+
 function openNew(kind: SalesEventKind = 'event'): void {
   editId.value = null;
+  carriedLayout.value = undefined;
+  boothCopied.value = false;
   editKind.value = kind;
   Object.assign(form, {
     name: '',
@@ -268,8 +275,16 @@ function openNew(kind: SalesEventKind = 'event'): void {
  */
 function openDuplicate(e: SalesEvent): void {
   openNew(e.kind ?? 'event');
+  const carried = boothFieldsForDuplicate(e);
+  carriedLayout.value = carried.boothLayout;
+  boothCopied.value = Boolean(carried.booth || carried.boothLayout);
   Object.assign(form, {
     name: `${e.name} (copy)`,
+    boothHall: carried.booth?.hall ?? '',
+    boothNumber: carried.booth?.number ?? '',
+    boothLink: carried.booth?.link ?? '',
+    boothNote: carried.booth?.note ?? '',
+    noPool: Boolean(carried.noPool),
     street: e.venue?.street ?? '',
     postcode: e.venue?.postcode ?? '',
     city: e.venue?.city ?? '',
@@ -423,6 +438,7 @@ async function save(): Promise<void> {
     },
     booth: store ? undefined : cleanBooth({ hall: form.boothHall, number: form.boothNumber, link: form.boothLink, note: form.boothNote }),
     noPool: store || !form.noPool ? undefined : true,
+    boothLayout: !existing && !store ? carriedLayout.value : existing?.boothLayout,
     currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
@@ -534,6 +550,7 @@ async function save(): Promise<void> {
           </div>
           <label><span>Link</span><input v-model="form.boothLink" type="url" :maxlength="BOOTH_LIMITS.link" placeholder="https://…" /></label>
           <label><span>Note for visitors</span><input v-model="form.boothNote" type="text" :maxlength="BOOTH_LIMITS.note" placeholder="New prints, limited pins." /></label>
+          <p v-if="boothCopied" class="warn">Hall, booth number and layout were copied - check them.</p>
           <p class="hint">Shown on your public events page, widget, calendar and Instagram bio.</p>
           <label class="check"><input v-model="form.noPool" type="checkbox" /> <span>Do not share this event with the community</span></label>
           <p class="hint">For private or invite-only events. Only matters if you share your events (Settings, Event sharing).</p>

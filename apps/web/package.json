@@ -13,6 +13,7 @@
   "dependencies": {
     "@zollify/consignment": "*",
     "@zollify/consignment-artist": "*",
+    "@zollify/commissions": "*",
     "@zollify/convention-checklist": "*",
     "@zollify/costs": "*",
     "@zollify/peppol-be": "*",

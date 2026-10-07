@@ -357,6 +357,9 @@ export async function lockTill(): Promise<void> {
   }
 }
 
+/** Whether a Lock button belongs on screen: only once a shared-till PIN lock is set up on this device. */
+export const canLockTill = (): boolean => tillSettings.value.enabled;
+
 export function saveTillSettings(next: TillSettings): void {
   tillSettings.value = { ...next };
   write('settings', tillSettings.value);

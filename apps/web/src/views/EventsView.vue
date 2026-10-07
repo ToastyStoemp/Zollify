@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, cleanBooth, safeHttpsUrl, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
@@ -201,6 +201,10 @@ const form = reactive({
   city: '',
   country: '',
   tin: '',
+  boothHall: '',
+  boothNumber: '',
+  boothLink: '',
+  boothNote: '',
   localCurrency: '',
   exchangeRate: '',
   roundingIncrement: '0',
@@ -227,6 +231,10 @@ function openNew(kind: SalesEventKind = 'event'): void {
     city: '',
     country: account.value?.profile.artist.countryOfOrigin || 'Switzerland',
     tin: '',
+    boothHall: '',
+    boothNumber: '',
+    boothLink: '',
+    boothNote: '',
     localCurrency: '',
     exchangeRate: '',
     roundingIncrement: '0',
@@ -282,6 +290,10 @@ function openEdit(e: SalesEvent): void {
     city: e.venue?.city ?? '',
     country: e.venue?.country ?? '',
     tin: e.venue?.tin ?? '',
+    boothHall: e.booth?.hall ?? '',
+    boothNumber: e.booth?.number ?? '',
+    boothLink: e.booth?.link ?? '',
+    boothNote: e.booth?.note ?? '',
     localCurrency: e.localCurrency ?? '',
     exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
     roundingIncrement: String(e.roundingIncrement ?? 0),
@@ -371,6 +383,10 @@ async function save(): Promise<void> {
     return;
   }
   const store = editKind.value === 'store';
+  if (!store && form.boothLink.trim() && !safeHttpsUrl(form.boothLink)) {
+    error.value = 'The booth link must start with https://';
+    return;
+  }
   const existing = editId.value ? visibleEvents.value.find((e) => e.id === editId.value) : undefined;
   const local = form.localCurrency.trim().toUpperCase();
   const rate = parseFloat(form.exchangeRate);
@@ -393,6 +409,7 @@ async function save(): Promise<void> {
       country: form.country.trim() || undefined,
       tin: form.tin.trim() || undefined,
     },
+    booth: store ? undefined : cleanBooth({ hall: form.boothHall, number: form.boothNumber, link: form.boothLink, note: form.boothNote }),
     currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
@@ -492,6 +509,17 @@ async function save(): Promise<void> {
           <label><span>Country</span><CountryPicker v-model="form.country" store="name" /></label>
         </div>
         <label v-if="editKind === 'event'"><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
+
+        <fieldset v-if="editKind === 'event'">
+          <legend>Booth</legend>
+          <div class="two">
+            <label><span>Hall</span><input v-model="form.boothHall" type="text" :maxlength="BOOTH_LIMITS.hall" placeholder="3" /></label>
+            <label><span>Booth number</span><input v-model="form.boothNumber" type="text" :maxlength="BOOTH_LIMITS.number" placeholder="B-12" /></label>
+          </div>
+          <label><span>Link</span><input v-model="form.boothLink" type="url" :maxlength="BOOTH_LIMITS.link" placeholder="https://…" /></label>
+          <label><span>Note for visitors</span><input v-model="form.boothNote" type="text" :maxlength="BOOTH_LIMITS.note" placeholder="New prints, limited pins." /></label>
+          <p class="hint">Shown on your public events page, widget, calendar and Instagram bio.</p>
+        </fieldset>
 
         <fieldset>
           <legend>Currency</legend>

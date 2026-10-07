@@ -1,6 +1,7 @@
 import { safeHttpUrl } from './csv';
 import { z } from 'zod';
 import { countryFlag } from './flags';
+import { resolveBooth } from './event-booth';
 import type { SalesEvent } from './types';
 
 /**
@@ -13,6 +14,8 @@ import type { SalesEvent } from './types';
  */
 
 // ── Per-event extras the booth adds on top of the event record ──────────────
+// link, hall, booth and blurb are legacy here: they now live on the event
+// (SalesEvent.booth) and these values only fill in where the event has none.
 
 export const EventOverlaySchema = z.object({
   /** Link to the convention's own site. */
@@ -81,6 +84,7 @@ function publicOne(e: SalesEvent, ov: Partial<EventOverlay>, today: Date): Publi
   const end = e.dateEnd || start;
   const startD = toDate(start);
   const endD = toDate(end);
+  const booth = resolveBooth(e, ov);
   return {
     id: e.id,
     name: e.name || 'Event',
@@ -89,11 +93,11 @@ function publicOne(e: SalesEvent, ov: Partial<EventOverlay>, today: Date): Publi
     city: e.venue?.city ?? '',
     country: e.venue?.country ?? '',
     flag: countryFlag(e.venue?.country),
-    link: safeHttpUrl(ov.link),
-    hall: ov.hall ?? '',
-    booth: ov.booth ?? '',
+    link: booth.link,
+    hall: booth.hall,
+    booth: booth.number,
     igHandle: ov.igHandle ?? '',
-    blurb: ov.blurb ?? '',
+    blurb: booth.note,
     past: endD ? endD < today : false,
     ongoing: startD && endD ? startD <= today && today <= endD : false,
     soon: startD ? startD > today && startD.getTime() - today.getTime() <= SOON_DAYS * 86_400_000 : false,

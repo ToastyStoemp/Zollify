@@ -11,6 +11,7 @@ import {
   type PublicEventsConfig,
 } from '@zollify/shared';
 import {
+  isEnabled,
   reduceEvents,
   type ModuleContext,
   type PublicModuleContext,
@@ -89,6 +90,19 @@ function eventsFor(db: Database.Database, accountId: string) {
     .prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN ('event.upsert', 'event.close') ORDER BY seq")
     .all(accountId) as { opId: string; type: string; payload: string }[];
   return reduceEvents(ops.map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) })));
+}
+
+/**
+ * The next few upcoming events, exactly as the public page lists them - for
+ * other pages (the online receipt) that want a "see us next" line. Empty
+ * unless the page is switched on for the account and has a slug, so nothing
+ * appears that the page itself does not already publish.
+ */
+export function nextPublicEvents(db: Database.Database, accountId: string, limit: number): PublicEvent[] {
+  if (!isEnabled(db, accountId, 'public-events')) return [];
+  const config = readConfig(db, accountId);
+  if (!config.slug) return [];
+  return splitPublicEvents(eventsFor(db, accountId), readOverlays(db, accountId), 0).upcoming.slice(0, limit);
 }
 
 interface Site {

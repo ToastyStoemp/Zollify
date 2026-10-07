@@ -21,7 +21,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
   app.post('/api/account/wipe', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     if (claims.role !== 'owner') {
-      return reply.code(403).send({ error: 'forbidden', message: 'Only the owner can erase the booth data.' });
+      return reply.code(403).send({ error: 'forbidden', message: 'Only the owner can erase the account data.' });
     }
     const removed = db.transaction((accountId: string) => {
       const ops = db.prepare('DELETE FROM ops WHERE accountId = ?').run(accountId).changes;

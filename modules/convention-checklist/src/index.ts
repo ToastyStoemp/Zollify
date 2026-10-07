@@ -11,7 +11,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Convention Checklist',
-  description: 'Packing checklist for booth supplies and products, tracked per convention.',
+  description: 'Packing checklist for event supplies and products, tracked per convention.',
   requires: ['catalog'],
   minRole: 'member',
 

@@ -88,12 +88,12 @@ function fillVat(): void {
       <p class="note">Shown as "find us online" under your online receipts, and printed on paper if you switch that on in POS → Receipts. Link starting with https://; Instagram and TikTok also take a plain handle.</p>
       <div class="grid">
         <label><span>Webstore</span><input v-model="links.webstore" type="text" inputmode="url" placeholder="https://shop.example.com" /></label>
-        <label><span>Instagram</span><input v-model="links.instagram" type="text" placeholder="@yourbooth" /></label>
-        <label><span>TikTok</span><input v-model="links.tiktok" type="text" placeholder="@yourbooth" /></label>
-        <label><span>Facebook</span><input v-model="links.facebook" type="text" inputmode="url" placeholder="https://facebook.com/yourbooth" /></label>
+        <label><span>Instagram</span><input v-model="links.instagram" type="text" placeholder="@yourshop" /></label>
+        <label><span>TikTok</span><input v-model="links.tiktok" type="text" placeholder="@yourshop" /></label>
+        <label><span>Facebook</span><input v-model="links.facebook" type="text" inputmode="url" placeholder="https://facebook.com/yourshop" /></label>
         <label><span>Bluesky</span><input v-model="links.bluesky" type="text" inputmode="url" placeholder="https://bsky.app/profile/you.bsky.social" /></label>
         <label><span>Mastodon</span><input v-model="links.mastodon" type="text" inputmode="url" placeholder="https://mastodon.social/@you" /></label>
-        <label><span>YouTube</span><input v-model="links.youtube" type="text" inputmode="url" placeholder="https://youtube.com/@yourbooth" /></label>
+        <label><span>YouTube</span><input v-model="links.youtube" type="text" inputmode="url" placeholder="https://youtube.com/@yourshop" /></label>
         <label><span>Other link label</span><input v-model="links.otherLabel" type="text" maxlength="30" placeholder="Newsletter" /></label>
         <label><span>Other link</span><input v-model="links.otherUrl" type="text" inputmode="url" placeholder="https://" /></label>
       </div>

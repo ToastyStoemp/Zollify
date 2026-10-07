@@ -65,7 +65,7 @@ const error = ref<string | null>(null);
 // ── Step 1: what you run, and who ────────────────────────────────────────────
 type Runs = 'events' | 'stores' | 'both';
 const RUNS: { id: Runs; title: string; text: string }[] = [
-  { id: 'events', title: 'Events', text: 'Fairs, markets, conventions - a booth for a few days at a time.' },
+  { id: 'events', title: 'Events', text: 'Fairs, markets, conventions - a pop-up for a few days at a time.' },
   { id: 'stores', title: 'Stores', text: 'A shop, or several, open until you close them.' },
   { id: 'both', title: 'Both', text: 'Events and stores.' },
 ];
@@ -242,7 +242,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-if="step === 1" class="card" @submit.prevent="saveWho">
       <h1>Welcome to Zollify</h1>
       <p class="lede">
-        One app for the booth: the till, stock, events and paperwork. First, who is behind the
+        One app for your business: the till, stock, events and paperwork. First, who is behind the
         table? You enter this once: receipts, customs documents and e-invoices all read it from here,
         so no module asks again. Everything past your name is optional, and you can change it any
         time under Settings → Business profile.
@@ -337,7 +337,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <div v-else class="card">
       <h1>You're set up</h1>
       <p class="lede">
-        Here is the order most booths do things in. Each one takes a minute, and none of them has
+        Here is the order most sellers do things in. Each one takes a minute, and none of them has
         to happen today.
       </p>
 
@@ -349,7 +349,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         </li>
         <li>
           <strong>Count what you own</strong>
-          <span>One inventory for the whole booth. Events can claim a share of it.</span>
+          <span>One inventory for the whole business. Events can claim a share of it.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'stock' })">Open Inventory</button>
         </li>
         <li v-if="runsEvents">

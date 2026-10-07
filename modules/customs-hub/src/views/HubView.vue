@@ -59,9 +59,7 @@ function openTarget(c: CountryCard) {
 // PDF per country and hands the files over.
 
 /** Without an event from the URL, pick one here - the active event first. */
-const events = computed(() =>
-  [...sdk().data.events.list()].sort((a, b) => (b.dateStart || '').localeCompare(a.dateStart || '') || a.name.localeCompare(b.name)),
-);
+const events = computed(() => sdk().data.events.list());
 const pickedEventId = ref(sdk().data.events.active()?.id ?? '');
 const exportEventId = computed(() => eventId.value ?? (pickedEventId.value || null));
 

@@ -72,7 +72,7 @@ const groups = computed(() =>
 );
 const listed = computed(() => groups.value.reduce((n, g) => n + g.list.length, 0));
 const upcoming = computed(() =>
-  visibleEvents.value.filter((e) => !isStore(e) && e.status !== 'closed').sort((a, b) => dateKey(a).localeCompare(dateKey(b)) || a.name.localeCompare(b.name)),
+  visibleEvents.value.filter((e) => !isStore(e) && e.status !== 'closed'),
 );
 const finished = computed(() =>
   visibleEvents.value.filter((e) => !isStore(e) && e.status === 'closed').sort((a, b) => dateKey(b).localeCompare(dateKey(a)) || b.updatedAt - a.updatedAt),

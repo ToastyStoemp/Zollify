@@ -61,7 +61,8 @@ export function poyntConfig(app: PoyntApp, origin: string): PoyntConfig | null {
   const o = origin.trim().replace(/\/+$/, '');
   if (!/^https:\/\/[^/]+$/.test(o)) return null;
   const eu = app.region === 'eu';
-  return { ...app, api: eu ? 'https://services-eu.poynt.net' : 'https://services.poynt.net', web: eu ? 'https://eu.poynt.net' : 'https://poynt.net', origin: o };
+  // `web` is where merchants allow the app - the "Merchant grant access URL" the developer portal shows.
+  return { ...app, api: eu ? 'https://services-eu.poynt.net' : 'https://services.poynt.net', web: eu ? 'https://poynt-eu.secureserver.net' : 'https://poynt.net', origin: o };
 }
 
 /** The address people reach this server at: PUBLIC_ORIGIN, else what Fastify derives (forwarded headers only from a trusted proxy). */
@@ -105,7 +106,8 @@ export function businessFromCode(code: string, cfg: Pick<PoyntConfig, 'applicati
     if (!ok) return null;
   }
   const t = Math.floor(now / 1000);
-  if (!/^https:\/\/([a-z-]+\.)?poynt\.net$/.test(claims.iss ?? '')) return null;
+  // Poynt has moved hosts to GoDaddy's domains; the code may come from either.
+  if (!/^https:\/\/([a-z-]+\.)?(poynt\.net|secureserver\.net|godaddy\.com)$/.test(claims.iss ?? '')) return null;
   if (claims.sub !== cfg.applicationId) return null;
   if (!claims.exp || claims.exp < t || (claims.iat && claims.iat < t - 900)) return null;
   const biz = claims['poynt.biz'];

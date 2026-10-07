@@ -102,7 +102,7 @@ describe('connecting a Nexi account', () => {
     expect((await call(owner, 'GET', '/smartpos/status')).json()).toMatchObject({ configured: true, connected: false, canManage: true, app: null, serverApp: true, redirectUrl: 'https://pos.example.test/p/pos/smartpos/authorized' });
     const { url } = (await call(owner, 'POST', '/smartpos/connect')).json();
     const u = new URL(url);
-    expect(u.origin + u.pathname).toBe('https://eu.poynt.net/applications/authorize');
+    expect(u.origin + u.pathname).toBe('https://poynt-eu.secureserver.net/applications/authorize');
     expect(u.searchParams.get('client_id')).toBe(APP);
     expect(u.searchParams.get('redirect_uri')).toBe('https://pos.example.test/p/pos/smartpos/authorized');
   });
@@ -277,6 +277,8 @@ describe('helpers', () => {
     const cfg = { applicationId: APP, authPublicKey: null };
     expect(businessFromCode(code(), cfg)).toBe(BIZ);
     expect(businessFromCode(code(BIZ, { iss: 'https://evil.example' }), cfg)).toBeNull();
+    expect(businessFromCode(code(BIZ, { iss: 'https://poynt-eu.secureserver.net' }), cfg)).toBe(BIZ);
+    expect(businessFromCode(code(BIZ, { iss: 'https://poynt-eu.secureserver.net.evil.example' }), cfg)).toBeNull();
     expect(businessFromCode(code('not-a-uuid'), cfg)).toBeNull();
   });
 });

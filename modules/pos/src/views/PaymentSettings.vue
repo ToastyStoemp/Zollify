@@ -5,7 +5,7 @@ import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
-import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
+import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposOtherDevice, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
 import { sdk } from '../runtime';
@@ -79,18 +79,31 @@ onMounted(async () => {
 
 // ── Nexi SmartPOS: which terminal this till sends payments to ───────────────
 const smartposTerminals = ref<SmartposTerminal[]>([]);
+const smartposOthers = ref<SmartposOtherDevice[]>([]);
+/** Whether the list has come back at least once, so "none" means none. */
+const smartposLoaded = ref(false);
 const smartposTerminal = ref('');
 const smartposError = ref('');
 const smartpos = ref<SmartposStatus | null>(null);
 const appForm = ref({ open: false, applicationId: '', region: 'eu' as 'eu' | 'us', privateKey: '', authPublicKey: '', saving: false });
-async function refreshSmartpos(): Promise<void> {
+async function refreshSmartpos(fresh = false): Promise<void> {
   smartposError.value = '';
+  smartposLoaded.value = false;
   smartpos.value = await loadSmartposStatus().catch(() => null);
+  if (!smartpos.value?.connected) {
+    smartposTerminals.value = [];
+    smartposOthers.value = [];
+    return;
+  }
   try {
-    smartposTerminals.value = await loadSmartposTerminals();
+    const list = await loadSmartposTerminals(fresh);
+    smartposTerminals.value = list.terminals;
+    smartposOthers.value = list.others;
+    smartposLoaded.value = true;
   } catch (err) {
     const body = (err as { body?: { error?: string; message?: string } } | null)?.body;
     smartposTerminals.value = [];
+    smartposOthers.value = [];
     // No app or not connected yet is what the hints already say.
     smartposError.value = body?.error === 'not_connected' || body?.error === 'not_configured' ? '' : (body?.message ?? 'Could not load your terminals.');
   }
@@ -155,7 +168,10 @@ async function run(p: PaymentProvider, action: 'configure' | 'pairReader' | 'dis
   } catch (err) {
     sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
   }
-  setTimeout(() => void refreshStatuses(), 1200);
+  setTimeout(() => {
+    void refreshStatuses();
+    if (p.id === 'nexi-smartpos') void refreshSmartpos();
+  }, 1200);
 }
 async function saveKey(): Promise<void> {
   await setSetting(SUMUP_KEY_SETTING, sumupKey.value.trim());
@@ -177,6 +193,7 @@ async function saveRemoteCarbon(): Promise<void> {
   sdk().ui.toast('Remote Carbon saved.', { kind: 'success' });
   void refreshStatuses();
 }
+const when = (ts: number): string => new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const ago = (ts: number): string => {
   const m = Math.round((Date.now() - ts) / 60000);
   if (m < 1) return 'just now';
@@ -263,13 +280,23 @@ async function removeMethod(name: string): Promise<void> {
         <p class="hint">The key stays on the server, encrypted. Each account on this server has its own app, Nexi account and terminals.</p>
       </div>
       <div class="carbon">
-        <div class="row"><span class="label">This till’s Nexi terminal</span><button type="button" class="quiet" @click="refreshSmartpos">Refresh</button></div>
+        <div class="row"><span class="label">Nexi connection</span></div>
+        <p v-if="smartpos?.connection" class="ok">Connected to {{ smartpos.connection.businessName || 'your Nexi business' }} since {{ when(smartpos.connection.linkedAt) }}.</p>
+        <p v-else class="hint">Not connected yet. {{ smartpos && !smartpos.configured ? 'Add a Poynt app first, then tap' : 'Tap' }} <strong>Connect</strong> above and allow the app on your Nexi account.</p>
+        <p v-if="smartpos?.lastAttempt && smartpos.lastAttempt.outcome !== 'connected'" class="error">
+          Last attempt ({{ when(smartpos.lastAttempt.at) }}) {{ smartpos.lastAttempt.outcome === 'declined' ? 'was cancelled on the Nexi page.' : 'did not connect' }}{{ smartpos.lastAttempt.outcome === 'declined' ? '' : smartpos.lastAttempt.detail ? `: ${smartpos.lastAttempt.detail}` : '.' }}
+        </p>
+      </div>
+      <div v-if="smartpos?.connected" class="carbon">
+        <div class="row"><span class="label">This till’s Nexi terminal</span><button type="button" class="quiet" @click="refreshSmartpos(true)">Refresh</button></div>
         <select v-if="smartposTerminals.length" v-model="smartposTerminal" @change="saveSmartposTerminal">
           <option value="" disabled>Choose a terminal…</option>
           <option v-for="t in smartposTerminals" :key="t.deviceId" :value="t.deviceId">{{ t.name }}{{ t.storeName ? ` - ${t.storeName}` : '' }}{{ t.serial ? ` (${t.serial})` : '' }}</option>
         </select>
         <p v-else-if="smartposError" class="error">{{ smartposError }}</p>
-        <p v-else class="hint">{{ smartpos && !smartpos.configured ? 'Add a Poynt app first, then' : 'Tap' }} <strong>Connect</strong> above to allow it on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
+        <p v-else-if="smartposLoaded" class="hint">Poynt lists no active terminals on this business yet. A test merchant has none until a device is activated on it - Nexi registers developer terminals, or use Poynt’s emulator. Tap <strong>Refresh</strong> once one is set up.</p>
+        <p v-else class="hint">Loading terminals…</p>
+        <p v-if="smartposOthers.length" class="hint">Also on this business, but not usable: {{ smartposOthers.map((d) => `${d.name} (${d.why})`).join(', ') }}.</p>
         <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. Each till can use its own terminal.</p>
       </div>
     </template>
@@ -313,6 +340,7 @@ async function removeMethod(name: string): Promise<void> {
 h2 { font-size: 1.05rem; margin: 0; }
 h3 { font-size: .95rem; margin: .5rem 0 0; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .85rem; }
+.ok { color: var(--zfy-accent, #0e7c66); margin: 0; font-size: .85rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .85rem; }
 .providers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
 .providers li { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }

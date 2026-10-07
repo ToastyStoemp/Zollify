@@ -20,7 +20,7 @@ import type { ModuleContext, PublicModuleContext, SecretBox } from '@zollify/ser
  * the outcome back to a per-payment callback URL that only Poynt knows.
  *
  *   POST {api}/token          self-signed RS256 JWT → app access token
- *   GET  {api}/businesses/{biz}/stores   → stores and their devices
+ *   GET  {api}/businesses/{biz}?storeDevices=true → its stores and their devices
  *   POST {api}/cloudMessages  { businessId, storeId, deviceId, ttl, data }
  *        data = { callbackUrl, payment: "<json: amount (minor units), currency, referenceId, …>" }
  *        or     { action: "cancelPayment" }
@@ -93,25 +93,31 @@ export function appAssertion(cfg: Pick<PoyntConfig, 'applicationId' | 'privateKe
 
 /** The merchant's business from the authorisation code - after every check we can make (see the note in the route). */
 export function businessFromCode(code: string, cfg: Pick<PoyntConfig, 'applicationId' | 'authPublicKey'>, now = Date.now()): string | null {
+  const r = readCode(code, cfg, now);
+  return 'biz' in r ? r.biz : null;
+}
+
+/** The same, saying why a code was refused - shown to the owner, so it never echoes the code itself. */
+export function readCode(code: string, cfg: Pick<PoyntConfig, 'applicationId' | 'authPublicKey'>, now = Date.now()): { biz: string } | { reason: string } {
   const parts = code.split('.');
-  if (parts.length !== 3) return null;
+  if (parts.length !== 3) return { reason: 'Poynt sent back something that is not a sign-in code.' };
   let claims: { iss?: string; sub?: string; exp?: number; iat?: number; 'poynt.biz'?: string };
   try {
     claims = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'));
   } catch {
-    return null;
+    return { reason: 'Poynt’s sign-in code could not be read.' };
   }
   if (cfg.authPublicKey) {
     const ok = createVerify('RSA-SHA256').update(`${parts[0]}.${parts[1]}`).verify(createPublicKey(cfg.authPublicKey), Buffer.from(parts[2]!, 'base64url'));
-    if (!ok) return null;
+    if (!ok) return { reason: 'The sign-in code’s signature does not match the Poynt public key saved with the app.' };
   }
   const t = Math.floor(now / 1000);
   // Poynt has moved hosts to GoDaddy's domains; the code may come from either.
-  if (!/^https:\/\/([a-z-]+\.)?(poynt\.net|secureserver\.net|godaddy\.com)$/.test(claims.iss ?? '')) return null;
-  if (claims.sub !== cfg.applicationId) return null;
-  if (!claims.exp || claims.exp < t || (claims.iat && claims.iat < t - 900)) return null;
+  if (!/^https:\/\/([a-z-]+\.)?(poynt\.net|secureserver\.net|godaddy\.com)$/.test(claims.iss ?? '')) return { reason: `The sign-in code was issued by ${JSON.stringify(String(claims.iss ?? 'nobody').slice(0, 80))}, not Poynt.` };
+  if (claims.sub !== cfg.applicationId) return { reason: 'The sign-in code is for another Poynt app than the one saved here.' };
+  if (!claims.exp || claims.exp < t || (claims.iat && claims.iat < t - 900)) return { reason: 'The sign-in code had expired - is the server’s clock right?' };
   const biz = claims['poynt.biz'];
-  return typeof biz === 'string' && /^[0-9a-f-]{36}$/i.test(biz) ? biz : null;
+  return typeof biz === 'string' && /^[0-9a-f-]{36}$/i.test(biz) ? { biz } : { reason: 'The sign-in code does not name a Poynt business.' };
 }
 
 /** What a payment came to, from the terminal's callback. */
@@ -166,6 +172,13 @@ export function migrateSmartpos(db: Database.Database): void {
       app         TEXT NOT NULL,                 -- encrypted PoyntApp
       updatedAt   INTEGER NOT NULL
     );
+    -- How the last attempt to connect went, so the owner can see it.
+    CREATE TABLE IF NOT EXISTS smartpos_attempts (
+      accountId   TEXT PRIMARY KEY,
+      at          INTEGER NOT NULL,
+      outcome     TEXT NOT NULL,
+      detail      TEXT NOT NULL DEFAULT ''
+    );
     CREATE TABLE IF NOT EXISTS smartpos_states (
       nonce       TEXT PRIMARY KEY,
       accountId   TEXT NOT NULL,
@@ -186,6 +199,11 @@ export function migrateSmartpos(db: Database.Database): void {
       updatedAt   INTEGER NOT NULL
     );
   `);
+  try {
+    db.exec('ALTER TABLE smartpos_links ADD COLUMN businessName TEXT');
+  } catch {
+    /* already there */
+  }
 }
 
 const linkOf = (db: Database.Database, accountId: string): string | null =>
@@ -241,20 +259,32 @@ export class PoyntClient {
     return { status: res.status, json };
   }
 
-  /** The merchant's terminals: every device of every store of the business. */
-  async terminals(businessId: string): Promise<Terminal[]> {
-    const res = await this.call('GET', `/businesses/${encodeURIComponent(businessId)}/stores`);
-    if (res.status >= 300) throw new Error(`Poynt refused the terminal list (${res.status}).`);
-    const stores = (Array.isArray(res.json) ? res.json : ((res.json as { stores?: unknown[] } | null)?.stores ?? [])) as {
+  /**
+   * The business's devices, from the business record (Poynt has no list of
+   * stores of its own). Usable ones are activated terminals; the rest are
+   * listed too, with why not, so an empty list explains itself.
+   */
+  async devices(businessId: string): Promise<{ terminals: Terminal[]; others: OtherDevice[]; businessName: string }> {
+    const res = await this.call('GET', `/businesses/${encodeURIComponent(businessId)}?storeDevices=true`);
+    if (res.status >= 300) throw new Error(`Poynt refused to show the business (${res.status})${poyntMessage(res.json)}.`);
+    const body = (res.json ?? {}) as { doingBusinessAs?: string; legalName?: string; stores?: unknown };
+    const stores = (Array.isArray(body.stores) ? body.stores : []) as {
       id?: string;
       displayName?: string;
       storeDevices?: { deviceId?: string; serialNumber?: string; name?: string; status?: string; type?: string }[];
     }[];
-    return stores.flatMap((s) =>
-      (s.storeDevices ?? [])
-        .filter((d) => d.deviceId && (!d.status || d.status === 'ACTIVATED') && (!d.type || d.type === 'TERMINAL'))
-        .map((d) => ({ storeId: String(s.id), storeName: s.displayName ?? '', deviceId: String(d.deviceId), name: d.name || d.serialNumber || String(d.deviceId), serial: d.serialNumber ?? '' })),
-    );
+    const terminals: Terminal[] = [];
+    const others: OtherDevice[] = [];
+    for (const s of stores) {
+      for (const d of s.storeDevices ?? []) {
+        const name = d.name || d.serialNumber || String(d.deviceId ?? '?');
+        if (!d.deviceId) continue;
+        if (d.status && d.status !== 'ACTIVATED') others.push({ name, storeName: s.displayName ?? '', why: `status ${d.status}` });
+        else if (d.type && d.type !== 'TERMINAL') others.push({ name, storeName: s.displayName ?? '', why: `type ${d.type}` });
+        else terminals.push({ storeId: String(s.id), storeName: s.displayName ?? '', deviceId: String(d.deviceId), name, serial: d.serialNumber ?? '' });
+      }
+    }
+    return { terminals, others, businessName: body.doingBusinessAs || body.legalName || '' };
   }
 
   async send(msg: { businessId: string; storeId: string; deviceId: string; ttl: number; data: unknown }): Promise<void> {
@@ -262,6 +292,18 @@ export class PoyntClient {
     if (res.status >= 300) throw new Error(`Poynt did not take the request (${res.status}).`);
   }
 }
+
+/** A device on the business that cannot take payments from Zollify, and why. */
+export interface OtherDevice {
+  name: string;
+  storeName: string;
+  why: string;
+}
+
+const poyntMessage = (json: unknown): string => {
+  const m = (json as { message?: unknown; developerMessage?: unknown } | null)?.message ?? (json as { developerMessage?: unknown } | null)?.developerMessage;
+  return typeof m === 'string' && m ? `: ${m.slice(0, 200)}` : '';
+};
 
 export interface Terminal {
   storeId: string;
@@ -340,12 +382,12 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
     const cfg = poyntConfig(own, originOf(req));
     return cfg ? { cfg, client: apps.client(cfg) } : { error: noOrigin };
   };
-  // The terminal list changes rarely; asked at most once a minute per business.
-  const cache = new Map<string, { at: number; list: Terminal[] }>();
-  const terminalsOf = async (client: PoyntClient, biz: string): Promise<Terminal[]> => {
+  // The terminal list changes rarely; asked at most once a minute per business (Refresh asks again).
+  const cache = new Map<string, { at: number; list: Awaited<ReturnType<PoyntClient['devices']>> }>();
+  const devicesOf = async (client: PoyntClient, biz: string, fresh = false) => {
     const hit = cache.get(biz);
-    if (hit && Date.now() - hit.at < 60_000) return hit.list;
-    const list = await client.terminals(biz);
+    if (hit && !fresh && Date.now() - hit.at < 60_000) return hit.list;
+    const list = await client.devices(biz);
     cache.set(biz, { at: Date.now(), list });
     return list;
   };
@@ -358,6 +400,8 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
     return {
       configured: !!apps.appOf(who.accountId) && https,
       connected: !!linkOf(db, who.accountId),
+      connection: (db.prepare('SELECT businessId, businessName, linkedAt FROM smartpos_links WHERE accountId = ?').get(who.accountId) as { businessId: string; businessName: string | null; linkedAt: number } | undefined) ?? null,
+      lastAttempt: (db.prepare('SELECT at, outcome, detail FROM smartpos_attempts WHERE accountId = ?').get(who.accountId) as { at: number; outcome: string; detail: string } | undefined) ?? null,
       canManage: admin(who.role),
       // The key itself never leaves the server.
       app: own ? { applicationId: own.applicationId, region: own.region, hasAuthKey: !!own.authPublicKey } : null,
@@ -434,13 +478,14 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
     return { ok: true };
   });
 
-  app.get('/smartpos/terminals', async (req, reply) => {
+  app.get<{ Querystring: { fresh?: string } }>('/smartpos/terminals', async (req, reply) => {
     const setup = setupOf(req);
     if ('error' in setup) return reply.code(409).send(setup.error);
     const biz = linkOf(db, ctx.identity(req).accountId);
     if (!biz) return reply.code(409).send({ error: 'not_connected', message: 'Connect your Nexi account under Settings → Payments first.' });
     try {
-      return { terminals: await terminalsOf(setup.client, biz) };
+      const { terminals, others } = await devicesOf(setup.client, biz, req.query.fresh === '1');
+      return { terminals, others };
     } catch (err) {
       return reply.code(502).send({ error: 'upstream', message: (err as Error).message });
     }
@@ -459,7 +504,7 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
     const { amount, currency, reference, storeId, deviceId } = body.data;
     try {
       // Only this merchant's own terminals.
-      if (!(await terminalsOf(client, biz)).some((t) => t.storeId === storeId && t.deviceId === deviceId)) {
+      if (!(await devicesOf(client, biz)).terminals.some((t) => t.storeId === storeId && t.deviceId === deviceId)) {
         return reply.code(404).send({ error: 'unknown_terminal', message: 'That terminal is not on your Nexi account - pick it again under Settings → Payments.' });
       }
       const referenceId = randomUUID();
@@ -526,35 +571,46 @@ export function registerSmartposPublic(app: FastifyInstance, ctx: PublicModuleCo
    * and made out to this app, Poynt must confirm the app can see that
    * business, and a business links to one Zollify account only.
    */
-  app.get<{ Querystring: { code?: string; status?: string; context?: string } }>('/smartpos/authorized', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
+  app.get<{ Querystring: Record<string, string | undefined> }>('/smartpos/authorized', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
     const origin = originOf(req);
     const back = (outcome: string) => reply.redirect(`${origin}/#/settings?panel=pos.payments&smartpos=${outcome}`);
     const nonce = String(req.query.context ?? '');
     const state = db.prepare('SELECT accountId, expiresAt FROM smartpos_states WHERE nonce = ?').get(nonce) as { accountId: string; expiresAt: number } | undefined;
     db.prepare('DELETE FROM smartpos_states WHERE nonce = ?').run(nonce);
     if (!state || state.expiresAt < Date.now()) return back('expired');
+    /** Remembers how it went, for the owner's settings screen, then goes back there. */
+    const done = (outcome: string, detail = '') => {
+      db.prepare('INSERT INTO smartpos_attempts (accountId, at, outcome, detail) VALUES (?, ?, ?, ?) ON CONFLICT(accountId) DO UPDATE SET at = excluded.at, outcome = excluded.outcome, detail = excluded.detail').run(
+        state.accountId,
+        Date.now(),
+        outcome,
+        detail.slice(0, 300),
+      );
+      return back(outcome);
+    };
     // The app of the account that started connecting: each account may have its own.
     const own = apps.appOf(state.accountId);
     const cfg = own ? poyntConfig(own, origin) : null;
-    if (!cfg) return back('not_configured');
+    if (!cfg) return done('not_configured');
     const client = apps.client(cfg);
-    if (String(req.query.status ?? '').toLowerCase() === 'denied' || !req.query.code) return back('declined');
-    const biz = businessFromCode(String(req.query.code), cfg);
-    if (!biz) return back('failed');
+    if (String(req.query.status ?? '').toLowerCase() === 'denied') return done('declined');
+    // Only the names of what came back, never the values.
+    if (!req.query.code) return done('failed', `Poynt came back without a sign-in code (it sent: ${Object.keys(req.query).join(', ').slice(0, 120) || 'nothing'}).`);
+    const read = readCode(String(req.query.code), cfg);
+    if ('reason' in read) return done('failed', read.reason);
+    const biz = read.biz;
+    let businessName = '';
     try {
-      const check = await client.call('GET', `/businesses/${encodeURIComponent(biz)}`);
-      if (check.status >= 300) return back('failed');
-    } catch {
-      return back('failed');
+      businessName = (await client.devices(biz)).businessName;
+    } catch (err) {
+      return done('failed', `${(err as Error).message} Check the app's API permissions in the Poynt portal.`);
     }
     const taken = db.prepare('SELECT accountId FROM smartpos_links WHERE businessId = ?').get(biz) as { accountId: string } | undefined;
-    if (taken && taken.accountId !== state.accountId) return back('in_use');
-    db.prepare('INSERT INTO smartpos_links (accountId, businessId, linkedAt) VALUES (?, ?, ?) ON CONFLICT(accountId) DO UPDATE SET businessId = excluded.businessId, linkedAt = excluded.linkedAt').run(
-      state.accountId,
-      biz,
-      Date.now(),
-    );
-    return back('connected');
+    if (taken && taken.accountId !== state.accountId) return done('in_use');
+    db.prepare(
+      'INSERT INTO smartpos_links (accountId, businessId, businessName, linkedAt) VALUES (?, ?, ?, ?) ON CONFLICT(accountId) DO UPDATE SET businessId = excluded.businessId, businessName = excluded.businessName, linkedAt = excluded.linkedAt',
+    ).run(state.accountId, biz, businessName, Date.now());
+    return done('connected', businessName);
   });
 
   /** The terminal reporting on a payment. Only the URL Poynt was given (with its secret) gets in. */

@@ -56,13 +56,10 @@ beforeAll(async () => {
     sent.push({ url, body: String(init?.body ?? '') });
     const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     if (url.endsWith('/token')) return json(200, { accessToken: 'app-token', expiresIn: 86400, tokenType: 'BEARER' });
-    if (url.endsWith(`/businesses/${BIZ}`) || url.endsWith(`/businesses/${BIZ2}`)) return json(200, { id: url.split('/').pop() });
-    if (url.endsWith(`/businesses/${BIZ2}/stores`)) return json(200, [{ id: 'store-2', displayName: 'Shop two', storeDevices: [{ deviceId: 'urn:tid:shop2', name: 'Till 2', status: 'ACTIVATED', type: 'TERMINAL' }] }]);
-    if (url.includes('/businesses/') && url.endsWith('/stores')) {
-      return url.includes(BIZ)
-        ? json(200, [{ id: 'store-1', displayName: 'Atelier', storeDevices: [{ deviceId: 'urn:tid:n950', serialNumber: 'N950-1', name: 'Counter', status: 'ACTIVATED', type: 'TERMINAL' }, { deviceId: 'urn:tid:old', status: 'DEACTIVATED', type: 'TERMINAL' }] }])
-        : json(403, { message: 'no access' });
+    if (url.includes(`/businesses/${BIZ}?`)) {
+      return json(200, { id: BIZ, doingBusinessAs: 'Atelier ApS', stores: [{ id: 'store-1', displayName: 'Atelier', storeDevices: [{ deviceId: 'urn:tid:n950', serialNumber: 'N950-1', name: 'Counter', status: 'ACTIVATED', type: 'TERMINAL' }, { deviceId: 'urn:tid:old', name: 'Old one', status: 'DEACTIVATED', type: 'TERMINAL' }] }] });
     }
+    if (url.includes(`/businesses/${BIZ2}?`)) return json(200, { id: BIZ2, legalName: 'Shop Two', stores: [{ id: 'store-2', displayName: 'Shop two', storeDevices: [{ deviceId: 'urn:tid:shop2', name: 'Till 2', status: 'ACTIVATED', type: 'TERMINAL' }] }] });
     if (url.includes('/businesses/')) return json(403, { message: 'no access' });
     if (url.endsWith('/cloudMessages')) return new Response(null, { status: 202 });
     return json(404, {});
@@ -112,7 +109,14 @@ describe('connecting a Nexi account', () => {
     expect(await connect(jwt({ iss: 'https://poynt.net', sub: APP, iat: now(), exp: now() + 300, 'poynt.biz': BIZ }, app_.privateKey))).toMatch(/smartpos=failed/);
     expect(await connect(code(BIZ, { sub: 'urn:aid:someone-else' }))).toMatch(/smartpos=failed/);
     expect(await connect(code(BIZ, { exp: now() - 10 }))).toMatch(/smartpos=failed/);
-    expect((await call(owner, 'GET', '/smartpos/status')).json().connected).toBe(false);
+    // The owner can see why.
+    expect((await call(owner, 'GET', '/smartpos/status')).json()).toMatchObject({ connected: false, lastAttempt: { outcome: 'failed', detail: expect.stringMatching(/expired/) } });
+    expect(await connect(code(BIZ, { sub: 'urn:aid:someone-else' }))).toMatch(/smartpos=failed/);
+    expect((await call(owner, 'GET', '/smartpos/status')).json().lastAttempt.detail).toMatch(/another Poynt app/);
+    // Back without a code: only the names of what Poynt sent are kept.
+    const { url } = (await call(owner, 'POST', '/smartpos/connect')).json();
+    await app.inject({ method: 'GET', url: `/p/pos/smartpos/authorized?context=${new URL(url).searchParams.get('context')}&error=oops` });
+    expect((await call(owner, 'GET', '/smartpos/status')).json().lastAttempt.detail).toBe('Poynt came back without a sign-in code (it sent: context, error).');
   });
 
   it('links the business once the code checks out, and a context only works once', async () => {
@@ -121,11 +125,18 @@ describe('connecting a Nexi account', () => {
     const go = () => app.inject({ method: 'GET', url: `/p/pos/smartpos/authorized?code=${encodeURIComponent(code())}&status=allow&context=${context}` });
     expect(String((await go()).headers.location)).toBe('https://pos.example.test/#/settings?panel=pos.payments&smartpos=connected');
     expect(String((await go()).headers.location)).toMatch(/smartpos=expired/);
-    expect((await call(owner, 'GET', '/smartpos/status')).json().connected).toBe(true);
+    expect((await call(owner, 'GET', '/smartpos/status')).json()).toMatchObject({
+      connected: true,
+      connection: { businessId: BIZ, businessName: 'Atelier ApS' },
+      lastAttempt: { outcome: 'connected', detail: 'Atelier ApS' },
+    });
   });
 
   it('lists only active terminals', async () => {
-    expect((await call(owner, 'GET', '/smartpos/terminals')).json().terminals).toEqual([{ storeId: 'store-1', storeName: 'Atelier', deviceId: 'urn:tid:n950', name: 'Counter', serial: 'N950-1' }]);
+    expect((await call(owner, 'GET', '/smartpos/terminals')).json()).toEqual({
+      terminals: [{ storeId: 'store-1', storeName: 'Atelier', deviceId: 'urn:tid:n950', name: 'Counter', serial: 'N950-1' }],
+      others: [{ name: 'Old one', storeName: 'Atelier', why: 'status DEACTIVATED' }],
+    });
   });
 });
 

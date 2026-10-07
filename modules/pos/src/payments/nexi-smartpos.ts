@@ -25,6 +25,10 @@ export interface SmartposTerminal {
 export interface SmartposStatus {
   configured: boolean;
   connected: boolean;
+  /** The Nexi business this account is linked to. */
+  connection: { businessId: string; businessName: string | null; linkedAt: number } | null;
+  /** How the last Connect went, with Poynt's reason when it failed. */
+  lastAttempt: { at: number; outcome: string; detail: string } | null;
   canManage: boolean;
   app: { applicationId: string; region: 'eu' | 'us'; hasAuthKey: boolean } | null;
   serverApp: boolean;
@@ -149,4 +153,11 @@ export const nexiSmartposProvider: PaymentProvider = {
   },
 };
 
-export const loadSmartposTerminals = async (): Promise<SmartposTerminal[]> => (await sdk().http.get<{ terminals: SmartposTerminal[] }>('smartpos/terminals')).terminals;
+/** Devices on the business that cannot take payments here, and why (deactivated, not a terminal). */
+export interface SmartposOtherDevice {
+  name: string;
+  storeName: string;
+  why: string;
+}
+export const loadSmartposTerminals = (fresh = false): Promise<{ terminals: SmartposTerminal[]; others: SmartposOtherDevice[] }> =>
+  sdk().http.get<{ terminals: SmartposTerminal[]; others: SmartposOtherDevice[] }>(`smartpos/terminals${fresh ? '?fresh=1' : ''}`);

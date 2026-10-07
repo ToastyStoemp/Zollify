@@ -50,7 +50,9 @@ const pay = (txId: string, commissionId: string, amount: number, extra: Record<s
     ...extra,
   });
 
-const NEW = { customerName: 'Mira Keller', email: 'mira@example.test', phone: '+41 79 555 01 02', title: 'Fox portrait', description: 'A3, charcoal, from my own photo', price: 200, depositAsked: 50, dueDate: '2099-01-31', notes: 'asked for rush, said no' };
+const MIRA = { name: 'Mira Keller', email: 'mira@example.test', phone: '+41 79 555 01 02' };
+/** Mira orders several pieces below; each is "add as a new customer anyway" so these tests do not depend on picking her. */
+const NEW = { customer: MIRA, forceNewCustomer: true, title: 'Fox portrait', description: 'A3, charcoal, from my own photo', price: 200, depositAsked: 50, dueDate: '2099-01-31', notes: 'asked for rush, said no' };
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-commissions-'));
@@ -102,9 +104,9 @@ describe('the owner and staff side', () => {
   });
 
   it('refuses nonsense and unknown fields never land on the record', async () => {
-    expect((await call(staff, 'POST', '/commissions', { ...NEW, customerName: '' })).statusCode).toBe(400);
+    expect((await call(staff, 'POST', '/commissions', { ...NEW, customer: { ...MIRA, name: '' } })).statusCode).toBe(400);
     expect((await call(staff, 'POST', '/commissions', { ...NEW, price: -5 })).statusCode).toBe(400);
-    expect((await call(staff, 'POST', '/commissions', { ...NEW, email: 'not an email' })).statusCode).toBe(400);
+    expect((await call(staff, 'POST', '/commissions', { ...NEW, customer: { ...MIRA, email: 'not an email' } })).statusCode).toBe(400);
     const res = await call(staff, 'POST', '/commissions', { ...NEW, title: 'Extra', token: 'A'.repeat(32), status: 'collected', id: 'mine' });
     expect(res.json()).toMatchObject({ status: 'requested' });
     expect(res.json().token).not.toBe('A'.repeat(32));

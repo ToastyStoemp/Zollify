@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import {
   COMMISSION_STATUSES,
   COMMISSION_STATUS_LABEL,
+  CommissionCreateSchema,
   CommissionInputSchema,
   CommissionSettingsSchema,
   fmtPrice,
@@ -14,13 +15,17 @@ import {
 } from '@zollify/shared';
 import { QrCode } from '@zollify/ui';
 import { api, errorText, localToday, type CommissionView } from '../api';
+import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
+import CustomerPicker from './CustomerPicker.vue';
+import CustomersPanel from './CustomersPanel.vue';
 import { slipHtml } from '../slip';
 import { sdk } from '../runtime';
 
 /**
  * The owner's and staff's side: every commission with status filters and
  * search, a detail with its timeline and quick status buttons, the QR code for
- * the customer's page, and (admins) where people collect their work.
+ * the customer's page, the customers on file with what each one ordered, and
+ * (admins) where people collect their work and how long details are kept.
  */
 
 const items = ref<CommissionView[]>([]);
@@ -31,6 +36,7 @@ const error = ref<string | null>(null);
 const notice = ref<string | null>(null);
 const busy = ref(false);
 
+const tab = ref<'commissions' | 'customers'>('commissions');
 const isAdmin = computed(() => sdk().account()?.role !== 'member');
 const today = localToday();
 
@@ -170,7 +176,7 @@ const newLink = (): Promise<void> =>
 const erase = (): Promise<void> =>
   run(async () => {
     const c = current.value;
-    if (!c || !(await sdk().ui.confirm(`Erase "${c.title}" and ${c.customerName}'s details? Sales already rung up stay in your books.`, 'Erase commission?', { confirm: 'Erase' }))) return;
+    if (!c || !(await sdk().ui.confirm(`Erase "${c.title}"? The customer's details stay on their record until it is erased. Sales already rung up stay in your books.`, 'Erase commission?', { confirm: 'Erase' }))) return;
     await api.remove(c.id);
     items.value = items.value.filter((x) => x.id !== c.id);
     openId.value = null;
@@ -179,10 +185,16 @@ const erase = (): Promise<void> =>
 // ── Create / edit ───────────────────────────────────────────────────────────
 const editing = ref(false);
 const creating = ref(false);
-const form = reactive({ customerName: '', email: '', phone: '', title: '', description: '', price: '', depositAsked: '', dueDate: '', notes: '', currency: 'EUR' });
+const form = reactive({ title: '', description: '', price: '', depositAsked: '', dueDate: '', notes: '', currency: 'EUR' });
+const choice = ref<CustomerChoice>(emptyChoice());
+const duplicates = ref<CustomerContact[]>([]);
 
-function startNew(): void {
-  Object.assign(form, { customerName: '', email: '', phone: '', title: '', description: '', price: '', depositAsked: '', dueDate: '', notes: '', currency: settings.value.currency });
+/** A new commission, for a customer already on file when one is given. */
+function startNew(customer?: CustomerContact): void {
+  Object.assign(form, { title: '', description: '', price: '', depositAsked: '', dueDate: '', notes: '', currency: settings.value.currency });
+  choice.value = customer ? choiceOf(customer) : emptyChoice();
+  duplicates.value = [];
+  tab.value = 'commissions';
   creating.value = true;
   editing.value = false;
   openId.value = null;
@@ -190,27 +202,61 @@ function startNew(): void {
 function startEdit(): void {
   const c = current.value;
   if (!c) return;
-  Object.assign(form, { ...c, price: c.price ? String(c.price) : '', depositAsked: c.depositAsked ? String(c.depositAsked) : '' });
+  Object.assign(form, { title: c.title, description: c.description, dueDate: c.dueDate, notes: c.notes, currency: c.currency, price: c.price ? String(c.price) : '', depositAsked: c.depositAsked ? String(c.depositAsked) : '' });
   editing.value = true;
 }
 const num = (s: string): number => Math.max(0, Number(s.replace(',', '.')) || 0);
-async function submit(): Promise<void> {
-  const parsed = CommissionInputSchema.safeParse({ ...form, price: num(form.price), depositAsked: num(form.depositAsked) });
+async function submit(force = false): Promise<void> {
+  const fields = { ...form, price: num(form.price), depositAsked: num(form.depositAsked) };
+  if (creating.value) {
+    const parsed = CommissionCreateSchema.safeParse({ ...fields, ...customerFields(choice.value, force) });
+    if (!parsed.success) {
+      error.value = parsed.error.issues[0]?.message ?? 'Check the form.';
+      return;
+    }
+    await run(async () => {
+      try {
+        const made = await api.create(parsed.data);
+        replace(made);
+        creating.value = false;
+        open(made);
+      } catch (err) {
+        // A customer like this one is already on file: offer them instead of adding a second.
+        const found = duplicatesIn(err);
+        if (!found) throw err;
+        duplicates.value = found;
+      }
+    }, 'Could not save the commission.');
+    return;
+  }
+  const parsed = CommissionInputSchema.safeParse(fields);
   if (!parsed.success) {
     error.value = parsed.error.issues[0]?.message ?? 'Check the form.';
     return;
   }
   await run(async () => {
-    if (creating.value) {
-      const made = await api.create(parsed.data);
-      replace(made);
-      creating.value = false;
-      open(made);
-    } else if (current.value) {
+    if (current.value) {
       replace(await api.save(current.value.id, parsed.data));
       editing.value = false;
     }
   }, 'Could not save the commission.');
+}
+const useDuplicate = (c: CustomerContact): void => {
+  choice.value = choiceOf(c);
+  duplicates.value = [];
+};
+
+/** From the customers tab: show one of their commissions. */
+function showCommission(c: CommissionView): void {
+  replace(c);
+  tab.value = 'commissions';
+  filter.value = 'all';
+  open(c);
+}
+const customerFocus = ref<string | null>(null);
+function showCustomer(c: CommissionView): void {
+  customerFocus.value = c.customerId;
+  tab.value = 'customers';
 }
 
 // ── Where people collect ────────────────────────────────────────────────────
@@ -232,13 +278,28 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
   <div class="comm">
     <header class="top">
       <h1>Commissions</h1>
-      <button type="button" class="primary" @click="startNew">New commission</button>
+      <button type="button" class="primary" @click="startNew()">New commission</button>
     </header>
+    <div class="chips tabs" role="tablist" aria-label="View">
+      <button type="button" class="chip" role="tab" :class="{ on: tab === 'commissions' }" :aria-selected="tab === 'commissions'" @click="tab = 'commissions'">Commissions</button>
+      <button type="button" class="chip" role="tab" :class="{ on: tab === 'customers' }" :aria-selected="tab === 'customers'" @click="customerFocus = null; tab = 'customers'">Customers</button>
+    </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" class="ok" role="status">{{ notice }}</p>
     <p v-if="overdueCount" class="warn">{{ overdueCount }} overdue - past the due date and not finished.</p>
 
-    <div class="layout">
+    <CustomersPanel
+      v-if="tab === 'customers'"
+      :is-admin="isAdmin"
+      :currency="settings.currency"
+      :keep-days="settings.keepCustomerDays"
+      :focus-id="customerFocus"
+      @new-commission="startNew"
+      @open-commission="showCommission"
+      @changed="load"
+    />
+
+    <div v-else class="layout">
       <section class="list" aria-label="Commissions">
         <input v-model="query" type="search" placeholder="Search name, title, email, phone" aria-label="Search commissions" />
         <div class="chips" role="group" aria-label="Filter by status">
@@ -266,18 +327,18 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Note <input v-model="pickup.pickupNote" type="text" maxlength="300" placeholder="Opening hours, what to bring" /></label>
           <label>Default currency <input v-model="pickup.currency" type="text" maxlength="3" class="short" /></label>
           <label>Time zone <small>(times on the customer's page, e.g. Europe/Zurich)</small><input v-model="pickup.timeZone" type="text" maxlength="64" placeholder="UTC" /></label>
+          <label>Keep customer details after the last commission closes <small>days, 0 to 365; 0 erases at the next check (every few hours). Then name, email, phone, notes and messages are erased.</small>
+            <input v-model.number="pickup.keepCustomerDays" type="number" min="0" max="365" step="1" class="short" />
+          </label>
           <button type="button" :disabled="busy" @click="saveSettings">Save</button>
         </details>
       </section>
 
       <section class="detail" aria-live="polite">
-        <form v-if="creating || editing" class="card" @submit.prevent="submit">
+        <form v-if="creating || editing" class="card" @submit.prevent="submit()">
           <h2>{{ creating ? 'New commission' : 'Edit commission' }}</h2>
-          <label>Customer name <input v-model="form.customerName" type="text" maxlength="120" required autocomplete="off" /></label>
-          <div class="two">
-            <label>Email <input v-model="form.email" type="email" maxlength="254" autocomplete="off" /></label>
-            <label>Phone <input v-model="form.phone" type="tel" maxlength="40" autocomplete="off" /></label>
-          </div>
+          <CustomerPicker v-if="creating" v-model="choice" :keep-days="settings.keepCustomerDays" :duplicates="duplicates" @use-duplicate="useDuplicate" @add-anyway="submit(true)" />
+          <p v-else class="hint">For {{ current?.customerName }}. Change their details under Customers.</p>
           <label>Title <small>the customer sees this</small><input v-model="form.title" type="text" maxlength="120" required /></label>
           <label>Details <small>private to you and staff</small><textarea v-model="form.description" rows="3" maxlength="4000" /></label>
           <div class="two">
@@ -297,6 +358,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
             <div>
               <h2>{{ current.title }}</h2>
               <p class="hint">{{ current.customerName }}<template v-if="current.email"> · {{ current.email }}</template><template v-if="current.phone"> · {{ current.phone }}</template></p>
+              <button v-if="current.customerId" type="button" class="link" @click="showCustomer(current)">All commissions of this customer</button>
             </div>
             <span class="badge" :class="current.status">{{ COMMISSION_STATUS_LABEL[current.status] }}</span>
           </header>
@@ -392,6 +454,7 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
 .short { width: 5rem; }
+.link { align-self: flex-start; padding: 0; min-height: 0; border: 0; background: none; color: var(--zfy-accent-ink, #0a5a4a); text-decoration: underline; font-size: .84rem; font-weight: 400; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .foot { justify-content: space-between; margin-top: .4rem; }
 .statuses { display: flex; gap: .4rem; flex-wrap: wrap; }

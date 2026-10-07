@@ -35,10 +35,28 @@ export const COMMISSION_TOKEN_RE = /^[A-Za-z0-9_-]{32}$/;
 const day = z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Dates look like 2026-12-31.')]);
 const money = z.number().finite().min(0).max(1_000_000);
 
-export const CommissionInputSchema = z.object({
-  customerName: z.string().trim().min(1, 'Enter the customer\'s name.').max(120),
+/**
+ * Who a commission is for. The details live in one customer record per person,
+ * so a returning customer is not retyped; commissions point at it by id. They
+ * are personal data, kept only while needed (see `decideErase`).
+ */
+export const CustomerInputSchema = z.object({
+  name: z.string().trim().min(1, 'Enter the customer\'s name.').max(120),
   email: z.union([z.literal(''), z.string().trim().toLowerCase().email().max(254)]).default(''),
   phone: z.string().trim().max(40).default(''),
+});
+export type CustomerInput = z.infer<typeof CustomerInputSchema>;
+
+export interface Customer extends CustomerInput {
+  id: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Shown in place of the name once a customer's details have been erased. */
+export const CUSTOMER_REMOVED_LABEL = 'Customer removed';
+
+export const CommissionInputSchema = z.object({
   /** Short name of the piece; the customer sees it on the tracking page. */
   title: z.string().trim().min(1, 'Give the commission a short title.').max(120),
   /** What was asked for, in detail. Stays with the artist. */
@@ -52,6 +70,18 @@ export const CommissionInputSchema = z.object({
   notes: z.string().trim().max(4000).default(''),
 });
 export type CommissionInput = z.infer<typeof CommissionInputSchema>;
+
+/**
+ * A new commission is for an existing customer (`customerId`) or for a new one
+ * typed in the same form (`customer`). A new customer who looks like an
+ * existing one is not created until the seller says so (`forceNewCustomer`).
+ */
+export const CommissionCreateSchema = CommissionInputSchema.extend({
+  customerId: z.string().min(1).max(80).optional(),
+  customer: CustomerInputSchema.optional(),
+  forceNewCustomer: z.boolean().default(false),
+}).refine((v) => !!v.customerId !== !!v.customer, { message: 'Pick a customer or enter a new one.', path: ['customer'] });
+export type CommissionCreateInput = z.infer<typeof CommissionCreateSchema>;
 
 export const CommissionUpdateSchema = z.object({
   status: z.enum(COMMISSION_STATUSES).optional(),
@@ -75,6 +105,10 @@ export interface CommissionUpdate {
 
 export interface Commission extends CommissionInput {
   id: string;
+  /** The customer record; null once their details were erased. */
+  customerId: string | null;
+  /** When the personal details were cleared from this commission, if they were. */
+  customerErasedAt: number | null;
   status: CommissionStatus;
   updates: CommissionUpdate[];
   createdAt: number;
@@ -113,6 +147,8 @@ export function nextStatuses(from: CommissionStatus): CommissionStatus[] {
   return COMMISSION_STATUSES.filter((s) => s !== from);
 }
 
+export const DEFAULT_KEEP_CUSTOMER_DAYS = 30;
+
 /** Where the owner says people collect from; shown on the tracking page. */
 export const CommissionSettingsSchema = z.object({
   /** Shown as the sender of the page; falls back to the account's name. */
@@ -123,6 +159,8 @@ export const CommissionSettingsSchema = z.object({
   currency: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).default('EUR'),
   /** IANA zone the tracking page shows times in, e.g. Europe/Zurich. */
   timeZone: z.string().trim().min(1).max(64).refine(isTimeZone, 'Unknown time zone.').default('UTC'),
+  /** Days a customer's details are kept after their last commission closes; 0 erases at the next sweep. */
+  keepCustomerDays: z.number().int().min(0).max(365).default(DEFAULT_KEEP_CUSTOMER_DAYS),
 });
 export type CommissionSettings = z.infer<typeof CommissionSettingsSchema>;
 

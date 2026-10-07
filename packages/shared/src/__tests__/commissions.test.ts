@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CommissionInputSchema, CommissionSettingsSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextStatuses } from '../commissions';
+import { CommissionCreateSchema, CommissionInputSchema, CommissionSettingsSchema, CustomerInputSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextStatuses } from '../commissions';
 
 describe('commissionTotals', () => {
   it('sums payments to the cent and never goes negative', () => {
@@ -29,12 +29,29 @@ describe('nextStatuses', () => {
 });
 
 describe('input schemas', () => {
-  it('needs a name and a title, tidies an email and defaults the rest', () => {
-    const ok = CommissionInputSchema.parse({ customerName: ' Mira ', title: 'Fox', email: ' MIRA@Example.test ' });
-    expect(ok).toMatchObject({ customerName: 'Mira', email: 'mira@example.test', price: 0, dueDate: '', currency: 'EUR' });
-    expect(CommissionInputSchema.safeParse({ customerName: '', title: 'x' }).success).toBe(false);
-    expect(CommissionInputSchema.safeParse({ customerName: 'a', title: 'x', dueDate: 'tomorrow' }).success).toBe(false);
-    expect(CommissionInputSchema.safeParse({ customerName: 'a', title: 'x', price: -1 }).success).toBe(false);
+  it('a commission needs a title and defaults the rest; it carries no customer details', () => {
+    const ok = CommissionInputSchema.parse({ title: 'Fox', customerName: 'Mira', email: 'mira@example.test' });
+    expect(ok).toMatchObject({ title: 'Fox', price: 0, dueDate: '', currency: 'EUR' });
+    expect(ok).not.toHaveProperty('customerName');
+    expect(ok).not.toHaveProperty('email');
+    expect(CommissionInputSchema.safeParse({ title: '' }).success).toBe(false);
+    expect(CommissionInputSchema.safeParse({ title: 'x', dueDate: 'tomorrow' }).success).toBe(false);
+    expect(CommissionInputSchema.safeParse({ title: 'x', price: -1 }).success).toBe(false);
+  });
+
+  it('a customer needs a name, and has its email tidied', () => {
+    expect(CustomerInputSchema.parse({ name: ' Mira ', email: ' MIRA@Example.test ' })).toMatchObject({ name: 'Mira', email: 'mira@example.test', phone: '' });
+    expect(CustomerInputSchema.safeParse({ name: '' }).success).toBe(false);
+    expect(CustomerInputSchema.safeParse({ name: 'a', email: 'nope' }).success).toBe(false);
+  });
+
+  it('a new commission is for an existing customer or a new one, never both or neither', () => {
+    const customer = { name: 'Mira' };
+    expect(CommissionCreateSchema.safeParse({ title: 'Fox', customer }).success).toBe(true);
+    expect(CommissionCreateSchema.safeParse({ title: 'Fox', customerId: 'c1' }).success).toBe(true);
+    expect(CommissionCreateSchema.safeParse({ title: 'Fox' }).success).toBe(false);
+    expect(CommissionCreateSchema.safeParse({ title: 'Fox', customer, customerId: 'c1' }).success).toBe(false);
+    expect(CommissionCreateSchema.parse({ title: 'Fox', customerId: 'c1' }).forceNewCustomer).toBe(false);
   });
 
   it('only knows the fixed statuses', () => {
@@ -49,5 +66,16 @@ describe('settings time zone', () => {
     expect(CommissionSettingsSchema.parse({ timeZone: ' Europe/Zurich ' }).timeZone).toBe('Europe/Zurich');
     expect(CommissionSettingsSchema.safeParse({ timeZone: 'Mars/Olympus' }).success).toBe(false);
     expect(CommissionSettingsSchema.safeParse({ timeZone: '' }).success).toBe(false);
+  });
+});
+
+describe('settings retention', () => {
+  it('defaults to 30 days and allows 0 to 365', () => {
+    expect(CommissionSettingsSchema.parse({}).keepCustomerDays).toBe(30);
+    expect(CommissionSettingsSchema.parse({ keepCustomerDays: 0 }).keepCustomerDays).toBe(0);
+    expect(CommissionSettingsSchema.parse({ keepCustomerDays: 365 }).keepCustomerDays).toBe(365);
+    expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: -1 }).success).toBe(false);
+    expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: 366 }).success).toBe(false);
+    expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: 1.5 }).success).toBe(false);
   });
 });

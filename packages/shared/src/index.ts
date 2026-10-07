@@ -9,6 +9,7 @@ export * from './hs-codes';
 export * from './cash';
 export * from './flags';
 export * from './public-events';
+export * from './event-booth';
 export * from './price-rows';
 export * from './short-barcode';
 export * from './receipt-link';

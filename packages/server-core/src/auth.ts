@@ -13,6 +13,8 @@ import {
   RegisterRequestSchema,
   emptyProfile,
   type AccountProfile,
+  type ProfileLinks,
+  cleanProfileLinks,
   type AuthUser,
   type TokenResponse,
   type UserRole,
@@ -132,6 +134,20 @@ export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
   };
 }
 
+/**
+ * Links are cleaned again on the way out, so a stored row is never more
+ * trusted than a request. A row that no longer passes is dropped. Links
+ * cleared on purpose stay as an empty set: absent means "never set".
+ */
+function storedLinks(raw: unknown): { links?: ProfileLinks } {
+  if (!raw || typeof raw !== 'object') return {};
+  try {
+    return { links: cleanProfileLinks(raw) };
+  } catch {
+    return {};
+  }
+}
+
 /** A missing or unreadable profile is an empty one - never a crash on login. */
 export function parseProfile(raw: string | null | undefined): AccountProfile {
   if (!raw) return emptyProfile();
@@ -144,6 +160,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
       staffSeesTotals: parsed.staffSeesTotals === true,
       ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
+      ...storedLinks(parsed.links),
     };
   } catch {
     return emptyProfile();

@@ -25,7 +25,7 @@ const account = currentAccount;
 const corePanels: Panel[] = [
   {
     id: 'core.profile',
-    label: 'Booth profile',
+    label: 'Business profile',
     group: 'Core',
     minRole: 'admin',
     component: () => import('./ProfileSettings.vue'),

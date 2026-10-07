@@ -1,13 +1,16 @@
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import {
-  EMPTY_RECEIPT_SOCIALS,
-  cleanReceiptSocials,
+  EMPTY_PROFILE_LINKS,
+  adoptLegacyLinks,
+  cleanProfileLinks,
+  cleanReceiptToggles,
   fmtRate,
   isReceiptToken,
   receiptBreakdown,
   receiptFooterLinks,
   vatBreakdown,
+  type ProfileLinks,
   type PublicEvent,
   type ReceiptFooterLink,
   type ReceiptSocials,
@@ -122,20 +125,62 @@ function cleanFooter(value: unknown): string | null | undefined {
 }
 
 // ── Footer links ────────────────────────────────────────────────────────────
-// Webstore and social links, plus the "next events" toggle. Footer content
+// Webstore and social links are part of the business profile, the one place they
+// are edited. This module keeps only the receipt's own switches (print the
+// links, list next events). The table of the first version, which stored the
+// links here, stays readable: it is copied into a profile that has none, and
+// is the fallback while a profile has never had links set. Footer content
 // only: nothing here touches the sale.
 
 const NEXT_EVENTS = 3;
 
-function readSocials(db: Database.Database, accountId: string): ReceiptSocials {
+/** The row the first version of the receipt settings wrote, as stored; null when there is none or it is unreadable. */
+function legacyRow(db: Database.Database, accountId: string): Record<string, unknown> | null {
   const row = db.prepare('SELECT socials FROM pos_receipt_socials WHERE accountId = ?').get(accountId) as { socials: string } | undefined;
-  if (!row) return { ...EMPTY_RECEIPT_SOCIALS };
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.socials) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy links from the old table into profiles that never had any. Never
+ * overwrites: a profile whose links were set, even cleared, is left alone.
+ * Safe to run on every start.
+ */
+export function migrateReceiptSocials(db: Database.Database): number {
+  const rows = db.prepare('SELECT accountId FROM pos_receipt_socials').all() as { accountId: string }[];
+  let moved = 0;
+  for (const { accountId } of rows) {
+    const account = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+    if (!account) continue;
+    const profile = parseProfile(account.profile);
+    const adopt = adoptLegacyLinks(profile.links, legacyRow(db, accountId));
+    if (!adopt) continue;
+    db.prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(JSON.stringify({ ...profile, links: adopt }), accountId);
+    moved++;
+  }
+  return moved;
+}
+
+/** The links the receipt shows: the profile's, or the old table's until the profile has been given any. */
+function readLinks(db: Database.Database, accountId: string): ProfileLinks {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  const fromProfile = parseProfile(row?.profile).links;
+  if (fromProfile) return fromProfile;
   try {
     // Re-cleaned on the way out too, so a row can never be more trusted than a request.
-    return cleanReceiptSocials(JSON.parse(row.socials));
+    return cleanProfileLinks(legacyRow(db, accountId));
   } catch {
-    return { ...EMPTY_RECEIPT_SOCIALS };
+    return { ...EMPTY_PROFILE_LINKS };
   }
+}
+
+function readSocials(db: Database.Database, accountId: string): ReceiptSocials {
+  return { ...readLinks(db, accountId), ...cleanReceiptToggles(legacyRow(db, accountId)) };
 }
 
 /** What the page may show: sanitised link rows, and event fields the public-events page already publishes. */
@@ -517,6 +562,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
   id: MODULE_ID,
   migrate: (db) => {
     migrate(db);
+    migrateReceiptSocials(db);
     migrateSmartpos(db);
   },
 
@@ -550,7 +596,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
       return next;
     });
 
-    // Webstore and social links for the receipt footer; owners and admins set them, every device may read.
+    // Links come from the business profile; what is saved here is the receipt's own switches. Every device may read.
     app.get('/receipt-links', async (req) => readSocials(ctx.db, ctx.identity(req).accountId));
 
     app.put<{ Body: unknown }>('/receipt-links', { bodyLimit: 8 * 1024 }, async (req, reply) => {
@@ -558,19 +604,15 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
       if (who.role !== 'owner' && who.role !== 'admin') {
         return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt links.' });
       }
-      let next: ReceiptSocials;
-      try {
-        next = cleanReceiptSocials(req.body);
-      } catch (err) {
-        return reply.code(400).send({ error: 'invalid', message: (err as Error).message });
-      }
+      // Link fields in the body are ignored on purpose: the profile is the one place they are edited.
+      const toggles = cleanReceiptToggles(req.body);
       ctx.db
         .prepare(
           `INSERT INTO pos_receipt_socials (accountId, socials, updatedAt) VALUES (?, ?, ?)
            ON CONFLICT(accountId) DO UPDATE SET socials = excluded.socials, updatedAt = excluded.updatedAt`,
         )
-        .run(who.accountId, JSON.stringify(next), Date.now());
-      return next;
+        .run(who.accountId, JSON.stringify({ ...legacyRow(ctx.db, who.accountId), ...toggles }), Date.now());
+      return readSocials(ctx.db, who.accountId);
     });
   },
 

@@ -276,13 +276,16 @@ export function buildReceiptLines(
 }
 
 /**
- * The webstore and social links as plain lines for paper, when the account
- * switched printing them on (off by default). Never blocks or fails a print.
+ * The webstore and social links (kept in the business profile) as plain lines
+ * for paper, when the account switched printing them on (off by default).
+ * Never blocks or fails a print.
  */
 async function printedLinkLines(): Promise<string[]> {
   const socials = await serverSocials();
   if (!socials?.showOnPrint) return [];
-  return receiptFooterLinks(socials).map((l) => `${l.label}: ${printableLink(l.url)}`);
+  // The links are the business profile's, which this device already holds; the server's copy covers a profile it has not synced yet.
+  const links = sdk().account()?.profile.links ?? socials;
+  return receiptFooterLinks(links).map((l) => `${l.label}: ${printableLink(l.url)}`);
 }
 
 /**
@@ -308,11 +311,11 @@ export async function printableReceipt(tx: Transaction, eventName: string, event
 
 /**
  * A device that was never set up under Receipts still prints a branded
- * receipt: blank artist fields fall back to the booth profile (as the
+ * receipt: blank artist fields fall back to the business profile (as the
  * settings form already promises), and a missing logo or footer to the ones
  * shared through the server.
  */
-function withProfileFallback(artist: ArtistInfo): ArtistInfo {
+export function withProfileFallback(artist: ArtistInfo): ArtistInfo {
   const profile = sdk().account()?.profile.artist;
   if (!profile) return artist;
   const out: ArtistInfo = { ...artist };

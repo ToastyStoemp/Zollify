@@ -69,6 +69,8 @@ const toRuns = (s: SellsAt): Runs => (s.events && s.stores ? 'both' : s.stores ?
 const runs = ref<Runs>(toRuns(sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e)))));
 const runsEvents = computed(() => runs.value !== 'stores');
 const runsStores = computed(() => runs.value !== 'events');
+// Off unless chosen: nothing is shared until the owner agrees. Applied with the modules, since the pool lives in Public events.
+const shareEvents = ref(false);
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
@@ -88,6 +90,7 @@ async function saveWho(): Promise<void> {
     const next = new Set(wanted.value);
     if (runsStores.value && modules.value.some((m) => m.moduleId === 'consignment')) next.add('consignment');
     if (!runsEvents.value) for (const id of ['customs-hub', 'customs-ch', 'customs-de']) next.delete(id);
+    if (runsEvents.value && shareEvents.value && modules.value.some((m) => m.moduleId === 'public-events')) next.add('public-events');
     wanted.value = next;
     step.value = 2;
   } catch (err) {
@@ -186,6 +189,13 @@ async function saveModules(): Promise<void> {
       mod.enabled = !mod.enabled;
     }
     if (changed.some((m) => m.enabled)) await loadEnabledModules(router);
+    if (runsEvents.value && shareEvents.value && wanted.value.has('public-events')) {
+      try {
+        await authFetch('/m/public-events/pool/settings', { method: 'PUT', body: JSON.stringify({ share: true }) });
+      } catch {
+        error.value = 'Could not turn on event sharing - you can turn it on under Settings.';
+      }
+    }
     step.value = 4;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not change those modules.';
@@ -237,6 +247,18 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <input v-model="runs" type="radio" name="runs" :value="r.id" />
           <strong>{{ r.title }}</strong>
           <span>{{ r.text }}</span>
+        </label>
+      </fieldset>
+      <fieldset v-if="runsEvents" class="runs share">
+        <legend>Help other artists find events?</legend>
+        <p class="lede small">Share the name, dates, place and link of your events with the community. Others can add them to their own events in one tap. Nobody can see who goes to which event. You can turn this off any time in Settings.</p>
+        <label :class="{ on: !shareEvents }">
+          <input v-model="shareEvents" type="radio" name="shareEvents" :value="false" />
+          <strong>No, keep my events to myself</strong>
+        </label>
+        <label :class="{ on: shareEvents }">
+          <input v-model="shareEvents" type="radio" name="shareEvents" :value="true" />
+          <strong>Yes, share my events</strong>
         </label>
       </fieldset>
       <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Booth profile.</p>
@@ -360,6 +382,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
 .grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .runs { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; }
+.runs.share p { grid-column: 1 / -1; margin: 0; }
 .runs legend { font-weight: 600; margin-bottom: .4rem; font-size: .95rem; }
 .runs label { display: flex; flex-direction: column; gap: .2rem; padding: .7rem .8rem; border: 1px solid var(--zfy-line); border-radius: 10px; cursor: pointer; font-size: .85rem; }
 .runs label.on { border-color: var(--zfy-accent); background: var(--zfy-accent-soft); }

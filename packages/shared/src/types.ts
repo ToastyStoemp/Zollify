@@ -75,6 +75,8 @@ export interface SalesEvent {
   vat?: EventVat;
   /** Hall, booth number, link and note - published by Public events. Not used for stores. */
   booth?: EventBooth;
+  /** Keep this event out of the shared event pool even when the account shares its events (private or invite-only). */
+  noPool?: boolean;
   /** Free-text notes for the team: setup times, stand number, who to ask. */
   notes?: string;
   /** Tickets, plans and other files. See EventAttachment. */

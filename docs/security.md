@@ -38,6 +38,19 @@ What the server guarantees, and the settings that matter for it. Regression test
 - Slack and Discord messages escape link and mention syntax.
 - Email links use `PUBLIC_ORIGIN`, or forwarded headers only from a trusted proxy.
 
+## Shared event pool (data that crosses accounts)
+
+Public events lets an account share an event to a pool every account on the server can search and quick-add from. It is the only place event data leaves an account on purpose.
+
+- **Opt-in, per event, reversible.** Nothing is shared until an admin shares that event. Withdrawing deletes the contribution; a listing with no contributors left is deleted with its flags and quick-add records.
+- **What crosses** (the `PoolListing` shape in `packages/shared/src/event-pool.ts`): name, edition label, venue name, street, postcode, city, country, start and end date, an https link, a description of up to 400 characters, a count of accounts going, and display names only for contributors who typed one.
+- **What never crosses**: costs, sales, stock, notes, attachments, VAT, customs data, account or user ids, account names, emails. Searches return no contributor ids.
+- **The server picks every field.** Name, dates and address are read from the contributor's own event in the op-log, never from the request body. The request adds only edition, venue name, link, description and display name, each validated and length-limited.
+- **No markup.** Text containing `<` or `>` is refused and control characters are stripped. Links must be https, without credentials. The client renders everything as escaped text.
+- **Dedupe.** Listings match on normalised name (case, accents and punctuation ignored), start date and city. A match adds a contributor instead of a second listing. The listing shows the newest contributor's details.
+- **Abuse controls.** 20 shares or edits per account per hour, 30 reports per account per day, 200 shared events per account, listings at most 60 days long. Each account can flag a listing once. Three distinct accounts flagging a listing hide it from search. Flags are stored in `event_pool_flags` and there is no admin screen for them yet; the server owner reads them from the database. Three colluding accounts could hide a listing, which is why hiding only affects search and the contributors keep their own copy.
+- **Visibility.** Only signed-in accounts with the Public events module switched on can search the pool. It is not on the unauthenticated `/p/` routes.
+
 ## Settings
 
 | Variable | Meaning |

@@ -8,7 +8,8 @@ import { clearSdk, setSdk } from './runtime';
  * the shop, a calendar feed, an Instagram bio), plus the per-event extras
  * the event record itself does not carry - hall, booth number, a link.
  * Everything visitors see is rendered by the server half from the same
- * events the booth already keeps.
+ * events the booth already keeps. A second screen, Find events, shares
+ * events to a pool other booths quick-add from.
  */
 export default defineModule({
   id: 'public-events',
@@ -28,6 +29,13 @@ export default defineModule({
       component: () => import('./views/PublicEventsView.vue'),
     });
     sdk.nav.add({ routeName: 'index', group: 'events', label: 'Public page', icon: 'globe', order: 115 });
+    sdk.routes.add({
+      path: 'find',
+      name: 'find',
+      title: 'Find events',
+      component: () => import('./views/FindEventsView.vue'),
+    });
+    sdk.nav.add({ routeName: 'find', group: 'events', label: 'Find events', icon: 'calendar', order: 116 });
     sdk.log.info('public-events module ready');
   },
 

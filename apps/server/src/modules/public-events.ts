@@ -17,7 +17,7 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
-import { migrateEventPool, registerEventPool } from './event-pool';
+import { migrateEventPool, poolOnOps, registerEventPool } from './event-pool';
 
 /**
  * Public events - the server half.
@@ -441,6 +441,7 @@ export const publicEventsServerModule: ServerModule = {
   id: 'public-events',
   minRole: 'admin',
   migrate,
+  onOps: poolOnOps,
 
   /** Authenticated: the booth's own settings and a preview of what visitors see. */
   routes: (ctx: ModuleContext) => async (app) => {

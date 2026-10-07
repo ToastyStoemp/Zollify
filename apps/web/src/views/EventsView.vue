@@ -207,6 +207,7 @@ const form = reactive({
   boothNumber: '',
   boothLink: '',
   boothNote: '',
+  noPool: false,
   localCurrency: '',
   exchangeRate: '',
   roundingIncrement: '0',
@@ -237,6 +238,7 @@ function openNew(kind: SalesEventKind = 'event'): void {
     boothNumber: '',
     boothLink: '',
     boothNote: '',
+    noPool: false,
     localCurrency: '',
     exchangeRate: '',
     roundingIncrement: '0',
@@ -296,6 +298,7 @@ function openEdit(e: SalesEvent): void {
     boothNumber: e.booth?.number ?? '',
     boothLink: e.booth?.link ?? '',
     boothNote: e.booth?.note ?? '',
+    noPool: Boolean(e.noPool),
     localCurrency: e.localCurrency ?? '',
     exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
     roundingIncrement: String(e.roundingIncrement ?? 0),
@@ -412,6 +415,7 @@ async function save(): Promise<void> {
       tin: form.tin.trim() || undefined,
     },
     booth: store ? undefined : cleanBooth({ hall: form.boothHall, number: form.boothNumber, link: form.boothLink, note: form.boothNote }),
+    noPool: store || !form.noPool ? undefined : true,
     currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
@@ -521,6 +525,8 @@ async function save(): Promise<void> {
           <label><span>Link</span><input v-model="form.boothLink" type="url" :maxlength="BOOTH_LIMITS.link" placeholder="https://…" /></label>
           <label><span>Note for visitors</span><input v-model="form.boothNote" type="text" :maxlength="BOOTH_LIMITS.note" placeholder="New prints, limited pins." /></label>
           <p class="hint">Shown on your public events page, widget, calendar and Instagram bio.</p>
+          <label class="check"><input v-model="form.noPool" type="checkbox" /> <span>Do not share this event with the community</span></label>
+          <p class="hint">For private or invite-only events. Only matters if you share your events (Settings, Event sharing).</p>
         </fieldset>
 
         <fieldset>
@@ -636,6 +642,7 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .menu .danger { color: var(--zfy-danger, #c6512f); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+label.check { flex-direction: row; align-items: center; gap: .5rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
 .three { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .6rem; }
 fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .6rem; }

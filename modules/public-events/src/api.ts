@@ -1,4 +1,4 @@
-import type { EventOverlay, PoolListing, PoolShare, PublicEvent, PublicEventsConfig } from '@zollify/shared';
+import type { EventOverlay, PoolListing, PublicEvent, PublicEventsConfig } from '@zollify/shared';
 import { sdk } from './runtime';
 
 /** Typed wrapper over this module's server half at `/api/m/public-events/…`. */
@@ -21,9 +21,8 @@ export const api = {
   pool: {
     search: (params: Record<string, string>) =>
       sdk().http.get<{ listings: PoolListing[]; more: boolean }>(`pool/listings?${new URLSearchParams(params).toString()}`),
-    mine: () => sdk().http.get<{ shared: { eventId: string; displayName: string; listing: PoolListing }[] }>('pool/mine'),
-    share: (share: Partial<PoolShare> & { eventId: string }) => sdk().http.put<{ listing: PoolListing }>('pool/share', share),
-    withdraw: (eventId: string) => sdk().http.del<{ ok: true }>(`pool/share/${encodeURIComponent(eventId)}`),
+    settings: () => sdk().http.get<{ share: boolean }>('pool/settings'),
+    setSharing: (share: boolean) => sdk().http.put<{ share: boolean }>('pool/settings', { share }),
     adopt: (listingId: string, eventId: string) =>
       sdk().http.post<{ ok: true }>(`pool/listings/${encodeURIComponent(listingId)}/adopt`, { eventId }),
     report: (listingId: string, reason: string, note: string) =>

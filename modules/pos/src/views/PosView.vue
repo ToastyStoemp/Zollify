@@ -891,7 +891,7 @@ function lockTill(): void {
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
-        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="door-open" :size="16" /><span>{{ seller }}</span></button>
+        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
@@ -1213,7 +1213,8 @@ function lockTill(): void {
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .seller { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: .1rem .55rem; font-size: .8rem; font-weight: 600; max-width: 9rem; }
-.seller span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.seller .lock-label { font-weight: 700; }
+.seller span.seller-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
 .scanner-wrap { position: relative; }
@@ -1311,6 +1312,8 @@ function lockTill(): void {
 .chip.cardc { color: #2f6fb8; border-color: #2f6fb8; }
 
 @media (max-width: 860px) {
+  /* Narrow: the lock icon alone; the seller stays in the title and label. */
+  .seller .lock-label, .seller .seller-name { display: none; }
   /* Cancels .content's own padding (a bleed-to-edges trick, not new) - the
      bottom value now also cancels the --zfy-bottom-nav clearance .content
      added for pages that don't otherwise account for the fixed tab bar.

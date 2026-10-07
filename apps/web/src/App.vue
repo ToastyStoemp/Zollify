@@ -9,7 +9,7 @@ import {
   loadNotifications,
   lockTill,
   tillLocked,
-  tillSettings,
+  canLockTill,
   markNotificationsRead,
   notifications,
   pendingCount,
@@ -271,8 +271,8 @@ const fmtAgo = (ms: number): string => {
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
-              <div v-if="tillSettings.enabled" class="till-row">
-                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="door-open" :size="13" /> Lock till</button>
+              <div v-if="canLockTill()" class="till-row">
+                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="lock" :size="13" /> Lock till</button>
                 <span v-if="account.userId !== getDeviceAccount()?.userId" class="hint">on {{ getDeviceAccount()?.email }}'s device</span>
               </div>
               <button v-else type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>

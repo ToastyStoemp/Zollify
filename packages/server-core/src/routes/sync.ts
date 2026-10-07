@@ -166,14 +166,18 @@ export function registerSyncRoutes(
       bumpMetric(db, claims.accountId, 'opsReceived', accepted);
       if (txCount > 0) bumpMetric(db, claims.accountId, 'txCount', txCount);
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
-      try {
-        onOps(claims.accountId, fresh);
-        problems?.resolve(claims.accountId, 'sync', deviceId);
-      } catch (err) {
-        req.log.error({ err }, 'a module failed to handle pushed ops');
-        // The ops are stored and the device is fine; what failed is a module reacting to them. A device whose pushes keep doing this is worth a look.
-        problems?.report(claims.accountId, { kind: 'sync', key: deviceId, severity: 'warning', after: SYNC_WARN_AFTER, message: 'A device keeps syncing changes the server cannot fully process', detail: reasonOf(null, err) });
-      }
+      // Modules follow the ops after the push has been answered: the ops are
+      // already committed, and a slow module must not hold a till's sync.
+      setImmediate(() => {
+        try {
+          onOps(claims.accountId, fresh);
+          problems?.resolve(claims.accountId, 'sync', deviceId);
+        } catch (err) {
+          req.log.error({ err }, 'a module failed to handle pushed ops');
+          // The ops are stored and the device is fine; what failed is a module reacting to them. A device whose pushes keep doing this is worth a look.
+          problems?.report(claims.accountId, { kind: 'sync', key: deviceId, severity: 'warning', after: SYNC_WARN_AFTER, message: 'A device keeps syncing changes the server cannot fully process', detail: reasonOf(null, err) });
+        }
+      });
     }
     return result;
   });

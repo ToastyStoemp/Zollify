@@ -4,6 +4,9 @@ import { z } from 'zod';
 import {
   PeppolDocumentInputSchema,
   PeppolPartySchema,
+  PeppolSettingsSchema,
+  emptyPeppolSettings,
+  localDay,
   PeppolStoredSettingsSchema,
   peppolSellerFromProfile,
   peppolTotals,
@@ -20,6 +23,9 @@ import {
 } from '@zollify/shared';
 import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, reportProblem, resolveProblem, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ACCESS_POINTS, AccessPointSchema, sendViaAccessPoint, type AccessPointConfig } from './peppol-access-points';
+
+/** A Belgian invoice is dated by the Belgian calendar, whatever the server's clock zone. */
+const PEPPOL_TZ = 'Europe/Brussels';
 
 /**
  * Belgian e-invoices over Peppol - the server half.
@@ -128,6 +134,9 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
     id: PEPPOL_MODULE_ID,
     minRole: 'admin',
     migrate,
+    onAccountDeleted: (db, accountId) => {
+      for (const t of ['peppol_settings', 'peppol_customers', 'peppol_documents', 'peppol_counters']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    },
 
     routes: (ctx: ModuleContext) => async (app) => {
       const { db } = ctx;
@@ -314,7 +323,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
           kind: 'credit',
           number: null,
           status: 'draft',
-          issueDate: new Date(now).toISOString().slice(0, 10),
+          issueDate: localDay(now, PEPPOL_TZ),
           invoiceRef: { number: found.doc.number, issueDate: found.doc.issueDate },
           paymentReference: null,
           sentVia: undefined,
@@ -393,15 +402,15 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const doc: PeppolDocument = {
           kind: 'invoice',
-          issueDate: new Date(now).toISOString().slice(0, 10),
-          dueDate: new Date(now + settings.paymentDays * 86_400_000).toISOString().slice(0, 10),
+          issueDate: localDay(now, PEPPOL_TZ),
+          dueDate: localDay(now + settings.paymentDays * 86_400_000, PEPPOL_TZ),
           currency: tx.currency,
           buyer: customer ? PeppolPartySchema.parse(JSON.parse(customer.doc)) : PeppolPartySchema.parse({ name: 'Customer' }),
           buyerReference: '',
           orderReference: '',
           lines,
-          note: `Sale of ${new Date(tx.timestamp).toISOString().slice(0, 10)}, already paid at the till.`,
-          deliveryDate: new Date(tx.timestamp).toISOString().slice(0, 10),
+          note: `Sale of ${localDay(tx.timestamp, PEPPOL_TZ)}, already paid at the till.`,
+          deliveryDate: localDay(tx.timestamp, PEPPOL_TZ),
           invoiceRef: null,
           saleId: tx.id,
           id: randomUUID(),

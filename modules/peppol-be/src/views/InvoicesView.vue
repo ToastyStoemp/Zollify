@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { PeppolPartySchema, fmtPrice, type PeppolDocument, type PeppolDocumentInput, type PeppolProblem, type PeppolSettings } from '@zollify/shared';
+import { PeppolPartySchema, fmtPrice, localIsoDay, type PeppolDocument, type PeppolDocumentInput, type PeppolProblem, type PeppolSettings } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   createDocument,
@@ -69,7 +69,7 @@ async function openDoc(id: string): Promise<void> {
 }
 function newInvoice(): void {
   const s = settings.value!;
-  const due = new Date(Date.now() + s.paymentDays * 86_400_000).toISOString().slice(0, 10);
+  const due = localIsoDay(Date.now() + s.paymentDays * 86_400_000);
   open.value = {
     doc: {
       id: '',

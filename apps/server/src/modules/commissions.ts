@@ -431,6 +431,9 @@ export const commissionsServerModule: ServerModule = {
   // Settings, link replacement and erasure are admin-only below.
   minRole: 'member',
   migrate,
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['commissions', 'commission_customers', 'commissions_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;

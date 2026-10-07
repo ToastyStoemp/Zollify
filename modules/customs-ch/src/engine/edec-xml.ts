@@ -9,6 +9,7 @@ import {
   parsePostCodeCity,
   toEdecHsCode,
 } from './calc';
+import { localIsoDay } from '@zollify/shared';
 import type { CustomsProduct, CustomsState } from './model';
 
 export interface EdecResult {
@@ -242,7 +243,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
   const eventName = state.meta.event || 'ZollTool';
   const artist = state.artist.companyName || state.artist.fullName || '';
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = localIsoDay(now);
   const filename =
     [eventName, artist, 'edec', dateStr]
       .filter(Boolean)

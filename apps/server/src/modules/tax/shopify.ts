@@ -1,4 +1,4 @@
-import { dayEndISO, dayStartISO, num, resolveMode, round2, sleep, SourceError, type SourceRow } from './types';
+import { dayEndISO, dayStartISO, FETCH_TIMEOUT_MS, num, resolveMode, round2, sleep, SourceError, type SourceRow } from './types';
 
 /**
  * Shopify Admin API orders client - pulls paid orders for a date range so
@@ -99,7 +99,7 @@ export class ShopifyOrdersClient {
 
   private async get(url: string): Promise<{ json: unknown; link: string }> {
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { redirect: 'error', headers: { 'X-Shopify-Access-Token': await this.token(), accept: 'application/json' } });
+      const res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { 'X-Shopify-Access-Token': await this.token(), accept: 'application/json' } });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;
@@ -121,7 +121,7 @@ export class ShopifyOrdersClient {
 
   private async fetchAccessToken(): Promise<string> {
     const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: this.config.clientId, client_secret: this.config.clientSecret });
-    const res = await fetch(`https://${this.config.shop}/admin/oauth/access_token`, { redirect: 'error',
+    const res = await fetch(`https://${this.config.shop}/admin/oauth/access_token`, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
       body,

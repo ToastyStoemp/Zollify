@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { SalesEvent, Transaction } from '@zollify/shared';
+import { localIsoDay } from '@zollify/shared';
 
 /** End-of-event sales report, ported from ZollTool: summary, payment split, best sellers, daily revenue, full sales list. */
 export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction[]): { bytes: ArrayBuffer; filename: string } {
@@ -98,7 +99,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   // ── Daily revenue bars ────────────────────────────────────────────────────
   const dayMap = new Map<string, number>();
   for (const tx of active) {
-    const day = new Date(tx.timestamp).toISOString().slice(0, 10);
+    const day = localIsoDay(tx.timestamp);
     dayMap.set(day, (dayMap.get(day) ?? 0) + (tx.baseTotal ?? tx.total));
   }
   const days = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));

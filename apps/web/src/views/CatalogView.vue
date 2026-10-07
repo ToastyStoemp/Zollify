@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
-import { HS_CODES, checkPickedFile, csvCell, fmtPrice } from '@zollify/shared';
+import { HS_CODES, checkPickedFile, csvCell, fmtPrice, localIsoDay } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
 import { loader } from '../boot';
 import {
@@ -9,6 +9,7 @@ import {
   allProducts,
   availabilityFor,
   currentAccount,
+  deleteImage,
   deleteProduct,
   freeFor,
   mergeProducts,
@@ -117,7 +118,7 @@ function exportRestockCsv(): void {
   const rows = [['Product', 'Variant', 'Type', 'SKU', 'Left']];
   for (const p of filtered.value) for (const r of lowRows(p)) rows.push([p.title, r.variant, p.type ?? '', p.sku ?? '', String(r.left)]);
   const csv = rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
-  void saveFile(`restock_${new Date().toISOString().slice(0, 10)}.csv`, csv, 'text/csv;charset=utf-8');
+  void saveFile(`restock_${localIsoDay()}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
 // ── Merge: fold plain products into one product with a variant each ─────────
@@ -344,6 +345,19 @@ const num = (s: string | number | undefined): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 
+/** Every image id a product carries, on itself and on its variants. */
+const imageIdsOf = (p: Product | undefined): string[] => (p ? [p.imageId, ...(p.variants ?? []).map((v) => v.imageId)].filter((id): id is string => Boolean(id)) : []);
+
+/**
+ * Deletes the given images unless something in the catalogue still points
+ * at them - a duplicated product shares its original's photo, and a product
+ * turned into variants copies its photo onto each of them.
+ */
+async function dropUnusedImages(ids: string[]): Promise<void> {
+  const used = new Set(allProducts.value.flatMap(imageIdsOf));
+  for (const id of new Set(ids)) if (!used.has(id)) await deleteImage(id).catch(() => {});
+}
+
 async function save(): Promise<void> {
   if (!form.title.trim()) {
     error.value = 'Give the product a title before saving.';
@@ -390,6 +404,8 @@ async function save(): Promise<void> {
       updatedAt: Date.now(),
     };
     await upsertProduct(product);
+    // Photos this save replaced or removed would otherwise sit in the database forever.
+    await dropUnusedImages(imageIdsOf(prior));
 
     // Stock is written only where it changed, so a plain title edit stays one op.
     if (variants.length) {
@@ -408,6 +424,7 @@ async function remove(product: Product): Promise<void> {
   if (!ok) return;
   try {
     await deleteProduct(product.id);
+    await dropUnusedImages(imageIdsOf(product));
     if (editId.value === product.id) editing.value = false;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not remove that product.';
@@ -708,7 +725,8 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 }
 @media (max-width: 640px) {
   .variant { grid-template-columns: 2.5rem 1fr auto; }
-  .variant input:nth-of-type(n + 2) { grid-column: 2 / span 1; }
+  /* SKU lives in a .withbtn span, not a bare input, so name it too. */
+  .variant > input:nth-of-type(n + 2), .variant > .withbtn { grid-column: 2 / span 1; }
 }
 @media (max-width: 720px) {
   /* Merge/Reorder/filter go icon-only here - the same width the search

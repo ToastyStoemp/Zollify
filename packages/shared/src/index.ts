@@ -26,6 +26,8 @@ export * from './webhooks';
 export * from './peppol';
 export * from './csv';
 export * from './restock';
+export * from './day';
+export * from './shopify-match';
 export * from './editions';
 export * from './artist-profile';
 export * from './event-pool';

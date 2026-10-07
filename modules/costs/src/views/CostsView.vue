@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { CostBatch, CostSource, Product } from '@zollify/shared';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell, typeColor } from '@zollify/ui';
 import { computeBatch, resolveCurrentCosts } from '../costs';
 import { costsDb } from '../state';
@@ -102,7 +102,7 @@ function open(batch?: CostBatch): void {
     Object.assign(form, { date: batch.date, note: batch.note ?? '', weighting: batch.weighting });
     sources.value = batch.sources?.length ? batch.sources.map((s) => ({ ...s, amount: String(s.amount) })) : [{ id: crypto.randomUUID(), label: 'Cost', amount: String(batch.total), kind: 'manual' }];
   } else {
-    Object.assign(form, { date: new Date().toISOString().slice(0, 10), note: '', weighting: 'value' });
+    Object.assign(form, { date: localIsoDay(), note: '', weighting: 'value' });
     sources.value = [{ id: crypto.randomUUID(), label: '', amount: '', kind: 'manual' }];
   }
   rows.value = next;

@@ -51,6 +51,8 @@ async function pushEvent(token: string, ev: Record<string, unknown>) {
     },
   });
   expect(res.statusCode).toBe(200);
+  // Modules follow pushed ops on the next turn, so a push settles before the test looks.
+  await new Promise((r) => setImmediate(r));
 }
 
 const iso = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);

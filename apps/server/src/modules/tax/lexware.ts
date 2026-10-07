@@ -1,4 +1,4 @@
-import { round2, sleep } from './types';
+import { FETCH_TIMEOUT_MS, round2, sleep } from './types';
 
 /**
  * Lexware Office (lexoffice) public API: vouchers, files, contacts. Plus the
@@ -61,7 +61,7 @@ export class LexwareClient {
       payload = JSON.stringify(opts.json);
     }
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(`${this.apiUrl}${path}`, { redirect: 'error', method, headers, body: payload });
+      const res = await fetch(`${this.apiUrl}${path}`, { redirect: 'error', method, headers, body: payload, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;

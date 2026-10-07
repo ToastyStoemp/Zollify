@@ -31,6 +31,7 @@ import {
   type SetupMoment,
   type SpaceInput,
   type UpgradeInput,
+  localIsoDay,
 } from '@zollify/shared';
 import { sdk } from './runtime';
 
@@ -336,4 +337,4 @@ export function errorText(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
-export const today = (): string => new Date().toISOString().slice(0, 10);
+export const today = (): string => localIsoDay();

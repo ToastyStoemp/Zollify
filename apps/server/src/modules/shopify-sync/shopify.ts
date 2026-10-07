@@ -1,5 +1,8 @@
 import type { ShopProduct } from './types';
 
+/** No upstream call may hang a request forever; the tax clients use the same cap. */
+const FETCH_TIMEOUT_MS = 15_000;
+
 interface GraphQLResponse<T> {
   data?: T;
   errors?: { message: string }[];
@@ -21,6 +24,7 @@ export class ShopifyClient {
         'X-Shopify-Access-Token': this.token,
       },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => '');
@@ -67,7 +71,8 @@ export class ShopifyClient {
     };
     const out: ShopProduct[] = [];
     let cursor: string | null = null;
-    do {
+    // A storefront with more than 500 pages (25k products) is not a booth; stop rather than loop on a broken cursor.
+    for (let guard = 0; guard < 500; guard++) {
       const data: Resp = await this.gql<Resp>(query, { cursor });
       for (const n of data.products.nodes) {
         out.push({
@@ -82,7 +87,8 @@ export class ShopifyClient {
         });
       }
       cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null;
-    } while (cursor);
+      if (!cursor) break;
+    }
     return out;
   }
 

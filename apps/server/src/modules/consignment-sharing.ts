@@ -4,7 +4,7 @@ import { z } from 'zod';
 import {
   SharePricingSchema,
   sharedPrice,
-  shortBarcode,
+  matchesShortBarcode,
   type Product,
   type ShareableItem,
   type SharePricing,
@@ -403,10 +403,10 @@ export function registerSharing(app: FastifyInstance, ctx: ModuleContext, side: 
 /** The same exact matches the till makes: SKU, or the short code printed on a label. */
 function matchCode(p: Product, code: string): { variantId: string | null } | null {
   const eq = (s: string | undefined): boolean => !!s && s.trim().toLowerCase() === code;
-  if (!p.variants?.length && (eq(p.sku) || shortBarcode(p.type, p.id).toLowerCase() === code)) return { variantId: null };
+  if (!p.variants?.length && (eq(p.sku) || matchesShortBarcode(code, p.type, p.id))) return { variantId: null };
   for (const v of p.variants ?? []) {
     if (v.unlisted) continue;
-    if (eq(v.sku) || shortBarcode(p.type, p.id, v.id).toLowerCase() === code) return { variantId: v.id };
+    if (eq(v.sku) || matchesShortBarcode(code, p.type, p.id, v.id)) return { variantId: v.id };
   }
   if (p.variants?.length && eq(p.sku)) return { variantId: null };
   return null;

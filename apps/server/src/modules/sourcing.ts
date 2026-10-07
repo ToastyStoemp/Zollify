@@ -62,6 +62,9 @@ export const sourcingServerModule: ServerModule = {
   id: 'sourcing',
   minRole: 'admin',
   migrate,
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['sourcing_docs', 'sourcing_files']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   routes: (ctx: ModuleContext) => async (app) => {
     /** Everything the cockpit needs, in one shot. */

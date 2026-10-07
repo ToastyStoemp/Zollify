@@ -122,7 +122,12 @@ const sale = (total: number) => ({
   type: 'tx.create',
   payload: { id: `t${n}`, eventId: 'e1', deviceId: 'd', timestamp: Date.now(), method: 'cash', payments: [{ kind: 'cash', amount: total }], items: [{ pid: 'p', vid: null, title: 'Fox print', qty: 1, unitPrice: total, lineTotal: total }], discounts: [], total, currency: 'CHF' },
 });
-const push = (ops: unknown[]) => app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'd', ops } });
+// Modules follow pushed ops on the next turn, so a push settles before the test looks.
+const push = async (ops: unknown[]) => {
+  const res = await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'd', ops } });
+  await new Promise((r) => setImmediate(r));
+  return res;
+};
 const list = async (t = owner): Promise<{ problems: Problem[]; openErrors: number; openWarnings: number; emailDigest: boolean }> => (await app.inject({ method: 'GET', url: '/api/problems', headers: auth(t) })).json();
 const open = async (kind: string) => (await list()).problems.filter((p) => p.kind === kind && p.resolvedAt == null);
 const bellTitles = async (): Promise<string[]> => (await app.inject({ method: 'GET', url: '/api/notifications', headers: auth() })).json().notifications.map((x: { title: string }) => x.title);

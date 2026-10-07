@@ -7,6 +7,7 @@ import {
   SignupInputSchema,
   SIGNUP_REF_KIND,
   WorkshopInputSchema,
+  localDay,
   placeSignup,
   promoteFromWaitlist,
   seatsTaken,
@@ -19,6 +20,7 @@ import {
 } from '@zollify/shared';
 import { issueChallenge, verifyChallenge, type Mailer, type ModuleContext, type PublicModuleContext } from '@zollify/server-core';
 import { accountName, consignorRow, parseDoc, replay } from './consignment';
+import { booksSettings } from './consignment-books';
 import { accountEmail, address, buildIcs, fmtWhen, get, icsSequence, list, put, remove, tellArtist } from './consignment-planner';
 import { POW_SOLVER_JS } from './pow-client';
 
@@ -62,7 +64,8 @@ export function migrateProgramme(db: Database.Database): void {
 
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 const newToken = (): string => randomBytes(16).toString('base64url');
-const today = (): string => new Date().toISOString().slice(0, 10);
+/** The store's calendar day, by its books time zone. */
+const today = (db: Database.Database, accountId: string): string => localDay(Date.now(), booksSettings(db, accountId).timeZone);
 
 function signupsOf(db: Database.Database, accountId: string, workshopId: string): Signup[] {
   return (db.prepare('SELECT doc FROM consignment_signups WHERE accountId = ? AND workshopId = ? ORDER BY createdAt').all(accountId, workshopId) as { doc: string }[]).map(
@@ -416,9 +419,9 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
 /** What a linked artist sees of the programme: features of them, workshops they host. */
 export function programmeForArtist(db: Database.Database, storeAccountId: string, consignorId: string) {
   return {
-    features: list<StoreFeature>(db, storeAccountId, 'features').filter((f) => f.consignorId === consignorId && f.endDate >= today()),
+    features: list<StoreFeature>(db, storeAccountId, 'features').filter((f) => f.consignorId === consignorId && f.endDate >= today(db, storeAccountId)),
     workshops: list<Workshop>(db, storeAccountId, 'workshops')
-      .filter((w) => w.hostConsignorId === consignorId && w.date >= today())
+      .filter((w) => w.hostConsignorId === consignorId && w.date >= today(db, storeAccountId))
       .map((w) => {
         const signups = signupsOf(db, storeAccountId, w.id);
         return { id: w.id, title: w.title, storeId: w.storeId, date: w.date, time: w.time, durationMin: w.durationMin, capacity: w.capacity, booked: seatsTaken(signups), cancelled: !!w.cancelledAt };
@@ -434,7 +437,7 @@ const SIGNUP_LIMIT = { config: { rateLimit: { max: 10, timeWindow: '10 minutes' 
 /** The page as the world sees it: published, current, and only the fields picked here. */
 function publicProgramme(db: Database.Database, accountId: string): PublicProgramme {
   const stores = eventsById(db, accountId);
-  const day = today();
+  const day = today(db, accountId);
   const artist = (id: string | null): string | null => (id ? (consignorRow(db, accountId, id) ? parseDoc(consignorRow(db, accountId, id)!.doc).name : null) : null);
   return {
     name: accountName(db, accountId) ?? '',
@@ -512,7 +515,7 @@ export function registerProgrammePublic(app: FastifyInstance, ctx: PublicModuleC
     const input = SignupInputSchema.safeParse(body);
     if (!input.success) return reply.code(400).send({ error: 'invalid', message: 'Enter your name and a valid email address.' });
     const w = get<Workshop>(db, accountId, 'workshops', req.params.id);
-    if (!w || !w.published || w.cancelledAt || w.date < today()) return reply.code(404).send({ error: 'not_found' });
+    if (!w || !w.published || w.cancelledAt || w.date < today(db, accountId)) return reply.code(404).send({ error: 'not_found' });
     if (!w.signupsOpen) return reply.code(409).send({ error: 'closed', message: 'Sign-ups for this workshop are closed.' });
 
     // The honeypot: answer like a success, store nothing.

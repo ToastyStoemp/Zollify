@@ -254,7 +254,8 @@ describe('totals', () => {
 
 describe('backup', () => {
   it('round-trips everything core owns, including photos', async () => {
-    await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false } as never);
+    // The product must point at the image: a backup only carries photos something still uses.
+    await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false, imageId: 'img-1' } as never);
     await events.upsertSalesEvent({ id: 'ev-1', name: 'Fair', venue: {}, currency: 'CHF', status: 'planned' } as never);
     await tx.recordSale(sale({ saleId: 's1' }));
     await images.importProductImage({

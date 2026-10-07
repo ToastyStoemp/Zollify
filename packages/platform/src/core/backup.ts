@@ -124,6 +124,16 @@ export async function createBackup(options?: BackupOptions): Promise<ZollifyBack
     inventory = inventory.filter((i) => claimed.has(`${i.productId}\x00${i.variantId}`));
   }
 
+  // Only images a live product or variant still points at; a photo replaced
+  // or removed before this code cleaned them up is dead weight in the file.
+  const referenced = new Set<string>();
+  for (const p of products) {
+    if (p.deletedAt) continue;
+    if (p.imageId) referenced.add(p.imageId);
+    for (const v of p.variants ?? []) if (v.imageId) referenced.add(v.imageId);
+  }
+  imageRecs = imageRecs.filter((rec) => referenced.has(rec.id));
+
   const images: BackupImage[] = await Promise.all(
     imageRecs.map(async (rec) => ({
       id: rec.id,

@@ -564,6 +564,9 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     migrateReceiptSocials(db);
     migrateSmartpos(db);
   },
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {

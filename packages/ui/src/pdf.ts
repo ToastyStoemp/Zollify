@@ -1,5 +1,6 @@
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+// Type-only: the runtime libraries (~900 KB together) load on first export,
+// not before login - see renderInto.
+import type { jsPDF } from 'jspdf';
 
 /**
  * Renders one of the app's print-ready HTML documents (customs forms, goods
@@ -36,6 +37,7 @@ export async function htmlDocsToPdf(htmls: string[]): Promise<Blob> {
 }
 
 async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> {
+  const [{ jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
   const landscape = /@page\s*\{[^}]*\blandscape\b/i.test(html);
   const pageWidthMm = landscape ? 297 : 210;
   const pageHeightMm = landscape ? 210 : 297;

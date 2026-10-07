@@ -10,6 +10,7 @@ import {
   consignmentLines,
   consignmentStatements,
   isStore,
+  localDay,
   rentDue,
   type ArtistConsignment,
   type ConsignedItem,
@@ -113,8 +114,24 @@ export interface ConsignorRow {
   updatedAt: number;
 }
 
-/** Rent is charged by the server's calendar day. */
-const today = (): string => new Date().toISOString().slice(0, 10);
+/** Every table the consignment modules keep per account (store side and artist side share them). */
+const CONSIGNMENT_TABLES = [
+  'consignors',
+  'consignment_payouts',
+  'consignment_planner',
+  'consignment_signups',
+  'consignment_public',
+  'consignment_shares',
+  'consignment_pricing',
+  'consignment_shared_images',
+  'consignment_shipments',
+  'consignment_stock_log',
+  'consignment_fees',
+  'consignment_settings',
+  'consignment_reports_sent',
+];
+/** Rent is charged by the store's calendar day (its books time zone). */
+const today = (db: Database.Database, accountId: string): string => localDay(Date.now(), booksSettings(db, accountId).timeZone);
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 /** No look-alike characters: the code is read off a screen or a message and typed. */
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -222,6 +239,12 @@ export const consignmentServerModule: ServerModule = {
     migrateSharing(db);
     migrateStock(db);
     migrateBooks(db);
+  },
+  onAccountDeleted: (db, accountId) => {
+    for (const t of CONSIGNMENT_TABLES) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    // Stores that had this account as a linked (or invited) artist keep the consignor, unlinked.
+    db.prepare('UPDATE consignors SET linkedAccountId = NULL WHERE linkedAccountId = ?').run(accountId);
+    db.prepare('UPDATE consignors SET offerAccountId = NULL WHERE offerAccountId = ?').run(accountId);
   },
 
   /** An artist's devices changed products: stores sharing them follow. */
@@ -439,7 +462,7 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
       lines,
       payouts,
       fees,
-      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today()), feesDue(fees)),
+      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today(db, who.accountId)), feesDue(fees)),
     };
   });
 
@@ -624,7 +647,7 @@ function artistView(
       lines,
       payouts,
       [consignor.id],
-      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today()),
+      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today(db, storeAccountId)),
       feesDue(feesOf(db, storeAccountId, consignor.id)),
     )[0]!,
   };

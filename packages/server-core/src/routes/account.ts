@@ -11,7 +11,13 @@ import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth'
  * per account with no offline write path worth building - the wizard runs on
  * a signed-in device, and every other device reads it at its next login.
  */
-export function registerAccountRoutes(app: FastifyInstance, db: Database.Database, dataDir?: string): void {
+export function registerAccountRoutes(
+  app: FastifyInstance,
+  db: Database.Database,
+  dataDir?: string,
+  /** Runs inside the wipe transaction so modules drop their rows for the account too. */
+  onWipe: (accountId: string) => void = () => {},
+): void {
   /**
    * Starts the booth over: every synced op, image and metric row for the
    * account is dropped and the sync epoch is bumped, so devices that still
@@ -28,6 +34,7 @@ export function registerAccountRoutes(app: FastifyInstance, db: Database.Databas
       db.prepare('DELETE FROM images WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM event_files WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM metrics WHERE accountId = ?').run(accountId);
+      onWipe(accountId);
       db.prepare('UPDATE accounts SET syncEpoch = syncEpoch + 1 WHERE id = ?').run(accountId);
       return ops;
     })(claims.accountId);

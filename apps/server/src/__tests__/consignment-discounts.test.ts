@@ -28,8 +28,12 @@ const auth = (t: string) => ({ authorization: `Bearer ${t}` });
 const call = (t: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE', url: string, payload?: Record<string, unknown>) =>
   app.inject({ method, url: `/api/m/${url.startsWith('/links') ? 'consignment-artist' : 'consignment'}${url}`, headers: auth(t), ...(payload ? { payload } : {}) });
 let n = 0;
-const push = (t: string, ops: { type: string; payload: unknown }[]) =>
-  app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-disc-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
+// Modules follow pushed ops on the next turn, so a push settles before the test looks.
+const push = async (t: string, ops: { type: string; payload: unknown }[]) => {
+  const res = await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(t), payload: { deviceId: 'dev', ops: ops.map((o) => ({ opId: `op-disc-${String(++n).padStart(10, '0')}`, deviceId: 'dev', ts: n, ...o })) } });
+  await new Promise((r) => setImmediate(r));
+  return res;
+};
 const storeRules = async () =>
   reduceDiscounts((await app.inject({ method: 'GET', url: '/api/sync/pull?since=0&limit=1000', headers: auth(store) })).json().ops).filter((r) => !r.deletedAt);
 const link = (path: string) => `/links/${storeAccountId}/ana${path}`;

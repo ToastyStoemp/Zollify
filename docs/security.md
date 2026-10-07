@@ -72,6 +72,18 @@ Public events lets an account share its events to a pool every account on the se
 - **Migration.** Display names from the earlier per-event sharing are dropped. Contributions made under it are withdrawn unless the account has since agreed to the new setting.
 - **Known limit.** Contributions stay in the pool while the Public events module is switched off for an account; turn sharing off first to withdraw them.
 
+## Problems (failure alerts)
+
+Quiet failures (a webhook that keeps failing, email that does not go out, a crashed scheduled job, a failed backup or update) are recorded per account in the `problems` table and shown to owners and admins under Settings, Problems. Code: `packages/server-core/src/problems.ts`; tests: `packages/server-core/src/__tests__/problems.test.ts`.
+
+- **What a row holds.** Kind and key (the source, e.g. `webhook` and the webhook id), severity (`warning` or `error`), a short message, a sanitised detail, an in-app link, a count, first seen, last seen, resolved and dismissed times, and when the bell and the digest last mentioned it. Never a secret, token, address, customer name, email or payload. The source passes a status or error class (`HTTP 500`, `Timed out`), never what the other side answered, and `sanitizeText` replaces links, email addresses, bearer tokens and long token-like strings again before anything is stored. Links must be same-app paths.
+- **Retention.** An open problem stays until its source succeeds or someone dismisses it. A resolved or dismissed one is deleted 30 days later (an hourly job). A problem that is open and quiet is not deleted.
+- **Who sees it.** `GET /api/problems`, dismissing, and the digest switch are for owners and admins of the account; staff get 403 and no bell note (the note is `minRole: admin`). The email-digest switch is the owner's. A shared-till token cannot call them. One account never sees or dismisses another's rows. Server-level problems (backup, update) are written to the account of the server owner.
+- **Dedupe and resolve.** The same account, kind and key is one open row: repeats raise the count and last seen. A success of the same source closes it. A failure after it was closed or dismissed is a new row.
+- **Thresholds.** Webhooks: 3 failed deliveries in a row open a warning; the automatic switch-off (after 20) makes it an error; delivering again, re-enabling or deleting the webhook closes it. Sync: 3 pushes in a row from one device where a module crashed on the ops open a warning (counted in memory, so a restart only delays it). Email: any failed send to a valid address opens an error, any successful one closes it. Peppol, myPOS, SumUp, Lexware, Nexi/Poynt: one failed call opens a warning, a success closes it. Scheduled jobs: a crash opens an error for that account. Backup or update status written by `deploy.sh` (`apps/server/deploy/status`): a failed backup or update is an error, an update request nobody picked up for 15 minutes is a warning.
+- **Noise control.** The bell hears only about a new error or a warning that escalates to an error, and at most once per kind and key per 24 hours, even if it was dismissed and came back. Repeats never notify. The email digest lists errors that opened since the last digest, goes to the owner only, at most once per 24 hours per account, only when SMTP is configured, and the owner can switch it off (Settings, Problems; default on). Warnings are never emailed.
+- **Never in the way.** Reporting catches its own errors and runs synchronously against SQLite; it cannot fail or delay a request or a delivery.
+
 ## Settings
 
 | Variable | Meaning |

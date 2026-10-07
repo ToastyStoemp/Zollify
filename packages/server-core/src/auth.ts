@@ -65,7 +65,7 @@ export interface JwtClaims {
  * Those need the person's own sign-in.
  */
 const TILL_DENIED: [RegExp, RegExp][] = [
-  [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/./, /^\/api\/(invites|tokens|webhooks|problems|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
   [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],

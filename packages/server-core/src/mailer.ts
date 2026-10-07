@@ -13,6 +13,8 @@ export interface MailMessage {
   to: string;
   subject: string;
   text: string;
+  /** The account the mail is for, so a send that keeps failing shows under its Problems. Never sent. */
+  accountId?: string;
   /** Reply-To, e.g. the store owner a notice is from. */
   replyTo?: string;
   /** An iCalendar body (METHOD:PUBLISH), attached so mail clients offer "add to calendar". */

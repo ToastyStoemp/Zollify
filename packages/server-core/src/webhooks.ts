@@ -20,6 +20,7 @@ import {
 } from '@zollify/shared';
 import type { JwtClaims } from './auth';
 import { reduceMerges, reduceTransactions } from './reduce';
+import { WEBHOOK_WARN_AFTER, reasonOf, type ModuleProblems } from './problems';
 
 /**
  * Webhooks: an account's events posted to Discord, Slack or any service
@@ -209,7 +210,7 @@ const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 's
 
 export function createWebhooks(
   db: Database.Database,
-  deps: { notify(accountId: string, n: { title: string; body?: string; link?: string; minRole?: 'admin' }): void; contributors: () => ReportContributor[]; log?: (err: unknown) => void },
+  deps: { notify(accountId: string, n: { title: string; body?: string; link?: string; minRole?: 'admin' }): void; contributors: () => ReportContributor[]; problems?: ModuleProblems; log?: (err: unknown) => void },
 ): Webhooks {
   const rows = (accountId: string): Webhook[] =>
     (db.prepare('SELECT doc FROM webhooks WHERE accountId = ?').all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as Webhook);
@@ -249,6 +250,20 @@ export function createWebhooks(
     const failures = result.error ? fresh.failures + 1 : 0;
     const off = failures >= FAILURES_BEFORE_OFF && fresh.enabled;
     save(accountId, { ...fresh, lastAt: Date.now(), lastStatus: result.status, lastError: result.error, failures, enabled: off ? false : fresh.enabled });
+    if (!result.error) deps.problems?.resolve(accountId, 'webhook', hookId);
+    else if (off || (failures >= WEBHOOK_WARN_AFTER && fresh.enabled)) {
+      // Source name and a sanitised reason only: never the answer the other side sent, never the address.
+      deps.problems?.report(accountId, {
+        kind: 'webhook',
+        key: hookId,
+        severity: off ? 'error' : 'warning',
+        message: off ? `Webhook "${fresh.name}" was switched off after repeated failures` : `Webhook "${fresh.name}" keeps failing`,
+        detail: `${failures} failed deliveries in a row. Last: ${reasonOf(result.status, result.error)}`,
+        link: '/settings?panel=core.webhooks',
+        // The switch-off already has its own note under the bell.
+        notify: false,
+      });
+    }
     if (off) deps.notify(accountId, { title: `Webhook "${fresh.name}" switched off`, body: `It failed ${failures} times in a row: ${result.error ?? ''}`.trim(), link: '/settings', minRole: 'admin' });
   }
 
@@ -338,6 +353,7 @@ export function createWebhooks(
     let sent = 0;
     const all = db.prepare('SELECT accountId, doc FROM webhooks').all() as { accountId: string; doc: string }[];
     for (const row of all) {
+    try {
       const hook = JSON.parse(row.doc) as Webhook & { lastDaily?: string; lastWeekly?: string };
       if (!hook.enabled) continue;
       const today = localDay(now, hook.timeZone);
@@ -365,6 +381,12 @@ export function createWebhooks(
         const fresh = rows(row.accountId).find((h) => h.id === hook.id);
         if (fresh) save(row.accountId, { ...fresh, ...patch } as Webhook);
       }
+      deps.problems?.resolve(row.accountId, 'job', 'webhook-reports');
+    } catch (err) {
+      // One broken webhook must not stop the summaries of the others.
+      deps.log?.(err);
+      deps.problems?.report(row.accountId, { kind: 'job', key: 'webhook-reports', severity: 'warning', message: 'The daily and weekly webhook summaries could not be built', detail: reasonOf(null, err), link: '/settings?panel=core.webhooks' });
+     }
     }
     return sent;
   }
@@ -410,7 +432,7 @@ function saleMessage(tx: Transaction, where: string | null): WebhookMessage {
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 /** A webhook as its owner sees it: the secret only matters for JSON, but they may need it to verify. */
-export function registerWebhookRoutes(app: FastifyInstance, db: Database.Database, hooks: Webhooks): void {
+export function registerWebhookRoutes(app: FastifyInstance, db: Database.Database, hooks: Webhooks, problems?: ModuleProblems): void {
   const admin = async (req: Parameters<typeof app.authenticate>[0], reply: Parameters<typeof app.authenticate>[1]) => {
     const claims = req.user as JwtClaims;
     if (claims.role === 'member') return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins manage webhooks.' });
@@ -451,6 +473,7 @@ export function registerWebhookRoutes(app: FastifyInstance, db: Database.Databas
     // Switching it back on clears the failure count.
     const hook: Webhook = { ...existing, ...input, failures: input.enabled && !existing.enabled ? 0 : existing.failures };
     db.prepare('UPDATE webhooks SET doc = ? WHERE id = ? AND accountId = ?').run(JSON.stringify(hook), hook.id, claims.accountId);
+    if (hook.enabled && !existing.enabled) problems?.resolve(claims.accountId, 'webhook', hook.id);
     return { webhook: hook };
   });
 
@@ -458,6 +481,7 @@ export function registerWebhookRoutes(app: FastifyInstance, db: Database.Databas
     const claims = req.user as JwtClaims;
     const info = db.prepare('DELETE FROM webhooks WHERE id = ? AND accountId = ?').run(req.params.id, claims.accountId);
     if (!info.changes) return reply.code(404).send({ error: 'No such webhook.' });
+    problems?.resolve(claims.accountId, 'webhook', req.params.id);
     return { ok: true };
   });
 

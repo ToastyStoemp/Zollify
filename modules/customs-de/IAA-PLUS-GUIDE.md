@@ -129,7 +129,7 @@ Below Warenort, more Kopfseite 2 sections:
   declarant (Germany) → EORI field to this real value**, replacing whatever
   placeholder is there now.
 - Anmelder → Ansprechpartner (contact person): Name\* and Telefon\* required.
-  Name known (declarant), phone not on file in the booth profile - open.
+  Name known (declarant), phone not on file in the business profile - open.
 - **Empfänger** (recipient) and **Versender** (consignor) live here at
   header level, confirmed correct placement per the official help text:
   "Der Empfänger muss bei nur einem Empfänger auf Kopfebene ... angegeben

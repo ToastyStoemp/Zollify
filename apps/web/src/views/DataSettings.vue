@@ -142,7 +142,7 @@ async function confirmRestore(): Promise<void> {
   <section class="data">
     <h2>Backup &amp; restore</h2>
     <p class="hint">
-      Your booth's data lives on this device. Sync copies it to your other devices, but an exported
+      Your business's data lives on this device. Sync copies it to your other devices, but an exported
       file is the only thing that survives losing them all - export before every convention.
     </p>
 
@@ -219,7 +219,7 @@ async function confirmRestore(): Promise<void> {
       <h2 class="danger-h">Start from scratch</h2>
       <p class="hint">
         Erases every product, event, sale and photo in this booth - on the server and on this device.
-        Other devices empty themselves at their next sync. Users, invites and the booth profile stay.
+        Other devices empty themselves at their next sync. Users, invites and the business profile stay.
       </p>
       <div class="actions">
         <button type="button" class="danger" :disabled="busy !== null" @click="wipe">

@@ -85,7 +85,7 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [receiptsServerModule],
+    serverModules: [receiptsServerModule('test-secret-value-long-enough-for-signing')],
     defaultModules: ['pos'],
     allowedOrigins: [],
     requireHttps: false,

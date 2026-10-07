@@ -5,7 +5,8 @@ export type PaymentProviderId =
   | 'mypos-carbon-remote'
   | 'mypos-glass'
   | 'bridge'
-  | 'sumup';
+  | 'sumup'
+  | 'nexi-smartpos';
 
 export interface ProviderStatus {
   connected: boolean;

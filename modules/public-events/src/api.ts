@@ -1,4 +1,4 @@
-import type { EventOverlay, PoolListing, PoolShare, PublicEvent, PublicEventsConfig } from '@zollify/shared';
+import type { EventOverlay, StoredEventOverlay, PoolListing, PoolShare, PublicEvent, PublicEventsConfig } from '@zollify/shared';
 import { sdk } from './runtime';
 
 /** Typed wrapper over this module's server half at `/api/m/public-events/…`. */
@@ -13,10 +13,11 @@ export interface Preview {
 }
 
 export const api = {
-  config: () => sdk().http.get<{ config: PublicEventsConfig; overlays: Record<string, EventOverlay> }>('config'),
+  config: () => sdk().http.get<{ config: PublicEventsConfig; overlays: Record<string, StoredEventOverlay> }>('config'),
   saveConfig: (config: PublicEventsConfig) => sdk().http.put<{ config: PublicEventsConfig }>('config', config),
   saveOverlay: (eventId: string, overlay: EventOverlay) =>
-    sdk().http.put<{ overlay: EventOverlay }>(`overlay/${eventId}`, overlay),
+    // Only the publishing fields; the server ignores the legacy booth keys a stored row may carry.
+    sdk().http.put<{ overlay: EventOverlay }>(`overlay/${eventId}`, { igHandle: overlay.igHandle, hidden: overlay.hidden }),
   preview: () => sdk().http.get<Preview>('preview'),
   pool: {
     search: (params: Record<string, string>) =>

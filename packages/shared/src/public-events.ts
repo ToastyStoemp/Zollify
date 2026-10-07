@@ -14,21 +14,33 @@ import type { SalesEvent } from './types';
  */
 
 // ── Per-event extras the booth adds on top of the event record ──────────────
-// link, hall, booth and blurb are legacy here: they now live on the event
-// (SalesEvent.booth) and these values only fill in where the event has none.
+// Only the publishing choices live here now. Hall, booth number, link and note
+// moved onto the event (SalesEvent.booth); the overlay no longer accepts them.
 
 export const EventOverlaySchema = z.object({
-  /** Link to the convention's own site. */
-  link: z.string().max(500).default('').refine((v) => !v || !!safeHttpUrl(v), 'Links must start with https://'),
-  hall: z.string().max(40).default(''),
-  booth: z.string().max(40).default(''),
   /** The convention's Instagram handle, with or without the @. */
   igHandle: z.string().max(60).default(''),
-  blurb: z.string().max(400).default(''),
   /** Keep this event off every public output. */
   hidden: z.boolean().default(false),
 });
 export type EventOverlay = z.infer<typeof EventOverlaySchema>;
+
+/** The legacy booth keys an old overlay row may still carry. */
+export const LEGACY_OVERLAY_KEYS = ['hall', 'booth', 'link', 'blurb'] as const;
+
+/**
+ * An overlay row as stored: the publishing fields plus, on rows written before
+ * the booth moved onto the event, the legacy booth keys. Read leniently (no
+ * limits, a bad value reads as absent) so an old row never fails to load; only
+ * the booth cleanup and the migration look at the legacy keys.
+ */
+export const StoredEventOverlaySchema = EventOverlaySchema.extend({
+  hall: z.string().optional().catch(undefined),
+  booth: z.string().optional().catch(undefined),
+  link: z.string().optional().catch(undefined),
+  blurb: z.string().optional().catch(undefined),
+});
+export type StoredEventOverlay = z.infer<typeof StoredEventOverlaySchema>;
 
 export const PublicEventsConfigSchema = z.object({
   /** Path segment the page lives at; null = not published. */
@@ -84,7 +96,7 @@ function publicOne(e: SalesEvent, ov: Partial<EventOverlay>, today: Date): Publi
   const end = e.dateEnd || start;
   const startD = toDate(start);
   const endD = toDate(end);
-  const booth = resolveBooth(e, ov);
+  const booth = resolveBooth(e);
   return {
     id: e.id,
     name: e.name || 'Event',
@@ -115,7 +127,7 @@ export interface SplitEvents {
  */
 export function splitPublicEvents(
   events: SalesEvent[],
-  overlays: Record<string, Partial<EventOverlay>>,
+  overlays: Record<string, Partial<StoredEventOverlay>>,
   pastLimit = 12,
   today: Date = startOfToday(),
 ): SplitEvents {

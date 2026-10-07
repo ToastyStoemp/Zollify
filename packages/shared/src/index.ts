@@ -25,4 +25,5 @@ export * from './webhooks';
 export * from './peppol';
 export * from './csv';
 export * from './restock';
+export * from './event-pool';
 export * from './commissions';

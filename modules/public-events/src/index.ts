@@ -9,8 +9,10 @@ import { clearSdk, setSdk } from './runtime';
  * One screen: where the booth's events are published (a page, a widget for
  * the shop, a calendar feed, an Instagram bio), plus the per-event publishing
  * choices - Instagram handle, hidden from the page. Hall, booth number, link
- * and note belong to the event itself (Events → Edit → Booth). Everything visitors see is rendered by the server half from the same
- * events the booth already keeps.
+ * and note belong to the event itself (Events → Edit → Booth). Everything
+ * visitors see is rendered by the server half from the same events the booth
+ * already keeps. A second screen, Find events, shares events to a pool other
+ * booths quick-add from.
  */
 export default defineModule({
   id: 'public-events',
@@ -36,6 +38,13 @@ export default defineModule({
       events: () => sdk.data.events.list(),
       upsert: (event) => sdk.data.events.upsert(event),
     });
+    sdk.routes.add({
+      path: 'find',
+      name: 'find',
+      title: 'Find events',
+      component: () => import('./views/FindEventsView.vue'),
+    });
+    sdk.nav.add({ routeName: 'find', group: 'events', label: 'Find events', icon: 'calendar', order: 116 });
     sdk.log.info('public-events module ready');
   },
 

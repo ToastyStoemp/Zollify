@@ -17,6 +17,7 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { migrateEventPool, registerEventPool } from './event-pool';
 
 /**
  * Public events - the server half.
@@ -47,6 +48,7 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (accountId, eventId)
     );
   `);
+  migrateEventPool(db);
 }
 
 // ── Data access ─────────────────────────────────────────────────────────────
@@ -442,6 +444,8 @@ export const publicEventsServerModule: ServerModule = {
 
   /** Authenticated: the booth's own settings and a preview of what visitors see. */
   routes: (ctx: ModuleContext) => async (app) => {
+    registerEventPool(app, ctx);
+
     app.get('/config', async (req) => {
       const who = ctx.identity(req);
       return { config: readConfig(ctx.db, who.accountId), overlays: readOverlays(ctx.db, who.accountId) };

@@ -1,4 +1,4 @@
-import type { EventOverlay, PublicEvent, PublicEventsConfig } from '@zollify/shared';
+import type { EventOverlay, PoolListing, PoolShare, PublicEvent, PublicEventsConfig } from '@zollify/shared';
 import { sdk } from './runtime';
 
 /** Typed wrapper over this module's server half at `/api/m/public-events/…`. */
@@ -18,4 +18,15 @@ export const api = {
   saveOverlay: (eventId: string, overlay: EventOverlay) =>
     sdk().http.put<{ overlay: EventOverlay }>(`overlay/${eventId}`, overlay),
   preview: () => sdk().http.get<Preview>('preview'),
+  pool: {
+    search: (params: Record<string, string>) =>
+      sdk().http.get<{ listings: PoolListing[]; more: boolean }>(`pool/listings?${new URLSearchParams(params).toString()}`),
+    mine: () => sdk().http.get<{ shared: { eventId: string; displayName: string; listing: PoolListing }[] }>('pool/mine'),
+    share: (share: Partial<PoolShare> & { eventId: string }) => sdk().http.put<{ listing: PoolListing }>('pool/share', share),
+    withdraw: (eventId: string) => sdk().http.del<{ ok: true }>(`pool/share/${encodeURIComponent(eventId)}`),
+    adopt: (listingId: string, eventId: string) =>
+      sdk().http.post<{ ok: true }>(`pool/listings/${encodeURIComponent(listingId)}/adopt`, { eventId }),
+    report: (listingId: string, reason: string, note: string) =>
+      sdk().http.post<{ ok: true }>(`pool/listings/${encodeURIComponent(listingId)}/report`, { reason, note }),
+  },
 };

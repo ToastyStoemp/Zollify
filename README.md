@@ -38,6 +38,7 @@ modules/
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
   consignment/    artists' work sold in your stores, commission and payouts; artists' own view (client + server half)
+  commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -159,7 +160,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events, Tax & books, Consignment.
+events, Tax & books, Consignment, Commissions.
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
@@ -185,6 +186,19 @@ balance unless the rent is paid separately. The store also schedules **setup
 moments**: the artist gets an in-app notification on their linked account and
 an email with a calendar file, confirms or declines from *Where I consign*, and
 the store hears back the same way.
+
+**Commissions** track custom work from request to pickup (Requested, Accepted,
+In progress, Ready for pickup, Collected, Cancelled). The record and the
+customer's contact details stay on the server, never in the synced op-log. A
+"Commission" button over the till takes a deposit or the final balance as an
+ordinary free-price sale line whose `ref` names the commission, so payment
+providers, receipts, VAT and cash-up work as for any sale; the paid-so-far is
+derived from those sale lines (a reverted sale gives the balance back). The
+customer follows progress at `/p/commissions/<token>`, reached by a QR code:
+the token is 192 random bits per commission and an admin can replace it, the
+page is plain server-rendered HTML with no script, rate limited and noindex,
+and shows only the title, status, customer-visible updates, due date, amounts
+and the pickup address - no contact details and no internal notes.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally
@@ -323,7 +337,10 @@ the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ic
 (subscribable calendar) and `/instagram.txt` (bio text). Rendered on the gateway
 from the account's op-log, so it updates whenever an event is edited. Public
 module halves mount under `/p/` with no session; the module resolves the account
-from the slug and refuses unless the module is enabled for it.
+from the slug and refuses unless the module is enabled for it. Hall, booth number,
+link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
+Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
+handle) and legacy booth values, which fill in wherever the event has none.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { EventOverlaySchema, type PoolListing, type SalesEvent } from '@zollify/shared';
+import type { PoolListing, SalesEvent } from '@zollify/shared';
 import { api } from '../api';
 import { sdk } from '../runtime';
 
@@ -89,10 +89,10 @@ async function quickAdd(l: PoolListing): Promise<void> {
       currency: sdk().account()?.profile.defaultCurrency || 'EUR',
       status: 'planned',
       notes: [l.venueName, l.description].filter(Boolean).join('\n') || undefined,
+      ...(l.url ? { booth: { link: l.url } } : {}),
       updatedAt: Date.now(),
     };
     await sdk().data.events.upsert(event);
-    if (l.url) await api.saveOverlay(event.id, EventOverlaySchema.parse({ link: l.url }));
     await api.pool.adopt(l.id, event.id);
     listings.value = listings.value.filter((x) => x.id !== l.id);
     flash(`Added ${l.name} to your events.`);
@@ -117,8 +117,8 @@ async function submitReport(l: PoolListing): Promise<void> {
 async function openShare(ev: SalesEvent): Promise<void> {
   sharing.value = ev.id;
   const mine = shared.value[ev.id];
-  let link = mine?.url ?? '';
-  if (!mine) {
+  let link = mine?.url ?? ev.booth?.link ?? '';
+  if (!link && !mine) {
     try {
       link = (await api.config()).overlays[ev.id]?.link ?? '';
     } catch {

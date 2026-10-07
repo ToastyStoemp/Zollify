@@ -1,3 +1,4 @@
+import type { ReceiptSocials } from '@zollify/shared';
 import { sdk } from '../runtime';
 import { getSetting } from './settings';
 
@@ -65,4 +66,15 @@ export async function screenLogo(): Promise<string | undefined> {
   const local = await getSetting<string>(LOGO_KEY);
   const b64 = local || (await serverBranding())?.logo;
   return b64 ? `data:image/png;base64,${b64}` : undefined;
+}
+
+/** The account's receipt links as the server has them; null when unreachable. Gives up quickly so a print is never held up. */
+export async function serverSocials(): Promise<ReceiptSocials | null> {
+  const timeout = new Promise<null>((ok) => setTimeout(() => ok(null), 2500));
+  return Promise.race([sdk().http.get<ReceiptSocials>('receipt-links').catch(() => null), timeout]);
+}
+
+/** Save the receipt links (owners and admins). Throws the server's message when a link is refused. */
+export async function pushSocials(next: ReceiptSocials): Promise<ReceiptSocials> {
+  return sdk().http.put<ReceiptSocials>('receipt-links', next);
 }

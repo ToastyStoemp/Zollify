@@ -1,6 +1,19 @@
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
-import { fmtRate, isReceiptToken, receiptBreakdown, vatBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
+import {
+  EMPTY_RECEIPT_SOCIALS,
+  cleanReceiptSocials,
+  fmtRate,
+  isReceiptToken,
+  receiptBreakdown,
+  receiptFooterLinks,
+  vatBreakdown,
+  type PublicEvent,
+  type ReceiptFooterLink,
+  type ReceiptSocials,
+  type SalesEvent,
+  type Transaction,
+} from '@zollify/shared';
 import {
   issueChallenge,
   makeSecretBox,
@@ -12,6 +25,7 @@ import {
   type ServerModule,
 } from '@zollify/server-core';
 import { POW_SOLVER_JS } from './pow-client';
+import { nextPublicEvents } from './public-events';
 import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
 
 /**
@@ -60,6 +74,11 @@ function migrate(db: Database.Database): void {
       footer    TEXT,
       updatedAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS pos_receipt_socials (
+      accountId TEXT PRIMARY KEY,
+      socials   TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
   `);
 }
 
@@ -100,6 +119,34 @@ function cleanFooter(value: unknown): string | null | undefined {
   if (typeof value !== 'string') throw new Error('The footer must be text.');
   const text = value.replace(/\r\n?/g, '\n').trim().slice(0, FOOTER_MAX);
   return text || null;
+}
+
+// ── Footer links ────────────────────────────────────────────────────────────
+// Webstore and social links, plus the "next events" toggle. Footer content
+// only: nothing here touches the sale.
+
+const NEXT_EVENTS = 3;
+
+function readSocials(db: Database.Database, accountId: string): ReceiptSocials {
+  const row = db.prepare('SELECT socials FROM pos_receipt_socials WHERE accountId = ?').get(accountId) as { socials: string } | undefined;
+  if (!row) return { ...EMPTY_RECEIPT_SOCIALS };
+  try {
+    // Re-cleaned on the way out too, so a row can never be more trusted than a request.
+    return cleanReceiptSocials(JSON.parse(row.socials));
+  } catch {
+    return { ...EMPTY_RECEIPT_SOCIALS };
+  }
+}
+
+/** What the page may show: sanitised link rows, and event fields the public-events page already publishes. */
+function footerExtras(db: Database.Database, accountId: string): Pick<PublicReceipt, 'links' | 'nextEvents'> {
+  const socials = readSocials(db, accountId);
+  const links = receiptFooterLinks(socials);
+  const events: PublicEvent[] = socials.showEvents ? nextPublicEvents(db, accountId, NEXT_EVENTS) : [];
+  return {
+    ...(links.length ? { links } : {}),
+    ...(events.length ? { nextEvents: events.map((e) => ({ name: e.name, city: e.city, start: e.start, end: e.end })) } : {}),
+  };
 }
 
 // ── Lookup ──────────────────────────────────────────────────────────────────
@@ -176,6 +223,10 @@ export interface PublicReceipt {
   payments: { label: string; amount: number; charged?: { amount: number; currency: string } }[];
   status: 'paid' | 'voided';
   brand: { logo?: string; footer: string[] };
+  /** Webstore and social links for the footer; absent when the booth set none. */
+  links?: ReceiptFooterLink[];
+  /** The next public events (ISO dates), when the booth switched that on and publishes the events page. */
+  nextEvents?: { name: string; city: string; start: string; end: string }[];
   /** VAT included per rate, or the exemption the sale was made under. */
   vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
 }
@@ -206,7 +257,7 @@ function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string
 /** The whitelist. Anything not copied here does not leave the server. */
 export function publicReceipt(
   tx: Transaction,
-  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding },
+  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'> },
 ): PublicReceipt {
   const rows = vatBreakdown(tx);
   const exempt = tx.tax?.exempt === true;
@@ -233,6 +284,7 @@ export function publicReceipt(
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
     },
+    ...extra.footer,
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -299,6 +351,8 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
 .row.net { padding-left: 1rem; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
+.linkrow { margin: .3rem 0; overflow-wrap: anywhere; }
+.linkrow a { color: var(--accent); }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
@@ -343,6 +397,40 @@ ${POW_SOLVER_JS}
     catch (e) { return cur + ' ' + n.toFixed(2); }
   }
 
+  // Webstore, socials and next events. Every string goes in as text; a link only
+  // becomes an anchor when it is https, whatever the server said.
+  function footer(r) {
+    var links = (r.links || []).filter(function (l) { return typeof l.url === 'string' && /^https:\/\//.test(l.url); });
+    var events = r.nextEvents || [];
+    if (!links.length && !events.length) return;
+    var box = el('div', 'links');
+    if (links.length) {
+      box.appendChild(el('p', 'c foot', 'Thanks for shopping with us - find us online'));
+      var list = el('p', 'c linkrow');
+      links.forEach(function (l, i) {
+        if (i) list.appendChild(document.createTextNode(' · '));
+        var a = el('a', '', l.label);
+        a.href = l.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        list.appendChild(a);
+      });
+      box.appendChild(list);
+    }
+    if (events.length) {
+      box.appendChild(el('p', 'muted c', 'Next events'));
+      events.forEach(function (e) {
+        box.appendChild(el('p', 'c foot', e.name + (e.city ? ' · ' + e.city : '') + ' · ' + dates(e.start, e.end)));
+      });
+    }
+    receiptEl.appendChild(box);
+    receiptEl.appendChild(el('hr'));
+  }
+  function dates(start, end) {
+    function f(s) { var d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); }
+    return end && end !== start ? f(start) + ' - ' + f(end) : f(start);
+  }
+
   function render(r) {
     receiptEl.textContent = '';
     if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
@@ -382,6 +470,7 @@ ${POW_SOLVER_JS}
       if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
     });
     receiptEl.appendChild(el('hr'));
+    footer(r);
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
     statusEl.hidden = true;
@@ -460,6 +549,29 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         .run(who.accountId, next.logo, next.footer, Date.now());
       return next;
     });
+
+    // Webstore and social links for the receipt footer; owners and admins set them, every device may read.
+    app.get('/receipt-links', async (req) => readSocials(ctx.db, ctx.identity(req).accountId));
+
+    app.put<{ Body: unknown }>('/receipt-links', { bodyLimit: 8 * 1024 }, async (req, reply) => {
+      const who = ctx.identity(req);
+      if (who.role !== 'owner' && who.role !== 'admin') {
+        return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt links.' });
+      }
+      let next: ReceiptSocials;
+      try {
+        next = cleanReceiptSocials(req.body);
+      } catch (err) {
+        return reply.code(400).send({ error: 'invalid', message: (err as Error).message });
+      }
+      ctx.db
+        .prepare(
+          `INSERT INTO pos_receipt_socials (accountId, socials, updatedAt) VALUES (?, ?, ?)
+           ON CONFLICT(accountId) DO UPDATE SET socials = excluded.socials, updatedAt = excluded.updatedAt`,
+        )
+        .run(who.accountId, JSON.stringify(next), Date.now());
+      return next;
+    });
   },
 
   publicRoutes: (ctx: PublicModuleContext) => async (app) => {
@@ -507,6 +619,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
           seller: seller(ctx.db, found.accountId),
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
+          footer: footerExtras(ctx.db, found.accountId),
         });
       },
     );

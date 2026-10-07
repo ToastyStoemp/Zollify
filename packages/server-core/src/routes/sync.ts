@@ -2,7 +2,7 @@ import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { PushRequestSchema, STAFF_OP_TYPES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
+import { PushRequestSchema, STAFF_OP_TYPES, SYNC_PUSH_MAX_BYTES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
@@ -111,7 +111,7 @@ export function registerSyncRoutes(
     return false;
   }
 
-  app.post('/api/sync/push', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/api/sync/push', { preHandler: app.authenticate, bodyLimit: SYNC_PUSH_MAX_BYTES }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     const parsed = PushRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid push' });

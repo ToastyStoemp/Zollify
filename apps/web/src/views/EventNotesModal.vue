@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import { EVENT_FILE_MAX_BYTES, EVENT_NOTES_MAX_CHARS, formatFileSize, type EventAttachment } from '@zollify/shared';
+import { EVENT_NOTES_MAX_CHARS, UPLOAD_PURPOSES, formatFileSize, type EventAttachment } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addEventFile,
@@ -144,7 +144,7 @@ const stillThere = computed(() => Boolean(getSalesEvent(props.eventId)));
           <input ref="picker" type="file" multiple hidden accept=".pdf,.pkpass,.png,.jpg,.jpeg,.webp,.gif,.heic,.txt,.csv,.docx,.xlsx,application/pdf,image/*" @change="onPick" />
           <div class="row">
             <button type="button" :disabled="busy" @click="picker?.click()"><Icon name="paperclip" :size="14" /> {{ busy ? 'Working…' : 'Attach files' }}</button>
-            <span class="hint">PDF, pictures or documents, up to {{ EVENT_FILE_MAX_BYTES / 1024 / 1024 }} MB each.</span>
+            <span class="hint">PDF, pictures or documents: pictures up to {{ UPLOAD_PURPOSES.eventFile.kinds.png.maxBytes / 1024 / 1024 }} MB, other files up to {{ UPLOAD_PURPOSES.eventFile.kinds.pdf.maxBytes / 1024 / 1024 }} MB.</span>
           </div>
           <p v-if="waiting" class="warn">{{ waiting }} file{{ waiting === 1 ? '' : 's' }} will reach the other devices once this one is back online.</p>
         </template>

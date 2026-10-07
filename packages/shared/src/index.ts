@@ -30,3 +30,4 @@ export * from './editions';
 export * from './artist-profile';
 export * from './event-pool';
 export * from './commissions';
+export * from './upload-limits';

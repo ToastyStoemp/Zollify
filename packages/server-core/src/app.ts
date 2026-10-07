@@ -23,6 +23,7 @@ import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
 import { registerEventFileRoutes } from './routes/event-files';
+import { registerUploadErrors, uploadConfig } from './upload-limits';
 import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
@@ -111,10 +112,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     },
     // Trusting every X-Forwarded-For hop would let anyone pick their own IP and step around the rate limits.
     trustProxy: opts.trustProxy === false ? false : ((hops: number) => (_addr: string, hop: number) => hop < hops)(opts.trustProxy === true ? 1 : opts.trustProxy),
-    // Generous on purpose: a backup restore pushes hundreds of image
-    // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
-    // authentication bound who can send this much, not the size itself.
-    bodyLimit: 32 * 1024 * 1024,
+    // A modest default (ZOLLIFY_MAX_BODY_MB). Routes that take files, and the
+    // sync push, raise it for themselves; Fastify refuses a body over its limit
+    // from Content-Length, before reading it.
+    bodyLimit: uploadConfig().maxBodyBytes,
   });
 
   const db = openDb(opts.dataDir);
@@ -206,6 +207,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.decorate('db', db);
+  registerUploadErrors(app);
   registerAnonymousBodyLimit(app);
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and

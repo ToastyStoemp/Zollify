@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import {
   RestoreError,
   backupFilename,
@@ -92,6 +93,8 @@ async function choose(event: Event): Promise<void> {
   pending.value = null;
 
   try {
+    const problem = await checkPickedFile('backupJson', file);
+    if (problem) throw new Error(problem);
     const raw = JSON.parse(await file.text()) as unknown;
     pending.value = { summary: inspectBackup(raw), raw, name: file.name };
   } catch (err) {

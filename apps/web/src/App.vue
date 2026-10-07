@@ -9,7 +9,7 @@ import {
   loadNotifications,
   lockTill,
   tillLocked,
-  tillSettings,
+  canLockTill,
   markNotificationsRead,
   notifications,
   pendingCount,
@@ -24,6 +24,7 @@ import {
   type Toast,
 } from '@zollify/platform';
 import { booted, contributions, events, signOutAndReload } from './boot';
+import { openProblemErrors, refreshProblemCount } from './lib/problems';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import LockScreen from './views/LockScreen.vue';
 import { Icon, ModalShell } from '@zollify/ui';
@@ -183,8 +184,12 @@ let bellPoll: ReturnType<typeof setInterval> | null = null;
 onMounted(() => {
   bellPoll = setInterval(() => {
     if (account.value && !realtimeConnected.value) void loadNotifications(true);
+    void refreshProblemCount();
   }, 5 * 60_000);
+  void refreshProblemCount();
 });
+// A new problem arrives as a note under the bell: look again when the list changes.
+watch(() => notifications.value.length, () => void refreshProblemCount());
 onUnmounted(() => {
   if (bellPoll) clearInterval(bellPoll);
 });
@@ -211,7 +216,7 @@ const fmtAgo = (ms: number): string => {
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column - otherwise the login card is squeezed into a 15rem track. -->
-  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
+  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening Zollify…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp, 'shell--full': route.name === 'pos:index' }]">
     <!-- The till hides this element's nav (brand/menu/links) - it already has
          its own back arrow, so that's space the product grid and cart get
@@ -246,7 +251,7 @@ const fmtAgo = (ms: number): string => {
 
           <footer class="tail">
             <div class="row">
-              <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span></router-link>
+              <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span><i v-if="openProblemErrors" class="pdot" title="Open errors in Settings, Problems"></i></router-link>
               <button
                 type="button"
                 class="quiet bell"
@@ -271,8 +276,8 @@ const fmtAgo = (ms: number): string => {
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
-              <div v-if="tillSettings.enabled" class="till-row">
-                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="door-open" :size="13" /> Lock till</button>
+              <div v-if="canLockTill()" class="till-row">
+                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="lock" :size="13" /> Lock till</button>
                 <span v-if="account.userId !== getDeviceAccount()?.userId" class="hint">on {{ getDeviceAccount()?.email }}'s device</span>
               </div>
               <button v-else type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
@@ -318,7 +323,7 @@ const fmtAgo = (ms: number): string => {
         <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
         <router-link v-for="sec in tabSections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
         <button v-if="tabOverflow" type="button" class="tab" :class="{ 'router-link-active': overflowActive }" @click="menuOpen = !menuOpen"><Icon name="menu" :size="20" /><span>More</span><i v-if="pendingCount || unreadNotifications" class="badge"></i></button>
-        <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount || unreadNotifications" class="badge"></i></router-link>
+        <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount || unreadNotifications || openProblemErrors" class="badge"></i></router-link>
       </div>
     </nav>
 
@@ -420,6 +425,7 @@ nav { flex: 1; }
 .bell-foot { display: flex; justify-content: space-between; gap: .5rem; }
 .sync .zfy-icon { color: var(--zfy-muted); }
 .sync.syncing .zfy-icon { animation: spin 1s linear infinite; }
+.pdot { display: inline-block; width: .5rem; height: .5rem; margin-left: .4rem; border-radius: 50%; background: var(--zfy-danger); flex: none; }
 .dot { position: absolute; top: .3rem; right: .3rem; width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-accent); border: 1.5px solid var(--zfy-surface); }
 .offline .dot { background: var(--zfy-muted); }
 .error .dot { background: var(--zfy-danger); }

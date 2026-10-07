@@ -1,5 +1,5 @@
 import { computed, reactive } from 'vue';
-import type { SaleEvent, SaleLine, SaleLineRef, TillLine } from '@zollify/sdk';
+import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
 import type { CardSettlement } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
@@ -331,6 +331,23 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
     ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
     ...(line.ref ? { ref: line.ref } : {}),
   });
+  return true;
+}
+
+/** The line a module added under `key`, for that module to read back. */
+export function findModuleLine(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null {
+  const l = cart.lines.find((x) => x.key === key);
+  return l ? { key, name: l.name, qty: l.qty, unitPrice: l.unitPrice, ...(l.ref ? { ref: l.ref } : {}) } : null;
+}
+
+/** Changes what a module's line charges, in place. False when the cart has no line under that key. */
+export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
+  const l = cart.lines.find((x) => x.key === line.key);
+  if (!l) return false;
+  l.name = line.name;
+  l.qty = line.qty;
+  l.unitPrice = line.unitPrice;
+  l.lineTotal = (Math.round(line.unitPrice * 100) * line.qty) / 100;
   return true;
 }
 

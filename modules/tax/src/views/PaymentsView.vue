@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import { monthKey, round2, type Cluster } from '../engine/types';
 import * as eng from '../engine/clusters';
 import { ParseError, fromSourceRow, parseSheet } from '../engine/parse';
@@ -76,6 +77,8 @@ async function onFile(file: File | undefined): Promise<void> {
   error.value = null;
   busy.value = 'file';
   try {
+    const problem = await checkPickedFile('spreadsheetImport', file);
+    if (problem) throw new ParseError(problem);
     const XLSX = await import('xlsx');
     const isCsv = file.name.toLowerCase().endsWith('.csv');
     const wb = isCsv ? XLSX.read(await file.text(), { type: 'string', raw: true }) : XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });

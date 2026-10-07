@@ -7,6 +7,7 @@ import { myposGlassProvider } from './mypos-glass';
 import { bridgeProvider, bridgeConnection } from './bridge-ws';
 import { sumupProvider } from './sumup';
 import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
+import { nexiSmartposProvider } from './nexi-smartpos';
 
 const providers: PaymentProvider[] = [
   manualProvider,
@@ -16,6 +17,7 @@ const providers: PaymentProvider[] = [
   myposGlassProvider,
   bridgeProvider,
   sumupProvider,
+  nexiSmartposProvider,
 ];
 
 export function allProviders(): PaymentProvider[] {

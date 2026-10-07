@@ -173,6 +173,7 @@ async function tellParticipant(
   const replyTo = accountEmail(db, accountId) ?? undefined;
   return mail.send({
     to: s.email,
+    accountId,
     subject: head[kind],
     text,
     ...(replyTo ? { replyTo } : {}),

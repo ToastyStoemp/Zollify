@@ -13,6 +13,8 @@ import {
   RegisterRequestSchema,
   emptyProfile,
   type AccountProfile,
+  type ProfileLinks,
+  cleanProfileLinks,
   type AuthUser,
   type TokenResponse,
   type UserRole,
@@ -63,10 +65,11 @@ export interface JwtClaims {
  * Those need the person's own sign-in.
  */
 const TILL_DENIED: [RegExp, RegExp][] = [
-  [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/./, /^\/api\/(invites|tokens|webhooks|problems|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
   [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
 ];
 
 /**
@@ -132,6 +135,20 @@ export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
   };
 }
 
+/**
+ * Links are cleaned again on the way out, so a stored row is never more
+ * trusted than a request. A row that no longer passes is dropped. Links
+ * cleared on purpose stay as an empty set: absent means "never set".
+ */
+function storedLinks(raw: unknown): { links?: ProfileLinks } {
+  if (!raw || typeof raw !== 'object') return {};
+  try {
+    return { links: cleanProfileLinks(raw) };
+  } catch {
+    return {};
+  }
+}
+
 /** A missing or unreadable profile is an empty one - never a crash on login. */
 export function parseProfile(raw: string | null | undefined): AccountProfile {
   if (!raw) return emptyProfile();
@@ -144,6 +161,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
       staffSeesTotals: parsed.staffSeesTotals === true,
       ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
+      ...storedLinks(parsed.links),
     };
   } catch {
     return emptyProfile();

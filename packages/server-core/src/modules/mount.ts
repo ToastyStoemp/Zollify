@@ -6,6 +6,7 @@ import type { Notify } from '../notifications';
 import type { ServerOpInput } from '../routes/sync';
 import type { WebhookMessage, WireOp } from '@zollify/shared';
 import type { Webhooks } from '../webhooks';
+import type { ModuleProblems, ProblemInput } from '../problems';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -36,6 +37,12 @@ export interface ModuleServices {
   writeOps(accountId: string, ops: ServerOpInput[]): number;
   /** Posts to the account's webhooks that listen for the event (Discord, Slack, JSON). */
   webhooks: Pick<Webhooks, 'emit'>;
+  /**
+   * Tells the account's owners and admins something failed (`report`), and that it works again
+   * (`resolve`): same kind and key is one problem. Never throws; absent in a bare test harness,
+   * so call it through `reportProblem` / `resolveProblem`.
+   */
+  problems?: ModuleProblems;
 }
 
 export interface ModuleContext extends ModuleServices {
@@ -91,13 +98,14 @@ export interface ServerModule {
 export function moduleServices(
   mod: Pick<ServerModule, 'id'>,
   db: Database.Database,
-  base: { notify: Notify; mail: Mailer; webhooks: Pick<Webhooks, 'emit'>; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
+  base: { notify: Notify; mail: Mailer; webhooks: Pick<Webhooks, 'emit'>; problems?: ModuleProblems; writeOps(accountId: string, origin: string, ops: ServerOpInput[]): number },
 ): ModuleServices {
   return {
     db,
     notify: (accountId, n) => base.notify(accountId, { ...n, moduleId: mod.id }),
     mail: base.mail,
     webhooks: base.webhooks,
+    ...(base.problems ? { problems: base.problems } : {}),
     writeOps: (accountId, ops) => base.writeOps(accountId, mod.id, ops),
   };
 }
@@ -184,5 +192,23 @@ export function mountPublicModules(
       },
       { prefix: `/p/${mod.id}` },
     );
+  }
+}
+
+/** Reports a failure for an account, if the context has the problems service. Never throws. */
+export function reportProblem(svc: Pick<ModuleServices, 'problems'>, accountId: string, input: ProblemInput): void {
+  try {
+    svc.problems?.report(accountId, input);
+  } catch {
+    /* reporting a problem must never be one */
+  }
+}
+
+/** The source works again: closes its problem. Never throws. */
+export function resolveProblem(svc: Pick<ModuleServices, 'problems'>, accountId: string, kind: string, key?: string): void {
+  try {
+    svc.problems?.resolve(accountId, kind, key);
+  } catch {
+    /* as above */
   }
 }

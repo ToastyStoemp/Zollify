@@ -66,7 +66,7 @@ async function load(ev: SalesEvent): Promise<void> {
   loadedEventId = ev.id;
   const blob = readCustomsDeBlob(ev);
   const stored = await sdk().config.get<Partial<StoredDeclarant>>(DECLARANT_KEY);
-  // Layered, most specific last: booth profile, then the module's saved declarant.
+  // Layered, most specific last: business profile, then the module's saved declarant.
   declarantDefault.value = {
     ...defaultCustomsDeDeclarant(),
     ...stripEmpty<CustomsDeDeclarant>(sdk().account()?.profile.artist),
@@ -356,7 +356,7 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
           <label><span>Email</span><input v-model="declarantOverride.email" type="email" :placeholder="declarantDefault.email" /></label>
           <label><span>VAT / tax ID</span><input v-model="declarantOverride.vatId" type="text" class="mono" :placeholder="declarantDefault.vatId || 'DE123456789'" /></label>
         </div>
-        <p class="hint">Prefilled from the booth profile and the declarant under Settings; what you change here applies to this event only.</p>
+        <p class="hint">Prefilled from the business profile and the declarant under Settings; what you change here applies to this event only.</p>
         <p class="hint">VAT/tax ID is only shown on the proforma invoice - required by German export brokers as a seller identifier, distinct from the EORI.</p>
       </article>
 

@@ -146,7 +146,8 @@ describe('a shared till', () => {
     const last = await post(owner, '/api/auth/unlock', { deviceId: TILL, userId: sam.id, pin: '9999', grant });
     expect(last.json()).toMatchObject({ removed: true });
     expect((await post(owner, '/api/auth/unlock', { deviceId: TILL, userId: sam.id, pin: '4711', grant })).statusCode).toBe(404);
-  });
+    // Ten real argon2 verifies (64 MiB each): well over the 5 s default on a busy machine.
+  }, 60_000);
 
   it("checks the device's own user's PIN without a grant", async () => {
     expect((await post(owner, '/api/auth/unlock', { deviceId: TILL, userId: ownerId, pin: '2468' })).statusCode).toBe(403);

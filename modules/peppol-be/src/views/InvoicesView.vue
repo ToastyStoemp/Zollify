@@ -218,7 +218,7 @@ async function removeCustomer(c: Customer): Promise<void> {
       <button type="button" class="primary" :disabled="!ready" @click="newInvoice"><Icon name="plus" :size="14" /> New invoice</button>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="settings && !ready" class="warn">Fill in your business details first, under Settings → E-invoices (Peppol).</p>
+    <p v-if="settings && !ready" class="warn">Add your business name and Belgian enterprise number to your Business profile first (Settings → Business profile). Payment details and the access point are under Settings → E-invoices (Peppol).</p>
 
     <p v-if="docs && !shown.length" class="empty">No invoices here yet.</p>
     <ul v-else-if="docs" class="list">

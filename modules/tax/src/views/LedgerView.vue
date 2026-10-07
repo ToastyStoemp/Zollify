@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import { api, type Expense, type InvoiceScan, type PnlRow } from '../api';
 import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
@@ -108,8 +109,14 @@ async function remove(e: Expense): Promise<void> {
   expenses.value = expenses.value.filter((x) => x.id !== e.id);
 }
 
-async function readFile(file: File | undefined): Promise<{ base64: string; name: string } | null> {
+async function readFile(file: File | undefined, purpose: 'invoice' | 'invoiceScan'): Promise<{ base64: string; name: string } | null> {
   if (!file) return null;
+  // The same check the server makes, so a wrong or oversized file is refused before it is read.
+  const problem = await checkPickedFile(purpose, file);
+  if (problem) {
+    error.value = problem;
+    return null;
+  }
   const buf = new Uint8Array(await file.arrayBuffer());
   let bin = '';
   for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
@@ -117,7 +124,7 @@ async function readFile(file: File | undefined): Promise<{ base64: string; name:
 }
 
 async function attach(e: Expense, file: File | undefined): Promise<void> {
-  const f = await readFile(file);
+  const f = await readFile(file, 'invoice');
   if (!f) return;
   try {
     const saved = (await api.attachInvoice(e.id, f.base64, f.name)).expense;
@@ -129,7 +136,7 @@ async function attach(e: Expense, file: File | undefined): Promise<void> {
 
 /** Reads the PDF with Claude and fills the form; the file is kept to attach on save. */
 async function scanInvoice(file: File | undefined): Promise<void> {
-  const f = await readFile(file);
+  const f = await readFile(file, 'invoiceScan');
   if (!f) return;
   scanFile.value = f;
   busy.value = 'scan';

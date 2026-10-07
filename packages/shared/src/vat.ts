@@ -89,7 +89,7 @@ export type VatProfile = z.infer<typeof VatProfileSchema>;
 /** A change to some fields - no defaults, so fields left out stay as they are. */
 export const VatProfileUpdateSchema = z.object(vatProfileFields).partial();
 
-/** Per-event VAT, set on the event form. Absent fields fall back to the country and the booth profile. */
+/** Per-event VAT, set on the event form. Absent fields fall back to the country and the business profile. */
 export interface EventVat {
   /** 'auto' (default) = exempt if the profile lists the country, else charge the country's rates. */
   mode?: 'auto' | 'charge' | 'exempt';

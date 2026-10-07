@@ -7,6 +7,7 @@ import cookie from '@fastify/cookie';
 import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
+import { registerAnonymousBodyLimit } from './body-limit';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
 import { isEnabled, listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
@@ -22,14 +23,17 @@ import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
 import { registerEventFileRoutes } from './routes/event-files';
+import { registerUploadErrors, uploadConfig } from './upload-limits';
 import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
 import { Rooms, registerWs } from './ws';
 import { configureCaptchaKey } from './captcha';
-import { createMailer, type Mailer } from './mailer';
+import { createMailer, isPlainEmail, type Mailer } from './mailer';
 import { createNotifier, registerNotificationRoutes, type Notify } from './notifications';
 import { createWebhooks, migrateWebhooks, registerWebhookRoutes } from './webhooks';
+import { checkDeployStatus } from './deploy-status';
+import { createProblems, migrateProblems, registerProblemRoutes, type Problems } from './problems';
 
 export interface GatewayOptions {
   dataDir: string;
@@ -110,13 +114,15 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     },
     // Trusting every X-Forwarded-For hop would let anyone pick their own IP and step around the rate limits.
     trustProxy: opts.trustProxy === false ? false : ((hops: number) => (_addr: string, hop: number) => hop < hops)(opts.trustProxy === true ? 1 : opts.trustProxy),
-    // Generous on purpose: a backup restore pushes hundreds of image
-    // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
-    // authentication bound who can send this much, not the size itself.
-    bodyLimit: 32 * 1024 * 1024,
+    // A modest default (ZOLLIFY_MAX_BODY_MB). Routes that take files, and the
+    // sync push, raise it for themselves; Fastify refuses a body over its limit
+    // from Content-Length, before reading it.
+    bodyLimit: uploadConfig().maxBodyBytes,
   });
 
   const db = openDb(opts.dataDir);
+  // Release SQLite after the other shutdown hooks have stopped.
+  app.addHook('onClose', async () => { if (db.open) db.close(); });
   migrateEntitlements(db);
   await seedOwner(db);
 
@@ -167,7 +173,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       // The health probe comes from the container runtime and the deploy
       // script over plain loopback HTTP; it carries nothing worth protecting.
       if (req.url === '/health') return undefined;
-      const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
+      const proto = req.protocol;
       if (proto !== 'https') {
         return reply.code(403).send({ error: 'https_required', message: 'HTTPS is required.' });
       }
@@ -203,12 +209,8 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.decorate('db', db);
-  // Large bodies are for signed-in work (backups, invoice PDFs); without a token
-  // nothing big is read, so nobody can make the server parse 32 MB for free.
-  app.addHook('onRequest', async (req, reply) => {
-    const size = Number(req.headers['content-length'] ?? 0);
-    if (size > 256 * 1024 && !req.headers.authorization) return reply.code(413).send({ error: 'Request too large.' });
-  });
+  registerUploadErrors(app);
+  registerAnonymousBodyLimit(app);
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.
@@ -240,7 +242,38 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
 
   const rooms = new Rooms();
   const ring = createNotifier(db, rooms);
-  const mail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
+  const rawMail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
+  // Every mail that names its account tells Problems how it went: one failure opens a warning, a success closes it.
+  // A malformed recipient is the caller's mistake, not the mail server's, so it never counts.
+  const mail: Mailer = {
+    get enabled() {
+      return rawMail.enabled;
+    },
+    async send(m) {
+      const ok = await rawMail.send(m);
+      if (m.accountId && rawMail.enabled && isPlainEmail(m.to)) {
+        if (ok) problems.resolve(m.accountId, 'email', 'smtp');
+        else problems.report(m.accountId, { kind: 'email', key: 'smtp', severity: 'error', message: 'Email could not be sent', detail: 'The mail server did not accept a message. Check SMTP_URL and MAIL_FROM.' });
+      }
+      return ok;
+    },
+  };
+  migrateProblems(db);
+  const problems: Problems = createProblems(db, { notify: (accountId, n) => notify(accountId, n), mail: () => mail, log: (err) => app.log.warn({ err }, 'problem not recorded') });
+  app.addHook('onClose', async () => problems.stop());
+  if (opts.deployDir) {
+    // The host's deploy script writes how the last update and its backup went; the owner hears of a failure.
+    const deployDir = opts.deployDir;
+    const look = () => checkDeployStatus(db, deployDir, problems);
+    const first = setTimeout(look, 5000);
+    const timer = setInterval(look, 10 * 60_000);
+    first.unref();
+    timer.unref();
+    app.addHook('onClose', async () => {
+      clearTimeout(first);
+      clearInterval(timer);
+    });
+  }
   // Webhooks hear every notification by its category, and modules add to the summaries.
   migrateWebhooks(db);
   const webhooks = createWebhooks(db, {
@@ -250,6 +283,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
         .filter((m) => m.webhookReport)
         .map((m) => (accountId: string, period: { from: string; to: string; timeZone: string }) =>
           isEnabled(db, accountId, m.id) ? m.webhookReport!(services(m), accountId, period) : []),
+    problems,
     log: (err) => app.log.warn({ err }, 'webhook failed'),
   });
   app.addHook('onClose', async () => webhooks.stop());
@@ -261,7 +295,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   const servicesByModule = new Map<string, ModuleServices>();
   const services = (mod: ServerModule): ModuleServices => {
     let s = servicesByModule.get(mod.id);
-    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, webhooks, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
+    if (!s) servicesByModule.set(mod.id, (s = moduleServices(mod, db, { notify, mail, webhooks, problems, writeOps: (accountId, origin, ops) => appendOps(db, rooms, accountId, origin, ops) })));
     return s;
   };
   registerSyncRoutes(app, db, rooms, (accountId, ops) => {
@@ -269,11 +303,12 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     for (const mod of opts.serverModules) {
       if (mod.onOps && isEnabled(db, accountId, mod.id)) mod.onOps(services(mod), accountId, ops);
     }
-  });
+  }, problems);
   registerDeviceRoutes(app, db);
   registerAccountRoutes(app, db, opts.dataDir, forgetAccount);
   registerNotificationRoutes(app, db);
-  registerWebhookRoutes(app, db, webhooks);
+  registerWebhookRoutes(app, db, webhooks, problems);
+  registerProblemRoutes(app, db, problems);
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
   registerLogRoutes(app, db, opts.dataDir);
@@ -301,7 +336,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // Public halves: no session, resolved by the module from a slug or token.
   mountPublicModules(app, db, opts.serverModules, services);
 
-  app.decorate('zollify', { db, store, webhooks, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+  app.decorate('zollify', { db, store, webhooks, problems, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 
   /**
    * Liveness probe. Deliberately unauthenticated and free of detail: a load

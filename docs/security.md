@@ -24,11 +24,42 @@ What the server guarantees, and the settings that matter for it. Regression test
 - Requests without a token may not send bodies over 256 KB.
 - Log uploads are rate-limited, and each account keeps only its newest 30.
 
+## Public pages with personal data
+
+- **Commission tracking** (`/p/commissions/<token>`): the token is 24 random bytes, one per commission, and an admin can replace it (the old link then answers "not available"). The page is built from a fixed list of fields (title, status, updates written for the customer, due date, amounts, pickup address); contact details, details and internal notes never leave. It is rendered on the server with every value escaped, has no script, is rate limited per IP, and is `noindex`, `no-store` and `no-referrer`. A wrong, malformed or retired token and a disabled module all give the same answer. Customer details live in the module's own server tables, not in the synced op-log, and an admin can erase a commission.
+
+## Commission customers (personal data, kept only while needed)
+
+A customer's name, email and phone are stored once per customer in `commission_customers` (server only, never in the op-log); commissions point at the customer by id and carry none of these fields. Nothing personal is logged.
+
+- **When details are needed.** While the customer has at least one commission that is not Collected or Cancelled. A closed commission cannot be reopened in the app, and a new commission for the customer makes them needed again; the clock restarts when it closes.
+- **Retention.** Admin setting "Keep customer details after the last commission closes", in days, default 30, 0 to 365 (0 erases at the next sweep). The clock starts when the last commission closed, or when the customer was added if they have none.
+- **The sweep.** Runs when the server starts and every 3 hours, only for accounts with the Commissions module switched on (a switched-off module is left alone until it is switched on again). It is idempotent. It is the only automatic erasure; the setting is read each time, so lowering it applies at the next run.
+- **What erasing does.** Deletes the customer record (name, email, phone). On each of their commissions it clears the internal notes, the free-text details and the messages written for the customer (free text can name or describe a person, and none of it is needed for the books), blanks the customer link, and shows the neutral label "Customer removed". It keeps the title, price, deposit asked, currency, due date, status, the date and step of every timeline entry, the tracking link, and what was paid (derived from sales, which stay in the books). The title is kept as the commission's label in the books, so it should not carry a person's name; the form says it is shown to the customer.
+- **Manual erasure.** "Erase now" on a customer and "Erase all closed customers now" are admin only, ask for confirmation that lists what is deleted, are refused for a customer with an open commission, and are denied on a shared till.
+- **Existing data.** Commissions made before customer records are moved onto them at startup (same email in any case, else same phone digits, else one customer each), nothing is lost, and the move is idempotent. Migrated customers start their retention clock at the migration, so nothing is erased on the day of deploy; commissions closed long ago are erased once the retention period after the migration has run.
+- **Search.** Name, email or phone, scoped to the caller's account in the query, at least two characters, at most 8 results, rate limited, and it returns contact fields only. A customer id from another account is treated as unknown.
+- **Duplicates.** A new customer whose email (any case) or phone digits match an existing one is offered back instead of created; staff choose to use the existing customer or add a new one anyway. Nothing is merged automatically.
+- **Email.** Messages to the customer go out only while the customer exists and has an address. The public tracking page never showed contact details and does not need the customer, so it keeps working after erasure (without the customer messages).
+
+## File uploads
+
+One mechanism covers every upload: event files, ledger invoices, invoice scanning, voucher PDFs, sourcing design files and proofs, and the receipt logo. The rules live in `packages/shared/src/upload-limits.ts` (the app checks them before sending) and `packages/server-core/src/upload-limits.ts` (the server enforces them). Tests: `packages/shared/src/__tests__/upload-limits.test.ts`, `packages/server-core/src/__tests__/upload-limits.test.ts`, `apps/server/src/__tests__/uploads.test.ts`.
+
+- **The real type is read from the file's first bytes.** The browser's Content-Type and the file's name are only checked against it: a PDF called `.png`, or an image that says it is a PDF, is refused with a 415, and the type that is stored is the one the bytes prove.
+- **HTML, SVG and XML are never accepted**, whatever they are called or labelled, and neither are names ending in `.html`, `.svg`, `.js` or `.exe`.
+- **Limits** (a picture 5 MB, a PDF 10 MB, the invoice scanner 5 MB, a design file 25 MB, the receipt logo 256 KB) are checked per type. A request body over its route's limit is refused from its Content-Length, before any of it is read.
+- **Storage quota**: event files, ledger invoices and sourcing files together count toward one limit per account, and an event holds a fixed number of files.
+- **Errors are readable**: 400 (empty or unreadable), 413 (too large, with the limit), 415 (wrong type, with what is allowed).
+- Imports (backups, the ZollTool zip, payments exports) are read in the browser and never uploaded as files; their size caps protect the device.
+- A stored file is never served as a raw URL. If a route ever does, `downloadHeaders()` makes it a download, with `nosniff` and a sandboxing CSP.
+
 ## Outgoing requests (SSRF)
 
 - **Webhooks**: public https addresses only. Loopback, private, link-local, carrier NAT, benchmark ranges and IPv6 forms that wrap them are refused. The address is checked again when connecting, so DNS rebinding does not help, and only a few KB of the answer is read.
 - **Integrations** (Lexware, myPOS, SumUp, Shopify): only the providers' own hosts, and no redirects.
 - **Peppol**: Storecove's fixed address only. The Peppol Directory lookup accepts strict identifiers only.
+- **Nexi SmartPOS**: Poynt's fixed API host only (services-eu.poynt.net, or services.poynt.net). The terminal's callbacks only count on the per-payment URL Poynt was given (a random secret in the path), only for the exact amount and currency asked, and a final outcome is never overwritten. Each account's own Poynt app key is stored encrypted, never sent back to a browser, and only owners and admins can change it. Connecting a Nexi account takes a one-time context we issued, a fresh code made out to this app (signature checked when `POYNT_AUTH_PUBLIC_KEY` is set), Poynt confirming the app can see that business, and a business links to one account only.
 
 ## Output
 
@@ -37,6 +68,36 @@ What the server guarantees, and the settings that matter for it. Regression test
 - Slack and Discord messages escape link and mention syntax.
 - Email links use `PUBLIC_ORIGIN`, or forwarded headers only from a trusted proxy.
 
+## Shared event pool (data that crosses accounts)
+
+Public events lets an account share its events to a pool every account on the server can search and quick-add from. It is the only place event data leaves an account on purpose.
+
+- **Account-level consent, off by default.** One setting, "Help share event information with the community" (setup wizard for accounts that run events, Settings, Event sharing, and the top of Find events). Nothing is shared until an owner or admin turns it on; existing accounts stay off. Turning it off withdraws every contribution of the account at once. A single event can opt out ("Do not share this event with the community") for private or invite-only events.
+- **What is shared when it is on.** Only events (never stores) that have a name, valid dates of at most 60 days, and a city or country, from 30 days ago onward. The server reconciles the account's contributions with its op-log whenever its events change, so edits update the listing and a deleted, opted-out or aged-out event is withdrawn.
+- **What crosses** (the `PoolListing` shape in `packages/shared/src/event-pool.ts`): name, edition label, venue name, street, postcode, city, country, start and end date, an https link (the event's booth link), and a description of up to 400 characters (the event's note for visitors, which the public page already shows). Nothing else.
+- **What never crosses**: costs, sales, stock, notes, attachments, booth hall and number, VAT, customs data, account or user ids, account names, emails.
+- **Who goes stays private.** There is no count of accounts, no display names, no contributor ids and no timestamps in any response. The server keeps an account id on each contribution only so the account's own contributions can be updated, withdrawn and deduped; it is never returned. A listing shows the facts of its first contribution, so another account joining or leaving never changes it, and a listing shared by many accounts looks exactly like one shared by a single account. Search order (soonest start, then name), paging and error messages do not depend on how many accounts share a listing. Quick-add is recorded for the adopting account only and no other account can see it. The one thing a caller learns is about itself: its own and already-added listings are left out of its search.
+- **Quick-add is open to everyone.** Find events and quick-add work whether or not the account shares; there is no reciprocity requirement.
+- **The server picks every field.** Name, dates, address, link and description are read from the contributor's own events in the op-log, never from a request body; each is validated and length-limited.
+- **No markup.** Text containing `<` or `>` is refused and control characters are stripped. Links must be https, without credentials. The client renders everything as escaped text.
+- **Dedupe.** Listings match on normalised name (case, accents and punctuation ignored), start date and city (or country when there is no city). A match adds a private contribution instead of a second listing.
+- **Abuse controls.** 20 consent changes per account per hour, 30 reports per account per day, 200 shared events per account, listings at most 60 days long. Each account can flag a listing once. Three distinct accounts flagging a listing hide it from search. Flags are stored in `event_pool_flags` and there is no admin screen for them yet; the server owner reads them from the database. Three colluding accounts could hide a listing, which is why hiding only affects search and the contributors keep their own copy.
+- **Visibility.** Only signed-in accounts with the Public events module switched on can search the pool. It is not on the unauthenticated `/p/` routes.
+- **Migration.** Display names from the earlier per-event sharing are dropped. Contributions made under it are withdrawn unless the account has since agreed to the new setting.
+- **Known limit.** Contributions stay in the pool while the Public events module is switched off for an account; turn sharing off first to withdraw them.
+
+## Problems (failure alerts)
+
+Quiet failures (a webhook that keeps failing, email that does not go out, a crashed scheduled job, a failed backup or update) are recorded per account in the `problems` table and shown to owners and admins under Settings, Problems. Code: `packages/server-core/src/problems.ts`; tests: `packages/server-core/src/__tests__/problems.test.ts`.
+
+- **What a row holds.** Kind and key (the source, e.g. `webhook` and the webhook id), severity (`warning` or `error`), a short message, a sanitised detail, an in-app link, a count, first seen, last seen, resolved and dismissed times, and when the bell and the digest last mentioned it. Never a secret, token, address, customer name, email or payload. The source passes a status or error class (`HTTP 500`, `Timed out`), never what the other side answered, and `sanitizeText` replaces links, email addresses, bearer tokens and long token-like strings again before anything is stored. Links must be same-app paths.
+- **Retention.** An open problem stays until its source succeeds or someone dismisses it. A resolved or dismissed one is deleted 30 days later (an hourly job). A problem that is open and quiet is not deleted.
+- **Who sees it.** `GET /api/problems`, dismissing, and the digest switch are for owners and admins of the account; staff get 403 and no bell note (the note is `minRole: admin`). The email-digest switch is the owner's. A shared-till token cannot call them. One account never sees or dismisses another's rows. Server-level problems (backup, update) are written to the account of the server owner.
+- **Dedupe and resolve.** The same account, kind and key is one open row: repeats raise the count and last seen. A success of the same source closes it. A failure after it was closed or dismissed is a new row.
+- **Thresholds.** Webhooks: 3 failed deliveries in a row open a warning; the automatic switch-off (after 20) makes it an error; delivering again, re-enabling or deleting the webhook closes it. Sync: 3 pushes in a row from one device where a module crashed on the ops open a warning (counted in memory, so a restart only delays it). Email: any failed send to a valid address opens an error, any successful one closes it. Peppol, myPOS, SumUp, Lexware, Nexi/Poynt: one failed call opens a warning, a success closes it. Scheduled jobs: a crash opens an error for that account. Backup or update status written by `deploy.sh` (`apps/server/deploy/status`): a failed backup or update is an error, an update request nobody picked up for 15 minutes is a warning.
+- **Noise control.** The bell hears only about a new error or a warning that escalates to an error, and at most once per kind and key per 24 hours, even if it was dismissed and came back. Repeats never notify. The email digest lists errors that opened since the last digest, goes to the owner only, at most once per 24 hours per account, only when SMTP is configured, and the owner can switch it off (Settings, Problems; default on). Warnings are never emailed.
+- **Never in the way.** Reporting catches its own errors and runs synchronously against SQLite; it cannot fail or delay a request or a delivery.
+
 ## Settings
 
 | Variable | Meaning |
@@ -44,6 +105,9 @@ What the server guarantees, and the settings that matter for it. Regression test
 | `ZOLLIFY_TRUST_PROXY` | `true` (default) trusts one reverse proxy in front; a number trusts that many hops; `false` trusts none. More than you have lets clients choose their own IP and step around rate limits. |
 | `PUBLIC_ORIGIN` | The address people reach the server at (e.g. `https://pos.example.com`), used for links in emails. |
 | `WEBHOOK_ALLOW_PRIVATE=1` | Lets webhooks reach private addresses. Only for LAN-only installs. |
+| `ZOLLIFY_ACCOUNT_STORAGE_MB` | Stored attachments one account may keep in total, in MB (default 500). |
+| `ZOLLIFY_EVENT_FILES_MAX` | Files one event may hold (default 20). |
+| `ZOLLIFY_MAX_BODY_MB` | Request body limit for routes that take no file, in MB (default 8). Routes that take a file set their own. |
 | `CAPTCHA_BITS`, `SIGNUP_CAPTCHA_BITS`, `RECEIPT_CAPTCHA_BITS` | Proof-of-work difficulty; registration never accepts less than `CAPTCHA_BITS`. |
 
 ## Known limits

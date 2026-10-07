@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled } from '@zollify/server-core';
+import { publicEventsServerModule } from '../modules/public-events';
 
 /**
  * The receipt page is open to anyone with a phone, so what is worth proving
@@ -85,8 +86,8 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [receiptsServerModule],
-    defaultModules: ['pos'],
+    serverModules: [receiptsServerModule('test-secret-value-long-enough-for-signing'), publicEventsServerModule],
+    defaultModules: ['pos', 'public-events'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -282,11 +283,179 @@ describe('online receipts', () => {
 
   it('keeps anything but a modest PNG out of the branding', async () => {
     const svg = Buffer.from('<svg onload="alert(1)"/>').toString('base64');
-    for (const logo of [svg, 'not base64!', Buffer.alloc(300 * 1024).toString('base64')]) {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]).toString('base64');
+    for (const [logo, status] of [[svg, 415], [jpeg, 415], ['not base64!', 400]] as const) {
       const res = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo } });
-      expect(res.statusCode).toBe(400);
+      expect(res.statusCode).toBe(status);
+      expect(res.json().message).toMatch(/\S/);
     }
+    // Over the cap: the body limit refuses it before the route reads it.
+    const big = await app.inject({ method: 'PUT', url: '/api/m/pos/branding', headers: auth(), payload: { logo: Buffer.alloc(300 * 1024).toString('base64') } });
+    expect(big.statusCode).toBe(413);
     expect((await app.inject({ method: 'PUT', url: '/api/m/pos/branding', payload: { footer: 'x' } })).statusCode).toBe(401);
+  });
+
+  describe('footer links', () => {
+    // The links are the business profile's; only the switches are saved through the module.
+    const putLinks = (links: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links } as object });
+    const putToggles = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', headers: auth(), payload: payload as object });
+    const day = (offset: number) => {
+      const d = new Date();
+      d.setDate(d.getDate() + offset);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    it('adds nothing to the receipt until links are set', async () => {
+      const r = (await lookup(TOKEN)).json();
+      expect(r.links).toBeUndefined();
+      expect(r.nextEvents).toBeUndefined();
+    });
+
+    it('serves clean links, bare handles made canonical, and leaves the sale untouched', async () => {
+      const before = (await lookup(TOKEN)).json();
+      const put = await putLinks({ webstore: ' https://shop.example.com/ ', instagram: '@harbourprints', tiktok: 'harbour.prints', otherUrl: 'https://news.example.com/signup', otherLabel: '<b>News</b>' });
+      expect(put.statusCode, put.body).toBe(200);
+      const after = (await lookup(TOKEN)).json();
+      expect(after.links).toEqual([
+        { label: 'Webstore', url: 'https://shop.example.com/' },
+        { label: 'Instagram', url: 'https://www.instagram.com/harbourprints' },
+        { label: 'TikTok', url: 'https://www.tiktok.com/@harbour.prints' },
+        // Stored as typed: the page writes it with textContent, never as markup.
+        { label: '<b>News</b>', url: 'https://news.example.com/signup' },
+      ]);
+      const { links: _links, ...rest } = after;
+      expect(rest).toEqual(before);
+    });
+
+    it('refuses anything but a plain https link', async () => {
+      for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'http://shop.example.com', 'ftp://x.example.com', 'https://user:pw@shop.example.com', 'https://localhost', 'https://a.example.com/ x', 'shop.example.com', `https://shop.example.com/${'a'.repeat(200)}`]) {
+        const res = await putLinks({ webstore: bad });
+        expect(res.statusCode, bad).toBe(400);
+      }
+      expect((await putLinks({ instagram: 'javascript:alert(1)' })).statusCode).toBe(400);
+      expect((await putLinks({ otherUrl: 'https://x.example.com', otherLabel: 'x'.repeat(31) })).statusCode).toBe(400);
+      // A refusal keeps what was saved.
+      expect((await lookup(TOKEN)).json().links).toHaveLength(4);
+    });
+
+    it('needs a sign-in to change them, and prints nothing by default', async () => {
+      expect((await app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', payload: { showOnPrint: true } })).statusCode).toBe(401);
+      expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json().showOnPrint).toBe(false);
+    });
+
+    it('keeps the switches in Receipts and the links in the profile, whichever is saved last', async () => {
+      const before = (await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json();
+      // Link fields sent to the receipt endpoint are ignored: the profile is the one place to edit them.
+      const res = await putToggles({ showOnPrint: true, showEvents: false, webstore: 'https://elsewhere.example.com' });
+      expect(res.json()).toMatchObject({ webstore: before.webstore, showOnPrint: true, showEvents: false });
+      const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+      expect(profile.links.webstore).toBe('https://shop.example.com/');
+      // Saving the profile again leaves the switches alone.
+      await putLinks({ facebook: 'https://facebook.com/harbourprints' });
+      expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json()).toMatchObject({ showOnPrint: true, facebook: 'https://facebook.com/harbourprints' });
+      await putToggles({ showOnPrint: false, showEvents: false });
+      await putLinks({ facebook: '' });
+    });
+
+    it('renders links as text and anchors that open safely', async () => {
+      const js = (await app.inject({ method: 'GET', url: '/p/pos/r/receipt.js' })).body;
+      expect(js).toContain("a.rel = 'noopener noreferrer'");
+      expect(js).toContain("a.target = '_blank'");
+      expect(js).toContain('find us online');
+      expect(js).not.toMatch(/innerHTML/);
+    });
+
+    it('lists the next three public events only when switched on, published and enabled', async () => {
+      const events = [
+        { id: 'ev-n1', name: 'Next A', dateStart: day(10), dateEnd: day(11), venue: { city: 'Bern' } },
+        { id: 'ev-n2', name: 'Next B', dateStart: day(20), dateEnd: day(20), venue: { city: 'Lyon' } },
+        { id: 'ev-n3', name: 'Next C', dateStart: day(30), dateEnd: day(31), venue: { city: 'Graz' } },
+        { id: 'ev-n4', name: 'Next D', dateStart: day(40), dateEnd: day(41), venue: { city: 'Wien' } },
+        { id: 'ev-hid', name: 'Hidden one', dateStart: day(5), dateEnd: day(6), venue: { city: 'Secret' } },
+        { id: 'ev-old', name: 'Past one', dateStart: day(-30), dateEnd: day(-29), venue: { city: 'Old' } },
+      ].map((e, i) => ({ opId: `op-ev-${String(i).padStart(12, '0')}`, deviceId: 'dev-1', ts: 100 + i, type: 'event.upsert', payload: { ...e, currency: 'CHF', status: 'active', updatedAt: 1 } }));
+      expect((await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: events } })).statusCode).toBe(200);
+
+      // Toggle off: nothing, even once the page is published.
+      await app.inject({ method: 'PUT', url: '/api/m/public-events/config', headers: auth(), payload: { slug: 'harbour-prints' } });
+      expect((await lookup(TOKEN)).json().nextEvents).toBeUndefined();
+
+      expect((await putToggles({ showEvents: true })).statusCode).toBe(200);
+      expect((await app.inject({ method: 'PUT', url: '/api/m/public-events/overlay/ev-hid', headers: auth(), payload: { hidden: true } })).statusCode).toBe(200);
+      const on = (await lookup(TOKEN)).json();
+      expect(on.nextEvents.map((e: { name: string }) => e.name)).toEqual(['Next A', 'Next B', 'Next C']);
+      expect(Object.keys(on.nextEvents[0]).sort()).toEqual(['city', 'end', 'name', 'start']);
+      expect(on.nextEvents[0]).toMatchObject({ city: 'Bern', start: day(10), end: day(11) });
+
+      // Module off: gone.
+      setEnabled(app.zollify.db, accountId, 'public-events', false);
+      expect((await lookup(TOKEN)).json().nextEvents).toBeUndefined();
+      setEnabled(app.zollify.db, accountId, 'public-events', true);
+
+      // Page unpublished: gone, because the page itself would not show them.
+      await app.inject({ method: 'PUT', url: '/api/m/public-events/config', headers: auth(), payload: { slug: null } });
+      expect((await lookup(TOKEN)).json().nextEvents).toBeUndefined();
+    });
+  });
+
+  describe('links kept by the first version', () => {
+    const db = () => app.zollify.db;
+    const profileOf = () => JSON.parse((db().prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string }).profile) as { links?: Record<string, string>; artist: { companyName: string } };
+    const setLegacy = (socials: unknown) =>
+      db().prepare('INSERT INTO pos_receipt_socials (accountId, socials, updatedAt) VALUES (?, ?, 1) ON CONFLICT(accountId) DO UPDATE SET socials = excluded.socials').run(accountId, JSON.stringify(socials));
+    /** A profile that never had links, as one from before they moved. */
+    const forgetLinks = () => {
+      const { links: _links, ...rest } = profileOf();
+      db().prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(JSON.stringify(rest), accountId);
+    };
+    const legacy = { webstore: 'https://old.example.com/', instagram: 'https://www.instagram.com/oldbooth', showOnPrint: true, showEvents: false };
+
+    it('is shown as a fallback while the profile has never had links', async () => {
+      forgetLinks();
+      setLegacy(legacy);
+      const r = (await lookup(TOKEN)).json();
+      expect(r.links).toEqual([
+        { label: 'Webstore', url: 'https://old.example.com/' },
+        { label: 'Instagram', url: 'https://www.instagram.com/oldbooth' },
+      ]);
+      expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json()).toMatchObject({ webstore: 'https://old.example.com/', showOnPrint: true });
+      // Reading changes nothing.
+      expect(profileOf().links).toBeUndefined();
+    });
+
+    it('is copied into a profile that has none, and the table stays readable', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      expect(migrateReceiptSocials(db())).toBe(1);
+      expect(profileOf().links).toMatchObject({ webstore: 'https://old.example.com/', instagram: 'https://www.instagram.com/oldbooth' });
+      // Nothing else in the profile moved.
+      expect(profileOf().artist.companyName).toBe('Harbour Prints');
+      expect((db().prepare('SELECT socials FROM pos_receipt_socials WHERE accountId = ?').get(accountId) as { socials: string }).socials).toContain('old.example.com');
+      // Running it again is a no-op.
+      expect(migrateReceiptSocials(db())).toBe(0);
+    });
+
+    it('never overwrites what the profile has, and clearing links on purpose is not undone by the old copy', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links: { webstore: 'https://new.example.com' } } });
+      setLegacy({ ...legacy, webstore: 'https://stale.example.com/' });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect(profileOf().links?.webstore).toBe('https://new.example.com/');
+
+      await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links: { webstore: '', instagram: '' } } });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect((await lookup(TOKEN)).json().links).toBeUndefined();
+    });
+
+    it('skips a stored row that no longer passes the checks', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      forgetLinks();
+      setLegacy({ webstore: 'javascript:alert(1)' });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect((await lookup(TOKEN)).json().links).toBeUndefined();
+      setLegacy('not an object');
+      expect(migrateReceiptSocials(db())).toBe(0);
+      setLegacy({ showOnPrint: false, showEvents: false });
+    });
   });
 
   it('finds the sale through the token index, not a table scan', () => {

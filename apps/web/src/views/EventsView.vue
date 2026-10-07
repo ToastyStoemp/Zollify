@@ -2,8 +2,10 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
+import EventSeriesModal from '../components/EventSeriesModal.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -35,7 +37,7 @@ const router = useRouter();
 /**
  * Events (fairs, markets, conventions - dated) and Stores (shops - open until
  * closed) are separate pages on the same screen: an account sees the ones it
- * runs (Settings → Booth profile → What you run).
+ * runs (Settings → Business profile → What you run).
  */
 const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode: 'events' });
 const storesPage = computed(() => props.mode === 'stores');
@@ -158,10 +160,24 @@ onMounted(() => window.addEventListener('click', closeMenu));
 onBeforeUnmount(() => window.removeEventListener('click', closeMenu));
 /** Whether the menu has anything in it for this tile (a helper may have nothing). */
 const hasMore = (e: SalesEvent): boolean =>
-  canEdit.value || Boolean(notesBadge(e)) || (customsOn() && !isStore(e));
+  canEdit.value || Boolean(notesBadge(e)) || Boolean(layoutNote(e)) || (customsOn() && !isStore(e));
+
+// ── Booth layout ────────────────────────────────────────────────────────────
+const layoutFor = ref<string | null>(null);
+/** The tile's layout line; a stored layout is re-checked, so a bad one just shows nothing. */
+const layoutNote = (e: SalesEvent): string => {
+  const layout = sanitizeBoothLayout(e.boothLayout);
+  return layout ? boothLayoutLabel(layout) : '';
+};
 
 // ── Notes & files ───────────────────────────────────────────────────────────
 const notesFor = ref<string | null>(null);
+// ── Editions ────────────────────────────────────────────────────────────────
+const seriesFor = ref<string | null>(null);
+function openPlanner(id: string): void {
+  seriesFor.value = null;
+  void router.push({ name: 'event-plan', params: { eventId: id } });
+}
 /** Whether a card has anything to read, so a helper only gets the button when there is. */
 const notesBadge = (e: SalesEvent): string => {
   const files = e.attachments?.length ?? 0;
@@ -194,6 +210,11 @@ const form = reactive({
   city: '',
   country: '',
   tin: '',
+  boothHall: '',
+  boothNumber: '',
+  boothLink: '',
+  boothNote: '',
+  noPool: false,
   localCurrency: '',
   exchangeRate: '',
   roundingIncrement: '0',
@@ -208,8 +229,15 @@ const form = reactive({
   pricesFrom: '',
 });
 
+/** Booth layout carried over by Duplicate; stored with the new event on save. */
+const carriedLayout = ref<BoothLayout | undefined>();
+/** Set when Duplicate filled in booth details or a layout, so the dialog can ask for a check. */
+const boothCopied = ref(false);
+
 function openNew(kind: SalesEventKind = 'event'): void {
   editId.value = null;
+  carriedLayout.value = undefined;
+  boothCopied.value = false;
   editKind.value = kind;
   Object.assign(form, {
     name: '',
@@ -220,6 +248,11 @@ function openNew(kind: SalesEventKind = 'event'): void {
     city: '',
     country: account.value?.profile.artist.countryOfOrigin || 'Switzerland',
     tin: '',
+    boothHall: '',
+    boothNumber: '',
+    boothLink: '',
+    boothNote: '',
+    noPool: false,
     localCurrency: '',
     exchangeRate: '',
     roundingIncrement: '0',
@@ -242,8 +275,16 @@ function openNew(kind: SalesEventKind = 'event'): void {
  */
 function openDuplicate(e: SalesEvent): void {
   openNew(e.kind ?? 'event');
+  const carried = boothFieldsForDuplicate(e);
+  carriedLayout.value = carried.boothLayout;
+  boothCopied.value = Boolean(carried.booth || carried.boothLayout);
   Object.assign(form, {
     name: `${e.name} (copy)`,
+    boothHall: carried.booth?.hall ?? '',
+    boothNumber: carried.booth?.number ?? '',
+    boothLink: carried.booth?.link ?? '',
+    boothNote: carried.booth?.note ?? '',
+    noPool: Boolean(carried.noPool),
     street: e.venue?.street ?? '',
     postcode: e.venue?.postcode ?? '',
     city: e.venue?.city ?? '',
@@ -275,6 +316,11 @@ function openEdit(e: SalesEvent): void {
     city: e.venue?.city ?? '',
     country: e.venue?.country ?? '',
     tin: e.venue?.tin ?? '',
+    boothHall: e.booth?.hall ?? '',
+    boothNumber: e.booth?.number ?? '',
+    boothLink: e.booth?.link ?? '',
+    boothNote: e.booth?.note ?? '',
+    noPool: Boolean(e.noPool),
     localCurrency: e.localCurrency ?? '',
     exchangeRate: e.exchangeRate != null ? String(e.exchangeRate) : '',
     roundingIncrement: String(e.roundingIncrement ?? 0),
@@ -364,6 +410,10 @@ async function save(): Promise<void> {
     return;
   }
   const store = editKind.value === 'store';
+  if (!store && form.boothLink.trim() && !safeHttpsUrl(form.boothLink)) {
+    error.value = 'The booth link must start with https://';
+    return;
+  }
   const existing = editId.value ? visibleEvents.value.find((e) => e.id === editId.value) : undefined;
   const local = form.localCurrency.trim().toUpperCase();
   const rate = parseFloat(form.exchangeRate);
@@ -386,6 +436,9 @@ async function save(): Promise<void> {
       country: form.country.trim() || undefined,
       tin: form.tin.trim() || undefined,
     },
+    booth: store ? undefined : cleanBooth({ hall: form.boothHall, number: form.boothNumber, link: form.boothLink, note: form.boothNote }),
+    noPool: store || !form.noPool ? undefined : true,
+    boothLayout: !existing && !store ? carriedLayout.value : existing?.boothLayout,
     currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
     exchangeRate: converting ? rate : undefined,
@@ -429,10 +482,12 @@ async function save(): Promise<void> {
         <li v-for="e in group.list" :key="e.id" :class="['card', { active: e.id === activeEventId }]">
           <div class="title">
             <strong>{{ e.name }}</strong>
+            <span v-if="e.edition" class="pill">{{ e.edition }}</span>
             <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -442,10 +497,12 @@ async function save(): Promise<void> {
               <button type="button" :aria-expanded="menuFor === e.id" aria-haspopup="menu" aria-label="More actions" @click="menuFor = menuFor === e.id ? null : e.id"><Icon name="more" :size="16" /></button>
               <div v-if="menuFor === e.id" class="menu" role="menu" @click="menuFor = null">
                 <button v-if="canEdit || notesBadge(e)" type="button" role="menuitem" @click="notesFor = e.id"><Icon name="paperclip" :size="14" /> Notes &amp; files<template v-if="notesBadge(e)"> · {{ notesBadge(e) }}</template></button>
+                <button v-if="canEdit || layoutNote(e)" type="button" role="menuitem" @click="layoutFor = e.id"><Icon name="layers" :size="14" /> Booth layout<template v-if="layoutNote(e)"> · set</template></button>
                 <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" role="menuitem"><Icon name="coins" :size="14" /> Prices</router-link>
                 <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" role="menuitem"><Icon name="file-text" :size="14" /> Customs</router-link>
                 <button v-if="canEdit" type="button" role="menuitem" @click="openEdit(e)"><Icon name="settings" :size="14" /> Edit</button>
                 <button v-if="canEdit" type="button" role="menuitem" @click="openDuplicate(e)"><Icon name="copy" :size="14" /> Duplicate</button>
+                <button v-if="(canEdit || e.seriesId) && !isStore(e)" type="button" role="menuitem" @click="seriesFor = e.id"><Icon name="calendar" :size="14" /> Editions</button>
                 <!-- Only meaningful for an active event - close() on a planned one
                      just re-confirms 'planned' (it parks a not-yet-started event
                      back there instead of closing it), so showing it there was
@@ -467,7 +524,9 @@ async function save(): Promise<void> {
       </ul>
     </template>
 
+    <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" />
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
+    <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />
 
     <ModalShell v-if="editing" :title="`${editId ? 'Edit' : 'New'} ${kindLabel}`" @close="editing = false">
       <div class="form">
@@ -483,6 +542,20 @@ async function save(): Promise<void> {
         </div>
         <label v-if="editKind === 'event'"><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
 
+        <fieldset v-if="editKind === 'event'">
+          <legend>Booth</legend>
+          <div class="two">
+            <label><span>Hall</span><input v-model="form.boothHall" type="text" :maxlength="BOOTH_LIMITS.hall" placeholder="3" /></label>
+            <label><span>Booth number</span><input v-model="form.boothNumber" type="text" :maxlength="BOOTH_LIMITS.number" placeholder="B-12" /></label>
+          </div>
+          <label><span>Link</span><input v-model="form.boothLink" type="url" :maxlength="BOOTH_LIMITS.link" placeholder="https://…" /></label>
+          <label><span>Note for visitors</span><input v-model="form.boothNote" type="text" :maxlength="BOOTH_LIMITS.note" placeholder="New prints, limited pins." /></label>
+          <p v-if="boothCopied" class="warn">Hall, booth number and layout were copied - check them.</p>
+          <p class="hint">Shown on your public events page, widget, calendar and Instagram bio.</p>
+          <label class="check"><input v-model="form.noPool" type="checkbox" /> <span>Do not share this event with the community</span></label>
+          <p class="hint">For private or invite-only events. Only matters if you share your events (Settings, Event sharing).</p>
+        </fieldset>
+
         <fieldset>
           <legend>Currency</legend>
           <label v-if="!editId">
@@ -496,7 +569,7 @@ async function save(): Promise<void> {
             <template v-if="pricesCarry">{{ overrideCount(pricesSource) }} price override{{ overrideCount(pricesSource) === 1 ? '' : 's' }} from {{ pricesSource.name }} come along.</template>
             <template v-else>The local currency no longer matches {{ pricesSource.name }}, so its price overrides are not copied.</template>
           </p>
-          <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Booth profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
+          <p class="hint">Books are always kept in {{ baseCurrency }} (Settings → Business profile). Charging in another currency is for a convention abroad - the till charges the converted amount, books stay in {{ baseCurrency }}. Leave blank to sell in {{ baseCurrency }} directly.</p>
           <div class="three">
             <label><span>Local currency</span><CurrencyPicker v-model="form.localCurrency" placeholder="SEK" /></label>
             <label><span>Rate (1 {{ baseCurrency }} =)</span><input v-model="form.exchangeRate" type="number" min="0" step="0.0001" inputmode="decimal" /></label>
@@ -584,6 +657,7 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .pill.planned { background: var(--zfy-signal-soft, #e4ecf6); color: var(--zfy-ink, #1a2230); }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }
+.layout-note { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); display: flex; align-items: center; gap: .3rem; }
 .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
 .actions button, .actions .btn { min-height: 2.2rem; padding: .2rem .7rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .3rem; }
 .btn { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; text-decoration: none; }
@@ -595,6 +669,7 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .menu .danger { color: var(--zfy-danger, #c6512f); }
 .form { display: flex; flex-direction: column; gap: .7rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+label.check { flex-direction: row; align-items: center; gap: .5rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
 .three { display: grid; grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); gap: .6rem; }
 fieldset { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .6rem; }

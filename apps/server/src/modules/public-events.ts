@@ -2,20 +2,27 @@ import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import {
   EventOverlaySchema,
+  LEGACY_OVERLAY_KEYS,
   PublicEventsConfigSchema,
+  StoredEventOverlaySchema,
   buildBio,
   buildIcs,
+  planBoothCleanup,
   splitPublicEvents,
-  type EventOverlay,
+  type SalesEvent,
+  type StoredEventOverlay,
   type PublicEvent,
   type PublicEventsConfig,
 } from '@zollify/shared';
 import {
+  isEnabled,
   reduceEvents,
   type ModuleContext,
+  type ModuleServices,
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { migrateEventPool, poolOnOps, registerEventPool } from './event-pool';
 
 /**
  * Public events - the server half.
@@ -46,6 +53,7 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (accountId, eventId)
     );
   `);
+  migrateEventPool(db);
 }
 
 // ── Data access ─────────────────────────────────────────────────────────────
@@ -58,14 +66,15 @@ function readConfig(db: Database.Database, accountId: string): PublicEventsConfi
   return parsed.success ? parsed.data : PublicEventsConfigSchema.parse({});
 }
 
-function readOverlays(db: Database.Database, accountId: string): Record<string, EventOverlay> {
+/** Rows as stored, legacy booth keys included until the startup cleanup has removed them. */
+function readOverlays(db: Database.Database, accountId: string): Record<string, StoredEventOverlay> {
   const rows = db.prepare('SELECT eventId, overlay FROM public_events_overlay WHERE accountId = ?').all(accountId) as {
     eventId: string;
     overlay: string;
   }[];
-  const out: Record<string, EventOverlay> = {};
+  const out: Record<string, StoredEventOverlay> = {};
   for (const r of rows) {
-    const parsed = EventOverlaySchema.safeParse(JSON.parse(r.overlay));
+    const parsed = StoredEventOverlaySchema.safeParse(JSON.parse(r.overlay));
     if (parsed.success) out[r.eventId] = parsed.data;
   }
   return out;
@@ -89,6 +98,61 @@ function eventsFor(db: Database.Database, accountId: string) {
     .prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN ('event.upsert', 'event.close') ORDER BY seq")
     .all(accountId) as { opId: string; type: string; payload: string }[];
   return reduceEvents(ops.map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) })));
+}
+
+/**
+ * The next few upcoming events, exactly as the public page lists them - for
+ * other pages (the online receipt) that want a "see us next" line. Empty
+ * unless the page is switched on for the account and has a slug, so nothing
+ * appears that the page itself does not already publish.
+ */
+export function nextPublicEvents(db: Database.Database, accountId: string, limit: number): PublicEvent[] {
+  if (!isEnabled(db, accountId, 'public-events')) return [];
+  const config = readConfig(db, accountId);
+  if (!config.slug) return [];
+  return splitPublicEvents(eventsFor(db, accountId), readOverlays(db, accountId), 0).upcoming.slice(0, limit);
+}
+
+/**
+ * One-time move of the legacy booth facts off the overlay, for every account,
+ * at startup (so it does not wait for a client to be opened). Per field: copy
+ * onto the event where the event's own field is empty, then drop the overlay
+ * field once the event holds it (see `planBoothCleanup`). Events are written
+ * through the op-log as the server, so devices pull them like any edit; the
+ * overlay rows are rewritten in the same transaction. Idempotent, and a failed
+ * account is simply retried on the next start. The client migration stays as a
+ * second path for the copy step.
+ */
+export function cleanOverlayBooth(ctx: Pick<ModuleServices, 'db' | 'writeOps'>): number {
+  const { db } = ctx;
+  const accounts = db
+    .prepare(
+      `SELECT DISTINCT accountId FROM public_events_overlay
+       WHERE json_extract(overlay, '$.hall') IS NOT NULL OR json_extract(overlay, '$.booth') IS NOT NULL
+          OR json_extract(overlay, '$.link') IS NOT NULL OR json_extract(overlay, '$.blurb') IS NOT NULL`,
+    )
+    .all() as { accountId: string }[];
+  const update = db.prepare('UPDATE public_events_overlay SET overlay = ? WHERE accountId = ? AND eventId = ?');
+  let moved = 0;
+  for (const { accountId } of accounts) {
+    try {
+      db.transaction(() => {
+        const plan = planBoothCleanup(eventsFor(db, accountId), readOverlays(db, accountId));
+        // Newer than what the log holds, so last-writer-wins keeps the copy.
+        const now = Date.now();
+        const ops = plan.events.map((e: SalesEvent) => ({
+          type: 'event.upsert' as const,
+          payload: { ...e, updatedAt: Math.max(now, e.updatedAt + 1) },
+        }));
+        if (ops.length) ctx.writeOps(accountId, ops);
+        for (const [eventId, row] of Object.entries(plan.overlays)) update.run(JSON.stringify(row), accountId, eventId);
+        moved += ops.length;
+      })();
+    } catch {
+      /* leave the account as it is; the next start tries again */
+    }
+  }
+  return moved;
 }
 
 interface Site {
@@ -427,11 +491,16 @@ export const publicEventsServerModule: ServerModule = {
   minRole: 'admin',
   migrate,
   onAccountDeleted: (db, accountId) => {
-    for (const t of ['public_events_config', 'public_events_overlay']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    for (const t of ['public_events_config', 'public_events_overlay', 'event_pool_contribs', 'event_pool_adopted', 'event_pool_flags', 'event_pool_actions', 'event_pool_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
   },
+  onOps: poolOnOps,
 
   /** Authenticated: the booth's own settings and a preview of what visitors see. */
   routes: (ctx: ModuleContext) => async (app) => {
+    // Once per boot, before the first request: booth facts move off the overlay.
+    cleanOverlayBooth(ctx);
+    registerEventPool(app, ctx);
+
     app.get('/config', async (req) => {
       const who = ctx.identity(req);
       return { config: readConfig(ctx.db, who.accountId), overlays: readOverlays(ctx.db, who.accountId) };
@@ -459,16 +528,24 @@ export const publicEventsServerModule: ServerModule = {
       return { config };
     });
 
+    // Only the publishing fields (Instagram handle, hidden) are accepted. An older cached client
+    // may still send hall, booth, link or blurb; they are ignored rather than rejected, so its
+    // save still works. A legacy value already stored (cleanup not yet run for this event) is
+    // kept as is, so the next startup can still carry it onto the event.
     app.put<{ Params: { eventId: string } }>('/overlay/:eventId', async (req, reply) => {
       const who = ctx.identity(req);
       const parsed = EventOverlaySchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: 'Invalid event extras.' });
+      const stored = readOverlays(ctx.db, who.accountId)[req.params.eventId];
+      const legacy = Object.fromEntries(
+        LEGACY_OVERLAY_KEYS.flatMap((k) => (stored?.[k] !== undefined ? [[k, stored[k]]] : [])),
+      );
       ctx.db
         .prepare(
           `INSERT INTO public_events_overlay (accountId, eventId, overlay, updatedAt) VALUES (?, ?, ?, ?)
            ON CONFLICT(accountId, eventId) DO UPDATE SET overlay = excluded.overlay, updatedAt = excluded.updatedAt`,
         )
-        .run(who.accountId, req.params.eventId, JSON.stringify(parsed.data), Date.now());
+        .run(who.accountId, req.params.eventId, JSON.stringify({ ...legacy, ...parsed.data }), Date.now());
       return { overlay: parsed.data };
     });
 

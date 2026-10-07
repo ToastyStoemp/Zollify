@@ -1,6 +1,6 @@
 # Zollify
 
-One app for the booth, assembled from modules loaded at runtime.
+One app for your business, assembled from modules loaded at runtime.
 
 Zollify replaces ZollTool, ZollTax and ZollSource with a single multi-tenant
 platform. Selling, customs, tax and sourcing are **modules** - they register
@@ -15,7 +15,7 @@ and never import one another.
   runs in the browser, sandboxed by CSP and verified by hash. It never runs in
   the Node process holding the database and every tenant's API keys.
 - **Install online, boot offline.** The network is on the install path only. A
-  booth with no signal boots every module it already has, out of IndexedDB.
+  business with no signal boots every module it already has, out of IndexedDB.
 - **Zollify never touches the sale.** myPOS, SumUp and Nexi SmartPOS terminals take the card and
   settle to the vendor's own bank. That keeps PCI scope and money-transmission
   licensing out of the platform - see [SECURITY.md](./SECURITY.md).
@@ -153,7 +153,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Receipts, printed to a thermal printer or through the browser.
 - History with per-currency totals, reverts and CSV export.
 - Cash up: expected vs counted, with a signed difference.
-- One inventory the whole booth draws on; an event can claim stock, and a claim
+- One inventory the whole business draws on; an event can claim stock, and a claim
   is reserved for it. Selling past a claim draws the overage from the unclaimed
   pool. Availability is derived from sales, never decremented, so reverting a
   sale returns the stock with no compensating write.

@@ -526,7 +526,7 @@ ${POW_SOLVER_JS}
 
   function fail(res) {
     if (res.status === 429) say('Too many attempts from this network. Please try again later.');
-    else if (res.status === 404) say("We couldn't find this receipt. If you just paid, the booth may still be offline - try again in a little while.");
+    else if (res.status === 404) say("We couldn't find this receipt. If you just paid, the seller may still be offline - try again in a little while.");
     else say('Something went wrong. Please try again in a moment.');
   }
 

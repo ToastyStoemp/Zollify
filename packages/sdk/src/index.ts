@@ -23,6 +23,8 @@ export type {
   SaleLineRef,
   TillAction,
   TillLine,
+  TillLineAccess,
+  TillLineInfo,
   TillLookup,
   SaleEvent,
   CoreEvents,

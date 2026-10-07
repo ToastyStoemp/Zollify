@@ -173,6 +173,7 @@ export function publicView(c: Commission, totals: CommissionTotals, settings: Co
     status: c.status,
     statusLabel: COMMISSION_STATUS_LABEL[c.status],
     dueDate: isClosedStatus(c.status) ? '' : c.dueDate,
+    timeZone: settings.timeZone,
     currency: c.currency,
     price: c.price,
     paid: totals.paid,

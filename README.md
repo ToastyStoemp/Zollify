@@ -141,7 +141,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (829 tests):**
+**Built and passing (840 tests):**
 
 *Platform*
 - `@zollify/sdk` - the boundary, with a host-compatibility checker.
@@ -207,7 +207,10 @@ customer follows progress at `/p/commissions/<token>`, reached by a QR code:
 the token is 192 random bits per commission and an admin can replace it, the
 page is plain server-rendered HTML with no script, rate limited and noindex,
 and shows only the title, status, customer-visible updates, due date, amounts
-and the pickup address - no contact details and no internal notes.
+and the pickup address - no contact details and no internal notes. Times are
+shown in the time zone set in the module's settings, and an open page reloads
+itself every five minutes until the commission is collected or cancelled. At
+the till, a commission already in the sale can have its amount replaced.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally

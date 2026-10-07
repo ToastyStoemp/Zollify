@@ -5,6 +5,8 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, setEnabled, type MailMessage } from '@zollify/server-core';
 import { commissionsServerModule } from '../modules/commissions';
+import { fmtStamp, renderCommission } from '../modules/commissions-page';
+import type { PublicCommission } from '@zollify/shared';
 
 /**
  * Commissions hold a customer's name and contact details, and their tracking
@@ -220,6 +222,8 @@ describe('the customer page', () => {
     expect(res.headers['referrer-policy']).toBe('no-referrer');
     const html = res.body;
     expect(html).toContain('name="robots" content="noindex');
+    expect(html).toContain('<meta http-equiv="refresh" content="300" />');
+    expect(html).toContain('Times are shown in UTC.');
     expect(html).toContain('In progress');
     expect(html).toContain('5 Mar 2099');
     expect(html).toContain('€25.00');
@@ -254,7 +258,19 @@ describe('the customer page', () => {
     await call(staff, 'POST', `/commissions/${id}/updates`, { status: 'cancelled', message: 'Customer changed their mind.' });
     const html = (await app.inject({ method: 'GET', url: path })).body;
     expect(html).toContain('This commission was cancelled.');
+    expect(html).not.toContain('http-equiv');
     expect(html).not.toContain('5 Mar 2099');
+  });
+
+  it('takes the zone from the settings, and refuses an unknown one', async () => {
+    const settings = { shopName: '', pickupName: '', pickupAddress: '', pickupNote: '', currency: 'EUR' };
+    expect((await call(owner, 'PUT', '/settings', { ...settings, timeZone: 'Mars/Olympus' })).statusCode).toBe(400);
+    expect((await call(owner, 'PUT', '/settings', { ...settings, timeZone: 'Europe/Zurich' })).json()).toMatchObject({ timeZone: 'Europe/Zurich' });
+    const made = (await call(staff, 'POST', '/commissions', { ...NEW, title: 'Zone test' })).json();
+    const html = (await app.inject({ method: 'GET', url: made.publicPath })).body;
+    expect(html).toContain('Times are shown in Europe/Zurich.');
+    expect(html).toContain('<meta http-equiv="refresh" content="300" />');
+    await call(owner, 'PUT', '/settings', { ...settings, timeZone: 'UTC' });
   });
 
   it('is gone when the module is switched off, and back when it is on again', async () => {
@@ -276,5 +292,55 @@ describe('the customer page', () => {
     const codes = new Set<number>();
     for (let i = 0; i < 70; i++) codes.add((await app.inject({ method: 'GET', url: `/p/commissions/${'B'.repeat(32)}` })).statusCode);
     expect(codes.has(429)).toBe(true);
+  });
+});
+
+describe('times on the customer page', () => {
+  const base: PublicCommission = {
+    shop: 'Ink',
+    title: 'Fox',
+    status: 'in_progress',
+    statusLabel: 'In progress',
+    dueDate: '',
+    timeZone: 'UTC',
+    currency: 'EUR',
+    price: 0,
+    paid: 0,
+    balance: 0,
+    updates: [],
+    pickup: null,
+  };
+  // 23:30 UTC on 5 Jan 2099: already the next day in Zurich, still the same afternoon in Los Angeles.
+  const lateEvening = Date.UTC(2099, 0, 5, 23, 30);
+
+  it('shows a moment on the clock of the owner\'s zone, across midnight', () => {
+    expect(fmtStamp(lateEvening, 'UTC')).toBe('5 Jan 2099, 23:30');
+    expect(fmtStamp(lateEvening, 'Europe/Zurich')).toBe('6 Jan 2099, 00:30');
+    expect(fmtStamp(lateEvening, 'America/Los_Angeles')).toBe('5 Jan 2099, 15:30');
+    // Summer time moves the offset: 22:30 UTC in July is already 00:30 in Zurich.
+    expect(fmtStamp(Date.UTC(2099, 6, 5, 22, 30), 'Europe/Zurich')).toBe('6 Jul 2099, 00:30');
+    expect(fmtStamp(Date.UTC(2099, 0, 5, 0, 5), 'UTC')).toBe('5 Jan 2099, 00:05');
+  });
+
+  it('falls back to UTC for a zone it does not know', () => {
+    expect(fmtStamp(lateEvening, 'Mars/Olympus')).toBe('5 Jan 2099, 23:30');
+  });
+
+  it('renders update times in that zone and names it, escaped', () => {
+    const update = { at: lateEvening, status: 'in_progress' as const, statusLabel: 'In progress', changed: true, message: '' };
+    const html = renderCommission({ ...base, timeZone: 'Europe/Zurich', updates: [update] });
+    expect(html).toContain('6 Jan 2099, 00:30');
+    expect(html).not.toContain('5 Jan 2099');
+    expect(html).toContain('Times are shown in Europe/Zurich.');
+    expect(renderCommission({ ...base, timeZone: '<b>' })).toContain('Times are shown in &lt;b&gt;.');
+  });
+
+  it('refreshes by itself only while the commission is open, with no script', () => {
+    for (const status of ['requested', 'accepted', 'in_progress', 'ready'] as const) {
+      const html = renderCommission({ ...base, status });
+      expect(html).toContain('<meta http-equiv="refresh" content="300" />');
+      expect(html).not.toContain('<script');
+    }
+    for (const status of ['collected', 'cancelled'] as const) expect(renderCommission({ ...base, status })).not.toContain('http-equiv');
   });
 });

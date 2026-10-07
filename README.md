@@ -342,6 +342,17 @@ encrypted and never reaches the browser). With any other access point,
 download the XML and upload it there. The generated XML passes the official
 CEN and OpenPEPPOL schematrons and the UBL 2.1 schema.
 
+*Problems* - Settings → Problems lists what quietly failed for owners and
+admins: a webhook that keeps failing or was switched off, email that does not
+go out, a sync device whose pushes crash a module, a scheduled job that threw,
+Peppol, myPOS, SumUp, Lexware and Nexi calls that fail, and the host's backup
+and update status. Repeats update one row, a success closes it, a new error
+rings the bell once a day at most, and the owner gets one email digest a day
+unless they opt out. Server modules report through
+`reportProblem(ctx, accountId, { kind, key, severity, message })` and
+`resolveProblem(ctx, accountId, kind, key)`; rows never hold secrets or payloads
+(see docs/security.md).
+
 Security notes and settings are in [docs/security.md](docs/security.md);
 legal notes per country in [docs/germany-compliance.md](docs/germany-compliance.md)
 and [docs/denmark-compliance.md](docs/denmark-compliance.md).

@@ -18,7 +18,7 @@ import {
   type ArtistDetails,
   type Transaction,
 } from '@zollify/shared';
-import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, reportProblem, resolveProblem, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ACCESS_POINTS, AccessPointSchema, sendViaAccessPoint, type AccessPointConfig } from './peppol-access-points';
 
 /**
@@ -347,7 +347,12 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const ap = accessPointOf(accountId);
         if (!ap) return reply.code(400).send({ error: 'no_access_point', message: 'Set up a Peppol access point in the settings, or download the XML and upload it to yours.' });
         const result = await sendViaAccessPoint(ap, found.doc, found.xml);
-        if (!result.ok) return reply.code(502).send({ error: 'send_failed', message: result.message });
+        if (!result.ok) {
+          const status = /\((\d{3})\)/.exec(result.message)?.[1];
+          reportProblem(ctx, accountId, { kind: 'peppol.send', key: ap.provider, severity: 'warning', message: 'Sending an e-invoice through your Peppol access point failed', detail: status ? `HTTP ${status}` : 'Access point not reached or setup incomplete', link: '/settings?panel=peppol-be.peppol' });
+          return reply.code(502).send({ error: 'send_failed', message: result.message });
+        }
+        resolveProblem(ctx, accountId, 'peppol.send', ap.provider);
         const doc: PeppolDocument = { ...found.doc, status: found.doc.status === 'paid' ? 'paid' : 'sent', sentVia: { provider: ap.provider, at: Date.now(), reference: result.reference ?? null }, updatedAt: Date.now() };
         saveDoc(db, accountId, doc);
         return { document: doc, reference: result.reference ?? null };

@@ -36,8 +36,21 @@ if [[ ! -f "$env_file" ]]; then
   exit 1
 fi
 
+# What the app can read back (Settings, Problems): how the last run went, and whether its
+# backup worked. Plain key=value lines in the bind-mounted deploy directory.
+status_file="$repo_root/apps/server/deploy/status"
+step="start"
+backup_state="skipped"
+write_status() {
+  mkdir -p "$(dirname "$status_file")" 2>/dev/null || true
+  printf 'state=%s\nstep=%s\nbackup=%s\nat=%s\n' "$1" "$step" "$backup_state" "$(date +%s)" > "$status_file" 2>/dev/null || true
+}
+# Any non-zero exit (set -e, or the explicit ones below) lands here as a failure.
+trap 'rc=$?; if [[ $rc -ne 0 ]]; then write_status failed; fi' EXIT
+
 mode="${1:-}"
 if [[ "$mode" == "--pull" || "$mode" == "--auto" ]]; then
+  step="pull"
   echo "→ pulling"
   git pull --ff-only
 fi
@@ -45,18 +58,22 @@ fi
 if [[ "$mode" == "--auto" ]]; then
   # The button's request is consumed first, so a deploy asked for mid-run is not lost.
   rm -f "$repo_root/apps/server/deploy/requested"
+  step="apk"
   echo "→ fetching APKs"
   # Through a node container: the host needs nothing but Docker and git. The
   # repo and its packages are public, so no token is needed.
   mkdir -p "$repo_root/apps/server/apk" "$repo_root/apps/server/deploy"
   docker run --rm -e ZOLLIFY_APK_DIR=/repo/apps/server/apk     -v "$repo_root:/repo" -w /repo node:22-bookworm-slim node scripts/fetch-apks.mjs     || echo "  (APK fetch failed - keeping what is there)"
 
+  step="image"
   image="$(docker compose "${compose_args[@]}" config --images | head -1)"
   running="$(docker inspect -f '{{.Image}}' zollify 2>/dev/null || true)"
   docker compose "${compose_args[@]}" pull -q zollify
   latest="$(docker image inspect -f '{{.Id}}' "$image" 2>/dev/null || true)"
   if [[ -n "$running" && "$running" == "$latest" ]]; then
     echo "✓ already up to date ($image)"
+    step="done"
+    write_status ok
     # Every push tags a new :sha image in GHCR - once it's pulled once, the
     # last one is now unused and never gets cleaned up on its own. Also
     # covers the case a previous deploy failed outright (disk full pulling
@@ -68,19 +85,27 @@ fi
 
 # Backed up before anything restarts: a deploy is exactly when you most want a
 # restore point, and the volume survives the container but not a bad migration.
+step="backup"
 echo "→ backing up the database"
 stamp="$(date +%Y%m%d-%H%M%S)"
 mkdir -p backups
 if docker compose "${compose_args[@]}" ps --status running --quiet zollify >/dev/null 2>&1; then
-  docker compose "${compose_args[@]}" exec -T zollify \
+  if docker compose "${compose_args[@]}" exec -T zollify \
     node -e "const D=require('better-sqlite3');const db=new D('/data/zollify.db',{readonly:true});db.backup('/data/backup.tmp').then(()=>{db.close();process.exit(0)}).catch(e=>{console.error(e);process.exit(1)})" \
     && docker compose "${compose_args[@]}" cp "zollify:/data/backup.tmp" "backups/zollify-$stamp.db" \
     && docker compose "${compose_args[@]}" exec -T zollify rm -f /data/backup.tmp \
-    && echo "  saved backups/zollify-$stamp.db"
+    && echo "  saved backups/zollify-$stamp.db"; then
+    backup_state="ok"
+  else
+    # The deploy still goes ahead, as before, but the app now hears that there is no restore point.
+    backup_state="failed"
+    echo "  ✗ the backup failed" >&2
+  fi
 else
   echo "  (not running yet - nothing to back up)"
 fi
 
+step="restart"
 if [[ "$mode" == "--auto" ]]; then
   echo "→ restarting on the pulled image"
   docker compose "${compose_args[@]}" up -d --no-build
@@ -89,10 +114,13 @@ else
   docker compose "${compose_args[@]}" up -d --build
 fi
 
+step="health"
 echo "→ waiting for health"
 for _ in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8787/health >/dev/null 2>&1; then
     echo "✓ healthy"
+    step="done"
+    write_status ok
     docker compose "${compose_args[@]}" ps
     # The old image (and any stale build cache from the --build path) is now
     # unused - the exact accumulation that filled the disk mid-pull before.

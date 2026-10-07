@@ -5,6 +5,7 @@ import { currentAccount } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { Icon } from '@zollify/ui';
+import { openProblemErrors } from '../lib/problems';
 
 interface Panel {
   id: string;
@@ -62,6 +63,13 @@ const corePanels: Panel[] = [
     group: 'Core',
     minRole: 'admin',
     component: () => import('./WebhooksSettings.vue'),
+  },
+  {
+    id: 'core.problems',
+    label: 'Problems',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./ProblemsSettings.vue'),
   },
   {
     id: 'core.modules',
@@ -166,7 +174,7 @@ const groups = computed(() => [
             :aria-current="panel.id === selected ? 'page' : undefined"
             @click="select(panel.id)"
           >
-            {{ panel.label }}
+            {{ panel.label }}<i v-if="panel.id === 'core.problems' && openProblemErrors" class="pdot" aria-label="has open errors"></i>
           </button>
         </template>
       </nav>
@@ -186,6 +194,7 @@ nav { display: flex; flex-direction: column; gap: .2rem; }
 .group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint, #8a94a2); }
 .group:first-child { margin-top: 0; }
 nav button { text-align: left; border-color: transparent; background: transparent; justify-content: flex-start; }
+nav .pdot { display: inline-block; width: .45rem; height: .45rem; margin-left: .4rem; border-radius: 50%; background: var(--zfy-danger, #c6512f); vertical-align: middle; }
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 /* Each panel is a different component (SecuritySettings, ProfileSettings, …)
    loaded into .panel via <component :is>, so this can't reach its own root

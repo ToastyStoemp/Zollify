@@ -125,7 +125,11 @@ class BridgeConnection {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ action: 'cancel', v: 1 }));
     }
+    // Settle the caller's promise, otherwise checkout() waits forever and the
+    // till stays "payment in progress". A late result message is then ignored.
+    const reject = this.pendingReject;
     this.pendingResolve = this.pendingReject = null;
+    reject?.(new Error('Cancelled'));
   }
 }
 

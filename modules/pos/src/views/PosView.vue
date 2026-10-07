@@ -18,6 +18,7 @@ import {
   cardInBase,
   cardSettlement,
   cart,
+  cancelCheckout,
   checkout,
   clear,
   inCart,
@@ -731,12 +732,25 @@ async function sendLog(): Promise<void> {
 
 async function runTerminal(): Promise<void> {
   const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
-  if (payment.phase !== 'terminal') return;
+  if (outcome.cancelled || payment.phase !== 'terminal') return;
   if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`);
   else {
     payment.error = outcome.error ?? 'Card payment declined';
     payment.phase = 'failed';
   }
+}
+
+// Leaving a live terminal request behind - for a retry or to record the card
+// by hand - cancels it first, so a late approval can't record a second sale.
+async function retryCard(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'terminal';
+  void runTerminal();
+}
+async function completeByHand(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'confirm';
+  payment.method = 'card';
 }
 
 async function confirmPayment(): Promise<void> {
@@ -752,11 +766,16 @@ async function confirmPayment(): Promise<void> {
         return settled ? { ...l, settled } : l;
       });
   }
+  // A split's card leg goes on the terminal when there is one; the Confirm
+  // button is disabled while the terminal works (cart.busy) and Cancel aborts it.
+  const cardLeg = legs?.find((l) => l.kind === 'card');
   const outcome = await checkout(crypto.randomUUID(), {
     method: payment.method,
     legs,
     cashReceived: payment.method === 'cash' ? Number(payment.cashReceived) || undefined : undefined,
+    terminal: hasTerminal.value && cardLeg ? { providerId: providerId.value, amount: cardLeg.amount } : undefined,
   });
+  if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
   finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`);
@@ -862,7 +881,7 @@ async function printSale(saleId: string): Promise<void> {
 }
 
 async function cancelPayment(): Promise<void> {
-  if (payment.phase === 'terminal') await provider.value.cancel().catch(() => {});
+  await cancelCheckout();
   payment.phase = 'idle';
 }
 
@@ -1163,6 +1182,7 @@ function lockTill(): void {
             <button type="button" class="chip cardc" @click="payment.splitCard = Math.max(0, payment.total - (Number(payment.splitCash) || 0)).toFixed(2)">Card remainder</button>
           </div>
           <p>{{ splitState.label }}: <strong :class="splitState.cls">{{ money(splitState.amount) }}</strong></p>
+          <p v-if="cart.busy && hasTerminal" class="pulse">Present card to terminal…</p>
           <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
@@ -1174,8 +1194,8 @@ function lockTill(): void {
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
           <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
-          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="payment.phase = 'terminal'; runTerminal()">Retry card</button>
-          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
+          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
+          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
         </div>
       </template>

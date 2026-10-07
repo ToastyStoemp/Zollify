@@ -81,7 +81,9 @@ function panelsFromCubes(raw: unknown, back: boolean): BoothPanel[] | string {
   const map = new Map<string, BoothPanel>();
   for (const c of raw as Record<string, unknown>[]) {
     if (!c || ![c.x, c.y, c.z].every(Number.isInteger)) return 'Invalid cube position.';
-    const [x, y, z] = [c.x, c.y, c.z] as number[];
+    const x = c.x as number;
+    const y = c.y as number;
+    const z = c.z as number;
     if (Math.abs(x) > 30 || y < 0 || y > 30 || Math.abs(z) > 30) return 'Invalid cube position.';
     if ((c.material !== 'mesh' && c.material !== 'plastic') || typeof c.color !== 'string' || !HEX.test(c.color)) {
       return 'Invalid panel appearance.';
@@ -103,7 +105,9 @@ function readPanels(raw: unknown): BoothPanel[] | string {
   for (const p of raw as Record<string, unknown>[]) {
     if (!p || typeof p.type !== 'string' || !PANEL_TYPES.includes(p.type)) return 'Invalid panel position.';
     if (![p.x, p.y, p.z].every(isNum)) return 'Invalid panel position.';
-    const [x, y, z] = [p.x, p.y, p.z] as number[];
+    const x = p.x as number;
+    const y = p.y as number;
+    const z = p.z as number;
     const u = p.u ?? 1;
     const v = p.v ?? 1;
     if (!(u === 0.5 || u === 1) || !(v === 0.5 || v === 1)) return 'Invalid panel position.';
@@ -229,15 +233,15 @@ function corners(p: BoothPanel): [number, number, number][] {
 
 /** Real-world size of a panel in cm: [long edge, short edge]. */
 function panelDims(p: BoothPanel, l: BoothLayout): [number, number] {
-  const d = p.type === 'side' ? [l.depth * p.u, l.height * p.v] : p.type === 'shelf' ? [l.width * p.u, l.depth * p.v] : [l.width * p.u, l.height * p.v];
+  const d: [number, number] = p.type === 'side' ? [l.depth * p.u, l.height * p.v] : p.type === 'shelf' ? [l.width * p.u, l.depth * p.v] : [l.width * p.u, l.height * p.v];
   return d[0] >= d[1] ? [r1(d[0]), r1(d[1])] : [r1(d[1]), r1(d[0])];
 }
 
 export function summarizeBoothLayout(layout: BoothLayout): BoothSummary {
   const rows = new Map<string, BoothPartRow>();
   const joints = new Set<string>();
-  let min = [Infinity, Infinity, Infinity];
-  let max = [-Infinity, -Infinity, -Infinity];
+  let min: [number, number, number] = [Infinity, Infinity, Infinity];
+  let max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
   let full = 0;
   let mesh = 0;
   for (const p of layout.panels) {
@@ -250,8 +254,8 @@ export function summarizeBoothLayout(layout: BoothLayout): BoothSummary {
     rows.set(id, row);
     for (const c of corners(p)) {
       joints.add(c.map((n) => n.toFixed(3)).join(','));
-      min = min.map((m, i) => Math.min(m, c[i]));
-      max = max.map((m, i) => Math.max(m, c[i]));
+      min = [Math.min(min[0], c[0]), Math.min(min[1], c[1]), Math.min(min[2], c[2])];
+      max = [Math.max(max[0], c[0]), Math.max(max[1], c[1]), Math.max(max[2], c[2])];
     }
   }
   const parts = [...rows.values()].sort((a, b) => b.dims[0] - a.dims[0] || b.dims[1] - a.dims[1] || a.material.localeCompare(b.material));

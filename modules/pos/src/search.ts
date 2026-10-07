@@ -58,3 +58,10 @@ export function findSearchMatch(products: Product[], query: string): SearchResul
 }
 
 export { typeColor } from '@zollify/ui';
+
+/** Module tiles shown beside the products: only at the top level (not inside an artist), and only when the search is empty or names them. */
+export function visibleTileActions<T extends { label: string; tile?: boolean }>(actions: T[], query: string, browsingInside: boolean): T[] {
+  if (browsingInside) return [];
+  const needle = norm(query);
+  return actions.filter((a) => a.tile && (!needle || a.label.toLowerCase().includes(needle)));
+}

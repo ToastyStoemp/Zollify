@@ -117,7 +117,7 @@ export interface SaleLineRef {
   id: string;
 }
 
-/** A button a module adds to the till, opening one of its own screens over it. */
+/** A button (or, with `tile`, a tile in the product grid) a module adds to the till, opening one of its own screens over it. */
 export interface TillAction {
   id: string;
   label: string;
@@ -125,6 +125,8 @@ export interface TillAction {
   /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
   component: ComponentLoader;
   order?: number;
+  /** Show it as a tile beside the products instead of a button under the cart. */
+  tile?: boolean;
 }
 
 /** What a module found for a code the till did not know. */

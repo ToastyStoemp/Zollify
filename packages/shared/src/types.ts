@@ -33,6 +33,21 @@ export interface EventAttachment {
   addedAt: number;
 }
 
+/**
+ * Where the booth stands at an event. All optional, so old events and older
+ * devices are unaffected. See event-booth.ts for validation and the fallback
+ * to the legacy public-events overlay.
+ */
+export interface EventBooth {
+  hall?: string;
+  /** Stand or booth number. */
+  number?: string;
+  /** The convention's own page. https only. */
+  link?: string;
+  /** A short line for visitors, e.g. "New prints, limited pins." */
+  note?: string;
+}
+
 export interface SalesEvent {
   id: string;
   name: string;
@@ -59,6 +74,8 @@ export interface SalesEvent {
   customsDe?: Record<string, unknown>;
   /** VAT at this event - see resolveEventVat. Absent = from the country and the booth's exemptions. */
   vat?: EventVat;
+  /** Hall, booth number, link and note - published by Public events. Not used for stores. */
+  booth?: EventBooth;
   /** Free-text notes for the team: setup times, stand number, who to ask. */
   notes?: string;
   /** Tickets, plans and other files. See EventAttachment. */

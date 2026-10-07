@@ -153,7 +153,7 @@ describe('boothPreview', () => {
   it('draws the top view with the back at the top', () => {
     const p = boothPreview(ok(cube()), 'top');
     expect(p.shapes).toHaveLength(5);
-    const back = p.shapes[0];
+    const back = p.shapes[0]!;
     expect(back.kind).toBe('panel');
     expect(back.y).toBeLessThanOrEqual(p.shapes.find((s) => s.kind === 'shelf')!.y + 0.1);
     for (const s of p.shapes) {

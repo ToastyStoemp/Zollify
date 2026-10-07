@@ -1,20 +1,23 @@
-import { createHash, createPublicKey, createSign, createVerify, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, createSign, createVerify, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { ModuleContext, PublicModuleContext } from '@zollify/server-core';
+import type { ModuleContext, PublicModuleContext, SecretBox } from '@zollify/server-core';
 
 /**
  * Nexi SmartPOS (Nets SmartPOS N950 in Denmark): card payments on the
  * terminal, started from the till over GoDaddy Poynt's Payment Bridge - the
  * platform SmartPOS runs on (docs.poynt.com, "Payment Bridge API").
  *
- * The server operator registers one Poynt cloud app (an application id and
- * a private key, server-side only). Each merchant authorises that app once
- * from Settings → Payments; Zollify then lists their terminals and sends a
- * payment to the one a till picked. The terminal posts the outcome back to
- * a per-payment callback URL that only Poynt knows.
+ * Each account brings its own Poynt cloud app (an application id and a
+ * private key from the Poynt developer portal), saved under Settings →
+ * Payments and kept encrypted, so every shop on a server has its own
+ * terminals and settings. A server can also set one app for everybody in its
+ * environment, used by accounts without their own. The owner then
+ * authorises the app on their Nexi business once; Zollify lists its
+ * terminals and sends a payment to the one a till picked. The terminal posts
+ * the outcome back to a per-payment callback URL that only Poynt knows.
  *
  *   POST {api}/token          self-signed RS256 JWT → app access token
  *   GET  {api}/businesses/{biz}/stores   → stores and their devices
@@ -24,33 +27,49 @@ import type { ModuleContext, PublicModuleContext } from '@zollify/server-core';
  *   callback: { status: RECEIVED | STARTED | PROCESSED | CANCELED, referenceId, transactions: [...] }
  */
 
-export interface PoyntConfig {
+/** A Poynt cloud app: what the developer portal hands out. */
+export interface PoyntApp {
   applicationId: string;
   privateKey: string;
+  region: 'eu' | 'us';
+  /** Poynt's key for the authorisation code, when known; checked if set. */
+  authPublicKey: string | null;
+}
+
+export interface PoyntConfig extends PoyntApp {
   api: string;
   web: string;
-  /** Poynt's key for the authorisation code, when the operator has it; checked if set. */
-  authPublicKey: string | null;
   origin: string;
 }
 
-/** Null when the server is not set up for SmartPOS (no app, no key, or no public https address for callbacks). */
-export function poyntConfig(env: NodeJS.ProcessEnv = process.env): PoyntConfig | null {
+/** The server-wide app from the environment, for accounts without their own. Null when none is set. */
+export function serverPoyntApp(env: NodeJS.ProcessEnv = process.env): PoyntApp | null {
   const applicationId = env.POYNT_APPLICATION_ID?.trim();
-  const keyText = env.POYNT_PRIVATE_KEY?.replace(/\\n/g, '\n') || (env.POYNT_PRIVATE_KEY_FILE ? safeRead(env.POYNT_PRIVATE_KEY_FILE) : '');
-  const origin = env.PUBLIC_ORIGIN?.trim().replace(/\/+$/, '');
-  if (!applicationId || !keyText || !origin || !/^https:\/\//.test(origin)) return null;
-  // Nexi's European terminals live in Poynt's EU datacenter; `us` for the rest.
-  const eu = (env.POYNT_REGION ?? 'eu').toLowerCase() !== 'us';
+  const privateKey = env.POYNT_PRIVATE_KEY?.replace(/\\n/g, '\n') || (env.POYNT_PRIVATE_KEY_FILE ? safeRead(env.POYNT_PRIVATE_KEY_FILE) : '');
+  if (!applicationId || !privateKey) return null;
   return {
     applicationId,
-    privateKey: keyText,
-    api: eu ? 'https://services-eu.poynt.net' : 'https://services.poynt.net',
-    web: eu ? 'https://eu.poynt.net' : 'https://poynt.net',
+    privateKey,
+    // Nexi's European terminals live in Poynt's EU datacenter; `us` for the rest.
+    region: (env.POYNT_REGION ?? 'eu').toLowerCase() === 'us' ? 'us' : 'eu',
     authPublicKey: env.POYNT_AUTH_PUBLIC_KEY?.replace(/\\n/g, '\n') || null,
-    origin,
   };
 }
+
+/** Where the app talks to, and the https address Poynt calls back on. Null without a public https address. */
+export function poyntConfig(app: PoyntApp, origin: string): PoyntConfig | null {
+  const o = origin.trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[^/]+$/.test(o)) return null;
+  const eu = app.region === 'eu';
+  return { ...app, api: eu ? 'https://services-eu.poynt.net' : 'https://services.poynt.net', web: eu ? 'https://eu.poynt.net' : 'https://poynt.net', origin: o };
+}
+
+/** The address people reach this server at: PUBLIC_ORIGIN, else what Fastify derives (forwarded headers only from a trusted proxy). */
+function originOf(req: FastifyRequest): string {
+  if (process.env.PUBLIC_ORIGIN) return process.env.PUBLIC_ORIGIN.trim().replace(/\/+$/, '');
+  return `${req.protocol}://${req.host}`;
+}
+
 function safeRead(path: string): string {
   try {
     return readFileSync(path, 'utf8');
@@ -140,6 +159,11 @@ export function migrateSmartpos(db: Database.Database): void {
       businessId  TEXT NOT NULL UNIQUE,
       linkedAt    INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS smartpos_apps (
+      accountId   TEXT PRIMARY KEY,
+      app         TEXT NOT NULL,                 -- encrypted PoyntApp
+      updatedAt   INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS smartpos_states (
       nonce       TEXT PRIMARY KEY,
       accountId   TEXT NOT NULL,
@@ -170,6 +194,11 @@ const linkOf = (db: Database.Database, accountId: string): string | null =>
 export class PoyntClient {
   private token: { value: string; until: number } | null = null;
   constructor(private readonly cfg: PoyntConfig) {}
+
+  /** Signs in as the app: proves the id and key belong together. */
+  async signIn(): Promise<void> {
+    await this.accessToken();
+  }
 
   private async accessToken(): Promise<string> {
     if (this.token && this.token.until > Date.now()) return this.token.value;
@@ -240,6 +269,52 @@ export interface Terminal {
   serial: string;
 }
 
+// ── Which app an account uses ───────────────────────────────────────────────
+
+/** The account's own Poynt app, else the server's; and one client per app, so its token is reused. */
+export function smartposApps(db: Database.Database, box: SecretBox) {
+  const clients = new Map<string, PoyntClient>();
+  const ownApp = (accountId: string): PoyntApp | null => {
+    const row = db.prepare('SELECT app FROM smartpos_apps WHERE accountId = ?').get(accountId) as { app: string } | undefined;
+    if (!row) return null;
+    try {
+      return box.decrypt<PoyntApp>(row.app);
+    } catch {
+      return null;
+    }
+  };
+  return {
+    ownApp,
+    appOf: (accountId: string): PoyntApp | null => ownApp(accountId) ?? serverPoyntApp(),
+    client(cfg: PoyntConfig): PoyntClient {
+      const key = sha256(`${cfg.api}|${cfg.applicationId}|${cfg.privateKey}`);
+      let c = clients.get(key);
+      if (!c) clients.set(key, (c = new PoyntClient(cfg)));
+      return c;
+    },
+    save(accountId: string, app: PoyntApp | null): void {
+      if (app) {
+        db.prepare('INSERT INTO smartpos_apps (accountId, app, updatedAt) VALUES (?, ?, ?) ON CONFLICT(accountId) DO UPDATE SET app = excluded.app, updatedAt = excluded.updatedAt').run(
+          accountId,
+          box.encrypt(app),
+          Date.now(),
+        );
+      } else {
+        db.prepare('DELETE FROM smartpos_apps WHERE accountId = ?').run(accountId);
+      }
+    },
+  };
+}
+export type SmartposApps = ReturnType<typeof smartposApps>;
+
+const AppBody = z.object({
+  applicationId: z.string().trim().regex(/^urn:aid:[0-9a-f-]{36}$/i, 'The application id looks like urn:aid:… - copy it from the Poynt developer portal.'),
+  /** Empty keeps the key already saved. */
+  privateKey: z.string().max(10_000).default(''),
+  region: z.enum(['eu', 'us']).default('eu'),
+  authPublicKey: z.string().max(10_000).nullable().default(null),
+});
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 const PaymentBody = z.object({
@@ -251,30 +326,98 @@ const PaymentBody = z.object({
 });
 const TTL_S = 120;
 
-export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: PoyntConfig | null = poyntConfig(), client = cfg ? new PoyntClient(cfg) : null): void {
+export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps: SmartposApps): void {
   const { db } = ctx;
   const admin = (role: string) => role === 'owner' || role === 'admin';
-  const off = { error: 'not_configured', message: 'This server is not set up for Nexi SmartPOS - its operator needs a Poynt app (see the README).' };
+  const off = { error: 'not_configured', message: 'Add your Poynt app under Settings → Payments first.' };
+  const noOrigin = { error: 'not_configured', message: 'Nexi needs this server on a public https address to report payments back.' };
+  /** The account's app and its client, or why there is none. */
+  const setupOf = (req: FastifyRequest): { cfg: PoyntConfig; client: PoyntClient } | { error: typeof off } => {
+    const own = apps.appOf(ctx.identity(req).accountId);
+    if (!own) return { error: off };
+    const cfg = poyntConfig(own, originOf(req));
+    return cfg ? { cfg, client: apps.client(cfg) } : { error: noOrigin };
+  };
   // The terminal list changes rarely; asked at most once a minute per business.
   const cache = new Map<string, { at: number; list: Terminal[] }>();
-  const terminalsOf = async (biz: string): Promise<Terminal[]> => {
+  const terminalsOf = async (client: PoyntClient, biz: string): Promise<Terminal[]> => {
     const hit = cache.get(biz);
     if (hit && Date.now() - hit.at < 60_000) return hit.list;
-    const list = await client!.terminals(biz);
+    const list = await client.terminals(biz);
     cache.set(biz, { at: Date.now(), list });
     return list;
   };
 
   app.get('/smartpos/status', async (req) => {
-    const biz = linkOf(db, ctx.identity(req).accountId);
-    return { configured: !!cfg, connected: !!biz };
+    const who = ctx.identity(req);
+    const own = apps.ownApp(who.accountId);
+    const origin = originOf(req);
+    const https = /^https:\/\//.test(origin);
+    return {
+      configured: !!apps.appOf(who.accountId) && https,
+      connected: !!linkOf(db, who.accountId),
+      canManage: admin(who.role),
+      // The key itself never leaves the server.
+      app: own ? { applicationId: own.applicationId, region: own.region, hasAuthKey: !!own.authPublicKey } : null,
+      serverApp: !!serverPoyntApp(),
+      redirectUrl: `${origin}/p/pos/smartpos/authorized`,
+      https,
+    };
+  });
+
+  /** Saves the account's own Poynt app. A different app drops the link: the business allowed the old one. */
+  app.put('/smartpos/app', async (req, reply) => {
+    const who = ctx.identity(req);
+    if (!admin(who.role)) return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change the Poynt app.' });
+    const body = AppBody.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: body.error.issues[0]?.message ?? 'Check the app details.' });
+    const before = apps.ownApp(who.accountId);
+    // Leaving the key empty keeps the one saved for the same app.
+    const privateKey = body.data.privateKey.trim() ? `${body.data.privateKey.trim()}\n` : before?.applicationId === body.data.applicationId ? before.privateKey : '';
+    if (!privateKey) return reply.code(400).send({ error: 'invalid_request', message: 'Add the private key you downloaded with the app.' });
+    try {
+      if (createPrivateKey(privateKey).asymmetricKeyType !== 'rsa') throw new Error('not rsa');
+    } catch {
+      return reply.code(400).send({ error: 'invalid_request', message: 'That is not an RSA private key - use the .pem file Poynt gave you for the app.' });
+    }
+    const authPublicKey = body.data.authPublicKey?.trim() || null;
+    if (authPublicKey) {
+      try {
+        createPublicKey(authPublicKey);
+      } catch {
+        return reply.code(400).send({ error: 'invalid_request', message: 'That Poynt public key could not be read.' });
+      }
+    }
+    const next: PoyntApp = { applicationId: body.data.applicationId, privateKey, region: body.data.region, authPublicKey };
+    // Sign in as the app now, so a wrong id, key or region shows here rather than at the till.
+    const cfg = poyntConfig(next, originOf(req));
+    if (cfg) {
+      try {
+        await new PoyntClient(cfg).signIn();
+      } catch (err) {
+        return reply.code(400).send({ error: 'invalid_request', message: (err as Error).message });
+      }
+    }
+    if (before?.applicationId !== next.applicationId || before?.region !== next.region) db.prepare('DELETE FROM smartpos_links WHERE accountId = ?').run(who.accountId);
+    apps.save(who.accountId, next);
+    return { app: { applicationId: next.applicationId, region: next.region, hasAuthKey: !!authPublicKey } };
+  });
+
+  app.delete('/smartpos/app', async (req, reply) => {
+    const who = ctx.identity(req);
+    if (!admin(who.role)) return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change the Poynt app.' });
+    if (apps.ownApp(who.accountId)) db.prepare('DELETE FROM smartpos_links WHERE accountId = ?').run(who.accountId);
+    apps.save(who.accountId, null);
+    return { ok: true };
   });
 
   /** The address to send the owner to, to let Zollify use their terminals. */
   app.post('/smartpos/connect', async (req, reply) => {
     const who = ctx.identity(req);
     if (!admin(who.role)) return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can connect a payment terminal.' });
-    if (!cfg) return reply.code(409).send(off);
+    const setup = setupOf(req);
+    if ('error' in setup) return reply.code(409).send(setup.error);
+    const { cfg } = setup;
     const nonce = randomBytes(24).toString('base64url');
     db.prepare('DELETE FROM smartpos_states WHERE expiresAt < ?').run(Date.now());
     db.prepare('INSERT INTO smartpos_states (nonce, accountId, expiresAt) VALUES (?, ?, ?)').run(nonce, who.accountId, Date.now() + 15 * 60_000);
@@ -290,11 +433,12 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: 
   });
 
   app.get('/smartpos/terminals', async (req, reply) => {
-    if (!cfg || !client) return reply.code(409).send(off);
+    const setup = setupOf(req);
+    if ('error' in setup) return reply.code(409).send(setup.error);
     const biz = linkOf(db, ctx.identity(req).accountId);
     if (!biz) return reply.code(409).send({ error: 'not_connected', message: 'Connect your Nexi account under Settings → Payments first.' });
     try {
-      return { terminals: await terminalsOf(biz) };
+      return { terminals: await terminalsOf(setup.client, biz) };
     } catch (err) {
       return reply.code(502).send({ error: 'upstream', message: (err as Error).message });
     }
@@ -302,7 +446,9 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: 
 
   /** Sends the amount to the terminal; the till then asks for the outcome. */
   app.post('/smartpos/payments', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
-    if (!cfg || !client) return reply.code(409).send(off);
+    const setup = setupOf(req);
+    if ('error' in setup) return reply.code(409).send(setup.error);
+    const { cfg, client } = setup;
     const who = ctx.identity(req);
     const biz = linkOf(db, who.accountId);
     if (!biz) return reply.code(409).send({ error: 'not_connected', message: 'Connect your Nexi account under Settings → Payments first.' });
@@ -311,7 +457,7 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: 
     const { amount, currency, reference, storeId, deviceId } = body.data;
     try {
       // Only this merchant's own terminals.
-      if (!(await terminalsOf(biz)).some((t) => t.storeId === storeId && t.deviceId === deviceId)) {
+      if (!(await terminalsOf(client, biz)).some((t) => t.storeId === storeId && t.deviceId === deviceId)) {
         return reply.code(404).send({ error: 'unknown_terminal', message: 'That terminal is not on your Nexi account - pick it again under Settings → Payments.' });
       }
       const referenceId = randomUUID();
@@ -352,14 +498,15 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: 
   });
 
   app.post<{ Params: { ref: string } }>('/smartpos/payments/:ref/cancel', async (req, reply) => {
-    if (!client) return reply.code(409).send(off);
+    const setup = setupOf(req);
+    if ('error' in setup) return reply.code(409).send(setup.error);
     const row = db.prepare('SELECT * FROM smartpos_payments WHERE referenceId = ? AND accountId = ?').get(req.params.ref, ctx.identity(req).accountId) as
       | { businessId: string; storeId: string; deviceId: string; state: string }
       | undefined;
     if (!row) return reply.code(404).send({ error: 'not_found' });
     if (row.state === 'approved' || row.state === 'declined' || row.state === 'cancelled') return { state: row.state };
     try {
-      await client.send({ businessId: row.businessId, storeId: row.storeId, deviceId: row.deviceId, ttl: 30, data: { action: 'cancelPayment' } });
+      await setup.client.send({ businessId: row.businessId, storeId: row.storeId, deviceId: row.deviceId, ttl: 30, data: { action: 'cancelPayment' } });
     } catch {
       /* the terminal still reports CANCELED or the result itself */
     }
@@ -367,23 +514,28 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, cfg: 
   });
 }
 
-export function registerSmartposPublic(app: FastifyInstance, ctx: PublicModuleContext, cfg: PoyntConfig | null = poyntConfig(), client = cfg ? new PoyntClient(cfg) : null): void {
+export function registerSmartposPublic(app: FastifyInstance, ctx: PublicModuleContext, apps: SmartposApps): void {
   const { db } = ctx;
 
   /**
    * Back from Poynt after the merchant allowed Zollify. The code's signature
-   * is checked when the operator has set Poynt's public key; either way the
+   * is checked when Poynt's public key is known; either way the
    * nonce must be one we issued (and is used once), the code must be fresh
    * and made out to this app, Poynt must confirm the app can see that
    * business, and a business links to one Zollify account only.
    */
   app.get<{ Querystring: { code?: string; status?: string; context?: string } }>('/smartpos/authorized', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
-    const back = (outcome: string) => reply.redirect(`${cfg?.origin ?? ''}/#/settings?panel=pos.payments&smartpos=${outcome}`);
-    if (!cfg || !client) return back('not_configured');
+    const origin = originOf(req);
+    const back = (outcome: string) => reply.redirect(`${origin}/#/settings?panel=pos.payments&smartpos=${outcome}`);
     const nonce = String(req.query.context ?? '');
     const state = db.prepare('SELECT accountId, expiresAt FROM smartpos_states WHERE nonce = ?').get(nonce) as { accountId: string; expiresAt: number } | undefined;
     db.prepare('DELETE FROM smartpos_states WHERE nonce = ?').run(nonce);
     if (!state || state.expiresAt < Date.now()) return back('expired');
+    // The app of the account that started connecting: each account may have its own.
+    const own = apps.appOf(state.accountId);
+    const cfg = own ? poyntConfig(own, origin) : null;
+    if (!cfg) return back('not_configured');
+    const client = apps.client(cfg);
     if (String(req.query.status ?? '').toLowerCase() === 'denied' || !req.query.code) return back('declined');
     const biz = businessFromCode(String(req.query.code), cfg);
     if (!biz) return back('failed');

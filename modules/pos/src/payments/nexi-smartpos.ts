@@ -7,8 +7,9 @@ import { sdk } from '../runtime';
  * the cloud: the server sends the amount to the terminal through Poynt's
  * Payment Bridge, the customer pays on the terminal, and the terminal tells
  * the server the outcome, which the till asks for until it has it. Works
- * from any device - nothing pairs locally. The account is connected once
- * under Settings → Payments, and each till picks its terminal there.
+ * from any device - nothing pairs locally. Each account adds its own Poynt
+ * app and connects its Nexi business once under Settings → Payments, and
+ * each till picks its terminal there.
  */
 
 export const SMARTPOS_TERMINAL_SETTING = 'smartpos.terminal';
@@ -19,6 +20,20 @@ export interface SmartposTerminal {
   name: string;
   serial: string;
 }
+
+/** What the server says about this account's SmartPOS setup. The private key never comes back. */
+export interface SmartposStatus {
+  configured: boolean;
+  connected: boolean;
+  canManage: boolean;
+  app: { applicationId: string; region: 'eu' | 'us'; hasAuthKey: boolean } | null;
+  serverApp: boolean;
+  redirectUrl: string;
+  https: boolean;
+}
+export const loadSmartposStatus = (): Promise<SmartposStatus> => sdk().http.get<SmartposStatus>('smartpos/status');
+export const saveSmartposApp = (app: { applicationId: string; privateKey: string; region: 'eu' | 'us'; authPublicKey: string | null }) => sdk().http.put('smartpos/app', app);
+export const removeSmartposApp = () => sdk().http.del('smartpos/app');
 
 type Outcome = { state: 'sent' | 'started' | 'approved' | 'declined' | 'cancelled'; transactionId?: string; cardBrand?: string; last4?: string; authCode?: string; message?: string };
 
@@ -49,9 +64,11 @@ export const nexiSmartposProvider: PaymentProvider = {
   id: 'nexi-smartpos',
   label: 'Nexi SmartPOS (Nets N950)',
 
+  /** Always offered where the server answers: the account adds its own Poynt app below. */
   async isAvailable(): Promise<boolean> {
     try {
-      return (await sdk().http.get<{ configured: boolean }>('smartpos/status')).configured;
+      await loadSmartposStatus();
+      return true;
     } catch {
       return false;
     }
@@ -59,8 +76,9 @@ export const nexiSmartposProvider: PaymentProvider = {
 
   async getStatus(): Promise<ProviderStatus> {
     try {
-      const s = await sdk().http.get<{ configured: boolean; connected: boolean }>('smartpos/status');
-      if (!s.configured) return { connected: false, detail: 'Not set up on this server' };
+      const s = await loadSmartposStatus();
+      if (!s.https) return { connected: false, detail: 'Needs the server on a public https address' };
+      if (!s.configured) return { connected: false, detail: 'Add your Poynt app below' };
       if (!s.connected) return { connected: false, detail: 'Connect your Nexi account' };
       const t = await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING);
       return t ? { connected: true, detail: `Terminal: ${t.name}` } : { connected: false, detail: 'Pick this till’s terminal below' };

@@ -70,7 +70,7 @@ async function main(): Promise<void> {
     publicEventsServerModule,
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
-    receiptsServerModule,
+    receiptsServerModule(jwtSecret),
     consignmentServerModule,
     consignmentArtistServerModule,
     peppolServerModule(jwtSecret),

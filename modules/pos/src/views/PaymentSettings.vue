@@ -5,7 +5,7 @@ import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
-import { SMARTPOS_TERMINAL_SETTING, loadSmartposTerminals, type SmartposTerminal } from '../payments/nexi-smartpos';
+import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
 import { sdk } from '../runtime';
@@ -66,7 +66,7 @@ onMounted(async () => {
       declined: 'Connecting was cancelled on the Nexi page.',
       expired: 'That link had expired - try Connect again.',
       in_use: 'That Nexi account is already connected to another Zollify account.',
-      not_configured: 'This server is not set up for Nexi SmartPOS.',
+      not_configured: 'Add your Poynt app under Nexi SmartPOS first.',
       failed: 'Nexi did not confirm the connection - try again.',
     };
     sdk().ui.toast(text[outcome] ?? 'Back from Nexi.', { kind: outcome === 'connected' ? 'success' : 'warning', timeoutMs: 7000 });
@@ -81,15 +81,18 @@ onMounted(async () => {
 const smartposTerminals = ref<SmartposTerminal[]>([]);
 const smartposTerminal = ref('');
 const smartposError = ref('');
+const smartpos = ref<SmartposStatus | null>(null);
+const appForm = ref({ open: false, applicationId: '', region: 'eu' as 'eu' | 'us', privateKey: '', authPublicKey: '', saving: false });
 async function refreshSmartpos(): Promise<void> {
   smartposError.value = '';
+  smartpos.value = await loadSmartposStatus().catch(() => null);
   try {
     smartposTerminals.value = await loadSmartposTerminals();
   } catch (err) {
     const body = (err as { body?: { error?: string; message?: string } } | null)?.body;
     smartposTerminals.value = [];
-    // Not connected yet is what the hint below already says.
-    smartposError.value = body?.error === 'not_connected' ? '' : (body?.message ?? 'Could not load your terminals.');
+    // No app or not connected yet is what the hints already say.
+    smartposError.value = body?.error === 'not_connected' || body?.error === 'not_configured' ? '' : (body?.message ?? 'Could not load your terminals.');
   }
 }
 async function saveSmartposTerminal(): Promise<void> {
@@ -97,6 +100,41 @@ async function saveSmartposTerminal(): Promise<void> {
   await setSetting(SMARTPOS_TERMINAL_SETTING, t);
   sdk().ui.toast(t ? `Card payments go to ${t.name}.` : 'Terminal cleared.', { kind: 'success' });
   void refreshStatuses();
+}
+/** The account's own Poynt app: id and region shown, the key only ever sent. */
+function editApp(): void {
+  const a = smartpos.value?.app;
+  appForm.value = { open: true, applicationId: a?.applicationId ?? '', region: a?.region ?? 'eu', privateKey: '', authPublicKey: '', saving: false };
+}
+async function readKeyFile(e: Event, field: 'privateKey' | 'authPublicKey'): Promise<void> {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) appForm.value[field] = (await file.text()).trim();
+}
+async function saveApp(): Promise<void> {
+  const f = appForm.value;
+  f.saving = true;
+  try {
+    await saveSmartposApp({ applicationId: f.applicationId.trim(), privateKey: f.privateKey, region: f.region, authPublicKey: f.authPublicKey.trim() || null });
+    appForm.value = { ...f, open: false, privateKey: '', authPublicKey: '', saving: false };
+    sdk().ui.toast('Poynt app saved - now tap Connect to allow it on your Nexi account.', { kind: 'success', timeoutMs: 6000 });
+  } catch (err) {
+    f.saving = false;
+    sdk().ui.toast((err as { body?: { message?: string } } | null)?.body?.message ?? 'Could not save the app.', { kind: 'error' });
+  }
+  void refreshSmartpos();
+  void refreshStatuses();
+}
+async function removeApp(): Promise<void> {
+  if (!(await sdk().ui.confirm('This account stops using its own Poynt app and its Nexi connection is removed.', 'Remove the Poynt app?', { confirm: 'Remove' }))) return;
+  await removeSmartposApp();
+  await setSetting(SMARTPOS_TERMINAL_SETTING, null);
+  smartposTerminal.value = '';
+  void refreshSmartpos();
+  void refreshStatuses();
+}
+async function copyRedirect(): Promise<void> {
+  await navigator.clipboard.writeText(smartpos.value?.redirectUrl ?? '').catch(() => undefined);
+  sdk().ui.toast('Copied.', { kind: 'info' });
 }
 onUnmounted(() => clearInterval(pollTimer));
 
@@ -193,6 +231,37 @@ async function removeMethod(name: string): Promise<void> {
     </template>
 
     <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">
+      <div v-if="smartpos?.canManage" class="carbon">
+        <div class="row"><span class="label">Poynt app</span>
+          <template v-if="!appForm.open">
+            <button type="button" class="quiet" @click="editApp">{{ smartpos.app ? 'Change' : 'Add your app' }}</button>
+            <button v-if="smartpos.app" type="button" class="quiet danger" @click="removeApp">Remove</button>
+          </template>
+        </div>
+        <p v-if="smartpos.app && !appForm.open" class="hint"><code>{{ smartpos.app.applicationId }}</code> ({{ smartpos.app.region.toUpperCase() }}){{ smartpos.app.hasAuthKey ? ' - code signatures checked' : '' }}</p>
+        <p v-else-if="!appForm.open" class="hint">{{ smartpos.serverApp ? 'Using the app this server provides. Add your own to use your own Poynt developer account.' : 'Create a cloud app in the Poynt developer portal (EU: poynt-eu.godaddy.com) and add its application id and private key here. Only this account uses it.' }}</p>
+        <form v-if="appForm.open" class="appform" @submit.prevent="saveApp">
+          <label class="field"><span>Application id</span><input v-model="appForm.applicationId" type="text" autocomplete="off" placeholder="urn:aid:…" required /></label>
+          <label class="field"><span>Region</span>
+            <select v-model="appForm.region"><option value="eu">Europe (Nexi, Nets)</option><option value="us">United States</option></select>
+          </label>
+          <label class="field"><span>Private key (.pem){{ smartpos.app ? ' - leave empty to keep the saved one' : '' }}</span>
+            <input type="file" accept=".pem,.key,.txt" @change="readKeyFile($event, 'privateKey')" />
+            <textarea v-model="appForm.privateKey" rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+          <details>
+            <summary>Poynt’s public key (optional)</summary>
+            <p class="hint">If Nexi or Poynt gives you the key they sign authorisation codes with, add it and Zollify checks every code against it.</p>
+            <textarea v-model="appForm.authPublicKey" rows="3" spellcheck="false" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+          </details>
+          <div class="field"><span>OAuth callback URL - set this in the app’s OAuth settings</span>
+            <div class="row"><code class="grow">{{ smartpos.redirectUrl }}</code><button type="button" class="quiet" @click="copyRedirect">Copy</button></div>
+          </div>
+          <p v-if="!smartpos.https" class="error">Nexi can only reach this server over a public https address - open Zollify through it, or set PUBLIC_ORIGIN.</p>
+          <div class="row"><button type="submit" :disabled="appForm.saving || !appForm.applicationId.trim()">{{ appForm.saving ? 'Checking…' : 'Save' }}</button><button type="button" class="quiet" @click="appForm.open = false">Cancel</button></div>
+        </form>
+        <p class="hint">The key stays on the server, encrypted. Each account on this server has its own app, Nexi account and terminals.</p>
+      </div>
       <div class="carbon">
         <div class="row"><span class="label">This till’s Nexi terminal</span><button type="button" class="quiet" @click="refreshSmartpos">Refresh</button></div>
         <select v-if="smartposTerminals.length" v-model="smartposTerminal" @change="saveSmartposTerminal">
@@ -200,7 +269,7 @@ async function removeMethod(name: string): Promise<void> {
           <option v-for="t in smartposTerminals" :key="t.deviceId" :value="t.deviceId">{{ t.name }}{{ t.storeName ? ` - ${t.storeName}` : '' }}{{ t.serial ? ` (${t.serial})` : '' }}</option>
         </select>
         <p v-else-if="smartposError" class="error">{{ smartposError }}</p>
-        <p v-else class="hint">Tap <strong>Connect</strong> above to allow Zollify on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
+        <p v-else class="hint">{{ smartpos && !smartpos.configured ? 'Add a Poynt app first, then' : 'Tap' }} <strong>Connect</strong> above to allow it on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
         <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. Each till can use its own terminal.</p>
       </div>
     </template>
@@ -259,6 +328,9 @@ h3 { font-size: .95rem; margin: .5rem 0 0; }
 .label { flex: 1; font-size: .875rem; font-weight: 600; }
 code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); }
 .carbon { display: flex; flex-direction: column; gap: .5rem; padding: .7rem .8rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; }
+.appform { display: flex; flex-direction: column; gap: .5rem; }
+.appform textarea { font-family: ui-monospace, monospace; font-size: .75rem; }
+.grow { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: .78rem; }
 .methods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .methods li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; font-size: .875rem; }
 .methods .quiet { min-height: 1.7rem; font-size: .78rem; }

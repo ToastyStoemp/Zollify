@@ -17,6 +17,9 @@ import { businessFromCode, readCallback } from '../modules/smartpos';
 const PASSWORD = 'correct horse battery staple';
 const APP = 'urn:aid:00000000-0000-0000-0000-000000000001';
 const BIZ = '11111111-2222-3333-4444-555555555555';
+const APP2 = 'urn:aid:00000000-0000-0000-0000-000000000002';
+const BIZ2 = '66666666-7777-8888-9999-000000000000';
+const app2 = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 const app_ = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 const poynt = generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
 const jwt = (claims: Record<string, unknown>, key = poynt.privateKey): string => {
@@ -53,7 +56,8 @@ beforeAll(async () => {
     sent.push({ url, body: String(init?.body ?? '') });
     const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
     if (url.endsWith('/token')) return json(200, { accessToken: 'app-token', expiresIn: 86400, tokenType: 'BEARER' });
-    if (url.endsWith(`/businesses/${BIZ}`)) return json(200, { id: BIZ });
+    if (url.endsWith(`/businesses/${BIZ}`) || url.endsWith(`/businesses/${BIZ2}`)) return json(200, { id: url.split('/').pop() });
+    if (url.endsWith(`/businesses/${BIZ2}/stores`)) return json(200, [{ id: 'store-2', displayName: 'Shop two', storeDevices: [{ deviceId: 'urn:tid:shop2', name: 'Till 2', status: 'ACTIVATED', type: 'TERMINAL' }] }]);
     if (url.includes('/businesses/') && url.endsWith('/stores')) {
       return url.includes(BIZ)
         ? json(200, [{ id: 'store-1', displayName: 'Atelier', storeDevices: [{ deviceId: 'urn:tid:n950', serialNumber: 'N950-1', name: 'Counter', status: 'ACTIVATED', type: 'TERMINAL' }, { deviceId: 'urn:tid:old', status: 'DEACTIVATED', type: 'TERMINAL' }] }])
@@ -68,7 +72,7 @@ beforeAll(async () => {
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
-    serverModules: [receiptsServerModule],
+    serverModules: [receiptsServerModule('test-secret-value-long-enough-for-signing')],
     defaultModules: ['pos'],
     allowedOrigins: [],
     requireHttps: false,
@@ -95,7 +99,7 @@ async function connect(c = code()): Promise<string> {
 
 describe('connecting a Nexi account', () => {
   it('sends the owner to Poynt with this app and a one-time context', async () => {
-    expect((await call(owner, 'GET', '/smartpos/status')).json()).toEqual({ configured: true, connected: false });
+    expect((await call(owner, 'GET', '/smartpos/status')).json()).toMatchObject({ configured: true, connected: false, canManage: true, app: null, serverApp: true, redirectUrl: 'https://pos.example.test/p/pos/smartpos/authorized' });
     const { url } = (await call(owner, 'POST', '/smartpos/connect')).json();
     const u = new URL(url);
     expect(u.origin + u.pathname).toBe('https://eu.poynt.net/applications/authorize');
@@ -187,6 +191,78 @@ describe('taking a payment', () => {
     const staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'staff@smartpos.test', password: PASSWORD, inviteCode: invite.json().code } })).json().accessToken;
     expect((await call(staff, 'POST', '/smartpos/connect')).statusCode).toBe(403);
     expect((await call(staff, 'DELETE', '/smartpos/connection')).statusCode).toBe(403);
+  });
+});
+
+describe('each account with its own Poynt app', () => {
+  let shop: string;
+  const save = (t: string, body: Record<string, unknown>) => app.inject({ method: 'PUT', url: '/api/m/pos/smartpos/app', headers: auth(t), payload: body });
+  const lastAssertion = () => {
+    const m = [...sent].reverse().find((x) => x.url.endsWith('/token'))!;
+    return JSON.parse(Buffer.from(new URLSearchParams(m.body).get('assertion')!.split('.')[1]!, 'base64url').toString());
+  };
+
+  beforeAll(async () => {
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(owner), payload: { newAccount: true } });
+    const reg = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'shop2@smartpos.test', password: PASSWORD, inviteCode: invite.json().code } })).json();
+    setEnabled(app.zollify.db, reg.user.accountId, 'pos', true);
+    shop = reg.accessToken;
+  });
+
+  it('checks the app before saving it, and never hands the key back', async () => {
+    expect((await save(shop, { applicationId: 'not-an-app', privateKey: app2.privateKey })).statusCode).toBe(400);
+    expect((await save(shop, { applicationId: APP2, privateKey: 'garbage' })).json().message).toMatch(/RSA private key/);
+    expect((await save(shop, { applicationId: APP2 })).json().message).toMatch(/private key/);
+    const res = await save(shop, { applicationId: APP2, privateKey: app2.privateKey, region: 'eu', authPublicKey: poynt.publicKey });
+    expect(res.statusCode).toBe(200);
+    expect(lastAssertion()).toMatchObject({ iss: APP2, sub: APP2, aud: 'https://services-eu.poynt.net' });
+    expect(JSON.stringify(res.json())).not.toContain('PRIVATE KEY');
+    expect((await call(shop, 'GET', '/smartpos/status')).json()).toMatchObject({ configured: true, app: { applicationId: APP2, region: 'eu', hasAuthKey: true } });
+    // Stored encrypted.
+    const row = app.zollify.db.prepare('SELECT app FROM smartpos_apps').get() as { app: string };
+    expect(row.app).not.toContain('PRIVATE KEY');
+    // Saving again without the key keeps it.
+    expect((await save(shop, { applicationId: APP2, region: 'eu', authPublicKey: poynt.publicKey })).statusCode).toBe(200);
+  });
+
+  it('connects and pays through that account’s own app', async () => {
+    const { url } = (await call(shop, 'POST', '/smartpos/connect')).json();
+    expect(new URL(url).searchParams.get('client_id')).toBe(APP2);
+    const context = new URL(url).searchParams.get('context')!;
+    // A code made out to the server's app is not good for this account's.
+    const wrong = jwt({ iss: 'https://poynt.net', sub: APP, iat: now(), exp: now() + 300, 'poynt.biz': BIZ2 });
+    expect(String((await app.inject({ method: 'GET', url: `/p/pos/smartpos/authorized?code=${encodeURIComponent(wrong)}&context=${context}` })).headers.location)).toMatch(/smartpos=failed/);
+    const again = new URL((await call(shop, 'POST', '/smartpos/connect')).json().url).searchParams.get('context')!;
+    const right = jwt({ iss: 'https://poynt.net', sub: APP2, iat: now(), exp: now() + 300, 'poynt.biz': BIZ2 });
+    expect(String((await app.inject({ method: 'GET', url: `/p/pos/smartpos/authorized?code=${encodeURIComponent(right)}&context=${again}` })).headers.location)).toMatch(/smartpos=connected/);
+    expect((await call(shop, 'GET', '/smartpos/terminals')).json().terminals.map((t: { deviceId: string }) => t.deviceId)).toEqual(['urn:tid:shop2']);
+    expect((await call(shop, 'POST', '/smartpos/payments', { amount: 500, currency: 'DKK', storeId: 'store-2', deviceId: 'urn:tid:shop2' })).statusCode).toBe(201);
+    expect(lastAssertion().iss).toBe(APP2);
+    // The first account still uses the server's app.
+    expect((await call(owner, 'POST', '/smartpos/payments', { amount: 500, currency: 'DKK', storeId: 'store-1', deviceId: 'urn:tid:n950' })).statusCode).toBe(201);
+  });
+
+  it('works without any app in the server’s environment', async () => {
+    const saved = process.env.POYNT_APPLICATION_ID;
+    delete process.env.POYNT_APPLICATION_ID;
+    try {
+      expect((await call(owner, 'GET', '/smartpos/status')).json()).toMatchObject({ configured: false, serverApp: false });
+      expect((await call(owner, 'POST', '/smartpos/connect')).statusCode).toBe(409);
+      expect((await call(shop, 'GET', '/smartpos/status')).json()).toMatchObject({ configured: true, connected: true });
+      expect((await call(shop, 'GET', '/smartpos/terminals')).statusCode).toBe(200);
+    } finally {
+      process.env.POYNT_APPLICATION_ID = saved;
+    }
+  });
+
+  it('only lets owners and admins change the app, and removing it drops the link', async () => {
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(shop), payload: { role: 'member' } });
+    const staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'staff2@smartpos.test', password: PASSWORD, inviteCode: invite.json().code } })).json().accessToken;
+    expect((await save(staff, { applicationId: APP2, privateKey: app2.privateKey })).statusCode).toBe(403);
+    expect((await call(staff, 'DELETE', '/smartpos/app')).statusCode).toBe(403);
+    expect((await call(staff, 'GET', '/smartpos/status')).json().canManage).toBe(false);
+    expect((await call(shop, 'DELETE', '/smartpos/app')).statusCode).toBe(200);
+    expect((await call(shop, 'GET', '/smartpos/status')).json()).toMatchObject({ app: null, connected: false });
   });
 });
 

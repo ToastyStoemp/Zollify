@@ -274,10 +274,14 @@ posts to public https addresses unless `WEBHOOK_ALLOW_PRIVATE=1`.
 from any till over the cloud: the server sends the amount to the terminal
 through Poynt's Payment Bridge (the platform SmartPOS runs on), the customer
 pays there, and the terminal posts the outcome back to a one-off callback
-URL. The account is connected once under Settings → Payments (the owner
-allows Zollify on their Nexi/Poynt account) and each till picks its
-terminal. The server needs a Poynt cloud app - see `POYNT_*` in
-`apps/server/.env.example`. Not yet tried against a live terminal.
+URL. Each account sets it up under Settings → Payments: an owner or admin
+adds their own Poynt cloud app (application id and private key from the
+Poynt developer portal, kept encrypted on the server), taps Connect to
+allow it on their Nexi business, and each till picks its terminal. So every
+shop on one server has its own app, Nexi account and terminals. A server can
+also offer one app to accounts without their own - see `POYNT_*` in
+`apps/server/.env.example`. Nexi needs the server on a public https address
+to report payments back. Not yet tried against a live terminal.
 
 *E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
 invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B

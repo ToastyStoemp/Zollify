@@ -31,7 +31,7 @@ import {
   total,
 } from '../cart';
 import { getProvider } from '../payments/registry';
-import { findSearchMatch, typeColor } from '../search';
+import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
@@ -556,6 +556,8 @@ function applyDiscount(): void {
 
 // ── What other modules add to the till (a workshop place, say) ─────────────
 const tillActions = computed(() => sdk().till.actions());
+const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
+const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
 const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
 function runAction(action: TillAction): void {
   openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
@@ -922,7 +924,7 @@ function lockTill(): void {
         <strong>{{ openArtistName }}</strong>
       </div>
 
-      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
+      <p v-if="!entries.length && !tillTiles.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
           <button v-if="'artist' in e" type="button" class="tile type artist" :aria-label="`${e.artist.name}, ${e.artist.products.length} products`" :class="{ dim: e.artist.stock === 0, added: e.artist.products.some((p) => p.id === justAddedId) }" @click="openArtist = e.artist.key">
@@ -962,6 +964,12 @@ function lockTill(): void {
             </span>
           </button>
         </template>
+        <button v-for="a in tillTiles" :key="`action:${a.id}`" type="button" class="tile" :aria-label="a.label" @click="runAction(a)">
+          <span class="head">
+            <Icon :name="a.icon ?? 'plus'" :size="36" />
+            <span class="title">{{ a.label }}</span>
+          </span>
+        </button>
       </div>
 
       <button v-if="itemCount" type="button" class="primary cartbar" @click="showCartSheet = true">
@@ -1010,7 +1018,7 @@ function lockTill(): void {
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
           <button type="button" @click="openMisc">+ Misc item</button>
-          <button v-for="a in tillActions" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
+          <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>

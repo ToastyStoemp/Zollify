@@ -96,7 +96,7 @@ export default defineModule({
         }))];
     });
     // Taking payment for a workshop place, right at the till.
-    sdk.till.action({ id: 'workshops', label: 'Workshop', icon: 'calendar', component: () => import('./views/TillWorkshops.vue') });
+    sdk.till.action({ id: 'workshops', label: 'Workshop', icon: 'calendar', tile: true, component: () => import('./views/TillWorkshops.vue') });
     sdk.log.info('consignment module ready');
   },
 

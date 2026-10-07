@@ -24,3 +24,4 @@ export * from './webhooks';
 export * from './peppol';
 export * from './csv';
 export * from './restock';
+export * from './artist-profile';

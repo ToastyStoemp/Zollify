@@ -4,9 +4,10 @@ import { z } from 'zod';
 import {
   PeppolDocumentInputSchema,
   PeppolPartySchema,
-  PeppolSettingsSchema,
-  emptyPeppolSettings,
+  PeppolStoredSettingsSchema,
+  peppolSellerFromProfile,
   peppolTotals,
+  resolvePeppolSettings,
   peppolUbl,
   structuredReference,
   validatePeppol,
@@ -14,9 +15,10 @@ import {
   type PeppolLine,
   type PeppolParty,
   type PeppolSettings,
+  type ArtistDetails,
   type Transaction,
 } from '@zollify/shared';
-import { makeSecretBox, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ACCESS_POINTS, AccessPointSchema, sendViaAccessPoint, type AccessPointConfig } from './peppol-access-points';
 
 /**
@@ -71,11 +73,22 @@ function migrate(db: Database.Database): void {
 
 // ── Data ────────────────────────────────────────────────────────────────────
 
-function settingsOf(db: Database.Database, accountId: string): PeppolSettings {
+/**
+ * What the business stored here: only what differs from the business profile.
+ * A blank seller field means "as on the profile" - see resolvePeppolSettings.
+ */
+function storedOf(db: Database.Database, accountId: string): z.infer<typeof PeppolStoredSettingsSchema> {
   const row = db.prepare('SELECT doc FROM peppol_settings WHERE accountId = ?').get(accountId) as { doc: string } | undefined;
-  if (!row) return emptyPeppolSettings();
-  const parsed = PeppolSettingsSchema.safeParse(JSON.parse(row.doc));
-  return parsed.success ? parsed.data : emptyPeppolSettings();
+  const parsed = PeppolStoredSettingsSchema.safeParse(row ? JSON.parse(row.doc) : {});
+  return parsed.success ? parsed.data : PeppolStoredSettingsSchema.parse({});
+}
+function artistOf(db: Database.Database, accountId: string): ArtistDetails {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  return parseProfile(row?.profile).artist;
+}
+/** The settings invoices are made from: stored values over the business profile. Issued invoices keep their own stored UBL and never come back here. */
+function settingsOf(db: Database.Database, accountId: string): PeppolSettings {
+  return resolvePeppolSettings(storedOf(db, accountId), artistOf(db, accountId));
 }
 function docsOf(db: Database.Database, accountId: string): PeppolDocument[] {
   return (db.prepare('SELECT doc FROM peppol_documents WHERE accountId = ? ORDER BY createdAt DESC').all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as PeppolDocument);
@@ -129,14 +142,14 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
       app.get('/settings', async (req) => {
         const ap = accessPointOf(who(req));
         // The key never leaves the server; the screen only learns one is set.
-        return { settings: settingsOf(db, who(req)), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, accountRef: ap.accountRef, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
+        return { settings: settingsOf(db, who(req)), overrides: storedOf(db, who(req)), fromProfile: peppolSellerFromProfile(artistOf(db, who(req))), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, accountRef: ap.accountRef, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
       });
 
       app.put('/settings', async (req, reply) => {
-        const body = PeppolSettingsSchema.safeParse(req.body);
+        const body = PeppolStoredSettingsSchema.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: body.error.issues[0]?.message ?? 'Check your details.' });
         db.prepare('INSERT INTO peppol_settings (accountId, doc) VALUES (?, ?) ON CONFLICT (accountId) DO UPDATE SET doc = excluded.doc').run(who(req), JSON.stringify(body.data));
-        return { settings: body.data };
+        return { settings: settingsOf(db, who(req)), overrides: body.data, fromProfile: peppolSellerFromProfile(artistOf(db, who(req))) };
       });
 
       /** The access point account: provider, key (kept encrypted), sandbox or live. Null clears it. */
@@ -154,7 +167,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const config: AccessPointConfig = { ...body.data, apiKey };
         db.prepare('INSERT INTO peppol_settings (accountId, doc, accessPoint) VALUES (?, ?, ?) ON CONFLICT (accountId) DO UPDATE SET accessPoint = excluded.accessPoint').run(
           who(req),
-          JSON.stringify(settingsOf(db, who(req))),
+          JSON.stringify(storedOf(db, who(req))),
           box.encrypt(config),
         );
         return { accessPoint: { provider: config.provider, sandbox: config.sandbox, accountRef: config.accountRef, hasKey: true } };

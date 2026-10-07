@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { emptyProfile, isStore, sellsAt, type ArtistDetails, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, emptyProfile, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -12,7 +12,7 @@ import { loadEnabledModules, unloadModule } from '../boot';
  * both - it decides which pages it gets) and who it is, its next event or its
  * store, which modules to switch on, and where to go next. Every step can be skipped - skipping still
  * marks setup as done so the wizard never nags, and it can be re-run from
- * Settings → Booth profile.
+ * Settings → Business profile.
  */
 
 interface AvailableModule {
@@ -31,7 +31,7 @@ interface AvailableModule {
 const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   pos: { forWhom: 'The till. You need this to sell anything at all.', recommended: true },
   customs: {
-    forWhom: 'For selling across a border - Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock.',
+    forWhom: 'For selling across a border - Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock. Uses your business details from the first step.',
     recommended: true,
   },
   'price-cards': { forWhom: 'Printable price tags straight from the catalogue. Handy at any table.', recommended: true },
@@ -46,6 +46,10 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   sourcing: { forWhom: 'Keep suppliers and draft reorders when stock runs low.', recommended: false },
   'shopify-sync': { forWhom: 'Only if you also run a Shopify store and want the catalogue matched against it.', recommended: false },
   migration: { forWhom: 'Only if you are moving from ZollTool. Import the backup once, then switch it off.', recommended: false },
+  'peppol-be': {
+    forWhom: 'Belgian B2B invoices as Peppol e-invoices. Takes your name, address, VAT and enterprise number from the first step; you only add the access point and payment details.',
+    recommended: false,
+  },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
 };
 
@@ -71,6 +75,7 @@ const runsStores = computed(() => runs.value !== 'events');
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
+const links = ref<ProfileLinks>({ ...EMPTY_PROFILE_LINKS, ...account.value?.profile.links });
 
 async function saveWho(): Promise<void> {
   busy.value = true;
@@ -79,6 +84,7 @@ async function saveWho(): Promise<void> {
     await updateProfile({
       sells: { events: runsEvents.value, stores: runsStores.value },
       artist: artist.value,
+      links: { ...links.value },
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
@@ -226,8 +232,9 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <h1>Welcome to Zollify</h1>
       <p class="lede">
         One app for the booth: the till, stock, events and paperwork. First, who is behind the
-        table? These details go on receipts and customs documents, so they are worth getting right -
-        and you can change them any time under Settings.
+        table? You enter this once: receipts, customs documents and e-invoices all read it from here,
+        so no module asks again. Everything past your name is optional, and you can change it any
+        time under Settings → Business profile.
       </p>
 
       <fieldset class="runs">
@@ -238,9 +245,9 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <span>{{ r.text }}</span>
         </label>
       </fieldset>
-      <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Booth profile.</p>
+      <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Business profile.</p>
 
-      <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
+      <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="finish()">Skip setup</button>
@@ -272,7 +279,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-else-if="step === 3" class="card" @submit.prevent="saveModules">
       <h1>Switch on what you need</h1>
       <p class="lede">
-        Zollify is built from modules. Turn on the ones that fit your booth - anything you leave off
+        Zollify is built from modules. Turn on the ones that fit your business - anything you leave off
         stays out of the way and can be switched on later under Modules.
       </p>
 

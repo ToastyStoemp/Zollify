@@ -11,8 +11,8 @@ import { clearSdk, setSdk } from './runtime';
  * choices - Instagram handle, hidden from the page. Hall, booth number, link
  * and note belong to the event itself (Events → Edit → Booth). Everything
  * visitors see is rendered by the server half from the same events the booth
- * already keeps. A second screen, Find events, shares events to a pool other
- * booths quick-add from.
+ * already keeps. A second screen, Find events, searches a pool other booths quick-add
+ * from; accounts that agree (Settings, Event sharing) contribute their events to it.
  */
 export default defineModule({
   id: 'public-events',
@@ -45,6 +45,13 @@ export default defineModule({
       component: () => import('./views/FindEventsView.vue'),
     });
     sdk.nav.add({ routeName: 'find', group: 'events', label: 'Find events', icon: 'calendar', order: 116 });
+    sdk.settings.panel({
+      id: 'event-sharing',
+      label: 'Event sharing',
+      component: () => import('./views/SharingPanel.vue'),
+      minRole: 'admin',
+      order: 115,
+    });
     sdk.log.info('public-events module ready');
   },
 

@@ -2,10 +2,9 @@ import { z } from 'zod';
 
 /**
  * The shared event pool: public listings that accounts contribute to and
- * quick-add from. Only the facts below ever cross accounts. The server fills
- * name, dates and address from the contributor's own event (never from the
- * request), and this file is the one place that bounds what the free-text
- * extras may hold.
+ * quick-add from. Only the facts below ever cross accounts. The server reads
+ * every one of them from the contributor's own events (never from a request)
+ * once the account has agreed to share.
  */
 
 /** Longest a listing may run; keeps a typo from publishing a year-long "event". */
@@ -47,28 +46,21 @@ const text = (max: number) =>
     .pipe(z.string().max(max, `Keep it under ${max} characters.`))
     .refine((v) => !/[<>]/.test(v), 'No markup or angle brackets, please.');
 
-/** What the contributor types on top of the event record. */
-export const PoolShareSchema = z.object({
-  eventId: z.string().min(1).max(100),
-  edition: text(60).default(''),
-  venueName: text(120).default(''),
-  description: text(400).default(''),
-  url: z
-    .string()
-    .max(500)
-    .default('')
-    .refine((v) => !v.trim() || !!httpsUrl(v), 'The link must be a full https:// address.'),
-  /** Shown to others only when set; blank means "counted, never named". */
-  displayName: text(60).default(''),
-});
-export type PoolShare = z.infer<typeof PoolShareSchema>;
+/** The account-level consent, as the settings endpoint takes it. */
+export const PoolSettingsSchema = z.object({ share: z.boolean() });
+export type PoolSettings = z.infer<typeof PoolSettingsSchema>;
 
 export const PoolReportSchema = z.object({
   reason: z.enum(['spam', 'wrong', 'offensive', 'other']),
   note: text(300).default(''),
 });
 
-/** The facts of one listing, as every account sees them. */
+/**
+ * The facts of one listing, as every account sees them. Public event facts
+ * only: nothing here says who shares, adopted or goes to the event, so there
+ * is no contributor count, no names and no timestamps that move when another
+ * account joins.
+ */
 export interface PoolListing {
   id: string;
   name: string;
@@ -82,15 +74,8 @@ export interface PoolListing {
   dateEnd: string;
   url: string;
   description: string;
-  /** Distinct accounts that share this event. */
-  going: number;
-  /** Display names of contributors who opted in; may be shorter than `going`. */
-  names: string[];
-  /** The caller contributes to it (can edit or withdraw). */
-  mine: boolean;
   /** The caller already quick-added it. */
   added: boolean;
-  updatedAt: number;
 }
 
 /** Same name, same start, same city is the same event; case, accents and punctuation do not matter. */

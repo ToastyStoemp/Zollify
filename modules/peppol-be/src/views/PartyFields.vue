@@ -9,6 +9,13 @@ import { lookupPeppol } from '../api';
  * documents - with a check against the public Peppol Directory.
  */
 const party = defineModel<PeppolParty>({ required: true });
+/**
+ * The business profile's values, when this is the seller. A blank field then
+ * reads as "same as the profile", shown as the placeholder; only a value that
+ * differs is kept.
+ */
+const props = defineProps<{ profile?: Partial<PeppolParty> }>();
+const ph = (k: keyof PeppolParty, fallback = ''): string => props.profile?.[k]?.toString() || fallback;
 
 const SCHEMES = [
   { id: '0208', label: 'Belgian enterprise number (0208)' },
@@ -24,7 +31,7 @@ const lookup = ref<string | null>(null);
 async function check(): Promise<void> {
   lookup.value = 'Checking…';
   try {
-    const r = await lookupPeppol(party.value.peppolScheme, party.value.peppolId);
+    const r = await lookupPeppol(party.value.peppolScheme || ph('peppolScheme', '0208'), party.value.peppolId || ph('peppolId'));
     lookup.value = r.registered === null ? (r.message ?? 'Could not check.') : r.registered ? `On Peppol${r.name ? ` as ${r.name}` : ''}.` : 'Not found on Peppol - they cannot receive Peppol invoices yet.';
   } catch {
     lookup.value = 'Could not check.';
@@ -33,7 +40,7 @@ async function check(): Promise<void> {
 /** A Belgian enterprise number fills in the VAT number and the Peppol identifier, the usual case. */
 function fromEnterpriseNumber(): void {
   const p = party.value;
-  if (p.country !== 'BE' || !isBelgianEnterpriseNumber(p.companyId)) return;
+  if ((p.country || ph('country', 'BE')) !== 'BE' || !isBelgianEnterpriseNumber(p.companyId)) return;
   const kbo = p.companyId.replace(/\D/g, '');
   if (!p.vatNumber) p.vatNumber = `BE${kbo}`;
   if (!p.peppolId) {
@@ -43,7 +50,7 @@ function fromEnterpriseNumber(): void {
 }
 const kboHint = (): string | null => {
   const p = party.value;
-  if (p.country !== 'BE') return null;
+  if ((p.country || ph('country', 'BE')) !== 'BE') return null;
   if (p.companyId && !isBelgianEnterpriseNumber(p.companyId)) return 'Not a valid enterprise number.';
   if (p.vatNumber && !normaliseBelgianVat(p.vatNumber)) return 'Not a valid Belgian VAT number.';
   return null;
@@ -52,23 +59,24 @@ const kboHint = (): string | null => {
 
 <template>
   <div class="party">
-    <label class="wide"><span>Name</span><input v-model="party.name" type="text" autocomplete="organization" /></label>
-    <label class="wide"><span>Street and number</span><input v-model="party.street" type="text" autocomplete="street-address" /></label>
-    <label><span>Postcode</span><input v-model="party.postalCode" type="text" autocomplete="postal-code" /></label>
-    <label><span>City</span><input v-model="party.city" type="text" autocomplete="address-level2" /></label>
-    <label><span>Country</span><input v-model="party.country" type="text" maxlength="2" placeholder="BE" /></label>
-    <label><span>Email</span><input v-model="party.email" type="email" /></label>
-    <label><span>{{ party.country === 'BE' ? 'Enterprise number (KBO/BCE)' : 'Company number' }}</span><input v-model="party.companyId" type="text" placeholder="0123.456.749" @blur="fromEnterpriseNumber" /></label>
-    <label><span>VAT number</span><input v-model="party.vatNumber" type="text" placeholder="BE0123456749" /></label>
+    <label class="wide"><span>Name</span><input v-model="party.name" type="text" autocomplete="organization" :placeholder="ph('name')" /></label>
+    <label class="wide"><span>Street and number</span><input v-model="party.street" type="text" autocomplete="street-address" :placeholder="ph('street')" /></label>
+    <label><span>Postcode</span><input v-model="party.postalCode" type="text" autocomplete="postal-code" :placeholder="ph('postalCode')" /></label>
+    <label><span>City</span><input v-model="party.city" type="text" autocomplete="address-level2" :placeholder="ph('city')" /></label>
+    <label><span>Country</span><input v-model="party.country" type="text" maxlength="2" :placeholder="ph('country', 'BE')" /></label>
+    <label><span>Email</span><input v-model="party.email" type="email" :placeholder="ph('email')" /></label>
+    <label><span>{{ (party.country || ph('country', 'BE')) === 'BE' ? 'Enterprise number (KBO/BCE)' : 'Company number' }}</span><input v-model="party.companyId" type="text" :placeholder="ph('companyId', '0123.456.749')" @blur="fromEnterpriseNumber" /></label>
+    <label><span>VAT number</span><input v-model="party.vatNumber" type="text" :placeholder="ph('vatNumber', 'BE0123456749')" /></label>
     <p v-if="kboHint()" class="warn wide">{{ kboHint() }}</p>
     <fieldset class="wide">
       <legend>Peppol address</legend>
       <div class="row">
         <select v-model="party.peppolScheme" aria-label="Identifier type">
+          <option v-if="profile" value="">{{ profile.peppolScheme ? 'As on your Business profile' : 'Default' }}</option>
           <option v-for="s in SCHEMES" :key="s.id" :value="s.id">{{ s.label }}</option>
         </select>
-        <input v-model="party.peppolId" type="text" aria-label="Peppol identifier" placeholder="0123456749" />
-        <button type="button" :disabled="!party.peppolId" @click="check">Check</button>
+        <input v-model="party.peppolId" type="text" aria-label="Peppol identifier" :placeholder="ph('peppolId', '0123456749')" />
+        <button type="button" :disabled="!(party.peppolId || ph('peppolId'))" @click="check">Check</button>
       </div>
       <small v-if="lookup" class="hint">{{ lookup }}</small>
     </fieldset>

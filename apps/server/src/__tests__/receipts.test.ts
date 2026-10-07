@@ -291,7 +291,9 @@ describe('online receipts', () => {
   });
 
   describe('footer links', () => {
-    const putLinks = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', headers: auth(), payload: payload as object });
+    // The links are the business profile's; only the switches are saved through the module.
+    const putLinks = (links: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links } as object });
+    const putToggles = (payload: unknown) => app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', headers: auth(), payload: payload as object });
     const day = (offset: number) => {
       const d = new Date();
       d.setDate(d.getDate() + offset);
@@ -332,8 +334,22 @@ describe('online receipts', () => {
     });
 
     it('needs a sign-in to change them, and prints nothing by default', async () => {
-      expect((await app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', payload: { webstore: 'https://x.example.com' } })).statusCode).toBe(401);
+      expect((await app.inject({ method: 'PUT', url: '/api/m/pos/receipt-links', payload: { showOnPrint: true } })).statusCode).toBe(401);
       expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json().showOnPrint).toBe(false);
+    });
+
+    it('keeps the switches in Receipts and the links in the profile, whichever is saved last', async () => {
+      const before = (await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json();
+      // Link fields sent to the receipt endpoint are ignored: the profile is the one place to edit them.
+      const res = await putToggles({ showOnPrint: true, showEvents: false, webstore: 'https://elsewhere.example.com' });
+      expect(res.json()).toMatchObject({ webstore: before.webstore, showOnPrint: true, showEvents: false });
+      const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+      expect(profile.links.webstore).toBe('https://shop.example.com/');
+      // Saving the profile again leaves the switches alone.
+      await putLinks({ facebook: 'https://facebook.com/harbourprints' });
+      expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json()).toMatchObject({ showOnPrint: true, facebook: 'https://facebook.com/harbourprints' });
+      await putToggles({ showOnPrint: false, showEvents: false });
+      await putLinks({ facebook: '' });
     });
 
     it('renders links as text and anchors that open safely', async () => {
@@ -359,7 +375,7 @@ describe('online receipts', () => {
       await app.inject({ method: 'PUT', url: '/api/m/public-events/config', headers: auth(), payload: { slug: 'harbour-prints' } });
       expect((await lookup(TOKEN)).json().nextEvents).toBeUndefined();
 
-      expect((await putLinks({ webstore: 'https://shop.example.com', showEvents: true })).statusCode).toBe(200);
+      expect((await putToggles({ showEvents: true })).statusCode).toBe(200);
       expect((await app.inject({ method: 'PUT', url: '/api/m/public-events/overlay/ev-hid', headers: auth(), payload: { hidden: true } })).statusCode).toBe(200);
       const on = (await lookup(TOKEN)).json();
       expect(on.nextEvents.map((e: { name: string }) => e.name)).toEqual(['Next A', 'Next B', 'Next C']);
@@ -374,6 +390,66 @@ describe('online receipts', () => {
       // Page unpublished: gone, because the page itself would not show them.
       await app.inject({ method: 'PUT', url: '/api/m/public-events/config', headers: auth(), payload: { slug: null } });
       expect((await lookup(TOKEN)).json().nextEvents).toBeUndefined();
+    });
+  });
+
+  describe('links kept by the first version', () => {
+    const db = () => app.zollify.db;
+    const profileOf = () => JSON.parse((db().prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string }).profile) as { links?: Record<string, string>; artist: { companyName: string } };
+    const setLegacy = (socials: unknown) =>
+      db().prepare('INSERT INTO pos_receipt_socials (accountId, socials, updatedAt) VALUES (?, ?, 1) ON CONFLICT(accountId) DO UPDATE SET socials = excluded.socials').run(accountId, JSON.stringify(socials));
+    /** A profile that never had links, as one from before they moved. */
+    const forgetLinks = () => {
+      const { links: _links, ...rest } = profileOf();
+      db().prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(JSON.stringify(rest), accountId);
+    };
+    const legacy = { webstore: 'https://old.example.com/', instagram: 'https://www.instagram.com/oldbooth', showOnPrint: true, showEvents: false };
+
+    it('is shown as a fallback while the profile has never had links', async () => {
+      forgetLinks();
+      setLegacy(legacy);
+      const r = (await lookup(TOKEN)).json();
+      expect(r.links).toEqual([
+        { label: 'Webstore', url: 'https://old.example.com/' },
+        { label: 'Instagram', url: 'https://www.instagram.com/oldbooth' },
+      ]);
+      expect((await app.inject({ method: 'GET', url: '/api/m/pos/receipt-links', headers: auth() })).json()).toMatchObject({ webstore: 'https://old.example.com/', showOnPrint: true });
+      // Reading changes nothing.
+      expect(profileOf().links).toBeUndefined();
+    });
+
+    it('is copied into a profile that has none, and the table stays readable', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      expect(migrateReceiptSocials(db())).toBe(1);
+      expect(profileOf().links).toMatchObject({ webstore: 'https://old.example.com/', instagram: 'https://www.instagram.com/oldbooth' });
+      // Nothing else in the profile moved.
+      expect(profileOf().artist.companyName).toBe('Harbour Prints');
+      expect((db().prepare('SELECT socials FROM pos_receipt_socials WHERE accountId = ?').get(accountId) as { socials: string }).socials).toContain('old.example.com');
+      // Running it again is a no-op.
+      expect(migrateReceiptSocials(db())).toBe(0);
+    });
+
+    it('never overwrites what the profile has, and clearing links on purpose is not undone by the old copy', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links: { webstore: 'https://new.example.com' } } });
+      setLegacy({ ...legacy, webstore: 'https://stale.example.com/' });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect(profileOf().links?.webstore).toBe('https://new.example.com/');
+
+      await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links: { webstore: '', instagram: '' } } });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect((await lookup(TOKEN)).json().links).toBeUndefined();
+    });
+
+    it('skips a stored row that no longer passes the checks', async () => {
+      const { migrateReceiptSocials } = await import('../modules/receipts');
+      forgetLinks();
+      setLegacy({ webstore: 'javascript:alert(1)' });
+      expect(migrateReceiptSocials(db())).toBe(0);
+      expect((await lookup(TOKEN)).json().links).toBeUndefined();
+      setLegacy('not an object');
+      expect(migrateReceiptSocials(db())).toBe(0);
+      setLegacy({ showOnPrint: false, showEvents: false });
     });
   });
 

@@ -164,3 +164,49 @@ describe('isolation', () => {
     expect((await call(owner, 'GET', '/lookup?scheme=abc&id=0123')).statusCode).toBe(400);
   });
 });
+
+describe('seller from the business profile', () => {
+  let token: string;
+  const putProfile = (artist: Record<string, string>) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(token), payload: { artist } });
+
+  it('fills the seller from the profile, so nothing is asked twice', async () => {
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(owner), payload: { newAccount: true } });
+    const reg = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'profile@peppol.test', password: PASSWORD, inviteCode: invite.json().code } })).json();
+    token = reg.accessToken;
+    setEnabled(app.zollify.db, reg.user.accountId, 'peppol-be', true);
+    const put = await putProfile({ companyName: 'Atelier Rose', street: 'Rue Haute 1', postCodeCity: '1000 Brussels', countryOfOrigin: 'Belgium', email: 'rose@example.test', enterpriseNumber: SELLER });
+    expect(put.statusCode, put.body).toBe(200);
+
+    // Only the Peppol-specific details are saved in the module.
+    const saved = await call(token, 'PUT', '/settings', { iban: 'BE68539007547034', name: '', vatNumber: '' });
+    expect(saved.statusCode, saved.body).toBe(200);
+    const { settings, overrides, fromProfile } = (await call(token, 'GET', '/settings')).json();
+    expect(overrides).toMatchObject({ name: '', street: '', iban: 'BE68539007547034' });
+    expect(settings).toMatchObject({ name: 'Atelier Rose', street: 'Rue Haute 1', postalCode: '1000', city: 'Brussels', country: 'BE', email: 'rose@example.test', vatNumber: `BE${SELLER}`, peppolScheme: '0208', peppolId: SELLER });
+    expect(fromProfile.name).toBe('Atelier Rose');
+
+    const draft = (await call(token, 'POST', '/documents', invoice())).json().document;
+    const issued = await call(token, 'POST', `/documents/${draft.id}/issue`);
+    expect(issued.statusCode, issued.body).toBe(200);
+    const xml = (await call(token, 'GET', `/documents/${draft.id}/xml`)).body;
+    expect(xml).toContain('Atelier Rose');
+    expect(xml).toContain('Rue Haute 1');
+
+    // A later profile change reaches new invoices and never the issued one.
+    await putProfile({ companyName: 'Atelier Rose BV' });
+    expect((await call(token, 'GET', `/documents/${draft.id}/xml`)).body).not.toContain('Atelier Rose BV');
+    expect((await call(token, 'GET', '/settings')).json().settings.name).toBe('Atelier Rose BV');
+  });
+
+  it('keeps a value that differs from the profile, and what an account had before', async () => {
+    await call(token, 'PUT', '/settings', { iban: 'BE68539007547034', name: 'Rose Trading' });
+    expect((await call(token, 'GET', '/settings')).json().settings).toMatchObject({ name: 'Rose Trading', street: 'Rue Haute 1' });
+    // The full settings an older version stored still load as they were.
+    expect((await call(owner, 'GET', '/settings')).json().settings).toMatchObject({ name: 'Renamed BV', companyId: SELLER });
+  });
+
+  it('refuses a settings change that is not valid', async () => {
+    expect((await call(token, 'PUT', '/settings', { country: 'Belgium' })).statusCode).toBe(400);
+    expect((await call(token, 'PUT', '/settings', { peppolScheme: 'abc' })).statusCode).toBe(400);
+  });
+});

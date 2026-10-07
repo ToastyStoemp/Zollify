@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { Transaction } from '@zollify/shared';
+import { EMPTY_RECEIPT_SOCIALS, type ReceiptSocials, type Transaction } from '@zollify/shared';
 import { CountryPicker } from '@zollify/ui';
 import { LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, type ArtistInfo, type ReceiptLine } from '../receipt';
 import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
-import { pushBranding } from '../lib/branding';
+import { pushBranding, pushSocials, serverSocials } from '../lib/branding';
 import { receiptQrPng } from '../lib/after-sale';
 import ReceiptPreview from '../components/ReceiptPreview.vue';
 
@@ -35,6 +35,8 @@ const sampleQrB64 = ref('');
 const logoB64 = ref('');
 const printLogoB64 = ref('');
 const saved = ref(false);
+const socials = reactive<ReceiptSocials>({ ...EMPTY_RECEIPT_SOCIALS });
+const socialsSaved = ref(false);
 const error = ref<string | null>(null);
 
 onMounted(async () => {
@@ -51,6 +53,8 @@ onMounted(async () => {
     sampleQrB64.value = (await receiptQrPng('SAMPLEsampleSAMPLE0000')) ?? '';
     logoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '';
     printLogoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoB64)) ?? '';
+    const remote = await serverSocials();
+    if (remote) Object.assign(socials, remote);
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load receipt settings.';
   }
@@ -95,6 +99,18 @@ async function shareBranding(patch: { logo?: string | null; footer?: string | nu
     await pushBranding(patch);
   } catch {
     sdk().ui.toast('Saved here, but the online receipt could not be updated - try again when online.', { kind: 'warning' });
+  }
+}
+
+/** Account-level, so saved on the server (which validates and canonicalises) rather than per device. */
+async function saveSocials(): Promise<void> {
+  error.value = null;
+  try {
+    Object.assign(socials, await pushSocials({ ...socials }));
+    socialsSaved.value = true;
+    setTimeout(() => (socialsSaved.value = false), 2500);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save those links.';
   }
 }
 
@@ -173,6 +189,26 @@ const previewLines = computed<ReceiptLine[]>(() =>
         <p class="hint">The footer text and logo also appear on the online receipt and customer displays.</p>
         <button type="submit" class="primary">Save</button>
         <p v-if="saved" class="ok" role="status">Saved.</p>
+
+        <fieldset>
+          <legend>Webstore and socials</legend>
+          <p class="hint">Shown as "find us online" links under the online receipt. https links only; Instagram and TikTok also accept a plain handle.</p>
+          <div class="grid">
+            <label><span>Webstore</span><input v-model="socials.webstore" type="text" inputmode="url" placeholder="https://shop.example.com" /></label>
+            <label><span>Instagram</span><input v-model="socials.instagram" type="text" placeholder="@yourbooth" /></label>
+            <label><span>TikTok</span><input v-model="socials.tiktok" type="text" placeholder="@yourbooth" /></label>
+            <label><span>Facebook</span><input v-model="socials.facebook" type="text" inputmode="url" placeholder="https://facebook.com/yourbooth" /></label>
+            <label><span>Bluesky</span><input v-model="socials.bluesky" type="text" inputmode="url" placeholder="https://bsky.app/profile/you.bsky.social" /></label>
+            <label><span>Mastodon</span><input v-model="socials.mastodon" type="text" inputmode="url" placeholder="https://mastodon.social/@you" /></label>
+            <label><span>YouTube</span><input v-model="socials.youtube" type="text" inputmode="url" placeholder="https://youtube.com/@yourbooth" /></label>
+            <label><span>Other link label</span><input v-model="socials.otherLabel" type="text" maxlength="30" placeholder="Newsletter" /></label>
+            <label><span>Other link</span><input v-model="socials.otherUrl" type="text" inputmode="url" placeholder="https://" /></label>
+          </div>
+          <label class="inline"><input v-model="socials.showEvents" type="checkbox" /><span>List my next 3 public events on the online receipt (needs the published Public events page)</span></label>
+          <label class="inline"><input v-model="socials.showOnPrint" type="checkbox" /><span>Also print these links as text on the paper receipt</span></label>
+          <button type="button" class="primary" @click="saveSocials">Save links</button>
+          <p v-if="socialsSaved" class="ok" role="status">Saved.</p>
+        </fieldset>
 
         <h3>Logo</h3>
         <p class="hint">Printed at the top of the receipt. Scaled to {{ LOGO_MAX_PX }}px wide and flattened onto white for the printer, which has no transparency.</p>

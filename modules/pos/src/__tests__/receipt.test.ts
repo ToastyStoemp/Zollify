@@ -145,3 +145,22 @@ describe('printed receipt amounts', () => {
     expect(lines.join('\n')).not.toContain('incl. VAT');
   });
 });
+
+describe('printed footer links', () => {
+  const lines = (linkLines?: string[]): string[] =>
+    buildReceiptLines(sale(), 'Con', { artist: {}, logoB64: '', footerText: 'Thanks!', linkLines })
+      .filter((l) => l.kind === 'text')
+      .map((l) => l.text ?? '');
+
+  it('prints nothing extra by default', () => {
+    expect(lines()).toEqual(lines([]));
+    expect(lines().join('\n')).not.toContain('Webstore');
+  });
+
+  it('prints each link as centred plain text within the paper width', () => {
+    const out = lines(['Webstore: shop.example.com', 'Instagram: www.instagram.com/harbourprints']);
+    expect(out.some((l) => l.includes('Webstore: shop.example.com'))).toBe(true);
+    expect(out.every((l) => l.length <= 32)).toBe(true);
+    expect(out.indexOf('Thanks!')).toBeLessThan(out.findIndex((l) => l.includes('Webstore')));
+  });
+});

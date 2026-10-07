@@ -7,6 +7,7 @@ import cookie from '@fastify/cookie';
 import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
+import { registerAnonymousBodyLimit } from './body-limit';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
 import { isEnabled, listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
 import { loadModuleStore } from './modules/registry';
@@ -22,6 +23,7 @@ import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
 import { registerEventFileRoutes } from './routes/event-files';
+import { registerUploadErrors, uploadConfig } from './upload-limits';
 import { registerUpdateRoutes } from './routes/updates';
 import { registerShellUpdateRoutes } from './routes/shell-updates';
 import { registerFxRoutes } from './routes/fx';
@@ -110,13 +112,15 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     },
     // Trusting every X-Forwarded-For hop would let anyone pick their own IP and step around the rate limits.
     trustProxy: opts.trustProxy === false ? false : ((hops: number) => (_addr: string, hop: number) => hop < hops)(opts.trustProxy === true ? 1 : opts.trustProxy),
-    // Generous on purpose: a backup restore pushes hundreds of image
-    // thumbnails and the ledger accepts invoice PDFs. Rate limiting and
-    // authentication bound who can send this much, not the size itself.
-    bodyLimit: 32 * 1024 * 1024,
+    // A modest default (ZOLLIFY_MAX_BODY_MB). Routes that take files, and the
+    // sync push, raise it for themselves; Fastify refuses a body over its limit
+    // from Content-Length, before reading it.
+    bodyLimit: uploadConfig().maxBodyBytes,
   });
 
   const db = openDb(opts.dataDir);
+  // Release SQLite after the other shutdown hooks have stopped.
+  app.addHook('onClose', async () => { if (db.open) db.close(); });
   migrateEntitlements(db);
   await seedOwner(db);
 
@@ -167,7 +171,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       // The health probe comes from the container runtime and the deploy
       // script over plain loopback HTTP; it carries nothing worth protecting.
       if (req.url === '/health') return undefined;
-      const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
+      const proto = req.protocol;
       if (proto !== 'https') {
         return reply.code(403).send({ error: 'https_required', message: 'HTTPS is required.' });
       }
@@ -203,12 +207,8 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   app.decorate('db', db);
-  // Large bodies are for signed-in work (backups, invoice PDFs); without a token
-  // nothing big is read, so nobody can make the server parse 32 MB for free.
-  app.addHook('onRequest', async (req, reply) => {
-    const size = Number(req.headers['content-length'] ?? 0);
-    if (size > 256 * 1024 && !req.headers.authorization) return reply.code(413).send({ error: 'Request too large.' });
-  });
+  registerUploadErrors(app);
+  registerAnonymousBodyLimit(app);
   app.decorate('authenticate', authenticate);
   // Registered before the routes so its hooks see every auth request and
   // response, including ones added later.

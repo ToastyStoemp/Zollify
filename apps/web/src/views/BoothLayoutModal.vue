@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { BOOTH_LAYOUT_MAX_BYTES, parseBoothLayout, sanitizeBoothLayout, summarizeBoothLayout } from '@zollify/shared';
+import { checkPickedFile, parseBoothLayout, sanitizeBoothLayout, summarizeBoothLayout } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   copyEventBoothLayout,
@@ -77,8 +77,9 @@ async function onPick(e: Event): Promise<void> {
   input.value = '';
   if (!file) return;
   error.value = null;
-  if (file.size > BOOTH_LAYOUT_MAX_BYTES) {
-    error.value = 'That file is too large to be a cube design.';
+  const problem = await checkPickedFile('jsonImport', file);
+  if (problem) {
+    error.value = problem;
     return;
   }
   await importText(await file.text(), file.name);

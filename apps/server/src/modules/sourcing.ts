@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import type { ModuleContext, ServerModule } from '@zollify/server-core';
+import { base64BodyLimit, maxBytesFor } from '@zollify/shared';
+import { checkQuota, decodeUpload, sendRefusal, type ModuleContext, type ServerModule } from '@zollify/server-core';
 
 /**
  * Sourcing - the server half, ported from ZollSource.
@@ -51,12 +52,9 @@ const FileBody = z.object({
   filename: z.string().min(1).max(200),
   mime: z.string().max(120).default('application/octet-stream'),
   kind: z.enum(['design', 'proof']).default('design'),
-  dataB64: z.string().min(1),
+  dataB64: z.string().min(1).max(base64BodyLimit(maxBytesFor('designFile'))),
 });
 const Approval = z.object({ approval: z.enum(['approved', 'rejected', 'pending']), note: z.string().max(500).optional() });
-
-/** 25 MB of base64 - a PSD or a print-ready PDF, not a video. */
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
 const isColl = (s: string): s is Coll => (COLLECTIONS as readonly string[]).includes(s);
 
@@ -108,18 +106,21 @@ export const sourcingServerModule: ServerModule = {
     });
 
     // ── Design files and proofs ───────────────────────────────────────────
-    app.post('/files', async (req, reply) => {
+    app.post('/files', { bodyLimit: base64BodyLimit(maxBytesFor('designFile')) }, async (req, reply) => {
       const who = ctx.identity(req);
       const parsed = FileBody.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send({ error: 'invalid_request', message: 'A file needs a dossier, a name and its bytes.' });
       const f = parsed.data;
-      const bytes = Buffer.from(f.dataB64, 'base64');
-      if (!bytes.length || bytes.length > MAX_FILE_BYTES) return reply.code(413).send({ error: 'too_large', message: 'Files up to 25 MB.' });
+      const file = decodeUpload('designFile', f.dataB64, { name: f.filename, claimedMime: f.mime });
+      if (!file.ok) return sendRefusal(reply, file);
+      const { bytes } = file;
+      const over = checkQuota(ctx.db, who.accountId, bytes.length);
+      if (over) return sendRefusal(reply, over);
       // Re-uploading the same filename keeps a version trail.
       const prev = ctx.db
         .prepare('SELECT MAX(version) AS v FROM sourcing_files WHERE accountId = ? AND dossierId = ? AND filename = ?')
         .get(who.accountId, f.dossierId, f.filename) as { v: number | null };
-      const meta = { id: crypto.randomUUID(), dossierId: f.dossierId, kind: f.kind, filename: f.filename, mime: f.mime, size: bytes.length, version: (prev.v ?? 0) + 1, approval: f.kind === 'proof' ? 'pending' : null, note: null, createdAt: Date.now() };
+      const meta = { id: crypto.randomUUID(), dossierId: f.dossierId, kind: f.kind, filename: f.filename, mime: file.mime, size: bytes.length, version: (prev.v ?? 0) + 1, approval: f.kind === 'proof' ? 'pending' : null, note: null, createdAt: Date.now() };
       ctx.db
         .prepare('INSERT INTO sourcing_files (accountId, id, dossierId, kind, filename, mime, size, version, approval, note, bytes, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(who.accountId, meta.id, meta.dossierId, meta.kind, meta.filename, meta.mime, meta.size, meta.version, meta.approval, meta.note, bytes, meta.createdAt);

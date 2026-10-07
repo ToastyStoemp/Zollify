@@ -28,6 +28,18 @@ What the server guarantees, and the settings that matter for it. Regression test
 
 - **Commission tracking** (`/p/commissions/<token>`): the token is 24 random bytes, one per commission, and an admin can replace it (the old link then answers "not available"). The page is built from a fixed list of fields (title, status, updates written for the customer, due date, amounts, pickup address); contact details, details and internal notes never leave. It is rendered on the server with every value escaped, has no script, is rate limited per IP, and is `noindex`, `no-store` and `no-referrer`. A wrong, malformed or retired token and a disabled module all give the same answer. Customer details live in the module's own server tables, not in the synced op-log, and an admin can erase a commission.
 
+## File uploads
+
+One mechanism covers every upload: event files, ledger invoices, invoice scanning, voucher PDFs, sourcing design files and proofs, and the receipt logo. The rules live in `packages/shared/src/upload-limits.ts` (the app checks them before sending) and `packages/server-core/src/upload-limits.ts` (the server enforces them). Tests: `packages/shared/src/__tests__/upload-limits.test.ts`, `packages/server-core/src/__tests__/upload-limits.test.ts`, `apps/server/src/__tests__/uploads.test.ts`.
+
+- **The real type is read from the file's first bytes.** The browser's Content-Type and the file's name are only checked against it: a PDF called `.png`, or an image that says it is a PDF, is refused with a 415, and the type that is stored is the one the bytes prove.
+- **HTML, SVG and XML are never accepted**, whatever they are called or labelled, and neither are names ending in `.html`, `.svg`, `.js` or `.exe`.
+- **Limits** (a picture 5 MB, a PDF 10 MB, the invoice scanner 5 MB, a design file 25 MB, the receipt logo 256 KB) are checked per type. A request body over its route's limit is refused from its Content-Length, before any of it is read.
+- **Storage quota**: event files, ledger invoices and sourcing files together count toward one limit per account, and an event holds a fixed number of files.
+- **Errors are readable**: 400 (empty or unreadable), 413 (too large, with the limit), 415 (wrong type, with what is allowed).
+- Imports (backups, the ZollTool zip, payments exports) are read in the browser and never uploaded as files; their size caps protect the device.
+- A stored file is never served as a raw URL. If a route ever does, `downloadHeaders()` makes it a download, with `nosniff` and a sandboxing CSP.
+
 ## Outgoing requests (SSRF)
 
 - **Webhooks**: public https addresses only. Loopback, private, link-local, carrier NAT, benchmark ranges and IPv6 forms that wrap them are refused. The address is checked again when connecting, so DNS rebinding does not help, and only a few KB of the answer is read.
@@ -67,6 +79,9 @@ Public events lets an account share its events to a pool every account on the se
 | `ZOLLIFY_TRUST_PROXY` | `true` (default) trusts one reverse proxy in front; a number trusts that many hops; `false` trusts none. More than you have lets clients choose their own IP and step around rate limits. |
 | `PUBLIC_ORIGIN` | The address people reach the server at (e.g. `https://pos.example.com`), used for links in emails. |
 | `WEBHOOK_ALLOW_PRIVATE=1` | Lets webhooks reach private addresses. Only for LAN-only installs. |
+| `ZOLLIFY_ACCOUNT_STORAGE_MB` | Stored attachments one account may keep in total, in MB (default 500). |
+| `ZOLLIFY_EVENT_FILES_MAX` | Files one event may hold (default 20). |
+| `ZOLLIFY_MAX_BODY_MB` | Request body limit for routes that take no file, in MB (default 8). Routes that take a file set their own. |
 | `CAPTCHA_BITS`, `SIGNUP_CAPTCHA_BITS`, `RECEIPT_CAPTCHA_BITS` | Proof-of-work difficulty; registration never accepts less than `CAPTCHA_BITS`. |
 
 ## Known limits

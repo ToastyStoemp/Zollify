@@ -108,6 +108,11 @@ export async function importProductImage(image: ImageRec): Promise<void> {
 
 export async function deleteImage(imageId: string): Promise<void> {
   await db().images.delete(imageId);
+  for (const kind of ['thumb', 'full'] as const) {
+    const url = urlCache.get(`${imageId}:${kind}`);
+    if (url) URL.revokeObjectURL(url);
+    urlCache.delete(`${imageId}:${kind}`);
+  }
 }
 
 // ── Object-URL cache for rendering thumbs/fulls ────────────────────────────

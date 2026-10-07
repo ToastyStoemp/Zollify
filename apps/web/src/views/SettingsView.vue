@@ -85,8 +85,8 @@ const corePanels: Panel[] = [
   },
 ];
 
-/** Phone: the list and a panel are two screens, not two columns. */
-const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null;
+/** Below the sidebar breakpoint (900, see styles.css): the list and a panel are two screens, not two columns. */
+const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 900px)') : null;
 const phone = ref(phoneQuery?.matches ?? false);
 const onPhoneChange = (e: MediaQueryListEvent): void => {
   phone.value = e.matches;
@@ -194,7 +194,7 @@ nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zf
    component, not this one. Centers whatever max-width a panel sets for
    itself; a panel with no opinion (fills 100%) is unaffected either way. */
 .panel > :deep(*) { margin-inline: auto; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   nav { gap: .35rem; }
   nav button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 2.8rem; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); }

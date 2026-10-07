@@ -365,7 +365,8 @@ function initCalendar() {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   };
-  var iso = function (d) { return d.toISOString().slice(0, 10); };
+  // Local getters: toISOString() would shift a local-midnight date to the day before east of UTC.
+  var iso = function (d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); };
   var within = function (day, ev) { return day >= ev.start && day <= (ev.end || ev.start); };
   var label = function (ev) {
     var extra = [];
@@ -425,6 +426,9 @@ export const publicEventsServerModule: ServerModule = {
   id: 'public-events',
   minRole: 'admin',
   migrate,
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['public_events_config', 'public_events_overlay']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   /** Authenticated: the booth's own settings and a preview of what visitors see. */
   routes: (ctx: ModuleContext) => async (app) => {

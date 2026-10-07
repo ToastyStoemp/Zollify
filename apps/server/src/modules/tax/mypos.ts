@@ -1,4 +1,4 @@
-import { dayEndISO, dayStartISO, num, pick, round2, resolveMode, sleep, str, SourceError, type KvCache, type SourceRow } from './types';
+import { dayEndISO, dayStartISO, FETCH_TIMEOUT_MS, num, pick, round2, resolveMode, sleep, str, SourceError, type KvCache, type SourceRow } from './types';
 
 /**
  * myPOS Banking API client (via the myPOS API Gateway). Pulls the merchant's
@@ -135,7 +135,7 @@ export class MyposClient {
     if (!this.config.clientId || !this.config.clientSecret) throw new SourceError('Missing myPOS integration client id / secret.');
     const body = new URLSearchParams({ grant_type: 'client_credentials', client_id: this.config.clientId, client_secret: this.config.clientSecret });
     if (this.config.scope) body.set('scope', this.config.scope);
-    const res = await fetch(`${this.config.gatewayUrl}/api/v1/oauth/token`, { redirect: 'error',
+    const res = await fetch(`${this.config.gatewayUrl}/api/v1/oauth/token`, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
       body,
@@ -152,7 +152,7 @@ export class MyposClient {
     if (!force && this.session && this.session.expiresAt > now + 30_000) return this.session.value;
     if (!this.config.merchantClientId || !this.config.merchantClientSecret) throw new SourceError('Missing myPOS merchant client id / secret.');
     const token = await this.accessToken(force);
-    const res = await fetch(`${this.config.gatewayUrl}/api/v1/auth/session`, { redirect: 'error',
+    const res = await fetch(`${this.config.gatewayUrl}/api/v1/auth/session`, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       method: 'POST',
       headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ client_id: this.config.merchantClientId, client_secret: this.config.merchantClientSecret }),
@@ -203,7 +203,7 @@ export class MyposClient {
     for (let attempt = 0; ; attempt++) {
       const token = await this.accessToken();
       const session = await this.sessionId();
-      const res = await fetch(url, { redirect: 'error',
+      const res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
         headers: {
           authorization: `Bearer ${token}`,
           'x-session': session,

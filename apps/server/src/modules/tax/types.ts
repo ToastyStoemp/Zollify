@@ -33,6 +33,9 @@ export const pick = (row: Record<string, unknown>, keys: string[]): unknown => {
   for (const k of keys) if (row[k] != null) return row[k];
   return undefined;
 };
+/** No upstream call may hang a request forever; every provider fetch carries this cap. */
+export const FETCH_TIMEOUT_MS = 15_000;
+
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 export const dayStartISO = (d: string): string => (/T/.test(d) ? d : `${d}T00:00:00Z`);
 export const dayEndISO = (d: string): string => (/T/.test(d) ? d : `${d}T23:59:59Z`);

@@ -53,6 +53,9 @@ export const priceCardsServerModule: ServerModule = {
   id: 'price-cards',
   minRole: 'admin',
   migrate,
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['price_cards_tokens']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   routes: (ctx: ModuleContext) => async (app) => {
     /** Mints a fresh plugin token for the account, replacing any earlier one. */

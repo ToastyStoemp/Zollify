@@ -214,6 +214,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
   configureCaptchaKey(opts.jwtSecret);
+  // Every module drops what it keeps for the account; runs inside the caller's transaction.
+  const forgetAccount = (accountId: string): void => {
+    for (const m of opts.serverModules) m.onAccountDeleted?.(db, accountId);
+  };
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir, {
     // Modules set up accounts their invites created (a store's artist gets "My stores").
     accountCreated: (e) => {
@@ -225,6 +229,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
         }
       }
     },
+    accountDeleted: (accountId) => forgetAccount(accountId),
   });
   registerDeviceLinkRoutes(app, db);
   registerDeviceUserRoutes(app, db, opts.jwtSecret);
@@ -266,7 +271,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     }
   });
   registerDeviceRoutes(app, db);
-  registerAccountRoutes(app, db, opts.dataDir);
+  registerAccountRoutes(app, db, opts.dataDir, forgetAccount);
   registerNotificationRoutes(app, db);
   registerWebhookRoutes(app, db, webhooks);
   registerFxRoutes(app);

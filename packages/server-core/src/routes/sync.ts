@@ -158,11 +158,15 @@ export function registerSyncRoutes(
       bumpMetric(db, claims.accountId, 'opsReceived', accepted);
       if (txCount > 0) bumpMetric(db, claims.accountId, 'txCount', txCount);
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
-      try {
-        onOps(claims.accountId, fresh);
-      } catch (err) {
-        req.log.error({ err }, 'a module failed to handle pushed ops');
-      }
+      // Modules follow the ops after the push has been answered: the ops are
+      // already committed, and a slow module must not hold a till's sync.
+      setImmediate(() => {
+        try {
+          onOps(claims.accountId, fresh);
+        } catch (err) {
+          req.log.error({ err }, 'a module failed to handle pushed ops');
+        }
+      });
     }
     return result;
   });

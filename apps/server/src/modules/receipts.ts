@@ -424,6 +424,9 @@ function ipOf(req: FastifyRequest): string {
 export const receiptsServerModule: ServerModule = {
   id: MODULE_ID,
   migrate,
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['pos_branding']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {

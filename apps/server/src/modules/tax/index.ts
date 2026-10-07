@@ -140,6 +140,9 @@ export function taxServerModule(jwtSecret: string): ServerModule {
     id: 'tax',
     minRole: 'admin',
     migrate,
+    onAccountDeleted: (db, accountId) => {
+      for (const t of ['tax_config', 'tax_cache', 'tax_expenses', 'tax_bookings', 'tax_ai_usage']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    },
 
     routes: (ctx: ModuleContext) => async (app) => {
       const db = ctx.db;

@@ -37,6 +37,8 @@ const form = reactive({
   /** Per-store commission, blank = the default above. */
   storeCommission: {} as Record<string, string>,
   note: '',
+  iban: '',
+  bic: '',
   archived: false,
 });
 
@@ -50,6 +52,8 @@ function openNew(): void {
     storeIds: stores.value.length === 1 ? [stores.value[0]!.id] : [],
     storeCommission: {},
     note: '',
+    iban: '',
+    bic: '',
     archived: false,
   });
   formError.value = null;
@@ -64,6 +68,8 @@ function openEdit(c: Consignor): void {
     storeIds: [...c.storeIds],
     storeCommission: Object.fromEntries(Object.entries(c.storeCommission).map(([k, v]) => [k, String(v)])),
     note: c.note,
+    iban: c.iban,
+    bic: c.bic,
     archived: c.archived,
   });
   formError.value = null;
@@ -96,6 +102,8 @@ async function save(): Promise<void> {
       storeCommission,
       storeIds: [...form.storeIds],
       note: form.note.trim(),
+      iban: form.iban,
+      bic: form.bic,
       archived: form.archived,
     });
     editing.value = false;
@@ -225,7 +233,12 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
           <p v-if="form.storeIds.length > 1" class="hint">Shared between stores. Leave a store's commission blank to use the default.</p>
         </fieldset>
 
-        <label><span>Note</span><textarea v-model="form.note" rows="2" placeholder="Bank details, agreement, pickup schedule…" /></label>
+        <div class="two">
+          <label><span>IBAN</span><input v-model="form.iban" type="text" autocomplete="off" placeholder="DK50 0040 0440 1162 43" /></label>
+          <label><span>BIC</span><input v-model="form.bic" type="text" autocomplete="off" placeholder="Optional" /></label>
+        </div>
+        <small class="hint">Where you pay this artist - used for the bank payment file under Reports.</small>
+        <label><span>Note</span><textarea v-model="form.note" rows="2" placeholder="Agreement, pickup schedule…" /></label>
         <label v-if="editId" class="check"><input v-model="form.archived" type="checkbox" /> Archived - no longer consigning</label>
       </div>
       <template #footer>

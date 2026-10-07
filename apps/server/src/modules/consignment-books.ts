@@ -7,12 +7,19 @@ import {
   DEFAULT_BOOKS_SETTINGS,
   FEE_REASONS,
   FeeInputSchema,
+  invoiceLines,
+  invoiceNumber,
+  invoiceTotal,
   isTimeZone,
+  isValidIban,
+  journalCsv,
+  pain001,
   localDay,
   recentPeriods,
   reportCsv,
   reportPeriod,
   storeReport,
+  type ArtistInvoice,
   type BooksSettings,
   type ConsignmentFee,
   type ReportPeriod,
@@ -50,6 +57,19 @@ export function migrateBooks(db: Database.Database): void {
     CREATE TABLE IF NOT EXISTS consignment_settings (
       accountId TEXT PRIMARY KEY,
       doc       TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS consignment_invoices (
+      accountId   TEXT NOT NULL,
+      number      TEXT NOT NULL,
+      year        TEXT NOT NULL,
+      seq         INTEGER NOT NULL,
+      periodFrom  TEXT NOT NULL,
+      consignorId TEXT NOT NULL,
+      currency    TEXT NOT NULL,
+      doc         TEXT NOT NULL,
+      PRIMARY KEY (accountId, number),
+      UNIQUE (accountId, year, seq),
+      UNIQUE (accountId, periodFrom, consignorId, currency)
     );
     CREATE TABLE IF NOT EXISTS consignment_reports_sent (
       accountId  TEXT NOT NULL,
@@ -168,6 +188,59 @@ export async function sendClosedReports(svc: ModuleServices, now = Date.now()): 
     if (to && svc.mail.enabled && (await svc.mail.send({ to, ...reportMail(name, report, venueNamer(db, accountId)) }))) sent++;
   }
   return sent;
+}
+
+
+// ── Invoices and the payment file ───────────────────────────────────────────
+
+export function invoicesOf(db: Database.Database, accountId: string, periodFrom: string): ArtistInvoice[] {
+  const rows = db.prepare('SELECT doc FROM consignment_invoices WHERE accountId = ? AND periodFrom = ? ORDER BY seq').all(accountId, periodFrom) as { doc: string }[];
+  return rows.map((r) => JSON.parse(r.doc) as ArtistInvoice);
+}
+
+/**
+ * Number and freeze an invoice for every artist the closed period left
+ * something to bill, once. Numbers come from a gap-free sequence per year,
+ * taken inside one transaction, and an issued invoice is never rewritten: a
+ * fee dated into the period later shows on the next period's invoice.
+ */
+export function issueInvoices(db: Database.Database, accountId: string, period: ReportPeriod, now = Date.now()): ArtistInvoice[] {
+  const settings = booksSettings(db, accountId);
+  const report = reportFor(db, accountId, period);
+  const year = period.to.slice(0, 4);
+  db.transaction(() => {
+    const have = new Set((db.prepare('SELECT consignorId, currency FROM consignment_invoices WHERE accountId = ? AND periodFrom = ?').all(accountId, period.from) as { consignorId: string; currency: string }[]).map((r) => `${r.consignorId}|${r.currency}`));
+    const insert = db.prepare('INSERT INTO consignment_invoices (accountId, number, year, seq, periodFrom, consignorId, currency, doc) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const a of report.artists) {
+      if (have.has(`${a.consignorId}|${a.currency}`)) continue;
+      const lines = invoiceLines(a);
+      if (!lines.length) continue;
+      const seq = ((db.prepare('SELECT MAX(seq) AS m FROM consignment_invoices WHERE accountId = ? AND year = ?').get(accountId, year) as { m: number | null }).m ?? 0) + 1;
+      const number = invoiceNumber(settings.accounting.invoicePrefix, period.to, seq);
+      const invoice: ArtistInvoice = { number, date: period.to, period, consignorId: a.consignorId, consignorName: a.name, currency: a.currency, lines, total: invoiceTotal(lines), issuedAt: now };
+      insert.run(accountId, number, year, seq, period.from, a.consignorId, a.currency, JSON.stringify(invoice));
+    }
+  })();
+  return invoicesOf(db, accountId, period.from);
+}
+
+/**
+ * What each artist is owed at the end of the period, less anything paid
+ * since: the figure a payout settles, so paying twice - or after a manual
+ * payout - never pays the same money again.
+ */
+function owedAfter(db: Database.Database, accountId: string, period: ReportPeriod, only?: string[]): { consignorId: string; name: string; amount: number; currency: string }[] {
+  const report = reportFor(db, accountId, period);
+  const since = payoutsFor(db, accountId).filter((p) => p.date > period.to);
+  const out: { consignorId: string; name: string; amount: number; currency: string }[] = [];
+  for (const a of report.artists) {
+    if (only && !only.includes(a.consignorId)) continue;
+    if (!consignorRow(db, accountId, a.consignorId)) continue;
+    const already = since.filter((p) => p.consignorId === a.consignorId && p.currency === a.currency).reduce((s, p) => s + Math.round(p.amount * 100), 0);
+    const amount = (Math.round(a.balance * 100) - already) / 100;
+    if (amount > 0) out.push({ consignorId: a.consignorId, name: a.name, amount, currency: a.currency });
+  }
+  return out;
 }
 
 // ── Routes ──────────────────────────────────────────────────────────────────
@@ -309,6 +382,78 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
         .send(reportCsv(reportFor(db, who.accountId, period), venueNamer(db, who.accountId)));
     });
 
+    // ── Invoices, payment file, bookkeeping ──────────────────────────────
+
+    app.get<{ Params: { from: string } }>('/reports/:from/invoices', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      return { invoices: invoicesOf(db, who.accountId, period.from) };
+    });
+
+    /** Issue the period's invoices. A period still running cannot be invoiced: its figures would still move. */
+    app.post<{ Params: { from: string } }>('/reports/:from/invoices', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      if (period.to >= localDay(Date.now(), booksSettings(db, who.accountId).timeZone)) {
+        return reply.code(409).send({ error: 'period_open', message: 'This period is still running. Invoice it once it has closed.' });
+      }
+      return { invoices: issueInvoices(db, who.accountId, period) };
+    });
+
+    app.get<{ Params: { from: string } }>('/reports/:from/journal.csv', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      return reply
+        .header('content-type', 'text/csv; charset=utf-8')
+        .header('content-disposition', `attachment; filename="journal-${period.from}.csv"`)
+        .send(journalCsv(invoicesOf(db, who.accountId, period.from), booksSettings(db, who.accountId).accounting));
+    });
+
+    /**
+     * The ISO 20022 file that pays what the period left owing. Artists with no
+     * valid IBAN are left out and named, so the owner can fix the record and
+     * ask again; the file itself is only made when somebody can be paid.
+     */
+    app.post<{ Params: { from: string } }>('/reports/:from/payment-file', async (req, reply) => {
+      const who = ctx.identity(req);
+      const period = periodAt(who.accountId, req.params.from);
+      if (!period) return reply.code(404).send({ error: 'not_found' });
+      const body = PayBody.safeParse(req.body);
+      if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the date the bank should pay.' });
+      const { accounting } = booksSettings(db, who.accountId);
+      if (!isValidIban(accounting.payerIban) || !accounting.payerName) {
+        return reply.code(409).send({ error: 'no_payer', message: 'Add the account you pay from (name and IBAN) under Reports → Bookkeeping first.' });
+      }
+      const invoices = invoicesOf(db, who.accountId, period.from);
+      const included: { consignorId: string; name: string; amount: number; currency: string; reference: string }[] = [];
+      const skipped: { consignorId: string; name: string; reason: string }[] = [];
+      const payments = [];
+      for (const o of owedAfter(db, who.accountId, period, body.data.consignorIds)) {
+        const row = consignorRow(db, who.accountId, o.consignorId)!;
+        const doc = parseDoc(row.doc);
+        if (!isValidIban(doc.iban)) {
+          skipped.push({ consignorId: o.consignorId, name: o.name, reason: doc.iban ? 'The IBAN on file is not valid.' : 'No IBAN on file.' });
+          continue;
+        }
+        const reference = invoices.find((i) => i.consignorId === o.consignorId && i.currency === o.currency)?.number ?? `PAY-${period.from}-${o.consignorId.slice(0, 8)}`;
+        payments.push({ reference, name: o.name, iban: doc.iban, ...(doc.bic ? { bic: doc.bic } : {}), amount: o.amount, currency: o.currency, remittance: `${accountName(db, who.accountId) ?? 'Store'} ${reference} ${periodLabel(period)}` });
+        included.push({ consignorId: o.consignorId, name: o.name, amount: o.amount, currency: o.currency, reference });
+      }
+      if (!payments.length) return { xml: null, filename: null, included, skipped };
+      const now = new Date();
+      const xml = pain001({
+        messageId: `ZOLLIFY-${period.from}-${now.getTime().toString(36).toUpperCase()}`,
+        createdAt: now,
+        executionDate: body.data.date,
+        debtor: { name: accounting.payerName, iban: accounting.payerIban, ...(accounting.payerBic ? { bic: accounting.payerBic } : {}) },
+        payments,
+      });
+      return { xml, filename: `payments-${period.from}.xml`, included, skipped };
+    });
+
     /**
      * Pay out what the period left owing. Each artist gets what they were owed
      * at its end, less anything paid since - so pressing it twice, or after a
@@ -320,19 +465,12 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
       if (!period) return reply.code(404).send({ error: 'not_found' });
       const body = PayBody.safeParse(req.body);
       if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Pick the date the payouts were made.' });
-      const report = reportFor(db, who.accountId, period);
-      const since = payoutsFor(db, who.accountId).filter((p) => p.date > period.to);
       const insert = db.prepare('INSERT INTO consignment_payouts (accountId, id, consignorId, doc, createdAt) VALUES (?, ?, ?, ?, ?)');
       const made: { consignorId: string; amount: number; currency: string }[] = [];
-      for (const a of report.artists) {
-        if (body.data.consignorIds && !body.data.consignorIds.includes(a.consignorId)) continue;
-        if (!consignorRow(db, who.accountId, a.consignorId)) continue;
-        const already = since.filter((p) => p.consignorId === a.consignorId && p.currency === a.currency).reduce((s, p) => s + Math.round(p.amount * 100), 0);
-        const amount = (Math.round(a.balance * 100) - already) / 100;
-        if (amount <= 0) continue;
-        const doc = { consignorId: a.consignorId, storeId: null, amount, currency: a.currency, date: body.data.date, note: `Report ${periodLabel(period)}` };
-        insert.run(who.accountId, randomUUID(), a.consignorId, JSON.stringify(doc), Date.now());
-        made.push({ consignorId: a.consignorId, amount, currency: a.currency });
+      for (const o of owedAfter(db, who.accountId, period, body.data.consignorIds)) {
+        const doc = { consignorId: o.consignorId, storeId: null, amount: o.amount, currency: o.currency, date: body.data.date, note: `Report ${periodLabel(period)}` };
+        insert.run(who.accountId, randomUUID(), o.consignorId, JSON.stringify(doc), Date.now());
+        made.push({ consignorId: o.consignorId, amount: o.amount, currency: o.currency });
       }
       return { payouts: made };
     });

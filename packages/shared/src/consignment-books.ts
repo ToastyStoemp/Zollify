@@ -1,4 +1,5 @@
 import { csvCell } from './csv';
+import { AccountingSettingsSchema } from './consignment-accounting';
 import { z } from 'zod';
 import {
   baseFactor,
@@ -95,6 +96,8 @@ export const BooksSettingsSchema = z.object({
   artistDiscounts: z.boolean().default(true),
   /** The deepest discount an artist may set, in percent. */
   artistDiscountMaxPct: z.number().min(1).max(100).default(30),
+  /** Payout account, invoice numbering and ledger accounts for the bookkeeping export. */
+  accounting: AccountingSettingsSchema.prefault({}),
 });
 export type BooksSettings = z.infer<typeof BooksSettingsSchema>;
 export const DEFAULT_BOOKS_SETTINGS: BooksSettings = BooksSettingsSchema.parse({});

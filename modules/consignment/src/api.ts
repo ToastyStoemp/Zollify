@@ -8,6 +8,7 @@ import {
   type Workshop,
   type WorkshopInput,
   type ArtistConsignment,
+  type ArtistInvoice,
   type BooksSettings,
   type ConsignmentFee,
   type FeeInput,
@@ -137,6 +138,16 @@ export const loadReports = (): Promise<{ settings: BooksSettings; periods: Repor
 export const loadReport = (from: string): Promise<{ report: StoreReport; venues: Record<string, string> }> => sdk().http.get(`reports/${encodeURIComponent(from)}`);
 export const payReport = (from: string, date: string, consignorIds?: string[]): Promise<{ payouts: { consignorId: string; amount: number; currency: string }[] }> =>
   sdk().http.post(`reports/${encodeURIComponent(from)}/payouts`, { date, ...(consignorIds ? { consignorIds } : {}) });
+export interface PaymentFile {
+  xml: string | null;
+  filename: string | null;
+  included: { consignorId: string; name: string; amount: number; currency: string; reference: string }[];
+  skipped: { consignorId: string; name: string; reason: string }[];
+}
+export const loadInvoices = async (from: string): Promise<ArtistInvoice[]> => (await sdk().http.get<{ invoices: ArtistInvoice[] }>(`reports/${encodeURIComponent(from)}/invoices`)).invoices;
+export const issueInvoices = async (from: string): Promise<ArtistInvoice[]> => (await sdk().http.post<{ invoices: ArtistInvoice[] }>(`reports/${encodeURIComponent(from)}/invoices`, {})).invoices;
+export const paymentFile = (from: string, date: string, consignorIds?: string[]): Promise<PaymentFile> =>
+  sdk().http.post(`reports/${encodeURIComponent(from)}/payment-file`, { date, ...(consignorIds ? { consignorIds } : {}) });
 // ── Planner ────────────────────────────────────────────────────────────────
 
 export interface Planner {

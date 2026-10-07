@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { FEE_REASONS, fmtPrice, reportCsv, type BooksSettings, type FeeReason, type ReportPeriod, type StoreReport } from '@zollify/shared';
+import { FEE_REASONS, fmtPrice, journalCsv, reportCsv, type ArtistInvoice, type BooksSettings, type FeeReason, type ReportPeriod, type StoreReport } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { errorText, loadReport, loadReports, payReport, saveBooksSettings, today } from '../api';
+import { errorText, issueInvoices, loadInvoices, loadReport, loadReports, payReport, paymentFile, saveBooksSettings, today } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -19,6 +19,7 @@ const from = ref('');
 const report = ref<StoreReport | null>(null);
 const venues = ref<Record<string, string>>({});
 const loading = ref(false);
+const invoices = ref<ArtistInvoice[]>([]);
 
 async function loadList(): Promise<void> {
   const res = await loadReports();
@@ -34,6 +35,7 @@ async function loadOne(): Promise<void> {
     report.value = res.report;
     venues.value = res.venues;
     picked.value = new Set(res.report.artists.filter((a) => a.balance > 0).map((a) => a.consignorId));
+    invoices.value = await loadInvoices(from.value);
   } catch (err) {
     emit('error', errorText(err, 'Could not load the report.'));
   } finally {
@@ -83,6 +85,34 @@ async function payOut(): Promise<void> {
   }
 }
 
+// ── Invoices, payment file, bookkeeping ─────────────────────────────────────
+async function issue(): Promise<void> {
+  if (!report.value) return;
+  try {
+    invoices.value = await issueInvoices(report.value.period.from);
+    sdk().ui.toast(`${invoices.value.length} invoice${invoices.value.length === 1 ? '' : 's'} on record.`, { kind: 'success' });
+  } catch (err) {
+    emit('error', errorText(err, 'Could not issue the invoices.'));
+  }
+}
+async function downloadJournal(): Promise<void> {
+  if (!report.value || !settings.value) return;
+  await sdk().ui.saveFile(`journal-${report.value.period.from}.csv`, journalCsv(invoices.value, settings.value.accounting), 'text/csv');
+}
+async function downloadPayments(): Promise<void> {
+  if (!report.value) return;
+  try {
+    const res = await paymentFile(report.value.period.from, payDate.value, picked.value.size ? [...picked.value] : undefined);
+    if (res.xml && res.filename) await sdk().ui.saveFile(res.filename, res.xml, 'application/xml');
+    const left = res.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
+    if (!res.xml) emit('error', left ? `No file made. ${left}` : 'Nothing is owed.');
+    else if (left) emit('error', `File made without: ${left}`);
+    else sdk().ui.toast(`Payment file for ${res.included.length} artist${res.included.length === 1 ? '' : 's'}. Upload it in your bank, then record the payouts here.`, { kind: 'success' });
+  } catch (err) {
+    emit('error', errorText(err, 'Could not make the payment file.'));
+  }
+}
+
 // ── Settings ────────────────────────────────────────────────────────────────
 const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const zones: string[] = (() => {
@@ -104,6 +134,7 @@ const form = reactive({
   presets: {} as Record<string, string | number>,
   artistDiscounts: true,
   artistDiscountMaxPct: 30 as string | number,
+  accounting: { payerName: '', payerIban: '', payerBic: '', invoicePrefix: 'SB', accountArtistPayable: '', accountCommission: '', accountFees: '', accountRent: '', accountCardCosts: '' } as BooksSettings['accounting'],
 });
 const formError = ref<string | null>(null);
 const reasons = Object.entries(FEE_REASONS) as [FeeReason, string][];
@@ -121,6 +152,7 @@ function openSettings(): void {
     presets: Object.fromEntries(reasons.map(([id]) => [id, s.feePresets[id] ?? ''])),
     artistDiscounts: s.artistDiscounts,
     artistDiscountMaxPct: s.artistDiscountMaxPct,
+    accounting: { ...s.accounting },
   });
   formError.value = null;
   editing.value = true;
@@ -140,6 +172,7 @@ async function saveSettings(): Promise<void> {
       feePresets: presets,
       artistDiscounts: form.artistDiscounts,
       artistDiscountMaxPct: Math.min(100, Math.max(1, num(form.artistDiscountMaxPct) || 30)),
+      accounting: { ...form.accounting },
     });
     settings.value = res.settings;
     editing.value = false;
@@ -223,6 +256,14 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
             </tbody>
           </table>
         </div>
+        <div class="head">
+          <h2>Bookkeeping</h2>
+          <span class="grow" />
+          <button type="button" :disabled="isOpen" :title="isOpen ? 'Invoice a period once it has closed' : ''" @click="issue"><Icon name="file-text" :size="14" /> Issue invoices</button>
+          <button type="button" :disabled="!invoices.length" @click="downloadJournal"><Icon name="download" :size="14" /> Journal CSV</button>
+          <button type="button" :disabled="!owed.length" @click="downloadPayments"><Icon name="banknote" :size="14" /> Bank payment file</button>
+        </div>
+        <p v-if="invoices.length" class="hint">{{ invoices.length }} invoice{{ invoices.length === 1 ? '' : 's' }} issued: {{ invoices[0]!.number }}<template v-if="invoices.length > 1"> to {{ invoices[invoices.length - 1]!.number }}</template>. Issued invoices never change. The payment file (ISO 20022 pain.001) uses the invoice number as each transfer's reference, so the bank statement matches back to it.</p>
         <p class="hint">Earned is the period's share less card costs, rent and fees. Owed is everything unpaid as of {{ fmtDay(report.period.to) }} - what a payout settles. Paying never pays the same money twice.</p>
       </section>
 
@@ -291,6 +332,27 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           <label class="check"><input v-model="form.artistDiscounts" type="checkbox" /> Linked artists may put their own work on discount</label>
           <label v-if="form.artistDiscounts"><span>At most (% off)</span><input v-model="form.artistDiscountMaxPct" type="number" min="1" max="100" inputmode="decimal" /></label>
           <small class="hint">Their discounts show under Discounts, where you can end one. Switching this off ends the ones running.</small>
+        </fieldset>
+        <fieldset>
+          <legend>Bookkeeping and payments</legend>
+          <div class="two">
+            <label><span>Pay from - account name</span><input v-model="form.accounting.payerName" type="text" /></label>
+            <label><span>Invoice prefix</span><input v-model="form.accounting.invoicePrefix" type="text" maxlength="8" /></label>
+          </div>
+          <div class="two">
+            <label><span>Pay from - IBAN</span><input v-model="form.accounting.payerIban" type="text" autocomplete="off" /></label>
+            <label><span>BIC</span><input v-model="form.accounting.payerBic" type="text" autocomplete="off" placeholder="Optional" /></label>
+          </div>
+          <div class="two">
+            <label><span>Account: owed to artists</span><input v-model="form.accounting.accountArtistPayable" type="text" /></label>
+            <label><span>Account: commission</span><input v-model="form.accounting.accountCommission" type="text" /></label>
+          </div>
+          <div class="two">
+            <label><span>Account: fees</span><input v-model="form.accounting.accountFees" type="text" /></label>
+            <label><span>Account: rent</span><input v-model="form.accounting.accountRent" type="text" /></label>
+          </div>
+          <label><span>Account: card costs</span><input v-model="form.accounting.accountCardCosts" type="text" /></label>
+          <small class="hint">Account numbers are the ones in your bookkeeping package's chart (e-conomic and the like); they fill the journal CSV's Account columns.</small>
         </fieldset>
         <fieldset>
           <legend>Usual fees</legend>

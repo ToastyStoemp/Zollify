@@ -18,6 +18,7 @@ export * from './vat';
 export * from './consignment';
 export * from './store-events';
 export * from './event-files';
+export * from './booth-layout';
 export * from './consignment-books';
 export * from './webhooks';
 export * from './peppol';

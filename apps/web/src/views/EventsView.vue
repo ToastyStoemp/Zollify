@@ -2,7 +2,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import { VAT_RATES, boothLayoutLabel, sanitizeBoothLayout, countryCodeOf, fmtPrice, isStore, fmtRate, resolveEventVat, seesSalesTotals, toLocalPrice, type EventVat } from '@zollify/shared';
+import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
@@ -158,7 +159,15 @@ onMounted(() => window.addEventListener('click', closeMenu));
 onBeforeUnmount(() => window.removeEventListener('click', closeMenu));
 /** Whether the menu has anything in it for this tile (a helper may have nothing). */
 const hasMore = (e: SalesEvent): boolean =>
-  canEdit.value || Boolean(notesBadge(e)) || (customsOn() && !isStore(e));
+  canEdit.value || Boolean(notesBadge(e)) || Boolean(layoutNote(e)) || (customsOn() && !isStore(e));
+
+// ── Booth layout ────────────────────────────────────────────────────────────
+const layoutFor = ref<string | null>(null);
+/** The tile's layout line; a stored layout is re-checked, so a bad one just shows nothing. */
+const layoutNote = (e: SalesEvent): string => {
+  const layout = sanitizeBoothLayout(e.boothLayout);
+  return layout ? boothLayoutLabel(layout) : '';
+};
 
 // ── Notes & files ───────────────────────────────────────────────────────────
 const notesFor = ref<string | null>(null);
@@ -433,6 +442,7 @@ async function save(): Promise<void> {
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -442,6 +452,7 @@ async function save(): Promise<void> {
               <button type="button" :aria-expanded="menuFor === e.id" aria-haspopup="menu" aria-label="More actions" @click="menuFor = menuFor === e.id ? null : e.id"><Icon name="more" :size="16" /></button>
               <div v-if="menuFor === e.id" class="menu" role="menu" @click="menuFor = null">
                 <button v-if="canEdit || notesBadge(e)" type="button" role="menuitem" @click="notesFor = e.id"><Icon name="paperclip" :size="14" /> Notes &amp; files<template v-if="notesBadge(e)"> · {{ notesBadge(e) }}</template></button>
+                <button v-if="canEdit || layoutNote(e)" type="button" role="menuitem" @click="layoutFor = e.id"><Icon name="layers" :size="14" /> Booth layout<template v-if="layoutNote(e)"> · set</template></button>
                 <router-link v-if="canEdit && e.localCurrency" :to="{ name: 'prices', params: { eventId: e.id } }" role="menuitem"><Icon name="coins" :size="14" /> Prices</router-link>
                 <router-link v-if="customsOn() && !isStore(e)" :to="{ name: 'customs-hub:index', query: { event: e.id } }" role="menuitem"><Icon name="file-text" :size="14" /> Customs</router-link>
                 <button v-if="canEdit" type="button" role="menuitem" @click="openEdit(e)"><Icon name="settings" :size="14" /> Edit</button>
@@ -468,6 +479,7 @@ async function save(): Promise<void> {
     </template>
 
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
+    <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />
 
     <ModalShell v-if="editing" :title="`${editId ? 'Edit' : 'New'} ${kindLabel}`" @close="editing = false">
       <div class="form">
@@ -584,6 +596,7 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .pill.planned { background: var(--zfy-signal-soft, #e4ecf6); color: var(--zfy-ink, #1a2230); }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }
+.layout-note { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); display: flex; align-items: center; gap: .3rem; }
 .actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
 .actions button, .actions .btn { min-height: 2.2rem; padding: .2rem .7rem; font-size: .78rem; display: inline-flex; align-items: center; gap: .3rem; }
 .btn { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; background: var(--zfy-surface, #fff); color: var(--zfy-ink, #1a2230); font-weight: 500; text-decoration: none; }

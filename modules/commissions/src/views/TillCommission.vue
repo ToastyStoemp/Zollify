@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { COMMISSION_REF_KIND, CommissionInputSchema, fmtPrice, isClosedStatus, round2 } from '@zollify/shared';
+import { COMMISSION_REF_KIND, CommissionCreateSchema, DEFAULT_KEEP_CUSTOMER_DAYS, fmtPrice, isClosedStatus, round2 } from '@zollify/shared';
 import { api, errorText, pendingPaid, type CommissionView } from '../api';
+import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
 import { sdk } from '../runtime';
+import CustomerPicker from './CustomerPicker.vue';
 import { decideCharge } from '../till-line';
 
 /**
@@ -15,6 +17,7 @@ import { decideCharge } from '../till-line';
 const emit = defineEmits<{ close: [] }>();
 
 const items = ref<CommissionView[] | null>(null);
+const keepDays = ref(DEFAULT_KEEP_CUSTOMER_DAYS);
 const error = ref<string | null>(null);
 const query = ref('');
 const event = computed(() => sdk().data.events.active());
@@ -22,7 +25,9 @@ const currency = computed(() => event.value?.currency ?? 'EUR');
 
 async function load(): Promise<void> {
   try {
-    items.value = (await api.list()).commissions.filter((c) => !isClosedStatus(c.status));
+    const res = await api.list();
+    items.value = res.commissions.filter((c) => !isClosedStatus(c.status));
+    keepDays.value = res.settings.keepCustomerDays;
   } catch (err) {
     error.value = errorText(err, 'Could not load commissions - this needs a connection.');
   }
@@ -93,14 +98,18 @@ async function charge(c: CommissionView): Promise<void> {
 // ── A new commission, with its deposit ──────────────────────────────────────
 const creating = ref(false);
 const busy = ref(false);
-const form = reactive({ customerName: '', email: '', phone: '', title: '', price: '', deposit: '', dueDate: '' });
+const form = reactive({ title: '', price: '', deposit: '', dueDate: '' });
+const choice = ref<CustomerChoice>(emptyChoice());
+const duplicates = ref<CustomerContact[]>([]);
+const useDuplicate = (c: CustomerContact): void => {
+  choice.value = choiceOf(c);
+  duplicates.value = [];
+};
 const num = (s: string): number => Math.max(0, Number(s.replace(',', '.')) || 0);
 
-async function create(): Promise<void> {
-  const input = CommissionInputSchema.safeParse({
-    customerName: form.customerName,
-    email: form.email,
-    phone: form.phone,
+async function create(force = false): Promise<void> {
+  const input = CommissionCreateSchema.safeParse({
+    ...customerFields(choice.value, force),
     title: form.title,
     price: num(form.price),
     depositAsked: num(form.deposit),
@@ -120,7 +129,10 @@ async function create(): Promise<void> {
     choose(made);
     sdk().ui.toast('Commission saved. Charge the deposit, or close this to skip it.', { kind: 'success' });
   } catch (err) {
-    error.value = errorText(err, 'Could not save the commission.');
+    // A customer like this one is already on file: offer them instead of adding a second.
+    const found = duplicatesIn(err);
+    if (found) duplicates.value = found;
+    else error.value = errorText(err, 'Could not save the commission.');
   } finally {
     busy.value = false;
   }
@@ -148,12 +160,8 @@ async function create(): Promise<void> {
       </div>
     </template>
 
-    <form v-else-if="creating" class="new" @submit.prevent="create">
-      <label>Customer name <input v-model="form.customerName" type="text" maxlength="120" required autocomplete="off" /></label>
-      <div class="two">
-        <label>Email <input v-model="form.email" type="email" maxlength="254" autocomplete="off" /></label>
-        <label>Phone <input v-model="form.phone" type="tel" maxlength="40" autocomplete="off" /></label>
-      </div>
+    <form v-else-if="creating" class="new" @submit.prevent="create()">
+      <CustomerPicker v-model="choice" :keep-days="keepDays" :duplicates="duplicates" @use-duplicate="useDuplicate" @add-anyway="create(true)" />
       <label>What is it? <input v-model="form.title" type="text" maxlength="120" required placeholder="Short title the customer sees" /></label>
       <div class="two">
         <label>Price ({{ currency }}) <input v-model="form.price" type="text" inputmode="decimal" /></label>

@@ -56,3 +56,15 @@ export { issueChallenge, verifyChallenge, type ChallengePurpose } from './captch
 export { makeSecretBox, type SecretBox } from './secretbox';
 export { registerStatic, type StaticOptions } from './static';
 export { reduceEvents, reduceProducts, reduceDiscounts, reduceTransactions, reduceMerges, type ReducibleOp } from './reduce';
+export {
+  uploadConfig,
+  decodeUpload,
+  sendRefusal,
+  storageUsed,
+  checkQuota,
+  addStorageSource,
+  downloadHeaders,
+  registerUploadErrors,
+  type UploadConfig,
+  type DecodedUpload,
+} from './upload-limits';

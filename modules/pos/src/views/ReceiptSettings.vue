@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { EMPTY_RECEIPT_SOCIALS, receiptFooterLinks, type ReceiptSocials, type Transaction } from '@zollify/shared';
+import { EMPTY_RECEIPT_SOCIALS, checkPickedFile, receiptFooterLinks, type ReceiptSocials, type Transaction } from '@zollify/shared';
 import { CountryPicker } from '@zollify/ui';
 import { LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, withProfileFallback, type ArtistInfo, type ReceiptLine } from '../receipt';
 import { getSetting, setSetting } from '../lib/settings';
@@ -79,6 +79,8 @@ async function chooseLogo(event: Event): Promise<void> {
   if (!file) return;
   error.value = null;
   try {
+    const problem = await checkPickedFile('pickedImage', file);
+    if (problem) throw new Error(problem);
     const [print, screen] = await Promise.all([processLogoFile(file), processLogoForScreen(file)]);
     await setSetting(RECEIPT_KEYS.logoB64, print);
     await setSetting(RECEIPT_KEYS.logoScreenB64, screen);

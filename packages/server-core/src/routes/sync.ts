@@ -2,7 +2,7 @@ import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { PushRequestSchema, STAFF_OP_TYPES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
+import { PushRequestSchema, STAFF_OP_TYPES, SYNC_PUSH_MAX_BYTES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
@@ -62,7 +62,7 @@ export function registerSyncRoutes(
   const getEpoch = db.prepare('SELECT syncEpoch FROM accounts WHERE id = ?');
   const txEventOf = db.prepare(
     `SELECT json_extract(payload, '$.eventId') AS eid FROM ops
-     WHERE accountId = ? AND type = 'tx.create' AND json_extract(payload, '$.id') = ? LIMIT 1`,
+     WHERE accountId = ? AND type = 'tx.create' AND json_extract(payload, '$.id') = ? ORDER BY seq LIMIT 1`,
   );
   // Parse the JSON array of allowed event ids; null/empty ⇒ unrestricted (full access).
   function restrictionFor(userId: string): Set<string> | null {
@@ -86,7 +86,8 @@ export function registerSyncRoutes(
   function opReadable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (GLOBAL_TYPES.has(op.type)) return true;
     if (op.type === 'tx.revert') {
-      const txId = (op.payload as { txId?: string } | null)?.txId;
+      const payload = op.payload as { txId?: string; id?: string } | null;
+      const txId = payload?.txId ?? payload?.id;
       const row = txId ? (txEventOf.get(accountId, txId) as { eid?: string } | undefined) : undefined;
       return !!row?.eid && allowed.has(row.eid);
     }
@@ -95,13 +96,14 @@ export function registerSyncRoutes(
   }
   // Which ops a restricted user is allowed to WRITE: only sales/stock for their
   // events (never catalog, discounts, other events, or account settings).
-  function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }, batch: { type: string; payload: unknown }[]): boolean {
+  function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (op.type === 'tx.revert') {
-      // Only a sale of one of their events: one already on the server, or one in this same push.
-      const txId = (op.payload as { txId?: string } | null)?.txId;
+      // Consult the canonical first sale, never a client-supplied duplicate.
+      // Earlier accepted ops in this push are already in the transaction.
+      const payload = op.payload as { txId?: string; id?: string } | null;
+      const txId = payload?.txId ?? payload?.id;
       if (!txId) return false;
-      const inBatch = batch.find((o) => o.type === 'tx.create' && (o.payload as { id?: string } | null)?.id === txId);
-      const eid = inBatch ? eventIdOf(inBatch) : (txEventOf.get(accountId, txId) as { eid?: string } | undefined)?.eid;
+      const eid = (txEventOf.get(accountId, txId) as { eid?: string } | undefined)?.eid;
       return !!eid && allowed.has(eid);
     }
     if (op.type === 'tx.create' || op.type === 'stock.set') {
@@ -111,7 +113,7 @@ export function registerSyncRoutes(
     return false;
   }
 
-  app.post('/api/sync/push', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/api/sync/push', { preHandler: app.authenticate, bodyLimit: SYNC_PUSH_MAX_BYTES }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     const parsed = PushRequestSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Invalid push' });
@@ -121,11 +123,9 @@ export function registerSyncRoutes(
     // Disallowed ops are DROPPED (not stored), never rejected with 403 - a 403
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
-    const scoped = allowed ? rawOps.filter((op) => opWritable(claims.accountId, allowed, op, rawOps)) : rawOps;
     const staff = claims.role === 'member';
-    const ops = (staff ? scoped.filter((op) => STAFF_TYPES.has(op.type)) : scoped).map((op) => stampSeller(db, op, claims, staff, deviceId));
-    const dropped = rawOps.length - ops.length;
-    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
+    const ops = (staff ? rawOps.filter((op) => STAFF_TYPES.has(op.type)) : rawOps).map((op) => stampSeller(db, op, claims, staff, deviceId));
+    let dropped = rawOps.length - ops.length;
 
     let accepted = 0;
     let txCount = 0;
@@ -134,6 +134,10 @@ export function registerSyncRoutes(
     const result = db.transaction((): PushResponse => {
       let seq = (maxSeq.get(claims.accountId) as { m: number }).m;
       for (const op of ops) {
+        if (allowed && !opWritable(claims.accountId, allowed, op)) {
+          dropped++;
+          continue;
+        }
         const r = insertOp.run(
           claims.accountId,
           seq + 1,
@@ -155,6 +159,8 @@ export function registerSyncRoutes(
       return { accepted, duplicates: rawOps.length - accepted, latestSeq: seq };
     })();
 
+    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
+
     bumpMetric(db, claims.accountId, 'syncPushes');
     if (accepted > 0) {
       bumpMetric(db, claims.accountId, 'opsReceived', accepted);
@@ -175,8 +181,12 @@ export function registerSyncRoutes(
   app.get('/api/sync/pull', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     const query = req.query as { since?: string; limit?: string; device?: string };
-    const since = Number(query.since ?? 0) || 0;
-    const limit = Math.min(Number(query.limit ?? 500) || 500, 1000);
+    const since = Number(query.since ?? 0);
+    const requestedLimit = Number(query.limit ?? 500);
+    if (!Number.isSafeInteger(since) || since < 0 || !Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+      return reply.code(400).send({ error: 'Invalid sync cursor or page size' });
+    }
+    const limit = Math.min(requestedLimit, 1000);
     // The caller's own ops: it made them and already has them. Sending them
     // back doubled the traffic of every sale (push it, then pull it again).
     const skipDevice = typeof query.device === 'string' && query.device ? query.device : null;

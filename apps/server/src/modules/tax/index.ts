@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { SalesEvent, Transaction } from '@zollify/shared';
+import { base64BodyLimit, maxBytesFor, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
+  checkQuota,
+  decodeUpload,
   makeSecretBox,
   reduceEvents,
   reduceMerges,
@@ -11,6 +13,7 @@ import {
   reasonOf,
   reportProblem,
   resolveProblem,
+  sendRefusal,
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
@@ -120,7 +123,7 @@ const BookBody = z.object({
   event: z
     .object({ name: z.string(), country: z.string().optional(), startDate: z.string(), endDate: z.string(), vatRate: z.number() })
     .optional(),
-  pdfBase64: z.string().max(20_000_000).optional(),
+  pdfBase64: z.string().max(base64BodyLimit(maxBytesFor('voucher'))).optional(),
   filename: z.string().max(120).optional(),
 });
 
@@ -384,11 +387,18 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       });
 
       // ── Lexware booking ─────────────────────────────────────────────────
-      app.post('/lexware/book', async (req, reply) => {
+      app.post('/lexware/book', { bodyLimit: base64BodyLimit(maxBytesFor('voucher')) }, async (req, reply) => {
         const { accountId } = who(req);
         const parsed = BookBody.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Malformed booking.' });
         const p = parsed.data;
+        // A bad PDF is refused before anything is booked, so a voucher never exists without its document.
+        let pdfBytes: Buffer | undefined;
+        if (p.pdfBase64) {
+          const pdf = decodeUpload('voucher', p.pdfBase64, { name: p.filename ?? 'voucher.pdf' });
+          if (!pdf.ok) return sendRefusal(reply, pdf);
+          pdfBytes = pdf.bytes;
+        }
         const lex = clientsFor(accountId).lexware;
 
         let voucher;
@@ -432,8 +442,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
             delete voucher.useCollectiveContact;
           }
           const made = await client.createVoucher(voucher);
-          if (p.pdfBase64) {
-            await client.uploadVoucherFile(made.id, Buffer.from(p.pdfBase64, 'base64'), p.filename ?? `${p.voucherNumber}.pdf`);
+          if (pdfBytes) {
+            await client.uploadVoucherFile(made.id, pdfBytes, p.filename ?? `${p.voucherNumber}.pdf`);
           }
           return made;
         });
@@ -522,17 +532,24 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         return { ok: true };
       });
 
-      app.post<{ Params: { id: string } }>('/ledger/expenses/:id/invoice', async (req, reply) => {
+      app.post<{ Params: { id: string } }>('/ledger/expenses/:id/invoice', { bodyLimit: base64BodyLimit(maxBytesFor('invoice')) }, async (req, reply) => {
         const { accountId } = who(req);
         const body = (req.body ?? {}) as { base64?: string; filename?: string };
-        const bytes = Buffer.from(String(body.base64 ?? ''), 'base64');
-        if (!bytes.length) return reply.code(400).send({ error: 'invalid', message: 'The file was empty.' });
-        if (bytes.length > 10 * 1024 * 1024) return reply.code(413).send({ error: 'too_large', message: 'Invoices are capped at 10 MB.' });
         const name = String(body.filename ?? 'invoice.pdf').slice(0, 200);
-        const info = db
-          .prepare('UPDATE tax_expenses SET invoiceName = ?, invoiceBytes = ?, invoiceAt = ?, updatedAt = ? WHERE accountId = ? AND id = ?')
-          .run(name, bytes, Date.now(), Date.now(), accountId, req.params.id);
-        if (!info.changes) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
+        const file = decodeUpload('invoice', body.base64, { name });
+        if (!file.ok) return sendRefusal(reply, file);
+        const prev = db.prepare('SELECT COALESCE(LENGTH(invoiceBytes), 0) AS n FROM tax_expenses WHERE accountId = ? AND id = ?').get(accountId, req.params.id) as { n: number } | undefined;
+        if (!prev) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
+        const over = checkQuota(db, accountId, file.bytes.length, prev.n);
+        if (over) return sendRefusal(reply, over);
+        db.prepare('UPDATE tax_expenses SET invoiceName = ?, invoiceBytes = ?, invoiceAt = ?, updatedAt = ? WHERE accountId = ? AND id = ?').run(
+          name,
+          file.bytes,
+          Date.now(),
+          Date.now(),
+          accountId,
+          req.params.id,
+        );
         return { expense: listExpenses(accountId).find((x) => x.id === req.params.id) };
       });
 
@@ -592,15 +609,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         return row && row.day === dayOf() ? row : { day: dayOf(), calls: 0, tokens: 0 };
       };
 
-      app.post('/ledger/parse', async (req, reply) => {
+      app.post('/ledger/parse', { bodyLimit: base64BodyLimit(maxBytesFor('invoiceScan')) }, async (req, reply) => {
         const { accountId } = who(req);
         const ai = clientsFor(accountId).ai;
         if (!ai.apiKey) return reply.code(503).send({ error: 'not_configured', message: 'Invoice scanning is off - add an Anthropic API key under Settings → Integrations.' });
-        const base64 = String((req.body as { base64?: string } | undefined)?.base64 ?? '');
-        if (!base64) return reply.code(400).send({ error: 'invalid', message: 'No PDF provided.' });
-        if (Math.floor((base64.length * 3) / 4) > ai.maxPdfBytes) {
+        // The configured cap (ai.maxPdfBytes) can only tighten the shared one; the type is read from the bytes either way.
+        const scan = decodeUpload('invoiceScan', (req.body as { base64?: string } | undefined)?.base64);
+        if (!scan.ok) return sendRefusal(reply, scan);
+        if (scan.bytes.length > ai.maxPdfBytes) {
           return reply.code(413).send({ error: 'too_large', message: `PDF too large (max ${Math.round(ai.maxPdfBytes / 1024 / 1024)} MB).` });
         }
+        const base64 = scan.bytes.toString('base64');
         const used = usageFor(accountId);
         if (used.calls >= ai.dailyCalls || used.tokens >= ai.dailyTokens) {
           return reply.code(429).send({ error: 'quota', message: 'The daily invoice-scan limit has been reached. Try again tomorrow.' });

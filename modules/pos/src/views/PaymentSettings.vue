@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import type { DeviceSummary } from '@zollify/shared';
+import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
@@ -108,7 +108,13 @@ function editApp(): void {
 }
 async function readKeyFile(e: Event, field: 'privateKey' | 'authPublicKey'): Promise<void> {
   const file = (e.target as HTMLInputElement).files?.[0];
-  if (file) appForm.value[field] = (await file.text()).trim();
+  if (!file) return;
+  const problem = await checkPickedFile('keyFile', file);
+  if (problem) {
+    sdk().ui.toast(problem, { kind: 'error' });
+    return;
+  }
+  appForm.value[field] = (await file.text()).trim();
 }
 async function saveApp(): Promise<void> {
   const f = appForm.value;

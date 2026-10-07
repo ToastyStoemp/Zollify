@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
-import { HS_CODES, csvCell, fmtPrice } from '@zollify/shared';
+import { HS_CODES, checkPickedFile, csvCell, fmtPrice } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
 import { loader } from '../boot';
 import {
@@ -288,11 +288,16 @@ function duplicate(p: Product): void {
 }
 onUnmounted(() => resetForm());
 
-function pickImage(e: Event): void {
+async function pickImage(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
+  const problem = await checkPickedFile('pickedImage', file);
+  if (problem) {
+    error.value = problem;
+    return;
+  }
   if (imagePreview.value) URL.revokeObjectURL(imagePreview.value);
   imageFile.value = file;
   removeImage.value = false;
@@ -307,11 +312,16 @@ function dropImage(): void {
 function addVariant(): void {
   form.variants.push({ id: crypto.randomUUID(), name: '', onHand: 0 });
 }
-function pickVariantImage(v: VariantForm, e: Event): void {
+async function pickVariantImage(v: VariantForm, e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
+  const problem = await checkPickedFile('pickedImage', file);
+  if (problem) {
+    error.value = problem;
+    return;
+  }
   if (v.previewUrl) URL.revokeObjectURL(v.previewUrl);
   v.newImage = file;
   v.previewUrl = URL.createObjectURL(file);

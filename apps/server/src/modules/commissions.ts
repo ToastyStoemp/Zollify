@@ -208,6 +208,7 @@ async function tellCustomer(
   const replyTo = accountEmail(ctx.db, accountId) ?? undefined;
   return ctx.mail.send({
     to: c.email,
+    accountId,
     subject: update ? `${c.title}: ${COMMISSION_STATUS_LABEL[c.status]}` : `Follow your commission: ${c.title}`,
     text,
     ...(replyTo ? { replyTo } : {}),

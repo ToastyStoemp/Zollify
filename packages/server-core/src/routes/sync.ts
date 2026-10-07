@@ -6,6 +6,7 @@ import { PushRequestSchema, STAFF_OP_TYPES, type PullResponse, type PushResponse
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import type { Rooms } from '../ws';
+import { SYNC_WARN_AFTER, reasonOf, type ModuleProblems } from '../problems';
 
 /** A change the server itself makes to an account's data, on a module's behalf. */
 export interface ServerOpInput {
@@ -48,6 +49,7 @@ export function registerSyncRoutes(
   db: Database.Database,
   rooms: Rooms,
   onOps: (accountId: string, ops: WireOp[]) => void = () => {},
+  problems?: ModuleProblems,
 ): void {
   const insertOp = db.prepare(
     `INSERT OR IGNORE INTO ops (accountId, seq, opId, deviceId, ts, type, payload, receivedAt)
@@ -160,8 +162,11 @@ export function registerSyncRoutes(
       rooms.nudge(claims.accountId, result.latestSeq, deviceId);
       try {
         onOps(claims.accountId, fresh);
+        problems?.resolve(claims.accountId, 'sync', deviceId);
       } catch (err) {
         req.log.error({ err }, 'a module failed to handle pushed ops');
+        // The ops are stored and the device is fine; what failed is a module reacting to them. A device whose pushes keep doing this is worth a look.
+        problems?.report(claims.accountId, { kind: 'sync', key: deviceId, severity: 'warning', after: SYNC_WARN_AFTER, message: 'A device keeps syncing changes the server cannot fully process', detail: reasonOf(null, err) });
       }
     }
     return result;

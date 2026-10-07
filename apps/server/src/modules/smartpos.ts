@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { ModuleContext, PublicModuleContext, SecretBox } from '@zollify/server-core';
+import { reasonOf, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
 
 /**
  * Nexi SmartPOS (Nets SmartPOS N950 in Denmark): card payments on the
@@ -326,6 +326,12 @@ const PaymentBody = z.object({
 });
 const TTL_S = 120;
 
+/** The status Poynt answered with, from our own error text; else the class of failure. Never Poynt's words. */
+const poyntReason = (err: unknown): string => {
+  const status = /\((\d{3})\)/.exec(err instanceof Error ? err.message : '')?.[1];
+  return reasonOf(status ? Number(status) : null, err);
+};
+
 export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps: SmartposApps): void {
   const { db } = ctx;
   const admin = (role: string) => role === 'owner' || role === 'admin';
@@ -483,8 +489,10 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
           }),
         },
       });
+      resolveProblem(ctx, who.accountId, 'poynt', 'cloud');
       return reply.code(201).send({ referenceId });
     } catch (err) {
+      reportProblem(ctx, who.accountId, { kind: 'poynt', key: 'cloud', severity: 'warning', message: 'Card payments through Nexi SmartPOS are failing to reach the terminal', detail: poyntReason(err), link: '/settings?panel=pos.payments' });
       return reply.code(502).send({ error: 'upstream', message: (err as Error).message });
     }
   });
@@ -557,8 +565,8 @@ export function registerSmartposPublic(app: FastifyInstance, ctx: PublicModuleCo
 
   /** The terminal reporting on a payment. Only the URL Poynt was given (with its secret) gets in. */
   app.post<{ Params: { ref: string; secret: string } }>('/smartpos/callback/:ref/:secret', { bodyLimit: 64 * 1024 }, async (req, reply) => {
-    const row = db.prepare('SELECT secretHash, amount, currency, state FROM smartpos_payments WHERE referenceId = ?').get(req.params.ref) as
-      | { secretHash: string; amount: number; currency: string; state: string }
+    const row = db.prepare('SELECT accountId, secretHash, amount, currency, state FROM smartpos_payments WHERE referenceId = ?').get(req.params.ref) as
+      | { accountId: string; secretHash: string; amount: number; currency: string; state: string }
       | undefined;
     const given = Buffer.from(sha256(req.params.secret));
     if (!row || !timingSafeEqual(given, Buffer.from(row.secretHash))) return reply.code(404).send({ error: 'not_found' });
@@ -566,6 +574,10 @@ export function registerSmartposPublic(app: FastifyInstance, ctx: PublicModuleCo
     if (row.state === 'approved' || row.state === 'declined' || row.state === 'cancelled') return { ok: true };
     const { state, detail } = readCallback(req.body, { amount: row.amount, currency: row.currency });
     db.prepare('UPDATE smartpos_payments SET state = ?, detail = ?, updatedAt = ? WHERE referenceId = ?').run(state, JSON.stringify(detail), Date.now(), req.params.ref);
+    // A card terminal that answers with the wrong amount or nothing is not an ordinary decline: someone should look.
+    if (state === 'declined' && /different amount|No transaction/.test(detail.message ?? '')) {
+      reportProblem(ctx, row.accountId, { kind: 'poynt.callback', key: 'terminal', severity: 'warning', message: 'A card terminal reported a payment that does not match the sale', detail: /different amount/.test(detail.message ?? '') ? 'Amount differed' : 'No transaction in the answer', link: '/settings?panel=pos.payments' });
+    }
     return { ok: true };
   });
 }

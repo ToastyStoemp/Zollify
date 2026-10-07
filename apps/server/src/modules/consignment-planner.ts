@@ -192,7 +192,7 @@ export async function tellArtist(
   if (!to) return { ...base, emailedTo: null, emailSkipped: 'no_address' };
   if (!ctx.mail.enabled) return { ...base, emailedTo: null, emailSkipped: 'not_configured' };
   const replyTo = accountEmail(ctx.db, storeAccountId) ?? undefined;
-  const sent = await ctx.mail.send({ to, subject: note.subject, text: note.text, ...(replyTo ? { replyTo } : {}), ...(note.ics ? { ics: note.ics } : {}) });
+  const sent = await ctx.mail.send({ to, accountId: storeAccountId, subject: note.subject, text: note.text, ...(replyTo ? { replyTo } : {}), ...(note.ics ? { ics: note.ics } : {}) });
   return sent ? { ...base, emailedTo: to } : { ...base, emailedTo: null, emailSkipped: 'failed' };
 }
 
@@ -482,6 +482,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: 
           const replyTo = accountEmail(db, who.accountId) ?? undefined;
           await ctx.mail.send({
             to,
+            accountId: who.accountId,
             subject: title,
             text: [`${title}${store ? ` at ${store.name}` : ''}.`, ...(setup.artistNote ? ['', setup.artistNote] : [])].join('\n'),
             ...(replyTo ? { replyTo } : {}),

@@ -8,6 +8,9 @@ import {
   reduceEvents,
   reduceMerges,
   reduceTransactions,
+  reasonOf,
+  reportProblem,
+  resolveProblem,
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
@@ -226,6 +229,24 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         }[];
 
       const who = (req: FastifyRequest) => ctx.identity(req);
+      /**
+       * Runs a call to an outside service and tells Problems how it went: a failure opens a warning
+       * (the HTTP status or error class only, never the service's words), a success closes it.
+       * A missing credential is a setup gap the screen already says, not an outage.
+       */
+      const track = async <T>(accountId: string, source: string, label: string, run: () => Promise<T>): Promise<T> => {
+        try {
+          const out = await run();
+          resolveProblem(ctx, accountId, `tax.${source}`);
+          return out;
+        } catch (err) {
+          const status = (err as { status?: number }).status;
+          if (status !== undefined || (err instanceof Error && err.name !== 'SourceError')) {
+            reportProblem(ctx, accountId, { kind: `tax.${source}`, severity: 'warning', message: `${label} is not answering`, detail: reasonOf(status, err), link: '/settings?panel=tax.integrations' });
+          }
+          throw err;
+        }
+      };
 
       // ── Status + config ─────────────────────────────────────────────────
       app.get('/status', async (req) => {
@@ -324,7 +345,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       // ── Payment sources ─────────────────────────────────────────────────
       app.get('/mypos/accounts', async (req) => {
         const c = clientsFor(who(req).accountId);
-        return { mode: c.mypos.mode, accounts: await c.mypos.listAccounts() };
+        return { mode: c.mypos.mode, accounts: await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listAccounts()) };
       });
 
       app.get('/mypos/transactions', async (req, reply) => {
@@ -333,7 +354,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
         const accounts = q.accounts ? q.accounts.split(',').filter(Boolean) : undefined;
-        const transactions = await c.mypos.listTransactions({ ...range.data, accounts });
+        const transactions = await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listTransactions({ ...range.data, accounts }));
         return { mode: c.mypos.mode, count: transactions.length, ...range.data, transactions };
       });
 
@@ -342,7 +363,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const range = Range.safeParse(q);
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
-        const txns = await c.mypos.listTransactions({ ...range.data, account: q.account || undefined });
+        const txns = await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listTransactions({ ...range.data, account: q.account || undefined }));
         return { mode: c.mypos.mode, summary: summarize(txns), ...range.data };
       });
 
@@ -358,7 +379,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const range = Range.safeParse(req.query);
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
-        const transactions = await c.sumup.listTransactions(range.data.from, range.data.to);
+        const transactions = await track(who(req).accountId, 'sumup', 'SumUp', () => c.sumup.listTransactions(range.data.from, range.data.to));
         return { mode: c.sumup.mode, count: transactions.length, ...range.data, transactions };
       });
 
@@ -405,14 +426,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
 
         if (!lex.apiKey) return reply.code(400).send({ error: 'not_configured', message: 'Add a Lexware API key under Settings → Integrations first.' });
         const client = new LexwareClient(lex.apiKey, lex.apiUrl);
-        if (p.kind === 'revenue' && customerName && p.customer !== 'collective') {
-          voucher.contactId = await client.ensureCustomerContact(customerName);
-          delete voucher.useCollectiveContact;
-        }
-        const created = await client.createVoucher(voucher);
-        if (p.pdfBase64) {
-          await client.uploadVoucherFile(created.id, Buffer.from(p.pdfBase64, 'base64'), p.filename ?? `${p.voucherNumber}.pdf`);
-        }
+        const created = await track(accountId, 'lexware', 'Lexware', async () => {
+          if (p.kind === 'revenue' && customerName && p.customer !== 'collective') {
+            voucher.contactId = await client.ensureCustomerContact(customerName);
+            delete voucher.useCollectiveContact;
+          }
+          const made = await client.createVoucher(voucher);
+          if (p.pdfBase64) {
+            await client.uploadVoucherFile(made.id, Buffer.from(p.pdfBase64, 'base64'), p.filename ?? `${p.voucherNumber}.pdf`);
+          }
+          return made;
+        });
         db.prepare(
           `INSERT INTO tax_bookings (accountId, voucherNumber, voucherId, kind, totalMinor, bookedAt) VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(accountId, voucherNumber) DO UPDATE SET voucherId = excluded.voucherId, totalMinor = excluded.totalMinor, bookedAt = excluded.bookedAt`,

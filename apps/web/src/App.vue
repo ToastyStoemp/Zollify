@@ -211,7 +211,7 @@ const fmtAgo = (ms: number): string => {
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column - otherwise the login card is squeezed into a 15rem track. -->
-  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
+  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening Zollify…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp, 'shell--full': route.name === 'pos:index' }]">
     <!-- The till hides this element's nav (brand/menu/links) - it already has
          its own back arrow, so that's space the product grid and cart get

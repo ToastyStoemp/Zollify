@@ -1,5 +1,5 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
-import type { EventOverlay } from '@zollify/shared';
+import type { StoredEventOverlay } from '@zollify/shared';
 import { migrateBoothToEvents } from './migrate';
 import { clearSdk, setSdk } from './runtime';
 
@@ -34,7 +34,7 @@ export default defineModule({
     sdk.nav.add({ routeName: 'index', group: 'events', label: 'Public page', icon: 'globe', order: 115 });
     // Booth facts moved onto the event record; copy any the old overlay still holds.
     void migrateBoothToEvents({
-      overlays: async () => (await sdk.http.get<{ overlays: Record<string, EventOverlay> }>('config')).overlays,
+      overlays: async () => (await sdk.http.get<{ overlays: Record<string, StoredEventOverlay> }>('config')).overlays,
       events: () => sdk.data.events.list(),
       upsert: (event) => sdk.data.events.upsert(event),
     });

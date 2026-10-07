@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { safeHttpUrl } from './csv';
-import type { EventOverlay } from './public-events';
+import type { StoredEventOverlay } from './public-events';
 import type { EventBooth, SalesEvent } from './types';
 
 /**
@@ -8,7 +8,8 @@ import type { EventBooth, SalesEvent } from './types';
  * page and a short note. It lives on the event record (SalesEvent.booth) so
  * everything that talks about the event - the public page, receipts, the
  * planner - reads one source. Public events used to keep these in its own
- * per-event overlay; `resolveBooth` falls back to that until it is migrated.
+ * per-event overlay; the server moves them onto the event and clears them from
+ * the overlay at startup (see `planBoothCleanup`).
  *
  * Pure functions, shared by the app form, the migration and the server.
  */
@@ -60,24 +61,18 @@ export interface ResolvedBooth {
 }
 
 /**
- * The booth facts to publish. The event's own field wins; the legacy overlay
- * value fills in only where the event field is empty, field by field.
+ * The booth facts to publish: the event's own, nothing else. A field the user
+ * clears stays cleared because the legacy overlay is no longer consulted.
+ * (A legacy overlay link that is not https cannot be carried onto the event
+ * and is not published either.)
  */
-export function resolveBooth(
-  event: Pick<SalesEvent, 'booth'>,
-  overlay: Partial<Pick<EventOverlay, 'hall' | 'booth' | 'link' | 'blurb'>> = {},
-): ResolvedBooth {
+export function resolveBooth(event: Pick<SalesEvent, 'booth'>): ResolvedBooth {
   const own = cleanBooth(event.booth) ?? {};
-  return {
-    hall: own.hall ?? (overlay.hall ?? '').trim(),
-    number: own.number ?? (overlay.booth ?? '').trim(),
-    link: own.link ?? safeHttpUrl(overlay.link),
-    note: own.note ?? (overlay.blurb ?? '').trim(),
-  };
+  return { hall: own.hall ?? '', number: own.number ?? '', link: own.link ?? '', note: own.note ?? '' };
 }
 
 /** What a legacy overlay holds, as booth fields (empty ones omitted). */
-export function boothFromOverlay(overlay: Partial<EventOverlay> | undefined): EventBooth | undefined {
+export function boothFromOverlay(overlay: Partial<StoredEventOverlay> | undefined): EventBooth | undefined {
   if (!overlay) return undefined;
   return cleanBooth({ hall: overlay.hall, number: overlay.booth, link: overlay.link, note: overlay.blurb });
 }
@@ -91,7 +86,7 @@ export function boothFromOverlay(overlay: Partial<EventOverlay> | undefined): Ev
  */
 export function eventsToMigrateBooth(
   events: SalesEvent[],
-  overlays: Record<string, Partial<EventOverlay>>,
+  overlays: Record<string, Partial<StoredEventOverlay>>,
 ): SalesEvent[] {
   const out: SalesEvent[] = [];
   for (const e of events) {
@@ -105,4 +100,45 @@ export function eventsToMigrateBooth(
     out.push({ ...e, booth: merged });
   }
   return out;
+}
+
+/** Overlay key -> the booth field it moved to. */
+const OVERLAY_TO_BOOTH = { hall: 'hall', booth: 'number', link: 'link', blurb: 'note' } as const;
+
+export interface BoothCleanupPlan {
+  /** Events to write back: empty booth fields filled from the overlay. */
+  events: SalesEvent[];
+  /** Overlay rows to rewrite (only those that change), legacy keys removed. */
+  overlays: Record<string, Partial<StoredEventOverlay>>;
+}
+
+/**
+ * Per field: an overlay value is copied onto the event when the event's field
+ * is empty, and removed from the overlay once the event's own field is set (or
+ * when the overlay value is blank). A value that cannot be carried (an http
+ * link, say) stays in the overlay untouched, so nothing is lost. Overlays of
+ * unknown or deleted events are left alone. The publishing fields are never
+ * touched, and a second run over the result plans nothing.
+ */
+export function planBoothCleanup(
+  events: SalesEvent[],
+  overlays: Record<string, Partial<StoredEventOverlay>>,
+): BoothCleanupPlan {
+  const changed = eventsToMigrateBooth(events, overlays);
+  const after = new Map(events.map((e) => [e.id, e]));
+  for (const e of changed) after.set(e.id, e);
+  const rows: Record<string, Partial<StoredEventOverlay>> = {};
+  for (const [id, row] of Object.entries(overlays)) {
+    const event = after.get(id);
+    if (!event || event.deletedAt) continue;
+    const own = cleanBooth(event.booth) ?? {};
+    const next: Record<string, unknown> = { ...row };
+    for (const key of Object.keys(OVERLAY_TO_BOOTH) as (keyof typeof OVERLAY_TO_BOOTH)[]) {
+      if (!(key in row)) continue;
+      const blank = typeof row[key] !== 'string' || !row[key]!.trim();
+      if (blank || own[OVERLAY_TO_BOOTH[key]]) delete next[key];
+    }
+    if (Object.keys(next).length !== Object.keys(row).length) rows[id] = next as Partial<StoredEventOverlay>;
+  }
+  return { events: changed, overlays: rows };
 }

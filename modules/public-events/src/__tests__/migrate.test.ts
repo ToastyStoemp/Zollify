@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EventOverlay, SalesEvent } from '@zollify/shared';
+import type { StoredEventOverlay, SalesEvent } from '@zollify/shared';
 import { migrateBoothToEvents } from '../migrate';
 
 const ev = (id: string, over: Partial<SalesEvent> = {}): SalesEvent => ({
@@ -12,14 +12,14 @@ const ev = (id: string, over: Partial<SalesEvent> = {}): SalesEvent => ({
   ...over,
 });
 
-function deps(events: SalesEvent[], overlays: Record<string, Partial<EventOverlay>>) {
+function deps(events: SalesEvent[], overlays: Record<string, Partial<StoredEventOverlay>>) {
   const store = new Map(events.map((e) => [e.id, e]));
   const upserts: string[] = [];
   return {
     store,
     upserts,
     deps: {
-      overlays: async () => overlays as Record<string, EventOverlay>,
+      overlays: async () => overlays as Record<string, StoredEventOverlay>,
       events: () => [...store.values()],
       upsert: async (e: SalesEvent) => {
         upserts.push(e.id);

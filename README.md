@@ -211,6 +211,16 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
+A customer is one record per account (name, email, phone) that commissions point
+at, so a returning customer is picked from a search instead of retyped, a
+Customers tab shows everything one customer ordered, paid and still owes, and a
+new customer who matches an existing email or phone is offered back, never
+merged. Details are kept only while needed: once every commission of a customer
+is collected or cancelled they are erased after a period an admin sets (default
+30 days, 0 to 365), by a sweep at startup and every few hours that only acts
+while the module is on. Erasing deletes the name, email and phone and clears the
+notes, details and customer messages, and keeps title, price, payments, dates and
+status. Admins can also erase one customer or all closed ones at once.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally

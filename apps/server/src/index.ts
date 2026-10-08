@@ -12,6 +12,7 @@ import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
 import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
 import { peppolServerModule } from './modules/peppol-be';
+import { odooServerModule } from './modules/odoo';
 
 loadDotEnv();
 
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
     consignmentArtistServerModule,
     commissionsServerModule,
     peppolServerModule(jwtSecret),
+    odooServerModule(jwtSecret),
   ];
 
   const app = await buildGateway({

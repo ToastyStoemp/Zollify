@@ -251,6 +251,20 @@ const MIGRATIONS: string[] = [
   CREATE INDEX idx_ops_account_type ON ops(accountId, type, seq);
   CREATE INDEX idx_ops_payload_id ON ops(accountId, type, json_extract(payload, '$.id'));
   `,
+  // v17 - devices get a description parsed from the user agent ("Zollify app
+  // on Android (SM-A536B)") so a list of unnamed ones can be told apart, and
+  // a removed device's not-yet-expired access tokens are refused: a token
+  // issued before the device's revokedAt is dead, one from a later sign-in
+  // is fine, so the row can stay.
+  `
+  ALTER TABLE devices ADD COLUMN device TEXT;
+  CREATE TABLE device_revocations (
+    accountId TEXT NOT NULL REFERENCES accounts(id),
+    deviceId  TEXT NOT NULL,
+    revokedAt INTEGER NOT NULL,
+    PRIMARY KEY (accountId, deviceId)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {
@@ -298,13 +312,16 @@ export function touchDevice(
   name: string | null,
   flavor: string | null,
   now: number,
+  device: string | null = null,
 ): void {
   db.prepare(
-    `INSERT INTO devices (id, accountId, userId, name, flavor, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO devices (id, accountId, userId, name, flavor, device, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET
        lastSeenAt = excluded.lastSeenAt,
+       userId = excluded.userId,
        name = COALESCE(excluded.name, name),
-       flavor = COALESCE(excluded.flavor, flavor)
+       flavor = COALESCE(excluded.flavor, flavor),
+       device = COALESCE(excluded.device, device)
      WHERE devices.accountId = excluded.accountId`,
-  ).run(id, accountId, userId, name, flavor, now, now);
+  ).run(id, accountId, userId, name, flavor, device, now, now);
 }

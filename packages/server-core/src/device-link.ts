@@ -150,7 +150,7 @@ export function registerDeviceLinkRoutes(app: FastifyInstance, db: Database.Data
       if (!user) return reply.code(410).send({ error: 'That account no longer exists.', status: 'expired' });
 
       db.prepare('UPDATE users SET lastLoginAt = ? WHERE id = ?').run(now, user.id);
-      touchDevice(db, user.accountId, user.id, row.deviceId ?? undefined, row.deviceName ?? undefined);
+      touchDevice(db, user.accountId, user.id, row.deviceId ?? undefined, row.deviceName ?? undefined, row.device ?? undefined, row.flavor);
       bumpMetric(db, user.accountId, 'logins');
       const tokens = await issueTokens(app, db, user, {
         deviceId: row.deviceId,

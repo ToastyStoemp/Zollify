@@ -82,8 +82,8 @@ if (invitedWith) {
 
 onMounted(async () => {
   if (!native || getServerUrl()) await checkFirstRun();
-  // The device identity lives in the account's database, so before the first
-  // sign-in on this device there is none yet; the server assigns one then.
+  // Before the first sign-in the device has a provisional id, which the
+  // account adopts once signed in - so even that first session names it.
   try {
     myDeviceId = await deviceId();
     myDeviceName = (await deviceName()) ?? '';

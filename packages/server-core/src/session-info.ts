@@ -14,13 +14,32 @@ export function parseDevice(ua = ''): string {
   else if (/Mac OS X/.test(s)) os = 'macOS';
   else if (/Linux/.test(s)) os = 'Linux';
   let br = 'Unknown browser';
-  if (/ZollTool|CapacitorHttp|okhttp/i.test(s)) br = 'ZollTool app';
+  // "; wv)" is Android's WebView marker: the Capacitor shell, not a browser.
+  if (/ZollTool|Zollify|CapacitorHttp|okhttp/i.test(s) || /; wv\)/.test(s)) br = 'Zollify app';
   else if (/Edg\//.test(s)) br = 'Edge';
   else if (/OPR\/|Opera/.test(s)) br = 'Opera';
   else if (/Chrome\//.test(s) && !/Chromium/.test(s)) br = 'Chrome';
   else if (/Firefox\//.test(s)) br = 'Firefox';
   else if (/Safari\//.test(s) && /Version\//.test(s)) br = 'Safari';
-  return `${br} on ${os}`;
+  const model = deviceModel(s);
+  return `${br} on ${os}${model ? ` (${model})` : ''}`;
+}
+
+/**
+ * The hardware, as far as a user agent says: Android puts the model before
+ * "Build/" ("SM-A536B", "Pixel 7"), or just "K" once Chrome reduces the UA,
+ * which says nothing. iPhones and iPads name themselves; desktops do not.
+ */
+export function deviceModel(ua = ''): string | null {
+  const s = String(ua);
+  const android = /Android [^;)]*;\s*([^;)]+?)\s+Build\//.exec(s) ?? /Android [^;)]*;\s*([^;)]+)\)/.exec(s);
+  if (android) {
+    const m = android[1]!.trim();
+    return m && m !== 'K' && !/^[a-z]{2}(-[a-z]{2})?$/i.test(m) ? m.slice(0, 40) : null;
+  }
+  if (/iPad/.test(s)) return 'iPad';
+  if (/iPhone/.test(s)) return 'iPhone';
+  return null;
 }
 
 const GEO_ON = process.env.GEO_LOOKUP === '1';

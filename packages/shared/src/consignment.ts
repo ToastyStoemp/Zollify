@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { BicSchema, IbanSchema } from './consignment-accounting';
 import type { ConsignmentFee } from './consignment-books';
 import type { StoreFeature } from './store-events';
 import type { SalesEvent, Transaction } from './types';
@@ -33,6 +34,9 @@ export const ConsignorInputSchema = z.object({
   storeIds: z.array(z.string().min(1).max(80)).max(200).default([]),
   note: z.string().max(1000).default(''),
   archived: z.boolean().default(false),
+  /** Where the store pays them; needed for the payout file. */
+  iban: IbanSchema,
+  bic: BicSchema,
 });
 export type ConsignorInput = z.infer<typeof ConsignorInputSchema>;
 
@@ -45,6 +49,8 @@ export interface Consignor {
   storeIds: string[];
   note: string;
   archived: boolean;
+  iban: string;
+  bic: string;
   /** Name of the artist's own Zollify account, once they have linked it. */
   linkedAccountName: string | null;
   linked: boolean;

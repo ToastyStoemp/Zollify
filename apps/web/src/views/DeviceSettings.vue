@@ -109,7 +109,7 @@ async function checkUpdate(): Promise<void> {
     shellChecked.value = true;
     if (shellCheck.value?.available) {
       // Already downloaded and waiting for a restart: say so, don't fetch it again.
-      if (!shellUpdateQueued(shellCheck.value.latestVersion)) {
+      if (!(await shellUpdateQueued(shellCheck.value.latestVersion))) {
         shellQueuing.value = true;
         await queueShellUpdate(shellCheck.value);
       }
@@ -120,6 +120,15 @@ async function checkUpdate(): Promise<void> {
   } finally {
     checking.value = false;
     shellQueuing.value = false;
+  }
+}
+async function reloadNow(): Promise<void> {
+  shellError.value = null;
+  try {
+    await reloadShellNow();
+  } catch (err) {
+    shellQueued.value = false;
+    shellError.value = err instanceof Error ? err.message : 'Could not reload.';
   }
 }
 const progressPct = (): number => (updateDownload.totalBytes > 0 ? Math.round((updateDownload.bytesWritten / updateDownload.totalBytes) * 100) : 0);
@@ -286,7 +295,7 @@ import SharedTillSettings from './SharedTillSettings.vue';
 
       <div class="row">
         <button type="button" :disabled="checking || updateDownload.active" @click="checkUpdate">{{ checking ? 'Checking…' : 'Check for updates' }}</button>
-        <button v-if="shellQueued" type="button" class="primary" @click="reloadShellNow">Reload now</button>
+        <button v-if="shellQueued" type="button" class="primary" @click="reloadNow">Reload now</button>
         <button v-if="canSelfUpdate && updateDownload.ready" type="button" class="primary" @click="installDownloadedUpdate">Install {{ updateDownload.versionName }}</button>
       </div>
     </template>

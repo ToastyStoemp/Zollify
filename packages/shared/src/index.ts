@@ -22,6 +22,7 @@ export * from './store-events';
 export * from './event-files';
 export * from './booth-layout';
 export * from './consignment-books';
+export * from './consignment-accounting';
 export * from './webhooks';
 export * from './peppol';
 export * from './csv';

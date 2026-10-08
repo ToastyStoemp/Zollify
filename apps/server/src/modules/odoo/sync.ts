@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { InventoryItem, Product, SavedMatches, Transaction } from '@zollify/shared';
 import type { ShopProduct } from '../shopify-sync/types';
 import { reduceMerges, reduceProducts, reduceTransactions, reportProblem, resolveProblem, type ModuleServices } from '@zollify/server-core';
-import { OdooClient, m2oId, type OdooProduct } from './odoo';
+import { OdooClient, m2oId, m2oName, type Many2one, type OdooProduct } from './odoo';
 
 /**
  * What moves between Zollify and Odoo, and the rules that keep the two from
@@ -23,6 +23,16 @@ import { OdooClient, m2oId, type OdooProduct } from './odoo';
  *   - Never agreed yet (a match just made): the first sync takes Odoo's
  *     figure, the web shop being the book of record - unless a sale happens
  *     here first, which pushes as any sale does.
+ *
+ * Web sales. A consignment store's web shop sells the artists' work too,
+ * and the artist is owed for it exactly as for a sale at the till. So every
+ * done delivery to a customer in Odoo (a `stock.move` into a customer
+ * location) comes over as a sale here, under the store event the owner
+ * picks, priced from its sales order line, with the artist and commission
+ * snapshotted on each line the way the till does. Consignment, statements
+ * and reports then see it. Each move is brought over once. The import runs
+ * before the stock pull, and the sale carries the delivery's own time, so
+ * the fresh count the pull writes afterwards never subtracts it twice.
  *
  * Invoices. Every sale at the till can become a posted customer invoice in
  * Odoo, one per sale, lines on the matched products, so Odoo's books and
@@ -47,6 +57,10 @@ export interface OdooSettings {
   journalId: number | null;
   /** res.partner the till's sales are invoiced to; made on first use when null. */
   partnerId: number | null;
+  /** The store event web sales are recorded under here, so consignment and reports see them; null = stock only. */
+  salesEventId: string | null;
+  /** Web sales from before this moment are not brought over (set when the event is first picked). */
+  salesSince: number | null;
 }
 
 export interface SyncOutcome {
@@ -58,6 +72,7 @@ export interface SyncOutcome {
 // ── Zollify's side ───────────────────────────────────────────────────────────
 
 export const itemKey = (productId: string, variantId: string): string => `${productId}:${variantId}`;
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** The catalogue and the level of every item, by the till's rule. */
 export function stockState(db: Database.Database, accountId: string) {
@@ -216,10 +231,137 @@ export async function pullStock(svc: ModuleServices, client: OdooClient, account
   return ops.length;
 }
 
+// ── Web sales ────────────────────────────────────────────────────────────────
+
+interface OdooMove {
+  id: number;
+  product_id: Many2one;
+  product_uom_qty: number;
+  quantity?: number;
+  quantity_done?: number;
+  date: string;
+  sale_line_id: Many2one;
+  picking_id: Many2one;
+}
+
+/** Odoo stores datetimes as UTC "YYYY-MM-DD HH:MM:SS". */
+const odooTime = (s: string): number => Date.parse(`${s.replace(' ', 'T')}Z`) || Date.now();
+
+/** The store's consignors, for the commission the till would snapshot; empty where consignment is not installed. */
+function consignorsOf(db: Database.Database, accountId: string): Map<string, { commissionPct: number; storeCommission: Record<string, number> }> {
+  const out = new Map<string, { commissionPct: number; storeCommission: Record<string, number> }>();
+  try {
+    const rows = db.prepare('SELECT id, doc FROM consignors WHERE accountId = ?').all(accountId) as { id: string; doc: string }[];
+    for (const r of rows) {
+      const doc = JSON.parse(r.doc) as { commissionPct?: number; storeCommission?: Record<string, number> };
+      out.set(r.id, { commissionPct: doc.commissionPct ?? 0, storeCommission: doc.storeCommission ?? {} });
+    }
+  } catch {
+    /* no consignment module on this server */
+  }
+  return out;
+}
+
+/**
+ * Deliveries to customers done in Odoo since the import began, not yet
+ * brought over, become sales here - one per picking (an order), or per move
+ * when there is no picking. Returns how many sales were written.
+ */
+export async function importWebSales(svc: ModuleServices, client: OdooClient, accountId: string, s: OdooSettings): Promise<number> {
+  if (!s.salesEventId || !s.salesSince) return 0;
+  const matched = matchedOdooIds(svc.db, accountId);
+  if (!matched.size) return 0;
+  const byOdooId = new Map<number, { productId: string; variantId: string }>();
+  for (const [key, id] of matched) {
+    const cut = key.indexOf(':');
+    byOdooId.set(id, { productId: key.slice(0, cut), variantId: key.slice(cut + 1) });
+  }
+  const since = new Date(s.salesSince).toISOString().slice(0, 19).replace('T', ' ');
+  const moves = await client.searchRead<OdooMove>(
+    'stock.move',
+    [['state', '=', 'done'], ['location_dest_id.usage', '=', 'customer'], ['product_id', 'in', [...byOdooId.keys()]], ['date', '>=', since]],
+    ['product_id', 'product_uom_qty', 'quantity', 'date', 'sale_line_id', 'picking_id'],
+    { order: 'date, id', limit: 500 },
+  );
+  const seen = new Set((svc.db.prepare('SELECT moveId FROM odoo_imports WHERE accountId = ?').all(accountId) as { moveId: number }[]).map((r) => r.moveId));
+  const fresh = moves.filter((m) => !seen.has(m.id) && (m.quantity ?? m.quantity_done ?? m.product_uom_qty) > 0);
+  if (!fresh.length) return 0;
+
+  // Prices from the sales order lines; a delivery with none takes the product's list price.
+  const lineIds = [...new Set(fresh.map((m) => m2oId(m.sale_line_id)).filter((id): id is number => id !== null))];
+  const lines = new Map<number, { unit: number; currency: string }>();
+  if (lineIds.length) {
+    const rows = await client.call<{ id: number; price_total: number; product_uom_qty: number; currency_id: Many2one }[]>('sale.order.line', 'read', [lineIds, ['price_total', 'product_uom_qty', 'currency_id']]);
+    for (const r of rows) lines.set(r.id, { unit: r.product_uom_qty ? r.price_total / r.product_uom_qty : 0, currency: m2oName(r.currency_id) });
+  }
+  const { products } = stockState(svc.db, accountId);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const consignors = consignorsOf(svc.db, accountId);
+  const eventCurrency = (() => {
+    const ev = (svc.db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'event.upsert' AND json_extract(payload, '$.id') = ? ORDER BY seq DESC LIMIT 1").get(accountId, s.salesEventId) as { payload: string } | undefined);
+    return ev ? ((JSON.parse(ev.payload) as { currency?: string }).currency ?? 'EUR') : 'EUR';
+  })();
+
+  // One sale per picking: the order as the customer placed it.
+  const groups = new Map<string, OdooMove[]>();
+  for (const m of fresh) {
+    const g = m2oId(m.picking_id) !== null ? `picking-${m2oId(m.picking_id)}` : `move-${m.id}`;
+    groups.set(g, [...(groups.get(g) ?? []), m]);
+  }
+  const ops: { type: 'tx.create'; payload: Transaction }[] = [];
+  const record = svc.db.prepare('INSERT OR IGNORE INTO odoo_imports (accountId, moveId, txId, importedAt) VALUES (?, ?, ?, ?)');
+  const now = Date.now();
+  for (const [group, ms] of groups) {
+    const items: Transaction['items'] = [];
+    let currency = eventCurrency;
+    for (const m of ms) {
+      const ref = byOdooId.get(m2oId(m.product_id)!);
+      if (!ref) continue;
+      const p = productById.get(ref.productId);
+      if (!p) continue;
+      const qty = m.quantity ?? m.quantity_done ?? m.product_uom_qty;
+      const line = m2oId(m.sale_line_id) !== null ? lines.get(m2oId(m.sale_line_id)!) : undefined;
+      const variant = ref.variantId ? p.variants.find((v) => v.id === ref.variantId) : undefined;
+      const unit = round2(line?.unit ?? variant?.price ?? p.price);
+      if (line?.currency) currency = line.currency;
+      const c = p.consignorId ? consignors.get(p.consignorId) : undefined;
+      const commission = c ? (typeof c.storeCommission[s.salesEventId] === 'number' ? c.storeCommission[s.salesEventId] : c.commissionPct) : undefined;
+      items.push({
+        pid: p.id,
+        vid: ref.variantId || null,
+        title: p.title,
+        ...(variant ? { variantLabel: variant.name } : {}),
+        qty,
+        unitPrice: unit,
+        lineTotal: round2(unit * qty),
+        ...(p.consignorId ? { consignorId: p.consignorId } : {}),
+        ...(commission !== undefined ? { commissionPct: commission } : {}),
+      });
+    }
+    if (!items.length) continue;
+    const total = round2(items.reduce((t, i) => t + i.lineTotal, 0));
+    const tx: Transaction = {
+      id: `odoo-${group}`,
+      eventId: s.salesEventId,
+      deviceId: 'odoo',
+      timestamp: Math.min(...ms.map((m) => odooTime(m.date))),
+      method: 'card',
+      payments: [{ kind: 'card', amount: total, provider: 'odoo', txRef: group }],
+      items,
+      discounts: [],
+      total,
+      currency,
+    };
+    ops.push({ type: 'tx.create', payload: tx });
+    for (const m of ms) record.run(accountId, m.id, tx.id, now);
+  }
+  if (ops.length) svc.writeOps(accountId, ops);
+  return ops.length;
+}
+
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
 const day = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** The partner the till's sales go to, made once. */
 async function ensurePartner(client: OdooClient, s: OdooSettings, save: (s: OdooSettings) => void): Promise<number> {

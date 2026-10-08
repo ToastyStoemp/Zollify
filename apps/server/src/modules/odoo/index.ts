@@ -1,11 +1,11 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import { isEnabled, makeSecretBox, type ModuleContext, type ModuleServices, type ServerModule } from '@zollify/server-core';
+import { isEnabled, makeSecretBox, reduceEvents, type ModuleContext, type ModuleServices, type ServerModule } from '@zollify/server-core';
 import type { ProductMatch, SavedMatches, Transaction, WireOp, ZtProduct } from '@zollify/shared';
 import type { ShopProduct } from '../shopify-sync/types';
 import { matchCatalogs } from '../shopify-sync/match';
 import { OdooClient, OdooError, m2oName } from './odoo';
-import { MODULE_ID, creditSale, invoiceSale, itemKey, logLine, odooCatalogue, pullStock, pushStock, stockState, tracked, unitsOf, type OdooSettings } from './sync';
+import { MODULE_ID, creditSale, importWebSales, invoiceSale, itemKey, logLine, odooCatalogue, pullStock, pushStock, stockState, tracked, unitsOf, type OdooSettings } from './sync';
 
 /**
  * Odoo sync - the server half. Keeps stock level with an Odoo warehouse
@@ -32,6 +32,7 @@ const ConnectBody = z.object({
   invoiceSales: z.boolean().default(false),
   journalId: z.number().int().positive().nullable().default(null),
   partnerId: z.number().int().positive().nullable().default(null),
+  salesEventId: z.string().min(1).max(80).nullable().default(null),
 });
 
 function migrate(db: Database.Database): void {
@@ -65,6 +66,13 @@ function migrate(db: Database.Database): void {
       createdAt  INTEGER NOT NULL,
       PRIMARY KEY (accountId, txId)
     );
+    CREATE TABLE IF NOT EXISTS odoo_imports (
+      accountId  TEXT NOT NULL,
+      moveId     INTEGER NOT NULL,
+      txId       TEXT NOT NULL,
+      importedAt INTEGER NOT NULL,
+      PRIMARY KEY (accountId, moveId)
+    );
     CREATE TABLE IF NOT EXISTS odoo_log (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       accountId TEXT NOT NULL,
@@ -76,7 +84,7 @@ function migrate(db: Database.Database): void {
   `);
 }
 
-const TABLES = ['odoo_connections', 'odoo_matches', 'odoo_stock', 'odoo_invoices', 'odoo_log'];
+const TABLES = ['odoo_connections', 'odoo_matches', 'odoo_stock', 'odoo_invoices', 'odoo_imports', 'odoo_log'];
 
 export function odooServerModule(jwtSecret: string): ServerModule {
   const box = makeSecretBox(jwtSecret, SECRET_SALT);
@@ -122,7 +130,8 @@ export function odooServerModule(jwtSecret: string): ServerModule {
       const { products } = stockState(svc.db, accountId);
       const titles = new Map(products.flatMap((p) => unitsOf(p).map((u) => [itemKey(p.id, u.variantId), u.title] as const)));
       for (const tx of sales) {
-        if (tx.revertedAt || tx.revertedBy) continue;
+        // A web sale is already invoiced in Odoo - it came from there.
+        if (tx.revertedAt || tx.revertedBy || tx.deviceId === 'odoo') continue;
         const id = await tracked(svc, accountId, `invoice for sale ${tx.id.slice(0, 8)}`, () => invoiceSale(svc, client, accountId, s, (next) => save(svc.db, accountId, next), tx, (pid, vid) => titles.get(itemKey(pid, vid)) ?? 'Item'));
         if (id) logLine(svc.db, accountId, 'invoice', `Invoice ${id} posted for sale ${tx.id.slice(0, 8)}`);
       }
@@ -140,12 +149,13 @@ export function odooServerModule(jwtSecret: string): ServerModule {
    * Odoo's figure (the web shop's book of record) rather than overwriting it,
    * and a push that failed earlier is retried once Odoo is back.
    */
-  const reconcile = async (svc: ModuleServices, accountId: string, s: OdooSettings): Promise<{ pushed: number; pulled: number }> => {
+  const reconcile = async (svc: ModuleServices, accountId: string, s: OdooSettings): Promise<{ sales: number; pushed: number; pulled: number }> => {
     const client = clientFor(s);
+    const sales = (await tracked(svc, accountId, 'web sales import', () => importWebSales(svc, client, accountId, s))) ?? 0;
     const pulled = (await tracked(svc, accountId, 'stock pull', () => pullStock(svc, client, accountId, s))) ?? 0;
     const pushed = (await tracked(svc, accountId, 'stock update', () => pushStock(svc, client, accountId, s))) ?? 0;
-    if (pushed || pulled) logLine(svc.db, accountId, 'sync', `${pushed} level${pushed === 1 ? '' : 's'} sent to Odoo, ${pulled} taken from it`);
-    return { pushed, pulled };
+    if (pushed || pulled || sales) logLine(svc.db, accountId, 'sync', `${sales ? `${sales} web sale${sales === 1 ? '' : 's'} brought over, ` : ''}${pushed} level${pushed === 1 ? '' : 's'} sent to Odoo, ${pulled} taken from it`);
+    return { sales, pushed, pulled };
   };
 
   const pullAll = async (svc: ModuleServices): Promise<void> => {
@@ -153,7 +163,7 @@ export function odooServerModule(jwtSecret: string): ServerModule {
     for (const { accountId } of rows) {
       if (!isEnabled(svc.db, accountId, MODULE_ID)) continue;
       const s = settingsOf(svc.db, accountId);
-      if (s?.syncStock) await reconcile(svc, accountId, s);
+      if (s && (s.syncStock || s.salesEventId)) await reconcile(svc, accountId, s);
     }
   };
 
@@ -200,7 +210,9 @@ export function odooServerModule(jwtSecret: string): ServerModule {
         const before = settingsOf(ctx.db, who.accountId);
         const apiKey = parsed.data.apiKey ?? before?.apiKey;
         if (!apiKey) return reply.code(400).send({ error: 'invalid_request', message: 'An API key is required.' });
-        const next: OdooSettings = { ...parsed.data, url: parsed.data.url.replace(/\/+$/, ''), apiKey };
+        // Web sales count from the moment the event is first picked, never from before the store had Zollify.
+        const salesSince = parsed.data.salesEventId ? (before?.salesSince ?? Date.now()) : null;
+        const next: OdooSettings = { ...parsed.data, url: parsed.data.url.replace(/\/+$/, ''), apiKey, salesSince };
         try {
           await clientFor(next).authenticate();
         } catch (err) {
@@ -220,7 +232,8 @@ export function odooServerModule(jwtSecret: string): ServerModule {
 
       /** Locations and sales journals, for the pickers; also proves the key works. */
       app.get('/choices', async (req, reply) => {
-        const s = need(ctx.identity(req).accountId, reply);
+        const who = ctx.identity(req);
+        const s = need(who.accountId, reply);
         if (!s) return;
         try {
           const client = clientFor(s);
@@ -229,8 +242,14 @@ export function odooServerModule(jwtSecret: string): ServerModule {
             client.searchRead<{ id: number; complete_name: string; warehouse_id: [number, string] | false }>('stock.location', [['usage', '=', 'internal']], ['complete_name', 'warehouse_id'], { order: 'complete_name' }),
             client.searchRead<{ id: number; name: string }>('account.journal', [['type', '=', 'sale']], ['name'], { order: 'name' }).catch(() => []),
           ]);
+          const ops = (ctx.db.prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN ('event.upsert', 'event.close') ORDER BY seq").all(who.accountId) as { opId: string; type: string; payload: string }[]).map((o) => ({ ...o, payload: JSON.parse(o.payload) as unknown }));
+          const events = reduceEvents(ops)
+            .filter((e) => !e.deletedAt)
+            .sort((a, b) => Number(b.kind === 'store') - Number(a.kind === 'store') || a.name.localeCompare(b.name))
+            .map((e) => ({ id: e.id, name: e.name, store: e.kind === 'store' }));
           return {
             version: version.server_version ?? null,
+            events,
             locations: locations.map((l) => ({ id: l.id, name: l.complete_name, warehouse: m2oName(l.warehouse_id) })),
             journals: journals.map((j) => ({ id: j.id, name: j.name })),
           };
@@ -289,7 +308,7 @@ export function odooServerModule(jwtSecret: string): ServerModule {
         const who = ctx.identity(req);
         const s = need(who.accountId, reply);
         if (!s) return;
-        if (!s.locationId) return reply.code(409).send({ error: 'no_location', message: 'Pick the Odoo location the shelf is first.' });
+        if (!s.locationId && !s.salesEventId) return reply.code(409).send({ error: 'nothing_to_sync', message: 'Pick the Odoo location the shelf is, or the event web sales go under, first.' });
         return reconcile(ctx, who.accountId, s);
       });
 
@@ -298,8 +317,9 @@ export function odooServerModule(jwtSecret: string): ServerModule {
         const levels = (ctx.db.prepare('SELECT COUNT(*) AS n, MAX(syncedAt) AS at FROM odoo_stock WHERE accountId = ?').get(who.accountId) as { n: number; at: number | null });
         const invoices = (ctx.db.prepare('SELECT COUNT(*) AS n, SUM(reversalId IS NOT NULL) AS credited FROM odoo_invoices WHERE accountId = ?').get(who.accountId) as { n: number; credited: number | null });
         const matched = (ctx.db.prepare('SELECT COUNT(*) AS n FROM odoo_matches WHERE accountId = ?').get(who.accountId) as { n: number }).n;
+        const webSales = (ctx.db.prepare('SELECT COUNT(DISTINCT txId) AS n FROM odoo_imports WHERE accountId = ?').get(who.accountId) as { n: number }).n;
         const log = ctx.db.prepare('SELECT at, kind, message FROM odoo_log WHERE accountId = ? ORDER BY id DESC LIMIT 30').all(who.accountId);
-        return { matched, levels: levels.n, lastSyncAt: levels.at, invoices: invoices.n, creditNotes: invoices.credited ?? 0, log };
+        return { matched, levels: levels.n, lastSyncAt: levels.at, webSales, invoices: invoices.n, creditNotes: invoices.credited ?? 0, log };
       });
     },
   };

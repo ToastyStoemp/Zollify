@@ -22,9 +22,13 @@ const odoo = {
   products: [
     { id: 101, name: 'Fox print', display_name: '[FOX] Fox print', default_code: 'FOX', barcode: false, lst_price: 100, product_tmpl_id: [11, 'Fox print'] as [number, string], active: true },
     { id: 102, name: 'Owl mug', display_name: '[OWL] Owl mug', default_code: 'OWL', barcode: false, lst_price: 20, product_tmpl_id: [12, 'Owl mug'] as [number, string], active: true },
+    { id: 103, name: 'Ana sticker', display_name: '[ANA-1] Ana sticker', default_code: 'ANA-1', barcode: false, lst_price: 5, product_tmpl_id: [13, 'Ana sticker'] as [number, string], active: true },
   ],
   quants: [{ id: 1, product_id: 101, location_id: 8, quantity: 5 }] as Quant[],
   moves: [] as Record<string, unknown>[],
+  /** Done deliveries to customers: the web shop's sales. */
+  deliveries: [] as { id: number; product_id: [number, string]; product_uom_qty: number; quantity: number; date: string; sale_line_id: [number, string] | false; picking_id: [number, string] | false }[],
+  orderLines: [] as { id: number; price_total: number; product_uom_qty: number; currency_id: [number, string] }[],
   partners: [] as { id: number; name: string }[],
   calls: [] as string[],
   nextId: 500,
@@ -90,6 +94,16 @@ function execute(model: string, method: string, args: unknown[], kwargs: Record<
     }
     case 'account.move.search_read':
       return [];
+    case 'stock.move.search_read': {
+      const [domain] = args as [[string, string, unknown][]];
+      const ids = domain.find((d) => d[0] === 'product_id')![2] as number[];
+      const since = domain.find((d) => d[0] === 'date')![2] as string;
+      return odoo.deliveries.filter((d) => ids.includes(d.product_id[0]) && d.date >= since);
+    }
+    case 'sale.order.line.read': {
+      const [ids] = args as [number[]];
+      return odoo.orderLines.filter((l) => ids.includes(l.id));
+    }
     case 'account.move.reversal.create':
       return 900;
     case 'account.move.reversal.reverse_moves': {
@@ -133,7 +147,7 @@ const push = (ops: { type: string; payload: unknown; opId?: string }[]) =>
 const settle = async (until: () => boolean): Promise<void> => {
   for (let i = 0; i < 100 && !until(); i++) await new Promise((r) => setTimeout(r, 20));
 };
-const SETTINGS = { url: ODOO, db: 'shop', login: 'owner@shop.test', apiKey: 'key-ok-123', locationId: 8, syncStock: true, invoiceSales: true, journalId: null, partnerId: null };
+const SETTINGS = { url: ODOO, db: 'shop', login: 'owner@shop.test', apiKey: 'key-ok-123', locationId: 8, syncStock: true, invoiceSales: true, journalId: null, partnerId: null, salesEventId: null };
 
 beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-odoo-'));
@@ -150,6 +164,7 @@ beforeAll(async () => {
     { type: 'event.upsert', payload: { id: 'shop', name: 'Shop', kind: 'store', venue: {}, currency: 'EUR', status: 'active', updatedAt: 1 } },
     { type: 'product.upsert', payload: { id: 'p1', title: 'Fox print', sku: 'FOX', forSale: true, unlisted: false, price: 100, variants: [], sortOrder: 0, updatedAt: 1 } },
     { type: 'product.upsert', payload: { id: 'p2', title: 'Owl cup', forSale: true, unlisted: false, price: 20, variants: [], sortOrder: 0, updatedAt: 1 } },
+    { type: 'product.upsert', payload: { id: 'p3', title: 'Ana sticker', sku: 'ANA-1', forSale: true, unlisted: false, price: 5, variants: [], consignorId: 'ana', consignorName: 'Ana', sortOrder: 0, updatedAt: 1 } },
     { type: 'inventory.set', payload: { productId: 'p1', variantId: '', onHand: 5, updatedAt: 1000 } },
   ]);
 });
@@ -169,7 +184,7 @@ describe('connecting', () => {
     expect([ok.statusCode, ok.json()]).toEqual([200, expect.anything()]);
     expect(ok.json()).toMatchObject({ connected: true, url: ODOO, locationId: 8 });
     expect(ok.body).not.toContain('key-ok-123');
-    expect((await call('GET', '/choices')).json()).toMatchObject({ version: '17.0', locations: [{ id: 8, name: 'WH/Stock', warehouse: 'WH' }], journals: [{ id: 3 }] });
+    expect((await call('GET', '/choices')).json()).toMatchObject({ version: '17.0', locations: [{ id: 8, name: 'WH/Stock', warehouse: 'WH' }], journals: [{ id: 3 }], events: [{ id: 'shop', name: 'Shop', store: true }] });
   });
 });
 
@@ -191,7 +206,7 @@ describe('matching', () => {
 
 describe('stock', () => {
   it('a first sync with both sides equal agrees without moving anything', async () => {
-    expect((await call('POST', '/sync')).json()).toEqual({ pushed: 0, pulled: 0 });
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 0 });
     expect(qtyOf(101, 8)).toBe(5);
   });
 
@@ -216,11 +231,11 @@ describe('stock', () => {
 
   it('a change in Odoo comes back as a fresh count on the next sync', async () => {
     odoo.quants[0]!.quantity = 1; // two sold on the web shop
-    expect((await call('POST', '/sync')).json()).toEqual({ pushed: 0, pulled: 1 });
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 1 });
     const counts = app.zollify.db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'inventory.set' ORDER BY seq DESC LIMIT 1").get(accountId) as { payload: string };
     expect(JSON.parse(counts.payload)).toMatchObject({ productId: 'p1', variantId: '', onHand: 1 });
     // Nothing more to do: both sides now agree on 1.
-    expect((await call('POST', '/sync')).json()).toEqual({ pushed: 0, pulled: 0 });
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 0 });
   });
 
   it('a recount here goes to Odoo', async () => {
@@ -240,10 +255,38 @@ describe('stock', () => {
   it('an Odoo that is down is reported, not fatal, and the next sync catches up', async () => {
     odoo.quants[0]!.quantity = 4; // sold on the web while Odoo was unreachable from here
     vi.mocked(fakeFetch).mockImplementationOnce(async () => new Response('', { status: 503 }));
-    expect((await call('POST', '/sync')).json()).toEqual({ pushed: 0, pulled: 0 });
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 0 });
     const log = (await call('GET', '/status')).json().log as { kind: string; message: string }[];
     expect(log.find((l) => l.kind === 'error')?.message).toMatch(/Odoo HTTP 503/);
-    expect((await call('POST', '/sync')).json()).toEqual({ pushed: 0, pulled: 1 });
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 1 });
+  });
+
+  it("a consigned item sold on the web shop becomes a sale here, credited to the artist, invoiced nowhere twice", async () => {
+    await call('POST', '/matches/save', { matches: { p3: { shopProductId: '13', variants: { '': { productId: '13', variantId: '103' } } } } });
+    odoo.quants.push({ id: 7, product_id: 103, location_id: 8, quantity: 10 });
+    // Record web sales under the shop from now on.
+    expect((await call('POST', '/connection', { ...SETTINGS, salesEventId: 'shop' })).json()).toMatchObject({ salesEventId: 'shop' });
+    expect((await call('POST', '/sync')).json()).toMatchObject({ sales: 0 });
+    // The web shop sells two stickers for 6 each (VAT included); Odoo delivers them.
+    const when = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    odoo.orderLines.push({ id: 71, price_total: 12, product_uom_qty: 2, currency_id: [1, 'EUR'] });
+    odoo.deliveries.push({ id: 61, product_id: [103, 'Ana sticker'], product_uom_qty: 2, quantity: 2, date: when, sale_line_id: [71, 'S00042'], picking_id: [31, 'WH/OUT/00042'] });
+    odoo.quants.find((q) => q.id === 7)!.quantity = 8;
+    const moves = odoo.moves.length;
+    const r = await call('POST', '/sync');
+    expect(r.json()).toEqual({ sales: 1, pushed: 0, pulled: 1 });
+    const sale = JSON.parse((app.zollify.db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'tx.create' ORDER BY seq DESC LIMIT 1").get(accountId) as { payload: string }).payload);
+    expect(sale).toMatchObject({ id: 'odoo-picking-31', eventId: 'shop', deviceId: 'odoo', method: 'card', total: 12, currency: 'EUR', payments: [{ kind: 'card', amount: 12, provider: 'odoo' }] });
+    expect(sale.items).toEqual([{ pid: 'p3', vid: null, title: 'Ana sticker', qty: 2, unitPrice: 6, lineTotal: 12, consignorId: 'ana' }]);
+    // The count came over too, and the sale is not subtracted from it again.
+    const count = JSON.parse((app.zollify.db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'inventory.set' ORDER BY seq DESC LIMIT 1").get(accountId) as { payload: string }).payload);
+    expect(count).toMatchObject({ productId: 'p3', onHand: 8 });
+    expect(count.updatedAt).toBeGreaterThan(sale.timestamp);
+    // Odoo already invoiced that order; the same delivery is never brought over twice.
+    await new Promise((res) => setTimeout(res, 100));
+    expect(odoo.moves.length).toBe(moves);
+    expect((await call('POST', '/sync')).json()).toEqual({ sales: 0, pushed: 0, pulled: 0 });
+    expect((await call('GET', '/status')).json()).toMatchObject({ webSales: 1 });
   });
 
   it('disconnecting forgets everything here and touches nothing there', async () => {

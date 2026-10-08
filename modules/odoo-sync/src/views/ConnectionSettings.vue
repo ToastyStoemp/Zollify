@@ -12,15 +12,17 @@ interface Connection {
   invoiceSales?: boolean;
   journalId?: number | null;
   partnerId?: number | null;
+  salesEventId?: string | null;
 }
 interface Choices {
   version: string | null;
   locations: { id: number; name: string; warehouse: string }[];
   journals: { id: number; name: string }[];
+  events: { id: string; name: string; store: boolean }[];
 }
 
 const state = ref<Connection>({ connected: false });
-const form = reactive({ url: '', db: '', login: '', apiKey: '', locationId: null as number | null, syncStock: true, invoiceSales: false, journalId: null as number | null });
+const form = reactive({ url: '', db: '', login: '', apiKey: '', locationId: null as number | null, syncStock: true, invoiceSales: false, journalId: null as number | null, salesEventId: null as string | null });
 const choices = ref<Choices | null>(null);
 const busy = ref(false);
 const disconnecting = ref(false);
@@ -30,7 +32,7 @@ async function refresh(): Promise<void> {
   try {
     state.value = await sdk().http.get<Connection>('connection');
     if (state.value.connected) {
-      Object.assign(form, { url: state.value.url ?? '', db: state.value.db ?? '', login: state.value.login ?? '', locationId: state.value.locationId ?? null, syncStock: state.value.syncStock ?? true, invoiceSales: state.value.invoiceSales ?? false, journalId: state.value.journalId ?? null });
+      Object.assign(form, { url: state.value.url ?? '', db: state.value.db ?? '', login: state.value.login ?? '', locationId: state.value.locationId ?? null, syncStock: state.value.syncStock ?? true, invoiceSales: state.value.invoiceSales ?? false, journalId: state.value.journalId ?? null, salesEventId: state.value.salesEventId ?? null });
       choices.value = await sdk().http.get<Choices>('choices').catch(() => null);
     }
   } catch (err) {
@@ -43,7 +45,7 @@ async function connect(): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    await sdk().http.post('connection', { url: form.url.trim(), db: form.db.trim(), login: form.login.trim(), apiKey: form.apiKey.trim() || undefined, locationId: form.locationId, syncStock: form.syncStock, invoiceSales: form.invoiceSales, journalId: form.journalId, partnerId: state.value.partnerId ?? null });
+    await sdk().http.post('connection', { url: form.url.trim(), db: form.db.trim(), login: form.login.trim(), apiKey: form.apiKey.trim() || undefined, locationId: form.locationId, syncStock: form.syncStock, invoiceSales: form.invoiceSales, journalId: form.journalId, partnerId: state.value.partnerId ?? null, salesEventId: form.salesEventId });
     // The key is stored server-side; no reason for it to sit in this page afterwards.
     form.apiKey = '';
     await refresh();
@@ -102,6 +104,17 @@ async function disconnect(): Promise<void> {
             </select>
           </label>
           <small class="hint">A sale here lowers Odoo's quantity on hand there within seconds; a web order there lowers the count here on the hourly pull, or on Sync now. Only items matched under Odoo, and counted here, go across.</small>
+        </fieldset>
+        <fieldset>
+          <legend>Web sales</legend>
+          <label>
+            <span>Record Odoo's web sales under</span>
+            <select v-model="form.salesEventId" :disabled="!choices">
+              <option :value="null">Don't bring web sales over</option>
+              <option v-for="e in choices?.events ?? []" :key="e.id" :value="e.id">{{ e.name }}<template v-if="e.store"> (store)</template></option>
+            </select>
+          </label>
+          <small class="hint">For a consignment store with a web shop: every delivery to a customer done in Odoo becomes a sale here under that event, priced from its order, with the artist and commission on each line - so statements, reports and payouts count it. Only from now on, and each delivery once. Returns are not brought back.</small>
         </fieldset>
         <fieldset>
           <legend>Invoices</legend>

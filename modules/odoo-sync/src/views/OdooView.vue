@@ -13,6 +13,7 @@ interface Status {
   matched: number;
   levels: number;
   lastSyncAt: number | null;
+  webSales: number;
   invoices: number;
   creditNotes: number;
   log: { at: number; kind: string; message: string }[];
@@ -109,8 +110,8 @@ async function sync(): Promise<void> {
   syncing.value = true;
   error.value = null;
   try {
-    const r = await sdk().http.post<{ pushed: number; pulled: number }>('sync', {});
-    sdk().ui.toast(`${r.pushed} level${r.pushed === 1 ? '' : 's'} sent to Odoo, ${r.pulled} taken from it.`, { kind: 'success' });
+    const r = await sdk().http.post<{ sales: number; pushed: number; pulled: number }>('sync', {});
+    sdk().ui.toast(`${r.sales ? `${r.sales} web sale${r.sales === 1 ? '' : 's'} brought over, ` : ''}${r.pushed} level${r.pushed === 1 ? '' : 's'} sent to Odoo, ${r.pulled} taken from it.`, { kind: 'success' });
     await loadStatus();
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Sync did not complete.';
@@ -138,6 +139,7 @@ async function sync(): Promise<void> {
         <div><span>Matched</span><strong>{{ status.matched }}</strong><small>products</small></div>
         <div><span>In step</span><strong>{{ status.levels }}</strong><small>stock levels</small></div>
         <div><span>Last sync</span><strong>{{ when(status.lastSyncAt) }}</strong></div>
+        <div><span>Web sales</span><strong>{{ status.webSales }}</strong><small>brought over</small></div>
         <div><span>Invoices</span><strong>{{ status.invoices }}</strong><small v-if="status.creditNotes">{{ status.creditNotes }} credited</small></div>
       </div>
       <ul v-if="status.log.length" class="log">

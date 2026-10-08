@@ -6,7 +6,8 @@ export type PaymentProviderId =
   | 'mypos-glass'
   | 'bridge'
   | 'sumup'
-  | 'nexi-smartpos';
+  | 'nexi-smartpos'
+  | 'adyen-terminal';
 
 export interface ProviderStatus {
   connected: boolean;

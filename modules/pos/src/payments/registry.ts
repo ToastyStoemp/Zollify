@@ -8,6 +8,7 @@ import { bridgeProvider, bridgeConnection } from './bridge-ws';
 import { sumupProvider } from './sumup';
 import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
 import { nexiSmartposProvider } from './nexi-smartpos';
+import { adyenTerminalProvider } from './adyen-terminal';
 
 const providers: PaymentProvider[] = [
   manualProvider,
@@ -18,6 +19,7 @@ const providers: PaymentProvider[] = [
   bridgeProvider,
   sumupProvider,
   nexiSmartposProvider,
+  adyenTerminalProvider,
 ];
 
 export function allProviders(): PaymentProvider[] {

@@ -33,6 +33,7 @@ import {
 import { POW_SOLVER_JS } from './pow-client';
 import { nextPublicEvents } from './public-events';
 import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
+import { ADYEN_TABLES, adyenApps, migrateAdyen, registerAdyen } from './adyen-terminal';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -557,21 +558,24 @@ function ipOf(req: FastifyRequest): string {
 }
 
 /** The POS module's server half. The secret encrypts each account's Poynt app key at rest. */
-export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtSecret, 'zollify-smartpos-v1')): ServerModule => ({
+export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtSecret, 'zollify-smartpos-v1'), adyenBox = makeSecretBox(jwtSecret, 'zollify-adyen-v1')): ServerModule => ({
   id: MODULE_ID,
   migrate: (db) => {
     migrate(db);
     migrateReceiptSocials(db);
     migrateSmartpos(db);
+    migrateAdyen(db);
   },
   onAccountDeleted: (db, accountId) => {
-    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states', ...ADYEN_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
   },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {
     // Nexi SmartPOS card payments - see smartpos.ts.
     registerSmartpos(app, ctx, smartposApps(ctx.db, box));
+    // Adyen terminals (Verifone V400m and the rest) - see adyen-terminal.ts.
+    registerAdyen(app, ctx, adyenApps(ctx.db, adyenBox));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: base64BodyLimit(maxBytesFor('logo'), 4096) }, async (req, reply) => {

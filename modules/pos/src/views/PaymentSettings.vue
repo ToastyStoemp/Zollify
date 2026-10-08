@@ -6,6 +6,7 @@ import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
+import { ADYEN_TERMINAL_SETTING, loadAdyenStatus, loadAdyenTerminals, removeAdyenApp, saveAdyenApp, type AdyenStatus, type AdyenTerminal } from '../payments/adyen-terminal';
 import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
 import { sdk } from '../runtime';
@@ -58,6 +59,8 @@ onMounted(async () => {
   void refreshCarbons();
   smartposTerminal.value = (await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING))?.deviceId ?? '';
   if (active.value === 'nexi-smartpos') void refreshSmartpos();
+  adyenTerminal.value = (await getSetting<AdyenTerminal>(ADYEN_TERMINAL_SETTING))?.poiId ?? '';
+  if (active.value === 'adyen-terminal') void refreshAdyen();
   // Back from Nexi/Poynt after connecting (or not).
   const outcome = new URLSearchParams(location.hash.split('?')[1] ?? '').get('smartpos');
   if (outcome) {
@@ -142,6 +145,60 @@ async function copyRedirect(): Promise<void> {
   await navigator.clipboard.writeText(smartpos.value?.redirectUrl ?? '').catch(() => undefined);
   sdk().ui.toast('Copied.', { kind: 'info' });
 }
+// ── Adyen: the account's credential, and which terminal this till sends payments to ──
+const adyen = ref<AdyenStatus | null>(null);
+const adyenTerminals = ref<{ id: string; model: string; serial: string; name: string }[]>([]);
+const adyenTerminal = ref('');
+const adyenError = ref('');
+const adyenForm = ref({ open: false, apiKey: '', merchantAccount: '', environment: 'live' as 'test' | 'live', saving: false });
+async function refreshAdyen(): Promise<void> {
+  adyenError.value = '';
+  adyen.value = await loadAdyenStatus().catch(() => null);
+  if (!adyen.value?.configured) {
+    adyenTerminals.value = [];
+    return;
+  }
+  try {
+    adyenTerminals.value = adyen.value.canList ? await loadAdyenTerminals() : [];
+  } catch (err) {
+    adyenTerminals.value = [];
+    adyenError.value = (err as { body?: { message?: string } } | null)?.body?.message ?? 'Could not load your terminals.';
+  }
+}
+async function saveAdyenTerminal(): Promise<void> {
+  const poiId = adyenTerminal.value.trim();
+  const known = adyenTerminals.value.find((t) => t.id === poiId);
+  const t: AdyenTerminal | null = poiId ? { poiId, name: known?.name ?? poiId } : null;
+  await setSetting(ADYEN_TERMINAL_SETTING, t);
+  sdk().ui.toast(t ? `Card payments go to ${t.name}.` : 'Terminal cleared.', { kind: 'success' });
+  void refreshStatuses();
+}
+function editAdyen(): void {
+  const a = adyen.value?.app;
+  adyenForm.value = { open: true, apiKey: '', merchantAccount: a?.merchantAccount ?? '', environment: a?.environment ?? 'live', saving: false };
+}
+async function saveAdyen(): Promise<void> {
+  const f = adyenForm.value;
+  f.saving = true;
+  try {
+    const { canList } = await saveAdyenApp({ apiKey: f.apiKey.trim(), merchantAccount: f.merchantAccount.trim(), environment: f.environment });
+    adyenForm.value = { ...f, open: false, apiKey: '', saving: false };
+    sdk().ui.toast(canList ? 'Adyen credential saved - now pick this till’s terminal.' : 'Adyen credential saved. The key cannot list terminals, so type the terminal id below.', { kind: 'success', timeoutMs: 6000 });
+  } catch (err) {
+    f.saving = false;
+    sdk().ui.toast((err as { body?: { message?: string } } | null)?.body?.message ?? 'Could not save the credential.', { kind: 'error' });
+  }
+  void refreshAdyen();
+  void refreshStatuses();
+}
+async function removeAdyen(): Promise<void> {
+  if (!(await sdk().ui.confirm('The Adyen API key is deleted from the server. Nothing changes at Adyen.', 'Remove the Adyen credential?', { confirm: 'Remove' }))) return;
+  await removeAdyenApp();
+  await setSetting(ADYEN_TERMINAL_SETTING, null);
+  adyenTerminal.value = '';
+  void refreshAdyen();
+  void refreshStatuses();
+}
 onUnmounted(() => clearInterval(pollTimer));
 
 async function select(id: PaymentProviderId): Promise<void> {
@@ -149,6 +206,7 @@ async function select(id: PaymentProviderId): Promise<void> {
   await sdk().config.set('activeProvider', id);
   onActiveProviderChanged(id);
   if (id === 'nexi-smartpos') void refreshSmartpos();
+  if (id === 'adyen-terminal') void refreshAdyen();
   sdk().ui.toast('Payment provider updated.', { kind: 'success' });
   void refreshStatuses();
 }
@@ -277,6 +335,38 @@ async function removeMethod(name: string): Promise<void> {
         <p v-else-if="smartposError" class="error">{{ smartposError }}</p>
         <p v-else class="hint">{{ smartpos && !smartpos.configured ? 'Add a Poynt app first, then' : 'Tap' }} <strong>Connect</strong> above to allow it on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
         <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. Each till can use its own terminal.</p>
+      </div>
+    </template>
+
+    <template v-if="active === 'adyen-terminal' && statuses['adyen-terminal']?.available">
+      <div v-if="adyen?.canManage" class="carbon">
+        <div class="row"><span class="label">Adyen credential</span>
+          <template v-if="!adyenForm.open">
+            <button type="button" class="quiet" @click="editAdyen">{{ adyen.app ? 'Change' : 'Add your API key' }}</button>
+            <button v-if="adyen.app" type="button" class="quiet danger" @click="removeAdyen">Remove</button>
+          </template>
+        </div>
+        <p v-if="adyen.app && !adyenForm.open" class="hint">Merchant account <code>{{ adyen.app.merchantAccount }}</code> · {{ adyen.app.environment === 'test' ? 'test' : 'live' }} · key ending {{ adyen.app.keyHint }}</p>
+        <p v-else-if="!adyenForm.open" class="hint">In your Adyen Customer Area, make an API credential with the <strong>Cloud Device API</strong> role (and, to list terminals here, the Management API terminal read role). Add its key and your merchant account. Only this account uses it.</p>
+        <form v-if="adyenForm.open" class="appform" @submit.prevent="saveAdyen">
+          <label class="field"><span>Merchant account</span><input v-model="adyenForm.merchantAccount" type="text" autocomplete="off" placeholder="YourCompanyECOM" required /></label>
+          <label class="field"><span>Environment</span>
+            <select v-model="adyenForm.environment"><option value="live">Live</option><option value="test">Test</option></select>
+          </label>
+          <label class="field"><span>API key{{ adyen.app ? ' - leave empty to keep the saved one' : '' }}</span><input v-model="adyenForm.apiKey" type="password" autocomplete="off" :required="!adyen.app" /></label>
+          <div class="row"><button type="submit" :disabled="adyenForm.saving || !adyenForm.merchantAccount.trim()">{{ adyenForm.saving ? 'Checking…' : 'Save' }}</button><button type="button" class="quiet" @click="adyenForm.open = false">Cancel</button></div>
+        </form>
+        <p class="hint">The key stays on the server, encrypted. Each account on this server has its own credential and terminals.</p>
+      </div>
+      <div class="carbon">
+        <div class="row"><span class="label">This till’s Adyen terminal</span><button type="button" class="quiet" @click="refreshAdyen">Refresh</button></div>
+        <select v-if="adyenTerminals.length" v-model="adyenTerminal" @change="saveAdyenTerminal">
+          <option value="" disabled>Choose a terminal…</option>
+          <option v-for="t in adyenTerminals" :key="t.id" :value="t.id">{{ t.name }}{{ t.name !== t.id ? ` (${t.id})` : '' }}</option>
+        </select>
+        <p v-else-if="adyenError" class="error">{{ adyenError }}</p>
+        <label class="field"><span>{{ adyenTerminals.length ? 'Or type the terminal id' : 'Terminal id' }}</span><input v-model="adyenTerminal" type="text" autocomplete="off" placeholder="V400m-347395464 - the model and serial on the back" @change="saveAdyenTerminal" /></label>
+        <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. The terminal needs internet (Wi-Fi or its SIM); the till can be anywhere.</p>
       </div>
     </template>
 

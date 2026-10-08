@@ -26,9 +26,7 @@ const saved = ref<string | null>(null);
 const copied = ref<string | null>(null);
 const overlayBusy = ref<string | null>(null);
 
-const events = computed(() =>
-  [...sdk().data.events.list()].sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? '')),
-);
+const events = computed(() => sdk().data.events.list());
 const suggestedSlug = computed(() =>
   (sdk().account()?.accountName ?? 'booth')
     .toLowerCase()

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { AdminAccount, AdminAccountDetail, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
+import type { AdminAccount, AdminAccountDetail, AdminAccountRelation, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
 import { authFetch, shellConfirm } from '@zollify/platform';
 import { Icon } from '@zollify/ui';
 
@@ -15,6 +15,7 @@ const loading = ref(true);
 const error = ref<string | null>(null);
 const overview = ref<AdminOverview | null>(null);
 const accounts = ref<AdminAccount[]>([]);
+const relations = ref<AdminAccountRelation[]>([]);
 const metrics = ref<AdminMetricRow[]>([]);
 const logs = ref<AdminLogEntry[]>([]);
 interface AdminSession {
@@ -38,15 +39,17 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const [o, a, m, l, s] = await Promise.all([
+    const [o, a, m, l, s, r] = await Promise.all([
       authFetch('/admin/overview') as Promise<AdminOverview>,
       authFetch('/admin/accounts') as Promise<AdminAccount[]>,
       authFetch('/admin/metrics?days=30') as Promise<AdminMetricRow[]>,
       authFetch('/admin/logs') as Promise<AdminLogEntry[]>,
       authFetch('/admin/sessions') as Promise<{ sessions: AdminSession[] }>,
+      authFetch('/admin/relations') as Promise<{ relations: AdminAccountRelation[] }>,
     ]);
     overview.value = o;
     accounts.value = a;
+    relations.value = r.relations;
     metrics.value = m;
     logs.value = l;
     sessions.value = s.sessions;
@@ -119,6 +122,21 @@ async function copy(text: string): Promise<void> {
 
 // ── Accounts ────────────────────────────────────────────────────────────────
 const openAccount = ref<string | null>(null);
+/** How one account relates to the others, read from that account's side. */
+function relatedTo(id: string): { other: string; text: string; kind: string }[] {
+  const out: { other: string; text: string; kind: string }[] = [];
+  for (const r of relations.value) {
+    if (r.from.id === id) {
+      out.push({ kind: r.kind, other: r.to.id, text: r.kind === 'invited' ? `Invited ${r.to.name} (${r.label}) to Zollify` : r.kind === 'consignment' ? `Sells work by ${r.label} - ${r.to.name}` : r.kind === 'consignment-offer' ? `Offered consignment to ${r.to.name} as ${r.label}` : `${r.kind}: ${r.to.name} (${r.label})` });
+    } else if (r.to.id === id) {
+      out.push({ kind: r.kind, other: r.from.id, text: r.kind === 'invited' ? `Created from an invite by ${r.from.name}` : r.kind === 'consignment' ? `Consigns to ${r.from.name} as ${r.label}` : r.kind === 'consignment-offer' ? `Consignment offer from ${r.from.name}, not yet answered` : `${r.kind}: ${r.from.name} (${r.label})` });
+    }
+  }
+  return out;
+}
+const relatedCount = (id: string): number => new Set(relatedTo(id).map((r) => r.other)).size;
+const KIND_LABEL: Record<string, string> = { invited: 'invited', consignment: 'consigns to', 'consignment-offer': 'consignment offer' };
+
 const detail = ref<AdminAccountDetail | null>(null);
 async function toggleAccount(id: string): Promise<void> {
   if (openAccount.value === id) {
@@ -220,7 +238,10 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
         <ul class="list">
           <li v-for="a in accounts" :key="a.id">
             <button type="button" class="row-btn" :aria-expanded="openAccount === a.id" @click="toggleAccount(a.id)">
-              <span class="main"><span>{{ a.name }}</span><small>{{ a.userCount }} users · {{ a.deviceCount }} devices · {{ a.opCount.toLocaleString() }} ops · {{ a.txTotal.toLocaleString() }} sales · active {{ when(a.lastActivityAt) }}</small></span>
+              <span class="main">
+                <span>{{ a.name }}<em v-if="a.ownsServer">server owner</em><small v-if="a.adminEmail">{{ a.adminEmail }}</small></span>
+                <small>{{ a.userCount }} users · {{ a.deviceCount }} devices · {{ a.opCount.toLocaleString() }} ops · {{ a.txTotal.toLocaleString() }} sales · active {{ when(a.lastActivityAt) }}<template v-if="relatedCount(a.id)"> · {{ relatedCount(a.id) }} linked account{{ relatedCount(a.id) === 1 ? '' : 's' }}</template></small>
+              </span>
               <Icon :name="openAccount === a.id ? 'chevron-down' : 'chevron-right'" :size="14" />
             </button>
             <div v-if="openAccount === a.id" class="detail">
@@ -230,8 +251,23 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
                 <ul class="plain"><li v-for="u in detail.users" :key="u.id">{{ u.email }} <em>{{ u.role }}</em><small>last login {{ when(u.lastLoginAt) }}</small></li></ul>
                 <p class="sub">Devices</p>
                 <ul class="plain"><li v-for="d in detail.devices" :key="d.id">{{ d.name || 'Unnamed' }}<small>seen {{ when(d.lastSeenAt) }}</small></li></ul>
+                <template v-if="relatedTo(a.id).length">
+                  <p class="sub">Other accounts</p>
+                  <ul class="plain"><li v-for="(r, i) in relatedTo(a.id)" :key="i">{{ r.text }}</li></ul>
+                </template>
               </template>
             </div>
+          </li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <h3>Relationships</h3>
+        <p class="hint">Which accounts are tied to which: an invite that made an account, a store and the artists consigning to it.</p>
+        <p v-if="!relations.length" class="hint">No account is linked to another yet.</p>
+        <ul v-else class="plain relations">
+          <li v-for="(r, i) in relations" :key="i">
+            <span>{{ r.from.name }}</span><em>{{ KIND_LABEL[r.kind] ?? r.kind }}</em><span>{{ r.to.name }}</span><small>{{ r.label }}<template v-if="r.since"> · since {{ when(r.since) }}</template></small>
           </li>
         </ul>
       </article>
@@ -292,6 +328,8 @@ h3 { margin: 0; font-size: .95rem; }
 .main small, .plain small { color: var(--zfy-muted, #5a6472); font-size: .74rem; margin-left: .3rem; }
 em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-surface, #fff); color: var(--zfy-muted, #5a6472); vertical-align: middle; }
 .detail { padding: .4rem .8rem .2rem; display: flex; flex-direction: column; gap: .2rem; }
+.relations li { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; padding: .3rem .5rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); }
+.relations em { margin: 0; }
 .sub { margin: .3rem 0 0; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .plain { list-style: none; margin: 0; padding: 0; font-size: .85rem; display: flex; flex-direction: column; gap: .15rem; }
 .log { margin: .3rem 0 0; max-height: 20rem; overflow: auto; padding: .6rem .8rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .72rem; white-space: pre-wrap; overflow-wrap: anywhere; }

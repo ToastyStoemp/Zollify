@@ -310,7 +310,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerWebhookRoutes(app, db, webhooks, problems);
   registerProblemRoutes(app, db, problems);
   registerFxRoutes(app);
-  registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
+  registerAdminRoutes(app, db, opts.deployDir, opts.dataDir, opts.serverModules);
   registerLogRoutes(app, db, opts.dataDir);
   registerEventFileRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);

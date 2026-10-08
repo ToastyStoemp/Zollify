@@ -23,6 +23,7 @@ import {
 } from '@zollify/platform';
 import { QrCode } from '@zollify/ui';
 import { loadEnabledModules } from '../boot';
+import GoogleMark from '../components/GoogleMark.vue';
 
 /**
  * Sign in, or create an account with an invite code - ported from ZollTool's
@@ -80,8 +81,19 @@ if (invitedWith) {
   mode.value = 'register';
 }
 
+/** Sign-in methods this server offers besides a password. */
+const providers = ref<{ google: boolean }>({ google: false });
+async function loadProviders(): Promise<void> {
+  try {
+    const res = await fetch(`${getApiBase()}/auth/providers`);
+    providers.value = res.ok ? ((await res.json()) as { google: boolean }) : { google: false };
+  } catch {
+    providers.value = { google: false };
+  }
+}
+
 onMounted(async () => {
-  if (!native || getServerUrl()) await checkFirstRun();
+  if (!native || getServerUrl()) await Promise.all([checkFirstRun(), loadProviders()]);
   // The device identity lives in the account's database, so before the first
   // sign-in on this device there is none yet; the server assigns one then.
   try {
@@ -90,6 +102,8 @@ onMounted(async () => {
   } catch {
     /* signed out on a fresh device */
   }
+  // Back from Google in this tab: finish the sign-in that was started here.
+  if (typeof route.query.google === 'string') await resumeGoogle(route.query.google);
 });
 
 async function afterLogin(body: unknown): Promise<void> {
@@ -268,6 +282,159 @@ function closeQr(): void {
 
 onBeforeUnmount(stopQr);
 
+// ── Sign in with Google ───────────────────────────────────────────────────────
+// Google refuses to sign anyone in inside an app's WebView, so the Android app
+// hands the sign-in to the device's browser and waits, polling with a secret
+// only it holds - the same shape as sign-in by QR. On the web the page itself
+// goes to Google and comes back with ?google=<id>, the secret kept in
+// sessionStorage meanwhile. Either way the server then says what it needs:
+// nothing more, an invite code (a person it does not know yet), or the
+// account's authenticator code.
+
+const GOOGLE_KEY = 'zollify.googleLink';
+const googleMode = ref(false);
+const googleState = ref<'waiting' | 'invite' | '2fa' | 'failed'>('waiting');
+const googleEmail = ref('');
+let googleLink: { id: string; pollSecret: string } | null = null;
+let googleTimer: ReturnType<typeof setTimeout> | undefined;
+
+function stopGoogle(): void {
+  clearTimeout(googleTimer);
+  googleTimer = undefined;
+  googleLink = null;
+}
+
+async function startGoogle(): Promise<void> {
+  error.value = null;
+  if (!pointAtServer()) return;
+  stopGoogle();
+  busy.value = true;
+  try {
+    const res = await fetch(`${getApiBase()}/auth/google/begin`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
+      body: JSON.stringify({ deviceId: myDeviceId || undefined, deviceName: myDeviceName || undefined, flavor: deviceFlavor() }),
+    });
+    const body = (await res.json().catch(() => ({}))) as { id?: string; pollSecret?: string; url?: string; error?: string };
+    if (!res.ok || !body.id || !body.pollSecret || !body.url) {
+      error.value = body.error ?? 'Could not start sign-in with Google.';
+      return;
+    }
+    googleLink = { id: body.id, pollSecret: body.pollSecret };
+    if (!native) {
+      // This tab goes to Google and comes back to /login?google=<id>.
+      sessionStorage.setItem(GOOGLE_KEY, JSON.stringify(googleLink));
+      location.assign(body.url);
+      return;
+    }
+    // The app's WebView opens an outside address in the device's own browser and stays put.
+    googleMode.value = true;
+    googleState.value = 'waiting';
+    if (!window.open(body.url, '_blank')) location.assign(body.url);
+    googleTimer = setTimeout(pollGoogle, POLL_MS);
+  } catch {
+    error.value = 'Could not reach the server. Check your connection and try again.';
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** The web tab is back from Google: pick up the sign-in it started. */
+async function resumeGoogle(id: string): Promise<void> {
+  void router.replace({ query: {} });
+  let saved: { id: string; pollSecret: string } | null = null;
+  try {
+    saved = JSON.parse(sessionStorage.getItem(GOOGLE_KEY) ?? 'null') as { id: string; pollSecret: string } | null;
+    sessionStorage.removeItem(GOOGLE_KEY);
+  } catch {
+    /* no storage */
+  }
+  if (!saved || saved.id !== id) {
+    error.value = 'That Google sign-in was started somewhere else - try again here.';
+    return;
+  }
+  googleLink = saved;
+  googleMode.value = true;
+  googleState.value = 'waiting';
+  await pollGoogle();
+}
+
+/** One ask of the server - with the invite or authenticator code when it wanted one. */
+async function pollGoogle(extra: Record<string, unknown> = {}): Promise<void> {
+  const current = googleLink;
+  if (!current) return;
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}/auth/google/poll`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', ...nativeHeaders() },
+      body: JSON.stringify({ ...current, ...extra }),
+    });
+  } catch {
+    if (googleLink === current) googleTimer = setTimeout(pollGoogle, POLL_MS);
+    return;
+  }
+  if (googleLink !== current) return;
+  const body = (await res.json().catch(() => ({}))) as { status?: string; email?: string; error?: string };
+  if (res.ok && body.status === 'approved') {
+    stopGoogle();
+    busy.value = true;
+    try {
+      await afterLogin(body);
+    } finally {
+      busy.value = false;
+    }
+    return;
+  }
+  if (body.status === 'pending') {
+    googleTimer = setTimeout(pollGoogle, POLL_MS);
+    return;
+  }
+  if (body.status === 'needsInvite' || body.status === 'needs2fa') {
+    googleEmail.value = body.email ?? '';
+    googleState.value = body.status === 'needsInvite' ? 'invite' : '2fa';
+    if (!res.ok) error.value = body.error ?? 'That was not accepted.';
+    return;
+  }
+  if (res.status >= 500 || res.status === 429) {
+    googleTimer = setTimeout(pollGoogle, POLL_MS * 2);
+    return;
+  }
+  stopGoogle();
+  googleState.value = 'failed';
+  error.value = body.error ?? 'Google sign-in did not go through.';
+}
+
+async function finishGoogle(): Promise<void> {
+  error.value = null;
+  busy.value = true;
+  try {
+    let trustToken: string | undefined;
+    try {
+      trustToken = localStorage.getItem(TRUST_KEY) ?? undefined;
+    } catch {
+      /* no storage */
+    }
+    await pollGoogle(
+      googleState.value === 'invite'
+        ? { inviteCode: inviteCode.value.trim() || undefined, accountName: accountName.value.trim() || undefined }
+        : { code: code.value.trim() || undefined, trustToken, rememberDevice: remember.value },
+    );
+  } finally {
+    busy.value = false;
+  }
+}
+
+function closeGoogle(): void {
+  stopGoogle();
+  googleMode.value = false;
+  error.value = null;
+}
+
+onBeforeUnmount(stopGoogle);
+
 /** Account creation is bot-gated by a proof-of-work challenge solved here before the request. */
 async function register(): Promise<void> {
   error.value = null;
@@ -322,6 +489,30 @@ async function register(): Promise<void> {
       <button type="button" class="quiet" @click="closeQr">Sign in with a password instead</button>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </section>
+    <form v-else-if="googleMode" class="panel" @submit.prevent="finishGoogle">
+      <h1><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></h1>
+      <template v-if="googleState === 'waiting'">
+        <p class="lede">Finish signing in with Google in the browser that just opened, then come back here.</p>
+        <p class="hint">{{ busy ? 'Signing in…' : 'Waiting for Google…' }}</p>
+      </template>
+      <template v-else-if="googleState === 'invite'">
+        <p class="lede">Google knows you as <strong>{{ googleEmail }}</strong>, but this server does not yet. An invite code puts you in a business, or starts a new one.</p>
+        <label><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" required /></label>
+        <label><span>Business name</span><input v-model="accountName" type="text" placeholder="Only for a brand-new account" /></label>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Creating…' : 'Create account' }}</button>
+      </template>
+      <template v-else-if="googleState === '2fa'">
+        <p class="lede">Signing in as <strong>{{ googleEmail }}</strong>. This account also asks for its authenticator code.</p>
+        <label><span>Authenticator code</span><input v-model="code" inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="6-digit code, or a recovery code" required /></label>
+        <label class="inline"><input v-model="remember" type="checkbox" /> <span>Remember this device</span></label>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
+      </template>
+      <template v-else>
+        <button type="button" class="primary" @click="startGoogle">Try again with Google</button>
+      </template>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+      <button type="button" class="quiet" @click="closeGoogle">Use a password instead</button>
+    </form>
     <form v-else class="panel" @submit.prevent="mode === 'login' ? login() : register()">
       <h1><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></h1>
       <p v-if="firstRun" class="hint setup">First run - the account you create now owns this server.</p>
@@ -330,7 +521,7 @@ async function register(): Promise<void> {
         <button type="button" role="tab" :aria-selected="mode === 'register'" :class="{ on: mode === 'register' }" @click="mode = 'register'; error = null">Create account</button>
       </div>
 
-      <label v-if="native"><span>Server</span><input v-model="server" type="url" inputmode="url" autocomplete="url" placeholder="https://zollify.example.com" required @change="pointAtServer() && checkFirstRun()" /></label>
+      <label v-if="native"><span>Server</span><input v-model="server" type="url" inputmode="url" autocomplete="url" placeholder="https://zollify.example.com" required @change="pointAtServer() && (checkFirstRun(), loadProviders())" /></label>
       <label><span>Email</span><input v-model="email" type="email" autocomplete="username" autofocus required /></label>
       <label><span>Password</span><input v-model="password" type="password" :autocomplete="mode === 'login' ? 'current-password' : 'new-password'" :minlength="mode === 'register' ? 8 : undefined" required /></label>
 
@@ -341,12 +532,14 @@ async function register(): Promise<void> {
         </template>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Signing in…' : 'Sign in' }}</button>
         <button type="button" class="quiet" :disabled="busy" @click="startQr">Sign in with another device</button>
+        <button v-if="providers.google" type="button" class="google" :disabled="busy" @click="startGoogle"><GoogleMark /> Continue with Google</button>
       </template>
       <template v-else>
         <label v-if="!firstRun"><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" /></label>
         <label><span>Business name</span><input v-model="accountName" type="text" :placeholder="firstRun ? 'Your business or studio' : 'Only for a brand-new account'" /></label>
         <p v-if="!firstRun" class="hint">Joining an existing business? The invite code puts you in it - the business name is ignored.</p>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Creating…' : firstRun ? 'Set up this server' : 'Create account' }}</button>
+        <button v-if="providers.google && !firstRun" type="button" class="google" :disabled="busy" @click="startGoogle"><GoogleMark /> Sign up with Google</button>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
@@ -370,6 +563,8 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .78rem; }
 .setup { color: var(--zfy-accent-ink, #0a5a4a); font-size: .85rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .875rem; }
+.google { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 2.5rem; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; border-radius: 8px; font-weight: 500; }
+.google:hover { background: var(--zfy-surface-2, #e9edf1); }
 .seg { display: flex; }
 .seg button { flex: 1; }
 .qr-panel { align-items: stretch; text-align: center; }

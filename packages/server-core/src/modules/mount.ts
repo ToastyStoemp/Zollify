@@ -92,6 +92,12 @@ export interface ServerModule {
    * module keeps for the account. A throw rolls the whole deletion back.
    */
   onAccountDeleted?(db: Database.Database, accountId: string): void;
+  /**
+   * The ties this module keeps between accounts (a store and the artist
+   * accounts consigning to it), for the server owner's admin panel. Account
+   * names are filled in by the gateway. Must not throw.
+   */
+  accountRelations?(db: Database.Database): { from: string; to: string; kind: string; label: string; since: number | null }[];
 }
 
 /** Builds the per-module services: notifications carry the module's id, server writes its name. */

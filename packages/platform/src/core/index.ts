@@ -105,6 +105,7 @@ export {
   eventFileCached,
   retryEventFileUploads,
 } from './event-files';
+export { setEventBoothLayout, copyEventBoothLayout, importEventBoothLayout, getConfiguratorUrl, setConfiguratorUrl } from './booth-layout';
 export { transactionsToCsv, csvFilename } from './csv';
 export {
   loadInventory,
@@ -132,6 +133,19 @@ export {
   type Availability,
   type InventoryRow,
 } from './inventory';
+export {
+  editionsOf,
+  createNextEdition,
+  linkToSeries,
+  unlinkFromSeries,
+  setEditionLabel,
+  planEditionsFor,
+  prepPlanFor,
+  grantsFor,
+  applyPrepPlan,
+  type NextEditionInput,
+  type PlannerRow,
+} from './editions';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
 export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead } from './notifications';

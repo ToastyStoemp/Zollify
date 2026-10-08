@@ -1,4 +1,4 @@
-import { shortBarcode, type Product } from '@zollify/shared';
+import { matchesShortBarcode, type Product } from '@zollify/shared';
 
 /** Ported from ZollTool: exact SKU / title / variant wins, else a unique partial match. */
 
@@ -27,7 +27,7 @@ export function findSearchMatch(products: Product[], query: string): SearchResul
     if (
       (norm(p.sku) && norm(p.sku) === needle) ||
       norm(p.title) === needle ||
-      (p.variants.length === 0 && norm(shortBarcode(p.type, p.id)) === needle)
+      (p.variants.length === 0 && matchesShortBarcode(needle, p.type, p.id))
     ) {
       return { productId: p.id, variantId: null, label };
     }
@@ -37,7 +37,7 @@ export function findSearchMatch(products: Product[], query: string): SearchResul
         (norm(v.sku) && norm(v.sku) === needle) ||
         (norm(v.name) && norm(v.name) === needle) ||
         norm(`${p.title} ${v.name}`) === needle ||
-        norm(shortBarcode(p.type, p.id, v.id)) === needle
+        matchesShortBarcode(needle, p.type, p.id, v.id)
       ) {
         return { productId: p.id, variantId: v.id, label: vLabel };
       }
@@ -58,3 +58,10 @@ export function findSearchMatch(products: Product[], query: string): SearchResul
 }
 
 export { typeColor } from '@zollify/ui';
+
+/** Module tiles shown beside the products: only at the top level (not inside an artist), and only when the search is empty or names them. */
+export function visibleTileActions<T extends { label: string; tile?: boolean }>(actions: T[], query: string, browsingInside: boolean): T[] {
+  if (browsingInside) return [];
+  const needle = norm(query);
+  return actions.filter((a) => a.tile && (!needle || a.label.toLowerCase().includes(needle)));
+}

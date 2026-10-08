@@ -1,6 +1,6 @@
 # Zollify
 
-One app for the booth, assembled from modules loaded at runtime.
+One app for your business, assembled from modules loaded at runtime.
 
 Zollify replaces ZollTool, ZollTax and ZollSource with a single multi-tenant
 platform. Selling, customs, tax and sourcing are **modules** - they register
@@ -15,7 +15,7 @@ and never import one another.
   runs in the browser, sandboxed by CSP and verified by hash. It never runs in
   the Node process holding the database and every tenant's API keys.
 - **Install online, boot offline.** The network is on the install path only. A
-  booth with no signal boots every module it already has, out of IndexedDB.
+  business with no signal boots every module it already has, out of IndexedDB.
 - **Zollify never touches the sale.** myPOS, SumUp and Nexi SmartPOS terminals take the card and
   settle to the vendor's own bank. That keeps PCI scope and money-transmission
   licensing out of the platform - see [SECURITY.md](./SECURITY.md).
@@ -31,13 +31,21 @@ packages/
   ui/             @zollify/ui           design tokens + components
 modules/
   pos/            cart, checkout, receipts + nested payment provider plugins
-  customs/        EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
+  customs-ch/     Swiss EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
+  customs-de/     German customs paperwork
+  customs-hub/    one Customs entry point over the country modules
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
+  label-printer/  Bluetooth label printer for price tags and staff badges
+  costs/          per-item cost from shipment batches, margins in the catalogue
+  convention-checklist/  packing checklist per convention
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
-  consignment/    artists' work sold in your stores, commission and payouts; artists' own view (client + server half)
+  consignment/    artists' work sold in your stores, commission and payouts (client + server half)
+  consignment-artist/  the artist's own view of the stores that carry their work
+  commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
+  peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -133,7 +141,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 
 ## Status
 
-**Built and passing (156 tests):**
+**Built and passing (840 tests):**
 
 *Platform*
 - `@zollify/sdk` - the boundary, with a host-compatibility checker.
@@ -152,14 +160,16 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 - Receipts, printed to a thermal printer or through the browser.
 - History with per-currency totals, reverts and CSV export.
 - Cash up: expected vs counted, with a signed difference.
-- One inventory the whole booth draws on; an event can claim stock, and a claim
+- One inventory the whole business draws on; an event can claim stock, and a claim
   is reserved for it. Selling past a claim draws the overage from the unclaimed
   pool. Availability is derived from sales, never decremented, so reverting a
   sale returns the stock with no compensating write.
 - Charging in a local currency while the books stay in the base one.
 
-*Modules* - POS, Customs, Sourcing, Shopify sync, Price Cards, Migration, Public
-events, Tax & books, Consignment.
+*Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
+Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
+Public events, Tax & books, Consignment (and the artist's own view), Commissions,
+E-invoices for Belgium (Peppol).
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
@@ -185,6 +195,32 @@ balance unless the rent is paid separately. The store also schedules **setup
 moments**: the artist gets an in-app notification on their linked account and
 an email with a calendar file, confirms or declines from *Where I consign*, and
 the store hears back the same way.
+
+**Commissions** track custom work from request to pickup (Requested, Accepted,
+In progress, Ready for pickup, Collected, Cancelled). The record and the
+customer's contact details stay on the server, never in the synced op-log. A
+"Commission" button over the till takes a deposit or the final balance as an
+ordinary free-price sale line whose `ref` names the commission, so payment
+providers, receipts, VAT and cash-up work as for any sale; the paid-so-far is
+derived from those sale lines (a reverted sale gives the balance back). The
+customer follows progress at `/p/commissions/<token>`, reached by a QR code:
+the token is 192 random bits per commission and an admin can replace it, the
+page is plain server-rendered HTML with no script, rate limited and noindex,
+and shows only the title, status, customer-visible updates, due date, amounts
+and the pickup address - no contact details and no internal notes. Times are
+shown in the time zone set in the module's settings, and an open page reloads
+itself every five minutes until the commission is collected or cancelled. At
+the till, a commission already in the sale can have its amount replaced.
+A customer is one record per account (name, email, phone) that commissions point
+at, so a returning customer is picked from a search instead of retyped, a
+Customers tab shows everything one customer ordered, paid and still owes, and a
+new customer who matches an existing email or phone is offered back, never
+merged. Details are kept only while needed: once every commission of a customer
+is collected or cancelled they are erased after a period an admin sets (default
+30 days, 0 to 365), by a sweep at startup and every few hours that only acts
+while the module is on. Erasing deletes the name, email and phone and clears the
+notes, details and customer messages, and keeps title, price, payments, dates and
+status. Admins can also erase one customer or all closed ones at once.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally
@@ -283,11 +319,21 @@ also offer one app to accounts without their own - see `POYNT_*` in
 `apps/server/.env.example`. Nexi needs the server on a public https address
 to report payments back. Not yet tried against a live terminal.
 
+*Business profile* - one place says who the business is: name, address,
+contact, VAT number, EORI, a Belgian enterprise number, and the webstore and
+social links (Settings -> Business profile, asked once in the setup wizard).
+Modules read it by default and keep a value of their own only when it
+differs, as the customs declarant does: receipts, customs paperwork and the
+Peppol seller all follow it, and an artist's links appear under the online
+receipt (and on paper, if switched on in Receipts). Links are checked on the
+server (https only, length caps, Instagram and TikTok handles made canonical).
+
 *E-invoices for Belgium (Peppol)* - the `peppol-be` module (admins) writes
 invoices and credit notes as Peppol BIS Billing 3.0 UBL, as Belgian B2B
 invoices must be from 2026. Each one is checked against the Peppol and
 Belgian rules before it is issued (enterprise number, VAT categories, the
-small-business exemption, reverse charge, intra-EU delivery); numbers are
+small-business exemption, reverse charge, intra-EU delivery); the seller
+is the business profile unless the invoice settings override a field; numbers are
 taken only on issue, per series and year, without gaps, and an issued
 invoice is frozen - corrections are credit notes. Invoices can start from a
 till sale, customers are checked against the Peppol Directory, and sending
@@ -295,6 +341,17 @@ goes through the business's own Storecove account (its API key is stored
 encrypted and never reaches the browser). With any other access point,
 download the XML and upload it there. The generated XML passes the official
 CEN and OpenPEPPOL schematrons and the UBL 2.1 schema.
+
+*Problems* - Settings → Problems lists what quietly failed for owners and
+admins: a webhook that keeps failing or was switched off, email that does not
+go out, a sync device whose pushes crash a module, a scheduled job that threw,
+Peppol, myPOS, SumUp, Lexware and Nexi calls that fail, and the host's backup
+and update status. Repeats update one row, a success closes it, a new error
+rings the bell once a day at most, and the owner gets one email digest a day
+unless they opt out. Server modules report through
+`reportProblem(ctx, accountId, { kind, key, severity, message })` and
+`resolveProblem(ctx, accountId, kind, key)`; rows never hold secrets or payloads
+(see docs/security.md).
 
 Security notes and settings are in [docs/security.md](docs/security.md);
 legal notes per country in [docs/germany-compliance.md](docs/germany-compliance.md)
@@ -323,19 +380,21 @@ the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ic
 (subscribable calendar) and `/instagram.txt` (bio text). Rendered on the gateway
 from the account's op-log, so it updates whenever an event is edited. Public
 module halves mount under `/p/` with no session; the module resolves the account
-from the slug and refuses unless the module is enabled for it.
+from the slug and refuses unless the module is enabled for it. Hall, booth number,
+link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
+Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
+handle) and legacy booth values, which fill in wherever the event has none.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway
 serving the built shell. See *Deploying on a VPS* below.
 
+*Android shell* - `android/`, three flavours, self-update for compat/full via
+`/api/updates/*`; see `.github/workflows/android.yml`.
+
 **Not built:**
 
-- **Android shell** - built (`android/`, three flavours, self-update for
-  compat/full via `/api/updates/*`; see `.github/workflows/android.yml`).
 - **Billing** - deferred. The per-account enabled-modules list is its seam.
-- Smaller carry-overs from ZollTool: customer display mode, QR scanning, price
-  comparison, PIN lock, cost tracking and PDF reports.
 
 The twenty-point security baseline is tracked in [SECURITY.md](./SECURITY.md),
 with each control pointing at where it is enforced. Two items remain open, both

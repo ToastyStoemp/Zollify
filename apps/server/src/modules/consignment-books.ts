@@ -27,7 +27,7 @@ import {
   type StoreReport,
   isStore,
 } from '@zollify/shared';
-import { isEnabled, type ModuleContext, type ModuleServices } from '@zollify/server-core';
+import { isEnabled, reasonOf, reportProblem, resolveProblem, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, consignorRows, parseDoc, payoutsFor, replay, toConsignor } from './consignment';
 import type { Side } from './consignment';
 import { accountEmail, get, rentalsOf, tellArtist } from './consignment-planner';
@@ -172,20 +172,26 @@ export async function sendClosedReports(svc: ModuleServices, now = Date.now()): 
   let sent = 0;
   const accounts = db.prepare('SELECT DISTINCT accountId FROM consignors').all() as { accountId: string }[];
   for (const { accountId } of accounts) {
-    if (!isEnabled(db, accountId, MODULE_ID)) continue;
-    const settings = booksSettings(db, accountId);
-    if (!settings.emailReport) continue;
-    const current = reportPeriod(settings, localDay(now, settings.timeZone));
-    const closed = recentPeriods(settings, current.from, 2)[1]!;
-    const done = db.prepare('SELECT 1 FROM consignment_reports_sent WHERE accountId = ? AND periodFrom = ?').get(accountId, closed.from);
-    if (done) continue;
-    db.prepare('INSERT INTO consignment_reports_sent (accountId, periodFrom, sentAt) VALUES (?, ?, ?)').run(accountId, closed.from, now);
-    const report = reportFor(db, accountId, closed);
-    if (!report.totals.length && !report.artists.length) continue;
-    const name = accountName(db, accountId) ?? 'Your store';
-    svc.notify(accountId, { kind: 'reports', title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment/reports', minRole: 'admin' });
-    const to = accountEmail(db, accountId);
-    if (to && svc.mail.enabled && (await svc.mail.send({ to, ...reportMail(name, report, venueNamer(db, accountId)) }))) sent++;
+    try {
+      if (!isEnabled(db, accountId, MODULE_ID)) continue;
+      const settings = booksSettings(db, accountId);
+      if (!settings.emailReport) continue;
+      const current = reportPeriod(settings, localDay(now, settings.timeZone));
+      const closed = recentPeriods(settings, current.from, 2)[1]!;
+      const done = db.prepare('SELECT 1 FROM consignment_reports_sent WHERE accountId = ? AND periodFrom = ?').get(accountId, closed.from);
+      if (done) continue;
+      db.prepare('INSERT INTO consignment_reports_sent (accountId, periodFrom, sentAt) VALUES (?, ?, ?)').run(accountId, closed.from, now);
+      const report = reportFor(db, accountId, closed);
+      if (!report.totals.length && !report.artists.length) continue;
+      const name = accountName(db, accountId) ?? 'Your store';
+      svc.notify(accountId, { kind: 'reports', title: `Report ready: ${periodLabel(closed)}`, body: `${report.artists.filter((a) => a.balance > 0).length} artists to pay out.`, link: '/m/consignment/reports', minRole: 'admin' });
+      const to = accountEmail(db, accountId);
+      if (to && svc.mail.enabled && (await svc.mail.send({ to, accountId, ...reportMail(name, report, venueNamer(db, accountId)) }))) sent++;
+      resolveProblem(svc, accountId, 'job.consignment-report');
+    } catch (err) {
+      // One account's trouble must not stop everyone else's report; the owner is told, not just the log.
+      reportProblem(svc, accountId, { kind: 'job.consignment-report', severity: 'error', message: 'Closing the consignment report failed', detail: reasonOf(null, err), link: '/m/consignment/reports' });
+    }
   }
   return sent;
 }
@@ -497,6 +503,7 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
         const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
         await ctx.mail.send({
           to,
+          accountId: ctx.identity(req).accountId,
           subject: `${name} objects to a fee of ${money(fee.amount, fee.currency)}`,
           text: [`${name} objects to the fee of ${money(fee.amount, fee.currency)} (${FEE_REASONS[fee.reason]}, ${fee.date}):`, '', body.data.note, '', 'You can waive it in Zollify under Consignment → Statement.'].join('\n'),
           ...(replyTo ? { replyTo } : {}),

@@ -1,4 +1,5 @@
 /** Data model v2 - shared between app and server. Grows in Phase 1/3. */
+import type { BoothLayout } from './booth-layout';
 import type { EventVat, SaleTax, TaxClass } from './vat';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
@@ -32,6 +33,21 @@ export interface EventAttachment {
   addedAt: number;
 }
 
+/**
+ * Where the booth stands at an event. All optional, so old events and older
+ * devices are unaffected. See event-booth.ts for validation and the fallback
+ * to the legacy public-events overlay.
+ */
+export interface EventBooth {
+  hall?: string;
+  /** Stand or booth number. */
+  number?: string;
+  /** The convention's own page. https only. */
+  link?: string;
+  /** A short line for visitors, e.g. "New prints, limited pins." */
+  note?: string;
+}
+
 export interface SalesEvent {
   id: string;
   name: string;
@@ -58,10 +74,20 @@ export interface SalesEvent {
   customsDe?: Record<string, unknown>;
   /** VAT at this event - see resolveEventVat. Absent = from the country and the booth's exemptions. */
   vat?: EventVat;
+  /** Hall, booth number, link and note - published by Public events. Not used for stores. */
+  booth?: EventBooth;
+  /** Keep this event out of the shared event pool even when the account shares its events (private or invite-only). */
+  noPool?: boolean;
   /** Free-text notes for the team: setup times, stand number, who to ask. */
   notes?: string;
   /** Tickets, plans and other files. See EventAttachment. */
   attachments?: EventAttachment[];
+  /** Events sharing a seriesId are editions of the same convention (see editions.ts). Absent = a one-off. */
+  seriesId?: string;
+  /** Which edition of the series this is, e.g. "2027" or "Spring 2027". */
+  edition?: string;
+  /** Booth/cube layout imported from the configurator. See booth-layout.ts. */
+  boothLayout?: BoothLayout;
   updatedAt: number;
   deletedAt?: number;
 }

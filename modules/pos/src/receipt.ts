@@ -1,10 +1,10 @@
 import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, printableLink, receiptFooterLinks } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { receiptQrPng } from './lib/after-sale';
-import { serverBranding } from './lib/branding';
+import { serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
 
 /**
@@ -168,7 +168,7 @@ export async function loadReceiptConfig(): Promise<{
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string },
+  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[] },
   eventCountry?: string,
 ): ReceiptLine[] {
   const { artist, logoB64, footerText } = config;
@@ -259,6 +259,10 @@ export function buildReceiptLines(
   if (footerText) {
     for (const part of footerText.split('\n')) lines.push(center(part));
   }
+  if (config.linkLines?.length) {
+    lines.push({ kind: 'space' });
+    for (const text of config.linkLines) for (const part of wrap(text, WIDTH)) lines.push(center(part));
+  }
   if (config.qrB64) {
     lines.push({ kind: 'image', imageB64: config.qrB64 });
     lines.push(center('Scan for your receipt online'));
@@ -272,32 +276,46 @@ export function buildReceiptLines(
 }
 
 /**
+ * The webstore and social links (kept in the business profile) as plain lines
+ * for paper, when the account switched printing them on (off by default).
+ * Never blocks or fails a print.
+ */
+async function printedLinkLines(): Promise<string[]> {
+  const socials = await serverSocials();
+  if (!socials?.showOnPrint) return [];
+  // The links are the business profile's, which this device already holds; the server's copy covers a profile it has not synced yet.
+  const links = sdk().account()?.profile.links ?? socials;
+  return receiptFooterLinks(links).map((l) => `${l.label}: ${printableLink(l.url)}`);
+}
+
+/**
  * The receipt as this device prints it: the saved receipt settings, plus the
  * online-receipt QR when that is switched on and the sale has a link.
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
-  const [qrB64, logoB64, shared] = await Promise.all([
+  const [qrB64, logoB64, shared, linkLines] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
+    printedLinkLines(),
   ]);
   return buildReceiptLines(
     tx,
     eventName,
-    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64 },
+    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64, linkLines },
     eventCountry,
   );
 }
 
 /**
  * A device that was never set up under Receipts still prints a branded
- * receipt: blank artist fields fall back to the booth profile (as the
+ * receipt: blank artist fields fall back to the business profile (as the
  * settings form already promises), and a missing logo or footer to the ones
  * shared through the server.
  */
-function withProfileFallback(artist: ArtistInfo): ArtistInfo {
+export function withProfileFallback(artist: ArtistInfo): ArtistInfo {
   const profile = sdk().account()?.profile.artist;
   if (!profile) return artist;
   const out: ArtistInfo = { ...artist };

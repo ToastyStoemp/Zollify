@@ -117,7 +117,7 @@ export interface SaleLineRef {
   id: string;
 }
 
-/** A button a module adds to the till, opening one of its own screens over it. */
+/** A button (or, with `tile`, a tile in the product grid) a module adds to the till, opening one of its own screens over it. */
 export interface TillAction {
   id: string;
   label: string;
@@ -125,6 +125,8 @@ export interface TillAction {
   /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
   component: ComponentLoader;
   order?: number;
+  /** Show it as a tile beside the products instead of a button under the cart. */
+  tile?: boolean;
 }
 
 /** What a module found for a code the till did not know. */
@@ -146,6 +148,21 @@ export interface TillLine {
   consignorId?: string;
   commissionPct?: number;
   ref?: { kind: string; id: string };
+}
+
+/** A line a module put in the cart, as it stands now. */
+export interface TillLineInfo {
+  key: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+}
+
+/** The till's side of reading and changing the lines modules added. */
+export interface TillLineAccess {
+  find(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null;
+  /** Swaps name, quantity and price of the line with `line.key`, in place. False when there is none. */
+  replace(line: Omit<TillLine, 'ref'>): boolean;
 }
 
 /**
@@ -561,6 +578,12 @@ export interface Sdk {
     actions(): (TillAction & { moduleId: string })[];
     /** False when no till is open to take it (or it refused, e.g. no active event). */
     addLine(line: TillLine): boolean;
+    /** The line this module already has in the cart under `key` (never another module's), or null. */
+    findLine(key: string): TillLineInfo | null;
+    /** Changes the amount of a line this module added, keeping its place in the cart. False when it has no such line or no till is open. */
+    replaceLine(line: Omit<TillLine, 'ref'>): boolean;
+    /** The till's side: read and change the lines modules added. Only one till listens at a time. */
+    onLineAccess(access: TillLineAccess): Unsubscribe;
     /** The till's side: receive lines modules add. Only one till listens at a time. */
     onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
     /**

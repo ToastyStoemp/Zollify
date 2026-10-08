@@ -56,8 +56,8 @@ describe('splitPublicEvents', () => {
   it('exposes only display fields, never the record', () => {
     // A sale-bearing field on the event must not leak through.
     const { upcoming } = splitPublicEvents(
-      [ev('a', '2026-10-03', undefined, { exchangeRate: 1.1, customs: { secret: 1 } } as Partial<SalesEvent>)],
-      { a: { booth: 'B-12', hall: '3' } },
+      [ev('a', '2026-10-03', undefined, { exchangeRate: 1.1, customs: { secret: 1 }, booth: { number: 'B-12', hall: '3' } } as Partial<SalesEvent>)],
+      {},
       12,
       today,
     );
@@ -80,8 +80,8 @@ describe('countryFlag', () => {
 describe('buildIcs', () => {
   it('emits all-day events with an exclusive end and folded long lines', () => {
     const { upcoming } = splitPublicEvents(
-      [ev('a', '2026-10-03', '2026-10-04', { name: 'A'.repeat(90) })],
-      { a: { link: 'https://example.test/con' } },
+      [ev('a', '2026-10-03', '2026-10-04', { name: 'A'.repeat(90), booth: { link: 'https://example.test/con' } })],
+      {},
       12,
       today,
     );
@@ -104,7 +104,7 @@ describe('Instagram bio', () => {
   });
 
   it('fills the template from the next event, falling back when there is none', () => {
-    const { upcoming } = splitPublicEvents([ev('a', '2026-09-20', '2026-09-21')], { a: { igHandle: 'animemesse', booth: '5823' } }, 12, today);
+    const { upcoming } = splitPublicEvents([ev('a', '2026-09-20', '2026-09-21', { booth: { number: '5823' } })], { a: { igHandle: 'animemesse' } }, 12, today);
     expect(buildBio(upcoming, 'Artist\n📍 {event}\nShop open', '')).toBe('Artist\n📍 @animemesse, booth 5823, 20-21st September\nShop open');
     expect(buildBio([], 'Artist\n📍 {event}\nShop open', 'Next dates soon')).toBe('Artist\n📍 Next dates soon\nShop open');
     // An empty {event} with no fallback collapses the blank it leaves.

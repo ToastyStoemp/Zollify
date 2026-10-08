@@ -1,7 +1,7 @@
 import {
   EVENT_FILES_MAX_PER_EVENT,
-  EVENT_FILE_MAX_BYTES,
   EVENT_NOTES_MAX_CHARS,
+  checkPickedFile,
   eventFileMime,
   isEventFileMime,
   type EventAttachment,
@@ -62,8 +62,9 @@ export async function addEventFile(eventId: string, file: File): Promise<EventAt
   const event = requireEvent(eventId);
   const mime = eventFileMime(file.name, file.type);
   if (!isEventFileMime(mime)) throw new Error('Attach a PDF, a picture, a Wallet pass or a plain document.');
-  if (file.size === 0) throw new Error('That file is empty.');
-  if (file.size > EVENT_FILE_MAX_BYTES) throw new Error(`Files can be ${EVENT_FILE_MAX_BYTES / 1024 / 1024} MB at most.`);
+  // The same check the server makes: size and real type, before anything is read or sent.
+  const problem = await checkPickedFile('eventFile', file);
+  if (problem) throw new Error(problem);
   if ((event.attachments?.length ?? 0) >= EVENT_FILES_MAX_PER_EVENT) throw new Error(`An event can hold ${EVENT_FILES_MAX_PER_EVENT} files.`);
 
   const att: EventAttachment = { id: crypto.randomUUID(), name: file.name.slice(0, 200), mime, size: file.size, addedAt: Date.now() };

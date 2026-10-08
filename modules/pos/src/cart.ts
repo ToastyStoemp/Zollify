@@ -1,8 +1,10 @@
 import { computed, reactive } from 'vue';
-import type { SaleEvent, SaleLine, SaleLineRef, TillLine } from '@zollify/sdk';
+import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
 import type { CardSettlement } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
+import type { PaymentProvider, PaymentResult } from './payments/provider';
+import { logDiagnostic } from './lib/diagnostics';
 import { sdk } from './runtime';
 import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
@@ -254,6 +256,8 @@ export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
   sale?: SaleEvent;
+  /** The seller abandoned this attempt (cancelCheckout) - nothing was recorded, whatever the terminal answered. */
+  cancelled?: boolean;
 }
 
 export interface CheckoutPayment {
@@ -263,8 +267,22 @@ export interface CheckoutPayment {
   legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
   /** Cash handed over, when counted. */
   cashReceived?: number;
-  /** Take the card on the configured terminal rather than recording it by hand. */
-  terminal?: { providerId: string };
+  /** Take the card on the configured terminal rather than recording it by hand. `amount` is a split's card leg; absent, the whole sale goes on the card. */
+  terminal?: { providerId: string; amount?: number };
+}
+
+// Each checkout is one attempt; cancelCheckout() bumps the counter so an
+// attempt whose terminal answers after the seller gave up on it (Cancel,
+// "Complete by hand", retry) can no longer record the sale.
+let attempt = 0;
+let activeProvider: PaymentProvider | null = null;
+
+/** Abandons the terminal request in flight, if any. Safe to call when nothing is pending. */
+export async function cancelCheckout(): Promise<void> {
+  attempt++;
+  const provider = activeProvider;
+  activeProvider = null;
+  if (provider) await provider.cancel().catch(() => {});
 }
 
 /** Units of an item already on the ticket. */
@@ -316,6 +334,23 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
   return true;
 }
 
+/** The line a module added under `key`, for that module to read back. */
+export function findModuleLine(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null {
+  const l = cart.lines.find((x) => x.key === key);
+  return l ? { key, name: l.name, qty: l.qty, unitPrice: l.unitPrice, ...(l.ref ? { ref: l.ref } : {}) } : null;
+}
+
+/** Changes what a module's line charges, in place. False when the cart has no line under that key. */
+export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
+  const l = cart.lines.find((x) => x.key === line.key);
+  if (!l) return false;
+  l.name = line.name;
+  l.qty = line.qty;
+  l.unitPrice = line.unitPrice;
+  l.lineTotal = (Math.round(line.unitPrice * 100) * line.qty) / 100;
+  return true;
+}
+
 /**
  * Records the sale and, on approval, announces it.
  *
@@ -337,22 +372,34 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
   if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
 
   cart.busy = true;
+  const thisAttempt = ++attempt;
   try {
     let providerName = 'manual';
     let txRef: string | undefined;
     let cardBrand: string | undefined;
-    if (pay.method === 'card' && cardInBase.value && !cardFx.rate) await loadCardFx();
+    if ((pay.method === 'card' || pay.terminal) && cardInBase.value && !cardFx.rate) await loadCardFx();
     const settled = pay.method === 'card' ? cardSettlement(charged) : null;
     if (pay.terminal) {
-      if (cardInBase.value && !settled) {
+      // A split only puts its card leg on the terminal; that leg's own
+      // settlement figure travels in pay.legs, so the sale record stays as is.
+      const onCard = pay.terminal.amount ?? charged;
+      const onCardSettled = cardSettlement(onCard);
+      if (cardInBase.value && !onCardSettled) {
         return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Payments.` };
       }
       const provider = getProvider(pay.terminal.providerId as never);
-      const result = await provider.startPayment(
-        settled
-          ? { amount: settled.amount, currency: settled.currency, reference: saleId }
-          : { amount: charged, currency: cart.currency, reference: saleId },
-      );
+      activeProvider = provider;
+      const result = await provider
+        .startPayment(
+          onCardSettled
+            ? { amount: onCardSettled.amount, currency: onCardSettled.currency, reference: saleId }
+            : { amount: onCard, currency: cart.currency, reference: saleId },
+        )
+        .catch((err: unknown): PaymentResult => ({ approved: false, provider: provider.id, error: err instanceof Error ? err.message : String(err) }));
+      if (thisAttempt !== attempt) {
+        if (result.approved) logDiagnostic(`Terminal approved sale ${saleId} after the seller cancelled it - not recorded (txRef=${result.txRef ?? '-'})`);
+        return { approved: false, cancelled: true, error: 'Cancelled' };
+      }
       if (!result.approved) return { approved: false, error: result.error ?? 'The payment was declined.' };
       providerName = result.provider;
       txRef = result.txRef;
@@ -422,6 +469,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
   } catch (err) {
     return { approved: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
+    activeProvider = null;
     cart.busy = false;
   }
 }

@@ -1,7 +1,26 @@
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
-import { fmtRate, isReceiptToken, receiptBreakdown, vatBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
+  EMPTY_PROFILE_LINKS,
+  adoptLegacyLinks,
+  base64BodyLimit,
+  cleanProfileLinks,
+  cleanReceiptToggles,
+  fmtRate,
+  isReceiptToken,
+  maxBytesFor,
+  receiptBreakdown,
+  receiptFooterLinks,
+  vatBreakdown,
+  type ProfileLinks,
+  type PublicEvent,
+  type ReceiptFooterLink,
+  type ReceiptSocials,
+  type SalesEvent,
+  type Transaction,
+} from '@zollify/shared';
+import {
+  decodeUpload,
   issueChallenge,
   makeSecretBox,
   parseProfile,
@@ -12,6 +31,7 @@ import {
   type ServerModule,
 } from '@zollify/server-core';
 import { POW_SOLVER_JS } from './pow-client';
+import { nextPublicEvents } from './public-events';
 import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
 
 /**
@@ -60,6 +80,11 @@ function migrate(db: Database.Database): void {
       footer    TEXT,
       updatedAt INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS pos_receipt_socials (
+      accountId TEXT PRIMARY KEY,
+      socials   TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
   `);
 }
 
@@ -68,9 +93,7 @@ function migrate(db: Database.Database): void {
 // device; a copy is kept here so the online receipt and every customer
 // display can carry them too.
 
-const LOGO_MAX_BYTES = 256 * 1024;
 const FOOTER_MAX = 500;
-const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export interface Branding {
   /** Base64 PNG, no data: prefix. */
@@ -87,11 +110,9 @@ function readBranding(db: Database.Database, accountId: string): Branding {
 function cleanLogo(value: unknown): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
-  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) throw new Error('The logo must be a base64 PNG.');
-  const bytes = Buffer.from(value, 'base64');
-  if (bytes.length > LOGO_MAX_BYTES) throw new Error('The logo is too large.');
-  if (!bytes.subarray(0, 8).equals(PNG_MAGIC)) throw new Error('The logo must be a PNG.');
-  return bytes.toString('base64');
+  const logo = decodeUpload('logo', value, { claimedMime: 'image/png' });
+  if (!logo.ok) throw Object.assign(new Error(logo.message), { status: logo.status });
+  return logo.bytes.toString('base64');
 }
 
 function cleanFooter(value: unknown): string | null | undefined {
@@ -100,6 +121,76 @@ function cleanFooter(value: unknown): string | null | undefined {
   if (typeof value !== 'string') throw new Error('The footer must be text.');
   const text = value.replace(/\r\n?/g, '\n').trim().slice(0, FOOTER_MAX);
   return text || null;
+}
+
+// ── Footer links ────────────────────────────────────────────────────────────
+// Webstore and social links are part of the business profile, the one place they
+// are edited. This module keeps only the receipt's own switches (print the
+// links, list next events). The table of the first version, which stored the
+// links here, stays readable: it is copied into a profile that has none, and
+// is the fallback while a profile has never had links set. Footer content
+// only: nothing here touches the sale.
+
+const NEXT_EVENTS = 3;
+
+/** The row the first version of the receipt settings wrote, as stored; null when there is none or it is unreadable. */
+function legacyRow(db: Database.Database, accountId: string): Record<string, unknown> | null {
+  const row = db.prepare('SELECT socials FROM pos_receipt_socials WHERE accountId = ?').get(accountId) as { socials: string } | undefined;
+  if (!row) return null;
+  try {
+    const parsed = JSON.parse(row.socials) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Copy links from the old table into profiles that never had any. Never
+ * overwrites: a profile whose links were set, even cleared, is left alone.
+ * Safe to run on every start.
+ */
+export function migrateReceiptSocials(db: Database.Database): number {
+  const rows = db.prepare('SELECT accountId FROM pos_receipt_socials').all() as { accountId: string }[];
+  let moved = 0;
+  for (const { accountId } of rows) {
+    const account = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+    if (!account) continue;
+    const profile = parseProfile(account.profile);
+    const adopt = adoptLegacyLinks(profile.links, legacyRow(db, accountId));
+    if (!adopt) continue;
+    db.prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(JSON.stringify({ ...profile, links: adopt }), accountId);
+    moved++;
+  }
+  return moved;
+}
+
+/** The links the receipt shows: the profile's, or the old table's until the profile has been given any. */
+function readLinks(db: Database.Database, accountId: string): ProfileLinks {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  const fromProfile = parseProfile(row?.profile).links;
+  if (fromProfile) return fromProfile;
+  try {
+    // Re-cleaned on the way out too, so a row can never be more trusted than a request.
+    return cleanProfileLinks(legacyRow(db, accountId));
+  } catch {
+    return { ...EMPTY_PROFILE_LINKS };
+  }
+}
+
+function readSocials(db: Database.Database, accountId: string): ReceiptSocials {
+  return { ...readLinks(db, accountId), ...cleanReceiptToggles(legacyRow(db, accountId)) };
+}
+
+/** What the page may show: sanitised link rows, and event fields the public-events page already publishes. */
+function footerExtras(db: Database.Database, accountId: string): Pick<PublicReceipt, 'links' | 'nextEvents'> {
+  const socials = readSocials(db, accountId);
+  const links = receiptFooterLinks(socials);
+  const events: PublicEvent[] = socials.showEvents ? nextPublicEvents(db, accountId, NEXT_EVENTS) : [];
+  return {
+    ...(links.length ? { links } : {}),
+    ...(events.length ? { nextEvents: events.map((e) => ({ name: e.name, city: e.city, start: e.start, end: e.end })) } : {}),
+  };
 }
 
 // ── Lookup ──────────────────────────────────────────────────────────────────
@@ -176,6 +267,10 @@ export interface PublicReceipt {
   payments: { label: string; amount: number; charged?: { amount: number; currency: string } }[];
   status: 'paid' | 'voided';
   brand: { logo?: string; footer: string[] };
+  /** Webstore and social links for the footer; absent when the booth set none. */
+  links?: ReceiptFooterLink[];
+  /** The next public events (ISO dates), when the booth switched that on and publishes the events page. */
+  nextEvents?: { name: string; city: string; start: string; end: string }[];
   /** VAT included per rate, or the exemption the sale was made under. */
   vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
 }
@@ -206,7 +301,7 @@ function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string
 /** The whitelist. Anything not copied here does not leave the server. */
 export function publicReceipt(
   tx: Transaction,
-  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding },
+  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'> },
 ): PublicReceipt {
   const rows = vatBreakdown(tx);
   const exempt = tx.tax?.exempt === true;
@@ -233,6 +328,7 @@ export function publicReceipt(
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
     },
+    ...extra.footer,
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -299,6 +395,8 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
 .row.net { padding-left: 1rem; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
+.linkrow { margin: .3rem 0; overflow-wrap: anywhere; }
+.linkrow a { color: var(--accent); }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
@@ -343,6 +441,40 @@ ${POW_SOLVER_JS}
     catch (e) { return cur + ' ' + n.toFixed(2); }
   }
 
+  // Webstore, socials and next events. Every string goes in as text; a link only
+  // becomes an anchor when it is https, whatever the server said.
+  function footer(r) {
+    var links = (r.links || []).filter(function (l) { return typeof l.url === 'string' && /^https:\/\//.test(l.url); });
+    var events = r.nextEvents || [];
+    if (!links.length && !events.length) return;
+    var box = el('div', 'links');
+    if (links.length) {
+      box.appendChild(el('p', 'c foot', 'Thanks for shopping with us - find us online'));
+      var list = el('p', 'c linkrow');
+      links.forEach(function (l, i) {
+        if (i) list.appendChild(document.createTextNode(' · '));
+        var a = el('a', '', l.label);
+        a.href = l.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        list.appendChild(a);
+      });
+      box.appendChild(list);
+    }
+    if (events.length) {
+      box.appendChild(el('p', 'muted c', 'Next events'));
+      events.forEach(function (e) {
+        box.appendChild(el('p', 'c foot', e.name + (e.city ? ' · ' + e.city : '') + ' · ' + dates(e.start, e.end)));
+      });
+    }
+    receiptEl.appendChild(box);
+    receiptEl.appendChild(el('hr'));
+  }
+  function dates(start, end) {
+    function f(s) { var d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); }
+    return end && end !== start ? f(start) + ' - ' + f(end) : f(start);
+  }
+
   function render(r) {
     receiptEl.textContent = '';
     if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
@@ -382,6 +514,7 @@ ${POW_SOLVER_JS}
       if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
     });
     receiptEl.appendChild(el('hr'));
+    footer(r);
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
     statusEl.hidden = true;
@@ -392,7 +525,7 @@ ${POW_SOLVER_JS}
 
   function fail(res) {
     if (res.status === 429) say('Too many attempts from this network. Please try again later.');
-    else if (res.status === 404) say("We couldn't find this receipt. If you just paid, the booth may still be offline - try again in a little while.");
+    else if (res.status === 404) say("We couldn't find this receipt. If you just paid, the seller may still be offline - try again in a little while.");
     else say('Something went wrong. Please try again in a moment.');
   }
 
@@ -428,7 +561,11 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
   id: MODULE_ID,
   migrate: (db) => {
     migrate(db);
+    migrateReceiptSocials(db);
     migrateSmartpos(db);
+  },
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
   },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
@@ -437,7 +574,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     registerSmartpos(app, ctx, smartposApps(ctx.db, box));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
 
-    app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: 512 * 1024 }, async (req, reply) => {
+    app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: base64BodyLimit(maxBytesFor('logo'), 4096) }, async (req, reply) => {
       const who = ctx.identity(req);
       if (who.role !== 'owner' && who.role !== 'admin') {
         return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt branding.' });
@@ -448,7 +585,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         logo = cleanLogo(req.body?.logo);
         footer = cleanFooter(req.body?.footer);
       } catch (err) {
-        return reply.code(400).send({ error: 'invalid', message: (err as Error).message });
+        return reply.code((err as { status?: number }).status ?? 400).send({ error: 'invalid', message: (err as Error).message });
       }
       const current = readBranding(ctx.db, who.accountId);
       const next: Branding = { logo: logo === undefined ? current.logo : logo, footer: footer === undefined ? current.footer : footer };
@@ -459,6 +596,25 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         )
         .run(who.accountId, next.logo, next.footer, Date.now());
       return next;
+    });
+
+    // Links come from the business profile; what is saved here is the receipt's own switches. Every device may read.
+    app.get('/receipt-links', async (req) => readSocials(ctx.db, ctx.identity(req).accountId));
+
+    app.put<{ Body: unknown }>('/receipt-links', { bodyLimit: 8 * 1024 }, async (req, reply) => {
+      const who = ctx.identity(req);
+      if (who.role !== 'owner' && who.role !== 'admin') {
+        return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change receipt links.' });
+      }
+      // Link fields in the body are ignored on purpose: the profile is the one place they are edited.
+      const toggles = cleanReceiptToggles(req.body);
+      ctx.db
+        .prepare(
+          `INSERT INTO pos_receipt_socials (accountId, socials, updatedAt) VALUES (?, ?, ?)
+           ON CONFLICT(accountId) DO UPDATE SET socials = excluded.socials, updatedAt = excluded.updatedAt`,
+        )
+        .run(who.accountId, JSON.stringify({ ...legacyRow(ctx.db, who.accountId), ...toggles }), Date.now());
+      return readSocials(ctx.db, who.accountId);
     });
   },
 
@@ -507,6 +663,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
           seller: seller(ctx.db, found.accountId),
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
+          footer: footerExtras(ctx.db, found.accountId),
         });
       },
     );

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LINK_URL_KEYS, type ProfileLinks } from './receipt-socials';
 import { VatProfileSchema, VatProfileUpdateSchema, type VatProfile } from './vat';
 
 /** Wire protocol between app and sync server - validated with zod on both sides. */
@@ -140,6 +141,8 @@ export const ArtistDetailsSchema = z.object({
   vatId: z.string().max(40).default(''),
   /** EORI number, required on EU export declarations. */
   eori: z.string().max(40).default(''),
+  /** Belgian enterprise number (KBO/BCE), kept as 0123.456.789. Peppol invoices and the VAT number follow from it. */
+  enterpriseNumber: z.string().max(20).optional(),
 });
 export type ArtistDetails = z.infer<typeof ArtistDetailsSchema>;
 /**
@@ -165,6 +168,8 @@ export interface AccountProfile {
   staffSeesTotals?: boolean;
   /** What the business runs, asked at setup: events (fairs, markets), stores, or both. Unset: see sellsAt. */
   sells?: SellsAt;
+  /** Webstore and social links, cleaned on save. The receipt footer and the print path read them from here. */
+  links?: ProfileLinks;
 }
 
 /** What a business runs. Decides which of the Events and Stores pages it gets. */
@@ -199,6 +204,8 @@ export const ProfileUpdateSchema = z.object({
   vat: VatProfileUpdateSchema.optional(),
   staffSeesTotals: z.boolean().optional(),
   sells: SellsAtSchema.optional(),
+  /** Link fields are checked by `cleanProfileLinks` on the server, which says what is wrong in words. */
+  links: z.object(Object.fromEntries([...LINK_URL_KEYS, 'otherLabel'].map((k) => [k, z.string().max(400).optional()]))).optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 

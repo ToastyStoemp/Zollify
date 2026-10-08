@@ -2,12 +2,18 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import type { SalesEvent, Transaction } from '@zollify/shared';
+import { base64BodyLimit, maxBytesFor, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
+  checkQuota,
+  decodeUpload,
   makeSecretBox,
   reduceEvents,
   reduceMerges,
   reduceTransactions,
+  reasonOf,
+  reportProblem,
+  resolveProblem,
+  sendRefusal,
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
@@ -117,7 +123,7 @@ const BookBody = z.object({
   event: z
     .object({ name: z.string(), country: z.string().optional(), startDate: z.string(), endDate: z.string(), vatRate: z.number() })
     .optional(),
-  pdfBase64: z.string().max(20_000_000).optional(),
+  pdfBase64: z.string().max(base64BodyLimit(maxBytesFor('voucher'))).optional(),
   filename: z.string().max(120).optional(),
 });
 
@@ -140,6 +146,9 @@ export function taxServerModule(jwtSecret: string): ServerModule {
     id: 'tax',
     minRole: 'admin',
     migrate,
+    onAccountDeleted: (db, accountId) => {
+      for (const t of ['tax_config', 'tax_cache', 'tax_expenses', 'tax_bookings', 'tax_ai_usage']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    },
 
     routes: (ctx: ModuleContext) => async (app) => {
       const db = ctx.db;
@@ -226,6 +235,24 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         }[];
 
       const who = (req: FastifyRequest) => ctx.identity(req);
+      /**
+       * Runs a call to an outside service and tells Problems how it went: a failure opens a warning
+       * (the HTTP status or error class only, never the service's words), a success closes it.
+       * A missing credential is a setup gap the screen already says, not an outage.
+       */
+      const track = async <T>(accountId: string, source: string, label: string, run: () => Promise<T>): Promise<T> => {
+        try {
+          const out = await run();
+          resolveProblem(ctx, accountId, `tax.${source}`);
+          return out;
+        } catch (err) {
+          const status = (err as { status?: number }).status;
+          if (status !== undefined || (err instanceof Error && err.name !== 'SourceError')) {
+            reportProblem(ctx, accountId, { kind: `tax.${source}`, severity: 'warning', message: `${label} is not answering`, detail: reasonOf(status, err), link: '/settings?panel=tax.integrations' });
+          }
+          throw err;
+        }
+      };
 
       // ── Status + config ─────────────────────────────────────────────────
       app.get('/status', async (req) => {
@@ -324,7 +351,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       // ── Payment sources ─────────────────────────────────────────────────
       app.get('/mypos/accounts', async (req) => {
         const c = clientsFor(who(req).accountId);
-        return { mode: c.mypos.mode, accounts: await c.mypos.listAccounts() };
+        return { mode: c.mypos.mode, accounts: await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listAccounts()) };
       });
 
       app.get('/mypos/transactions', async (req, reply) => {
@@ -333,7 +360,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
         const accounts = q.accounts ? q.accounts.split(',').filter(Boolean) : undefined;
-        const transactions = await c.mypos.listTransactions({ ...range.data, accounts });
+        const transactions = await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listTransactions({ ...range.data, accounts }));
         return { mode: c.mypos.mode, count: transactions.length, ...range.data, transactions };
       });
 
@@ -342,7 +369,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const range = Range.safeParse(q);
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
-        const txns = await c.mypos.listTransactions({ ...range.data, account: q.account || undefined });
+        const txns = await track(who(req).accountId, 'mypos', 'myPOS', () => c.mypos.listTransactions({ ...range.data, account: q.account || undefined }));
         return { mode: c.mypos.mode, summary: summarize(txns), ...range.data };
       });
 
@@ -358,16 +385,23 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const range = Range.safeParse(req.query);
         if (!range.success) return reply.code(400).send({ error: 'invalid', message: 'from and to are required (YYYY-MM-DD).' });
         const c = clientsFor(who(req).accountId);
-        const transactions = await c.sumup.listTransactions(range.data.from, range.data.to);
+        const transactions = await track(who(req).accountId, 'sumup', 'SumUp', () => c.sumup.listTransactions(range.data.from, range.data.to));
         return { mode: c.sumup.mode, count: transactions.length, ...range.data, transactions };
       });
 
       // ── Lexware booking ─────────────────────────────────────────────────
-      app.post('/lexware/book', async (req, reply) => {
+      app.post('/lexware/book', { bodyLimit: base64BodyLimit(maxBytesFor('voucher')) }, async (req, reply) => {
         const { accountId } = who(req);
         const parsed = BookBody.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Malformed booking.' });
         const p = parsed.data;
+        // A bad PDF is refused before anything is booked, so a voucher never exists without its document.
+        let pdfBytes: Buffer | undefined;
+        if (p.pdfBase64) {
+          const pdf = decodeUpload('voucher', p.pdfBase64, { name: p.filename ?? 'voucher.pdf' });
+          if (!pdf.ok) return sendRefusal(reply, pdf);
+          pdfBytes = pdf.bytes;
+        }
         const lex = clientsFor(accountId).lexware;
 
         let voucher;
@@ -405,14 +439,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
 
         if (!lex.apiKey) return reply.code(400).send({ error: 'not_configured', message: 'Add a Lexware API key under Settings → Integrations first.' });
         const client = new LexwareClient(lex.apiKey, lex.apiUrl);
-        if (p.kind === 'revenue' && customerName && p.customer !== 'collective') {
-          voucher.contactId = await client.ensureCustomerContact(customerName);
-          delete voucher.useCollectiveContact;
-        }
-        const created = await client.createVoucher(voucher);
-        if (p.pdfBase64) {
-          await client.uploadVoucherFile(created.id, Buffer.from(p.pdfBase64, 'base64'), p.filename ?? `${p.voucherNumber}.pdf`);
-        }
+        const created = await track(accountId, 'lexware', 'Lexware', async () => {
+          if (p.kind === 'revenue' && customerName && p.customer !== 'collective') {
+            voucher.contactId = await client.ensureCustomerContact(customerName);
+            delete voucher.useCollectiveContact;
+          }
+          const made = await client.createVoucher(voucher);
+          if (pdfBytes) {
+            await client.uploadVoucherFile(made.id, pdfBytes, p.filename ?? `${p.voucherNumber}.pdf`);
+          }
+          return made;
+        });
         db.prepare(
           `INSERT INTO tax_bookings (accountId, voucherNumber, voucherId, kind, totalMinor, bookedAt) VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(accountId, voucherNumber) DO UPDATE SET voucherId = excluded.voucherId, totalMinor = excluded.totalMinor, bookedAt = excluded.bookedAt`,
@@ -498,17 +535,24 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         return { ok: true };
       });
 
-      app.post<{ Params: { id: string } }>('/ledger/expenses/:id/invoice', async (req, reply) => {
+      app.post<{ Params: { id: string } }>('/ledger/expenses/:id/invoice', { bodyLimit: base64BodyLimit(maxBytesFor('invoice')) }, async (req, reply) => {
         const { accountId } = who(req);
         const body = (req.body ?? {}) as { base64?: string; filename?: string };
-        const bytes = Buffer.from(String(body.base64 ?? ''), 'base64');
-        if (!bytes.length) return reply.code(400).send({ error: 'invalid', message: 'The file was empty.' });
-        if (bytes.length > 10 * 1024 * 1024) return reply.code(413).send({ error: 'too_large', message: 'Invoices are capped at 10 MB.' });
         const name = String(body.filename ?? 'invoice.pdf').slice(0, 200);
-        const info = db
-          .prepare('UPDATE tax_expenses SET invoiceName = ?, invoiceBytes = ?, invoiceAt = ?, updatedAt = ? WHERE accountId = ? AND id = ?')
-          .run(name, bytes, Date.now(), Date.now(), accountId, req.params.id);
-        if (!info.changes) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
+        const file = decodeUpload('invoice', body.base64, { name });
+        if (!file.ok) return sendRefusal(reply, file);
+        const prev = db.prepare('SELECT COALESCE(LENGTH(invoiceBytes), 0) AS n FROM tax_expenses WHERE accountId = ? AND id = ?').get(accountId, req.params.id) as { n: number } | undefined;
+        if (!prev) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
+        const over = checkQuota(db, accountId, file.bytes.length, prev.n);
+        if (over) return sendRefusal(reply, over);
+        db.prepare('UPDATE tax_expenses SET invoiceName = ?, invoiceBytes = ?, invoiceAt = ?, updatedAt = ? WHERE accountId = ? AND id = ?').run(
+          name,
+          file.bytes,
+          Date.now(),
+          Date.now(),
+          accountId,
+          req.params.id,
+        );
         return { expense: listExpenses(accountId).find((x) => x.id === req.params.id) };
       });
 
@@ -568,15 +612,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         return row && row.day === dayOf() ? row : { day: dayOf(), calls: 0, tokens: 0 };
       };
 
-      app.post('/ledger/parse', async (req, reply) => {
+      app.post('/ledger/parse', { bodyLimit: base64BodyLimit(maxBytesFor('invoiceScan')) }, async (req, reply) => {
         const { accountId } = who(req);
         const ai = clientsFor(accountId).ai;
         if (!ai.apiKey) return reply.code(503).send({ error: 'not_configured', message: 'Invoice scanning is off - add an Anthropic API key under Settings → Integrations.' });
-        const base64 = String((req.body as { base64?: string } | undefined)?.base64 ?? '');
-        if (!base64) return reply.code(400).send({ error: 'invalid', message: 'No PDF provided.' });
-        if (Math.floor((base64.length * 3) / 4) > ai.maxPdfBytes) {
+        // The configured cap (ai.maxPdfBytes) can only tighten the shared one; the type is read from the bytes either way.
+        const scan = decodeUpload('invoiceScan', (req.body as { base64?: string } | undefined)?.base64);
+        if (!scan.ok) return sendRefusal(reply, scan);
+        if (scan.bytes.length > ai.maxPdfBytes) {
           return reply.code(413).send({ error: 'too_large', message: `PDF too large (max ${Math.round(ai.maxPdfBytes / 1024 / 1024)} MB).` });
         }
+        const base64 = scan.bytes.toString('base64');
         const used = usageFor(accountId);
         if (used.calls >= ai.dailyCalls || used.tokens >= ai.dailyTokens) {
           return reply.code(429).send({ error: 'quota', message: 'The daily invoice-scan limit has been reached. Try again tomorrow.' });

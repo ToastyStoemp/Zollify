@@ -1,4 +1,4 @@
-import { dayEndISO, dayStartISO, num, pick, round2, resolveMode, sleep, str, SourceError, type SourceRow } from './types';
+import { dayEndISO, dayStartISO, FETCH_TIMEOUT_MS, num, pick, round2, resolveMode, sleep, str, SourceError, type SourceRow } from './types';
 
 /**
  * SumUp API client - pulls merchant transaction history for a date range and
@@ -62,7 +62,7 @@ export class SumupClient {
 
   private async get(url: string): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const res = await fetch(url, { redirect: 'error', headers: { authorization: `Bearer ${this.config.apiKey}`, accept: 'application/json' } });
+      const res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), headers: { authorization: `Bearer ${this.config.apiKey}`, accept: 'application/json' } });
       if (res.status === 429 && attempt < MAX_RETRIES) {
         await sleep((Number(res.headers.get('retry-after')) || 2 ** attempt) * 1000);
         continue;

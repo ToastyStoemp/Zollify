@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { PeppolPartySchema, fmtPrice, type PeppolDocument, type PeppolDocumentInput, type PeppolProblem, type PeppolSettings } from '@zollify/shared';
+import { PeppolPartySchema, fmtPrice, localIsoDay, type PeppolDocument, type PeppolDocumentInput, type PeppolProblem, type PeppolSettings } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   createDocument,
@@ -69,7 +69,7 @@ async function openDoc(id: string): Promise<void> {
 }
 function newInvoice(): void {
   const s = settings.value!;
-  const due = new Date(Date.now() + s.paymentDays * 86_400_000).toISOString().slice(0, 10);
+  const due = localIsoDay(Date.now() + s.paymentDays * 86_400_000);
   open.value = {
     doc: {
       id: '',
@@ -218,7 +218,7 @@ async function removeCustomer(c: Customer): Promise<void> {
       <button type="button" class="primary" :disabled="!ready" @click="newInvoice"><Icon name="plus" :size="14" /> New invoice</button>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="settings && !ready" class="warn">Fill in your business details first, under Settings → E-invoices (Peppol).</p>
+    <p v-if="settings && !ready" class="warn">Add your business name and Belgian enterprise number to your Business profile first (Settings → Business profile). Payment details and the access point are under Settings → E-invoices (Peppol).</p>
 
     <p v-if="docs && !shown.length" class="empty">No invoices here yet.</p>
     <ul v-else-if="docs" class="list">

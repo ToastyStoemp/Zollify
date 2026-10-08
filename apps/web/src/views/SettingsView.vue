@@ -5,6 +5,7 @@ import { currentAccount } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { Icon } from '@zollify/ui';
+import { openProblemErrors } from '../lib/problems';
 
 interface Panel {
   id: string;
@@ -25,7 +26,7 @@ const account = currentAccount;
 const corePanels: Panel[] = [
   {
     id: 'core.profile',
-    label: 'Booth profile',
+    label: 'Business profile',
     group: 'Core',
     minRole: 'admin',
     component: () => import('./ProfileSettings.vue'),
@@ -64,6 +65,13 @@ const corePanels: Panel[] = [
     component: () => import('./WebhooksSettings.vue'),
   },
   {
+    id: 'core.problems',
+    label: 'Problems',
+    group: 'Core',
+    minRole: 'admin',
+    component: () => import('./ProblemsSettings.vue'),
+  },
+  {
     id: 'core.modules',
     label: 'Modules',
     group: 'Core',
@@ -85,8 +93,8 @@ const corePanels: Panel[] = [
   },
 ];
 
-/** Phone: the list and a panel are two screens, not two columns. */
-const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null;
+/** Below the sidebar breakpoint (900, see styles.css): the list and a panel are two screens, not two columns. */
+const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 900px)') : null;
 const phone = ref(phoneQuery?.matches ?? false);
 const onPhoneChange = (e: MediaQueryListEvent): void => {
   phone.value = e.matches;
@@ -166,7 +174,7 @@ const groups = computed(() => [
             :aria-current="panel.id === selected ? 'page' : undefined"
             @click="select(panel.id)"
           >
-            {{ panel.label }}
+            {{ panel.label }}<i v-if="panel.id === 'core.problems' && openProblemErrors" class="pdot" aria-label="has open errors"></i>
           </button>
         </template>
       </nav>
@@ -186,6 +194,7 @@ nav { display: flex; flex-direction: column; gap: .2rem; }
 .group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint, #8a94a2); }
 .group:first-child { margin-top: 0; }
 nav button { text-align: left; border-color: transparent; background: transparent; justify-content: flex-start; }
+nav .pdot { display: inline-block; width: .45rem; height: .45rem; margin-left: .4rem; border-radius: 50%; background: var(--zfy-danger, #c6512f); vertical-align: middle; }
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 /* Each panel is a different component (SecuritySettings, ProfileSettings, …)
    loaded into .panel via <component :is>, so this can't reach its own root
@@ -194,7 +203,7 @@ nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zf
    component, not this one. Centers whatever max-width a panel sets for
    itself; a panel with no opinion (fills 100%) is unaffected either way. */
 .panel > :deep(*) { margin-inline: auto; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   nav { gap: .35rem; }
   nav button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 2.8rem; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); }

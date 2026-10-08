@@ -25,7 +25,12 @@ const eventId = computed(() => String(route.params.eventId ?? ''));
 const event = computed(() => sdk().data.events.get(eventId.value) ?? null);
 const error = ref<string | null>(null);
 
-const declarant = ref<CustomsDeDeclarant>(defaultCustomsDeDeclarant());
+/** This event's own override only - blank means "inherit the account default", not "was blank when I last opened this page". */
+const declarantOverride = ref<CustomsDeDeclarant>(defaultCustomsDeDeclarant());
+/** Booth profile + Settings declarant layered under the override, shown as placeholders so an untouched field keeps tracking them. */
+const declarantDefault = ref<CustomsDeDeclarant>(defaultCustomsDeDeclarant());
+/** What the generators actually use: the override wherever it's filled in, the default everywhere else. */
+const declarant = computed<CustomsDeDeclarant>(() => ({ ...declarantDefault.value, ...stripEmpty<CustomsDeDeclarant>(declarantOverride.value) }));
 const precheckOffice = ref('');
 const eori = ref('');
 const exportMrn = ref('');
@@ -61,13 +66,15 @@ async function load(ev: SalesEvent): Promise<void> {
   loadedEventId = ev.id;
   const blob = readCustomsDeBlob(ev);
   const stored = await sdk().config.get<Partial<StoredDeclarant>>(DECLARANT_KEY);
-  // Layered, most specific last: booth profile, the module's saved declarant, this event's own record.
-  declarant.value = {
+  // Layered, most specific last: business profile, then the module's saved declarant.
+  declarantDefault.value = {
     ...defaultCustomsDeDeclarant(),
     ...stripEmpty<CustomsDeDeclarant>(sdk().account()?.profile.artist),
     ...stripEmpty<CustomsDeDeclarant>(stored ?? undefined),
-    ...stripEmpty<CustomsDeDeclarant>(blob.declarant),
   };
+  // This event's own record only, so an unedited field keeps following the
+  // account default instead of freezing whatever it was when this page was first opened.
+  declarantOverride.value = { ...defaultCustomsDeDeclarant(), ...(blob.declarant ?? {}) };
   // EORI and the precheck office belong to the company, not the event - the event can still override.
   // `||`, not `??`: an event that autosaved these blank (every save writes every field) must
   // still fall through to the settings/profile default, not get stuck on its own empty string.
@@ -112,7 +119,7 @@ async function save(): Promise<void> {
       ...ev,
       customsDe: {
         ...ev.customsDe,
-        declarant: { ...declarant.value },
+        declarant: stripEmpty<CustomsDeDeclarant>(declarantOverride.value),
         combinedEventIds: [...combinedEventIds.value],
         meta: {
           ...blob.meta,
@@ -137,7 +144,7 @@ async function save(): Promise<void> {
   }
 }
 watch(
-  [declarant, precheckOffice, eori, exportMrn, destinationCountry, transportMode, vehicleReg, totalPackages, referenceNumber, transportNationality, exitOffice, placeOfDeclaration, incoterms, combinedEventIds],
+  [declarantOverride, precheckOffice, eori, exportMrn, destinationCountry, transportMode, vehicleReg, totalPackages, referenceNumber, transportNationality, exitOffice, placeOfDeclaration, incoterms, combinedEventIds],
   scheduleSave,
   { deep: true },
 );
@@ -340,16 +347,16 @@ const openDexpdfXml = () => dexpdf.value && openXml(dexpdf.value.xml, safeName('
       <article class="card">
         <h2>Declarant</h2>
         <div class="grid">
-          <label><span>Company name</span><input v-model="declarant.companyName" type="text" /></label>
-          <label><span>Full name</span><input v-model="declarant.fullName" type="text" /></label>
-          <label><span>Street &amp; house number</span><input v-model="declarant.street" type="text" /></label>
-          <label><span>Postcode &amp; city</span><input v-model="declarant.postCodeCity" type="text" placeholder="10115 Berlin" /></label>
-          <label><span>Country</span><input v-model="declarant.countryOfOrigin" type="text" /></label>
-          <label><span>Phone</span><input v-model="declarant.phone" type="tel" /></label>
-          <label><span>Email</span><input v-model="declarant.email" type="email" /></label>
-          <label><span>VAT / tax ID</span><input v-model="declarant.vatId" type="text" class="mono" placeholder="DE123456789" /></label>
+          <label><span>Company name</span><input v-model="declarantOverride.companyName" type="text" :placeholder="declarantDefault.companyName" /></label>
+          <label><span>Full name</span><input v-model="declarantOverride.fullName" type="text" :placeholder="declarantDefault.fullName" /></label>
+          <label><span>Street &amp; house number</span><input v-model="declarantOverride.street" type="text" :placeholder="declarantDefault.street" /></label>
+          <label><span>Postcode &amp; city</span><input v-model="declarantOverride.postCodeCity" type="text" :placeholder="declarantDefault.postCodeCity || '10115 Berlin'" /></label>
+          <label><span>Country</span><input v-model="declarantOverride.countryOfOrigin" type="text" :placeholder="declarantDefault.countryOfOrigin" /></label>
+          <label><span>Phone</span><input v-model="declarantOverride.phone" type="tel" :placeholder="declarantDefault.phone" /></label>
+          <label><span>Email</span><input v-model="declarantOverride.email" type="email" :placeholder="declarantDefault.email" /></label>
+          <label><span>VAT / tax ID</span><input v-model="declarantOverride.vatId" type="text" class="mono" :placeholder="declarantDefault.vatId || 'DE123456789'" /></label>
         </div>
-        <p class="hint">Prefilled from the booth profile and the declarant under Settings; what you change here applies to this event only.</p>
+        <p class="hint">Prefilled from the business profile and the declarant under Settings; what you change here applies to this event only.</p>
         <p class="hint">VAT/tax ID is only shown on the proforma invoice - required by German export brokers as a seller identifier, distinct from the EORI.</p>
       </article>
 

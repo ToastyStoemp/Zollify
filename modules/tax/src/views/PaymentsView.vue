@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import { monthKey, round2, type Cluster } from '../engine/types';
 import * as eng from '../engine/clusters';
 import { ParseError, fromSourceRow, parseSheet } from '../engine/parse';
@@ -9,6 +10,7 @@ import { bookings, clusters, config, domesticVat, events, loaded, loadWork, clea
 import { sdk } from '../runtime';
 import ClusterCard from './ClusterCard.vue';
 import { Icon } from '@zollify/ui';
+import { localIsoDay as iso } from '@zollify/shared';
 
 /**
  * Payments: turn the month's card and online takings into bookings.
@@ -42,7 +44,6 @@ const liveSources = computed(() => {
   return out;
 });
 
-const iso = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function preset(mode: 'last-month' | 'this-month' | 'last-3-months'): void {
   const now = new Date();
   if (mode === 'this-month') {
@@ -76,6 +77,8 @@ async function onFile(file: File | undefined): Promise<void> {
   error.value = null;
   busy.value = 'file';
   try {
+    const problem = await checkPickedFile('spreadsheetImport', file);
+    if (problem) throw new ParseError(problem);
     const XLSX = await import('xlsx');
     const isCsv = file.name.toLowerCase().endsWith('.csv');
     const wb = isCsv ? XLSX.read(await file.text(), { type: 'string', raw: true }) : XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });

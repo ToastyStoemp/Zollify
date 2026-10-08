@@ -1,4 +1,5 @@
-import type { PeppolDocument, PeppolDocumentInput, PeppolParty, PeppolProblem, PeppolSettings, PeppolTotals } from '@zollify/shared';
+import type { PeppolSeller, PeppolDocument, PeppolDocumentInput, PeppolParty, PeppolProblem, PeppolSettings, PeppolTotals } from '@zollify/shared';
+import { localIsoDay } from '@zollify/shared';
 import { sdk } from './runtime';
 
 /** Typed calls to this module's server half (/api/m/peppol-be/…). */
@@ -29,8 +30,18 @@ export interface ProviderInfo {
 }
 export type Customer = PeppolParty & { id: string };
 
-export const loadSettings = (): Promise<{ settings: PeppolSettings; accessPoint: AccessPointInfo | null; providers: ProviderInfo[] }> => sdk().http.get('settings');
-export const saveSettings = (s: PeppolSettings): Promise<{ settings: PeppolSettings }> => sdk().http.put('settings', s);
+/**
+ * `settings` is what invoices are made from; `overrides` is what this business
+ * stored (blank seller fields follow the Business profile); `fromProfile` is what
+ * the profile gives.
+ */
+export interface SettingsReply {
+  settings: PeppolSettings;
+  overrides: PeppolSettings;
+  fromProfile: PeppolSeller;
+}
+export const loadSettings = (): Promise<SettingsReply & { accessPoint: AccessPointInfo | null; providers: ProviderInfo[] }> => sdk().http.get('settings');
+export const saveSettings = (s: PeppolSettings): Promise<SettingsReply> => sdk().http.put('settings', s);
 export const saveAccessPoint = (ap: { provider: string; apiKey: string; accountRef: string; sandbox: boolean } | null): Promise<{ accessPoint: AccessPointInfo | null }> =>
   sdk().http.put('access-point', ap ?? { provider: null });
 
@@ -60,4 +71,4 @@ export function errorText(err: unknown, fallback: string): string {
   return body?.message ?? (err instanceof Error ? err.message : fallback);
 }
 export const problemsOf = (err: unknown): PeppolProblem[] => (err as { body?: { problems?: PeppolProblem[] } } | null)?.body?.problems ?? [];
-export const today = (): string => new Date().toISOString().slice(0, 10);
+export const today = (): string => localIsoDay();

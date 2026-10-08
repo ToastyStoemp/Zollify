@@ -6,7 +6,11 @@ import {
   PeppolPartySchema,
   PeppolSettingsSchema,
   emptyPeppolSettings,
+  localDay,
+  PeppolStoredSettingsSchema,
+  peppolSellerFromProfile,
   peppolTotals,
+  resolvePeppolSettings,
   peppolUbl,
   structuredReference,
   validatePeppol,
@@ -14,10 +18,14 @@ import {
   type PeppolLine,
   type PeppolParty,
   type PeppolSettings,
+  type ArtistDetails,
   type Transaction,
 } from '@zollify/shared';
-import { makeSecretBox, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, reportProblem, resolveProblem, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ACCESS_POINTS, AccessPointSchema, sendViaAccessPoint, type AccessPointConfig } from './peppol-access-points';
+
+/** A Belgian invoice is dated by the Belgian calendar, whatever the server's clock zone. */
+const PEPPOL_TZ = 'Europe/Brussels';
 
 /**
  * Belgian e-invoices over Peppol - the server half.
@@ -71,11 +79,22 @@ function migrate(db: Database.Database): void {
 
 // ── Data ────────────────────────────────────────────────────────────────────
 
-function settingsOf(db: Database.Database, accountId: string): PeppolSettings {
+/**
+ * What the business stored here: only what differs from the business profile.
+ * A blank seller field means "as on the profile" - see resolvePeppolSettings.
+ */
+function storedOf(db: Database.Database, accountId: string): z.infer<typeof PeppolStoredSettingsSchema> {
   const row = db.prepare('SELECT doc FROM peppol_settings WHERE accountId = ?').get(accountId) as { doc: string } | undefined;
-  if (!row) return emptyPeppolSettings();
-  const parsed = PeppolSettingsSchema.safeParse(JSON.parse(row.doc));
-  return parsed.success ? parsed.data : emptyPeppolSettings();
+  const parsed = PeppolStoredSettingsSchema.safeParse(row ? JSON.parse(row.doc) : {});
+  return parsed.success ? parsed.data : PeppolStoredSettingsSchema.parse({});
+}
+function artistOf(db: Database.Database, accountId: string): ArtistDetails {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  return parseProfile(row?.profile).artist;
+}
+/** The settings invoices are made from: stored values over the business profile. Issued invoices keep their own stored UBL and never come back here. */
+function settingsOf(db: Database.Database, accountId: string): PeppolSettings {
+  return resolvePeppolSettings(storedOf(db, accountId), artistOf(db, accountId));
 }
 function docsOf(db: Database.Database, accountId: string): PeppolDocument[] {
   return (db.prepare('SELECT doc FROM peppol_documents WHERE accountId = ? ORDER BY createdAt DESC').all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as PeppolDocument);
@@ -115,6 +134,9 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
     id: PEPPOL_MODULE_ID,
     minRole: 'admin',
     migrate,
+    onAccountDeleted: (db, accountId) => {
+      for (const t of ['peppol_settings', 'peppol_customers', 'peppol_documents', 'peppol_counters']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    },
 
     routes: (ctx: ModuleContext) => async (app) => {
       const { db } = ctx;
@@ -129,14 +151,14 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
       app.get('/settings', async (req) => {
         const ap = accessPointOf(who(req));
         // The key never leaves the server; the screen only learns one is set.
-        return { settings: settingsOf(db, who(req)), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, accountRef: ap.accountRef, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
+        return { settings: settingsOf(db, who(req)), overrides: storedOf(db, who(req)), fromProfile: peppolSellerFromProfile(artistOf(db, who(req))), accessPoint: ap ? { provider: ap.provider, sandbox: ap.sandbox, accountRef: ap.accountRef, hasKey: !!ap.apiKey } : null, providers: ACCESS_POINTS };
       });
 
       app.put('/settings', async (req, reply) => {
-        const body = PeppolSettingsSchema.safeParse(req.body);
+        const body = PeppolStoredSettingsSchema.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: body.error.issues[0]?.message ?? 'Check your details.' });
         db.prepare('INSERT INTO peppol_settings (accountId, doc) VALUES (?, ?) ON CONFLICT (accountId) DO UPDATE SET doc = excluded.doc').run(who(req), JSON.stringify(body.data));
-        return { settings: body.data };
+        return { settings: settingsOf(db, who(req)), overrides: body.data, fromProfile: peppolSellerFromProfile(artistOf(db, who(req))) };
       });
 
       /** The access point account: provider, key (kept encrypted), sandbox or live. Null clears it. */
@@ -154,7 +176,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const config: AccessPointConfig = { ...body.data, apiKey };
         db.prepare('INSERT INTO peppol_settings (accountId, doc, accessPoint) VALUES (?, ?, ?) ON CONFLICT (accountId) DO UPDATE SET accessPoint = excluded.accessPoint').run(
           who(req),
-          JSON.stringify(settingsOf(db, who(req))),
+          JSON.stringify(storedOf(db, who(req))),
           box.encrypt(config),
         );
         return { accessPoint: { provider: config.provider, sandbox: config.sandbox, accountRef: config.accountRef, hasKey: true } };
@@ -301,7 +323,7 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
           kind: 'credit',
           number: null,
           status: 'draft',
-          issueDate: new Date(now).toISOString().slice(0, 10),
+          issueDate: localDay(now, PEPPOL_TZ),
           invoiceRef: { number: found.doc.number, issueDate: found.doc.issueDate },
           paymentReference: null,
           sentVia: undefined,
@@ -334,7 +356,12 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const ap = accessPointOf(accountId);
         if (!ap) return reply.code(400).send({ error: 'no_access_point', message: 'Set up a Peppol access point in the settings, or download the XML and upload it to yours.' });
         const result = await sendViaAccessPoint(ap, found.doc, found.xml);
-        if (!result.ok) return reply.code(502).send({ error: 'send_failed', message: result.message });
+        if (!result.ok) {
+          const status = /\((\d{3})\)/.exec(result.message)?.[1];
+          reportProblem(ctx, accountId, { kind: 'peppol.send', key: ap.provider, severity: 'warning', message: 'Sending an e-invoice through your Peppol access point failed', detail: status ? `HTTP ${status}` : 'Access point not reached or setup incomplete', link: '/settings?panel=peppol-be.peppol' });
+          return reply.code(502).send({ error: 'send_failed', message: result.message });
+        }
+        resolveProblem(ctx, accountId, 'peppol.send', ap.provider);
         const doc: PeppolDocument = { ...found.doc, status: found.doc.status === 'paid' ? 'paid' : 'sent', sentVia: { provider: ap.provider, at: Date.now(), reference: result.reference ?? null }, updatedAt: Date.now() };
         saveDoc(db, accountId, doc);
         return { document: doc, reference: result.reference ?? null };
@@ -375,15 +402,15 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const doc: PeppolDocument = {
           kind: 'invoice',
-          issueDate: new Date(now).toISOString().slice(0, 10),
-          dueDate: new Date(now + settings.paymentDays * 86_400_000).toISOString().slice(0, 10),
+          issueDate: localDay(now, PEPPOL_TZ),
+          dueDate: localDay(now + settings.paymentDays * 86_400_000, PEPPOL_TZ),
           currency: tx.currency,
           buyer: customer ? PeppolPartySchema.parse(JSON.parse(customer.doc)) : PeppolPartySchema.parse({ name: 'Customer' }),
           buyerReference: '',
           orderReference: '',
           lines,
-          note: `Sale of ${new Date(tx.timestamp).toISOString().slice(0, 10)}, already paid at the till.`,
-          deliveryDate: new Date(tx.timestamp).toISOString().slice(0, 10),
+          note: `Sale of ${localDay(tx.timestamp, PEPPOL_TZ)}, already paid at the till.`,
+          deliveryDate: localDay(tx.timestamp, PEPPOL_TZ),
           invoiceRef: null,
           saleId: tx.id,
           id: randomUUID(),

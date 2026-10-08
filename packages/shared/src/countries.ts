@@ -1,4 +1,4 @@
-/** ISO 3166 countries, shared by customs, events, products and the booth profile. */
+/** ISO 3166 countries, shared by customs, events, products and the business profile. */
 
 export const COUNTRIES: { code: string; name: string }[] = [
   { code: 'AF', name: 'Afghanistan' },

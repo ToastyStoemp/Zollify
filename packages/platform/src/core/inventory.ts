@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import type { EventStock, InventoryItem, SalesEvent } from '@zollify/shared';
+import { eventHasEnded, localIsoDay } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -224,12 +225,10 @@ export function soldTotal(productId: string, variantId: string | null = ''): num
  * Once the event is over (closed, or its last day has passed) whatever it
  * took is either sold - and counted as such - or back in the pile.
  */
-export function eventIsOver(event: SalesEvent | undefined, today = new Date().toISOString().slice(0, 10)): boolean {
+export function eventIsOver(event: SalesEvent | undefined, today = localIsoDay()): boolean {
   // No event (deleted, or never synced here): nothing to reserve for.
   if (!event) return true;
-  if (event.status === 'closed') return true;
-  const end = event.dateEnd || event.dateStart;
-  return Boolean(end && end < today);
+  return eventHasEnded(event, today);
 }
 
 /** The claim as far as reservations go: a past event's claim no longer holds anything. */

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { Signup, StoreFeature } from '@zollify/shared';
-import { addMonths, featureOn, fmtPrice, csvCell } from '@zollify/shared';
+import { addMonths, featureOn, fmtPrice, csvCell, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addSignup,
@@ -95,9 +95,9 @@ function openFeature(f?: StoreFeature): void {
   featureOpen.value = true;
 }
 function addDays(d: string, n: number): string {
-  const t = new Date(`${d}T00:00:00Z`);
-  t.setUTCDate(t.getUTCDate() + n);
-  return t.toISOString().slice(0, 10);
+  const t = new Date(`${d}T00:00:00`);
+  t.setDate(t.getDate() + n);
+  return localIsoDay(t);
 }
 function pickFeatureArtist(): void {
   const a = consignors.value.find((c) => c.id === feature.consignorId);

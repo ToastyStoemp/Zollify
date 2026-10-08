@@ -32,8 +32,10 @@ interface Member {
 
 export class Rooms {
   private byAccount = new Map<string, Set<Member>>();
+  private authorized = new WeakMap<WebSocket, () => boolean>();
 
-  add(accountId: string, deviceId: string, socket: WebSocket): Member {
+  add(accountId: string, deviceId: string, socket: WebSocket, authorized: () => boolean = () => true): Member {
+    this.authorized.set(socket, authorized);
     let room = this.byAccount.get(accountId);
     if (!room) this.byAccount.set(accountId, (room = new Set()));
     const entry: Member = { socket, deviceId };
@@ -66,6 +68,10 @@ export class Rooms {
   }
 
   private send(socket: WebSocket, msg: unknown): void {
+    if (this.authorized.get(socket)?.() === false) {
+      socket.close(4001, 'invalid token');
+      return;
+    }
     if (socket.readyState === socket.OPEN) socket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
   }
 
@@ -82,7 +88,7 @@ export class Rooms {
     const json = JSON.stringify(msg);
     for (const { socket, deviceId } of room) {
       if (deviceId === exceptDeviceId) continue;
-      if (socket.readyState === socket.OPEN) socket.send(json);
+      this.send(socket, json);
     }
   }
 
@@ -99,7 +105,7 @@ export class Rooms {
       // Only screens showing a customer display; tills and terminals have no
       // use for another register's cart every 15 seconds.
       if (deviceId === fromDeviceId || display === false) continue;
-      if (socket.readyState === socket.OPEN) socket.send(json);
+      this.send(socket, json);
     }
   }
 
@@ -114,7 +120,7 @@ export class Rooms {
     const stamped: PaymentMessage = { ...msg, from: fromDeviceId };
     const json = JSON.stringify(stamped);
     for (const { socket, deviceId } of room) {
-      if (deviceId === msg.to && socket.readyState === socket.OPEN) socket.send(json);
+      if (deviceId === msg.to) this.send(socket, json);
     }
   }
 }
@@ -161,7 +167,15 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       socket.close(4001, 'invalid token');
       return;
     }
-    const member = rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
+    const authorized = () => {
+      try {
+        app.jwt.verify(token ?? ''); // Recheck expiration for each send and receive.
+        return checkClaims(db, claims, 'GET', '/api/sync/ws') === null;
+      } catch {
+        return false;
+      }
+    };
+    const member = rooms.add(claims.accountId, deviceId ?? 'unknown', socket, authorized);
     live.add(socket);
     alive.set(socket, true);
     socket.on('pong', () => alive.set(socket, true));
@@ -183,6 +197,10 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       }
     }
     socket.on('message', (raw) => {
+      if (!authorized()) {
+        socket.close(4001, 'invalid token');
+        return;
+      }
       // Registers push ephemeral customer-display cart snapshots and the
       // remote-payment trigger/result handshake; everything else is ignored
       // (sync data always travels over HTTP).

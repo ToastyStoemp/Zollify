@@ -13,6 +13,8 @@ import {
   RegisterRequestSchema,
   emptyProfile,
   type AccountProfile,
+  type ProfileLinks,
+  cleanProfileLinks,
   type AuthUser,
   type TokenResponse,
   type UserRole,
@@ -68,10 +70,11 @@ export interface JwtClaims {
  * Those need the person's own sign-in.
  */
 const TILL_DENIED: [RegExp, RegExp][] = [
-  [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/./, /^\/api\/(invites|tokens|webhooks|problems|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
   [/^(?!GET)/, /^\/api\/(device-users|sessions|devices|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
 ];
 
 /**
@@ -142,6 +145,20 @@ export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
   };
 }
 
+/**
+ * Links are cleaned again on the way out, so a stored row is never more
+ * trusted than a request. A row that no longer passes is dropped. Links
+ * cleared on purpose stay as an empty set: absent means "never set".
+ */
+function storedLinks(raw: unknown): { links?: ProfileLinks } {
+  if (!raw || typeof raw !== 'object') return {};
+  try {
+    return { links: cleanProfileLinks(raw) };
+  } catch {
+    return {};
+  }
+}
+
 /** A missing or unreadable profile is an empty one - never a crash on login. */
 export function parseProfile(raw: string | null | undefined): AccountProfile {
   if (!raw) return emptyProfile();
@@ -154,6 +171,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
       staffSeesTotals: parsed.staffSeesTotals === true,
       ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
+      ...storedLinks(parsed.links),
     };
   } catch {
     return emptyProfile();
@@ -270,6 +288,8 @@ export async function seedOwner(db: Database.Database): Promise<void> {
 export interface AuthHooks {
   /** A new account was created with an invite code (not on joining an existing one). */
   accountCreated?(e: { accountId: string; userId: string; inviteCode: string }): void;
+  /** An account is being deleted; runs inside the deleting transaction so modules drop their rows with it. */
+  accountDeleted?(accountId: string): void;
 }
 
 export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string, hooks: AuthHooks = {}): void {
@@ -766,9 +786,10 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       db.prepare(
         'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
       ).run(accountId, accountId, accountId);
-      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'api_tokens', 'devices', 'notifications']) {
+      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'api_tokens', 'devices', 'notifications', 'webhooks']) {
         db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
       }
+      hooks.accountDeleted?.(accountId);
       db.prepare('DELETE FROM users WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
     })();

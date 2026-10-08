@@ -15,7 +15,7 @@ const PAYMENT_TIMEOUT_MS = 90_000;
  * matching payment.result comes back, correlated by requestId. Ported from
  * ZollTool. The Carbon side is `listenForRemotePayments` in this module.
  */
-let pending: { requestId: string; resolve: (msg: PaymentResultMessage) => void; timer: ReturnType<typeof setTimeout>; off: () => void } | null = null;
+let pending: { requestId: string; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout>; off: () => void } | null = null;
 
 async function pay(target: string, req: PaymentRequest): Promise<PaymentResultMessage> {
   if (pending) throw new Error('A remote payment is already in progress');
@@ -37,7 +37,7 @@ async function pay(target: string, req: PaymentRequest): Promise<PaymentResultMe
       off();
       pending = null;
     };
-    pending = { requestId, resolve, timer, off };
+    pending = { requestId, reject, timer, off };
   });
   logDiagnostic(`RemoteCarbon trigger to=${target} amount=${req.amount} currency=${req.currency}`);
   if (!sdk().realtime.sendPayment(trigger)) {
@@ -74,8 +74,11 @@ export const myposCarbonRemoteProvider: PaymentProvider = {
   },
   async cancel(): Promise<void> {
     if (!pending) return;
-    clearTimeout(pending.timer);
-    pending.off();
+    const p = pending;
+    clearTimeout(p.timer);
+    p.off();
     pending = null;
+    // startPayment() turns this into { approved: false, error: 'Cancelled' }.
+    p.reject(new Error('Cancelled'));
   },
 };

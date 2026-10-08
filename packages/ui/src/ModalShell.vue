@@ -56,7 +56,8 @@ h2 { margin: 0; font-size: 1.05rem; }
 .close { min-height: 2rem; padding: .2rem .4rem; }
 .body { min-height: 0; flex: 1; overflow-y: auto; padding: 1rem 1.1rem; }
 footer { padding: .8rem 1.1rem; border-top: 1px solid var(--zfy-line, #d6dde4); }
-@media (min-width: 640px) {
+/* 720 = the shell's phone breakpoint (apps/web/src/styles.css); a bottom sheet below, a centred dialog above. */
+@media (min-width: 721px) {
   .backdrop { align-items: center; padding: 1rem; }
   .card { border-radius: 16px; }
 }

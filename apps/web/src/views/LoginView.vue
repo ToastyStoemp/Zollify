@@ -344,8 +344,8 @@ async function register(): Promise<void> {
       </template>
       <template v-else>
         <label v-if="!firstRun"><span>Invite code</span><input v-model="inviteCode" type="text" autocomplete="off" placeholder="From whoever invited you" /></label>
-        <label><span>Booth name</span><input v-model="accountName" type="text" :placeholder="firstRun ? 'Your booth or studio' : 'Only for a brand-new account'" /></label>
-        <p v-if="!firstRun" class="hint">Joining an existing booth? The invite code puts you in it - the booth name is ignored.</p>
+        <label><span>Business name</span><input v-model="accountName" type="text" :placeholder="firstRun ? 'Your business or studio' : 'Only for a brand-new account'" /></label>
+        <p v-if="!firstRun" class="hint">Joining an existing business? The invite code puts you in it - the business name is ignored.</p>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Creating…' : firstRun ? 'Set up this server' : 'Create account' }}</button>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>

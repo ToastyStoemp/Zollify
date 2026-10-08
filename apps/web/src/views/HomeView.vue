@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, markRaw, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, markRaw, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { CalendarEntry } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { useRouter } from 'vue-router';
@@ -14,7 +14,7 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice, isStore, seesSalesTotals, sellsAt } from '@zollify/shared';
+import { fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -36,16 +36,20 @@ const placesRoute = computed(() => ({ name: event.value && isStore(event.value) 
 /** Staff see takings only when the owner allows it (Settings → Team). */
 const showTotals = computed(() => seesSalesTotals(account.value));
 
-// NOT toISOString().slice(0, 10) - that converts to UTC first, which shifts
-// the date by the timezone offset (e.g. a UTC+2 local midnight becomes
-// 22:00 the PREVIOUS day in UTC). Reading the local getters instead keeps
-// this matching the calendar day the user actually sees.
-function isoOf(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-const today = isoOf(new Date());
-const startOfDay = new Date();
-startOfDay.setHours(0, 0, 0, 0);
+// Ticked every minute so a tab left open overnight rolls over to the new day
+// instead of keeping yesterday's "today" until the next reload.
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  clock = setInterval(() => (now.value = Date.now()), 60_000);
+});
+onUnmounted(() => clearInterval(clock));
+const today = computed(() => localIsoDay(now.value));
+const startOfDay = computed(() => {
+  const d = new Date(now.value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+});
 
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -56,7 +60,7 @@ const greeting = computed(() => {
 const event = activeEvent;
 
 const todaysSales = computed(() =>
-  recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.getTime() && (!event.value || t.eventId === event.value.id)),
+  recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.value.getTime() && (!event.value || t.eventId === event.value.id)),
 );
 const eventSales = computed(() => (event.value ? recentTransactions.value.filter((t) => !t.revertedAt && t.eventId === event.value!.id) : []));
 
@@ -90,13 +94,13 @@ const bestToday = computed(() => {
 // ── Coming up ───────────────────────────────────────────────────────────────
 const upcoming = computed(() =>
   visibleEvents.value
-    .filter((e) => e.dateStart && (e.dateEnd ?? e.dateStart)! >= today)
+    .filter((e) => e.dateStart && (e.dateEnd ?? e.dateStart)! >= today.value)
     .sort((a, b) => a.dateStart!.localeCompare(b.dateStart!))
     .slice(0, 4),
 );
 
 function daysUntil(iso: string): string {
-  const d = Math.round((new Date(`${iso}T00:00:00`).getTime() - startOfDay.getTime()) / 86_400_000);
+  const d = Math.round((new Date(`${iso}T00:00:00`).getTime() - startOfDay.value.getTime()) / 86_400_000);
   if (d < 0) return 'now';
   if (d === 0) return 'today';
   if (d === 1) return 'tomorrow';
@@ -111,7 +115,7 @@ function range(e: { dateStart?: string; dateEnd?: string }): string {
 }
 
 // ── Calendar ─────────────────────────────────────────────────────────────────
-const calMonth = ref(new Date(startOfDay.getFullYear(), startOfDay.getMonth(), 1));
+const calMonth = ref(new Date(startOfDay.value.getFullYear(), startOfDay.value.getMonth(), 1));
 function shiftMonth(delta: number): void {
   calMonth.value = new Date(calMonth.value.getFullYear(), calMonth.value.getMonth() + delta, 1);
 }
@@ -135,7 +139,7 @@ const sortedEvents = computed(() => [...visibleEvents.value].sort((a, b) => (a.d
 function addDays(iso: string, n: number): string {
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + n);
-  return isoOf(d);
+  return localIsoDay(d);
 }
 
 interface CalEventSpan {
@@ -165,7 +169,7 @@ function gridRange(): { from: string; to: string } {
   start.setDate(1 - ((first.getDay() + 6) % 7));
   const end = new Date(start);
   end.setDate(start.getDate() + 41);
-  return { from: isoOf(start), to: isoOf(end) };
+  return { from: localIsoDay(start), to: localIsoDay(end) };
 }
 let asked = 0;
 async function loadEntries(): Promise<void> {
@@ -193,7 +197,7 @@ const calendarWeeks = computed<CalDay[][]>(() => {
   for (let w = 0; w < 6; w++) {
     const days: CalDay[] = [];
     for (let i = 0; i < 7; i++) {
-      const iso = isoOf(cursor);
+      const iso = localIsoDay(cursor);
       const prevIso = addDays(iso, -1);
       const nextIso = addDays(iso, 1);
       const events = sortedEvents.value
@@ -206,7 +210,7 @@ const calendarWeeks = computed<CalDay[][]>(() => {
           continuesRight: i < 6 && e.dateStart! <= nextIso && (e.dateEnd ?? e.dateStart)! >= nextIso,
         }));
       const entries = moduleEntries.value.filter((x) => x.date === iso).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
-      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today, events, entries });
+      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today.value, events, entries });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(days);

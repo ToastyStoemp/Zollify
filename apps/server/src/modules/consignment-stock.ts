@@ -257,6 +257,7 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext, side: Si
         const replyTo = accountEmail(db, ctx.identity(req).accountId) ?? undefined;
         await ctx.mail.send({
           to,
+          accountId: ctx.identity(req).accountId,
           subject: title,
           text: [`${title}, for ${storeName(row.accountId, shipment.storeId)}.`, '', ...lines.map((l) => `  ${l.qty} × ${l.title}`), ...(shipment.tracking ? ['', `Tracking: ${shipment.carrier} ${shipment.tracking}`.trim()] : []), ...(shipment.note ? ['', shipment.note] : []), '', 'Confirm it in Zollify under Consignment → Items when it arrives - the counts go straight onto the shelf.'].join('\n'),
           ...(replyTo ? { replyTo } : {}),
@@ -313,7 +314,7 @@ export function registerStock(app: FastifyInstance, ctx: ModuleContext, side: Si
       const to = (row && parseDoc(row.doc).email) || (artist ? accountEmail(db, artist) : null);
       if (to && ctx.mail.enabled) {
         const replyTo = accountEmail(db, who.accountId) ?? undefined;
-        await ctx.mail.send({ to, subject: title, text: [`${title}.`, '', ...(diffs.length ? ['What was counted differs from what you listed:', ...diffs.map((d) => `  ${d}`)] : ['Everything as you listed it - now on the shelf.'])].join('\n'), ...(replyTo ? { replyTo } : {}) });
+        await ctx.mail.send({ to, accountId: who.accountId, subject: title, text: [`${title}.`, '', ...(diffs.length ? ['What was counted differs from what you listed:', ...diffs.map((d) => `  ${d}`)] : ['Everything as you listed it - now on the shelf.'])].join('\n'), ...(replyTo ? { replyTo } : {}) });
       }
       return { shipment: done };
     });

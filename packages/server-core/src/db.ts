@@ -243,7 +243,15 @@ const MIGRATIONS: string[] = [
   ALTER TABLE notifications ADD COLUMN level TEXT NOT NULL DEFAULT 'normal';
   ALTER TABLE notifications ADD COLUMN groupKey TEXT;
   `,
-  // v16 - devices get a description parsed from the user agent ("Zollify app
+  // v16 - the op log is read by type ("every event.upsert for this account")
+  // and by payload id ("the tx with this id"); until now both scanned the
+  // whole account's log. The expression index must be spelled exactly like
+  // the queries (json_extract(payload, '$.id')) for SQLite to use it.
+  `
+  CREATE INDEX idx_ops_account_type ON ops(accountId, type, seq);
+  CREATE INDEX idx_ops_payload_id ON ops(accountId, type, json_extract(payload, '$.id'));
+  `,
+  // v17 - devices get a description parsed from the user agent ("Zollify app
   // on Android (SM-A536B)") so a list of unnamed ones can be told apart, and
   // a removed device's not-yet-expired access tokens are refused: a token
   // issued before the device's revokedAt is dead, one from a later sign-in

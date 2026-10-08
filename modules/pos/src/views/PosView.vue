@@ -9,6 +9,8 @@ import {
   addLine,
   addMisc,
   addModuleLine,
+  findModuleLine,
+  replaceModuleLine,
   appliedDiscounts,
   chargeTotals,
   customDiscountCharged,
@@ -18,6 +20,7 @@ import {
   cardInBase,
   cardSettlement,
   cart,
+  cancelCheckout,
   checkout,
   clear,
   inCart,
@@ -31,7 +34,7 @@ import {
   total,
 } from '../cart';
 import { getProvider } from '../payments/registry';
-import { findSearchMatch, typeColor } from '../search';
+import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
@@ -556,6 +559,8 @@ function applyDiscount(): void {
 
 // ── What other modules add to the till (a workshop place, say) ─────────────
 const tillActions = computed(() => sdk().till.actions());
+const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
+const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
 const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
 function runAction(action: TillAction): void {
   openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
@@ -567,7 +572,11 @@ const offTill = sdk().till.onAddLine((line) => {
   }
   return addModuleLine(line);
 });
-onUnmounted(offTill);
+const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
+onUnmounted(() => {
+  offTill();
+  offTillLines();
+});
 
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });
@@ -731,12 +740,25 @@ async function sendLog(): Promise<void> {
 
 async function runTerminal(): Promise<void> {
   const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
-  if (payment.phase !== 'terminal') return;
+  if (outcome.cancelled || payment.phase !== 'terminal') return;
   if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`);
   else {
     payment.error = outcome.error ?? 'Card payment declined';
     payment.phase = 'failed';
   }
+}
+
+// Leaving a live terminal request behind - for a retry or to record the card
+// by hand - cancels it first, so a late approval can't record a second sale.
+async function retryCard(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'terminal';
+  void runTerminal();
+}
+async function completeByHand(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'confirm';
+  payment.method = 'card';
 }
 
 async function confirmPayment(): Promise<void> {
@@ -752,11 +774,16 @@ async function confirmPayment(): Promise<void> {
         return settled ? { ...l, settled } : l;
       });
   }
+  // A split's card leg goes on the terminal when there is one; the Confirm
+  // button is disabled while the terminal works (cart.busy) and Cancel aborts it.
+  const cardLeg = legs?.find((l) => l.kind === 'card');
   const outcome = await checkout(crypto.randomUUID(), {
     method: payment.method,
     legs,
     cashReceived: payment.method === 'cash' ? Number(payment.cashReceived) || undefined : undefined,
+    terminal: hasTerminal.value && cardLeg ? { providerId: providerId.value, amount: cardLeg.amount } : undefined,
   });
+  if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
   finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`);
@@ -862,7 +889,7 @@ async function printSale(saleId: string): Promise<void> {
 }
 
 async function cancelPayment(): Promise<void> {
-  if (payment.phase === 'terminal') await provider.value.cancel().catch(() => {});
+  await cancelCheckout();
   payment.phase = 'idle';
 }
 
@@ -891,7 +918,7 @@ function lockTill(): void {
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
-        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="door-open" :size="16" /><span>{{ seller }}</span></button>
+        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
@@ -922,7 +949,7 @@ function lockTill(): void {
         <strong>{{ openArtistName }}</strong>
       </div>
 
-      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
+      <p v-if="!entries.length && !tillTiles.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
           <button v-if="'artist' in e" type="button" class="tile type artist" :aria-label="`${e.artist.name}, ${e.artist.products.length} products`" :class="{ dim: e.artist.stock === 0, added: e.artist.products.some((p) => p.id === justAddedId) }" @click="openArtist = e.artist.key">
@@ -962,6 +989,12 @@ function lockTill(): void {
             </span>
           </button>
         </template>
+        <button v-for="a in tillTiles" :key="`action:${a.id}`" type="button" class="tile" :aria-label="a.label" @click="runAction(a)">
+          <span class="head">
+            <Icon :name="a.icon ?? 'plus'" :size="36" />
+            <span class="title">{{ a.label }}</span>
+          </span>
+        </button>
       </div>
 
       <button v-if="itemCount" type="button" class="primary cartbar" @click="showCartSheet = true">
@@ -1010,7 +1043,7 @@ function lockTill(): void {
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
           <button type="button" @click="openMisc">+ Misc item</button>
-          <button v-for="a in tillActions" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
+          <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
@@ -1163,6 +1196,7 @@ function lockTill(): void {
             <button type="button" class="chip cardc" @click="payment.splitCard = Math.max(0, payment.total - (Number(payment.splitCash) || 0)).toFixed(2)">Card remainder</button>
           </div>
           <p>{{ splitState.label }}: <strong :class="splitState.cls">{{ money(splitState.amount) }}</strong></p>
+          <p v-if="cart.busy && hasTerminal" class="pulse">Present card to terminal…</p>
           <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
@@ -1174,8 +1208,8 @@ function lockTill(): void {
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
           <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
-          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="payment.phase = 'terminal'; runTerminal()">Retry card</button>
-          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
+          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
+          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
         </div>
       </template>
@@ -1213,7 +1247,8 @@ function lockTill(): void {
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
 .seller { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: .1rem .55rem; font-size: .8rem; font-weight: 600; max-width: 9rem; }
-.seller span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
+.seller .lock-label { font-weight: 700; }
+.seller span.seller-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
 .scanner-wrap { position: relative; }
@@ -1311,6 +1346,8 @@ function lockTill(): void {
 .chip.cardc { color: #2f6fb8; border-color: #2f6fb8; }
 
 @media (max-width: 860px) {
+  /* Narrow: the lock icon alone; the seller stays in the title and label. */
+  .seller .lock-label, .seller .seller-name { display: none; }
   /* Cancels .content's own padding (a bleed-to-edges trick, not new) - the
      bottom value now also cancels the --zfy-bottom-nav clearance .content
      added for pages that don't otherwise account for the fixed tab bar.

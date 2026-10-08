@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import { materialTotals, type Material } from '../engine';
 import { remove, save, snap } from '../api';
@@ -16,7 +16,7 @@ const currency = computed(() => sdk().account()?.profile.defaultCurrency ?? 'CHF
 const list = computed(() => [...snap.value.materials].sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)));
 const editing = ref<Material | null>(null);
 const buying = ref<Material | null>(null);
-const purchase = ref({ qty: '', cost: '', date: new Date().toISOString().slice(0, 10), note: '' });
+const purchase = ref({ qty: '', cost: '', date: localIsoDay(), note: '' });
 function openNew(): void {
   editing.value = { id: crypto.randomUUID(), name: '', type: 'paper', unit: 'sheet', description: '', purchases: [] };
 }
@@ -31,7 +31,7 @@ async function saveMaterial(): Promise<void> {
 }
 function openBuy(m: Material): void {
   buying.value = m;
-  purchase.value = { qty: '', cost: '', date: new Date().toISOString().slice(0, 10), note: '' };
+  purchase.value = { qty: '', cost: '', date: localIsoDay(), note: '' };
 }
 async function logPurchase(): Promise<void> {
   const m = buying.value;

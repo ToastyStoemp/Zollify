@@ -14,7 +14,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Sourcing',
-  description: 'Suppliers and reorder drafts for restocking the booth.',
+  description: 'Suppliers and reorder drafts for restocking.',
   requires: ['catalog'],
   // Purchasing is not a helper's job.
   minRole: 'admin',

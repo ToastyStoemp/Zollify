@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { localIsoDay } from '@zollify/shared';
 import { sdk } from '../runtime';
 
 /**
@@ -10,7 +11,7 @@ const events = computed(() => sdk().data.events.list());
 const activeId = computed(() => sdk().data.events.active()?.id ?? null);
 
 /** Same rule as inventory reservations: closed, or its last day has passed. */
-const today = new Date().toISOString().slice(0, 10);
+const today = localIsoDay();
 const isOver = (e: { status: string; dateStart?: string; dateEnd?: string }): boolean =>
   e.status === 'closed' || Boolean((e.dateEnd || e.dateStart || '') && (e.dateEnd || e.dateStart || '') < today);
 const dateKey = (e: { dateStart?: string; dateEnd?: string }): string => e.dateStart || e.dateEnd || '';

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { emptyProfile, isStore, sellsAt, type ArtistDetails, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, emptyProfile, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -12,7 +12,7 @@ import { loadEnabledModules, unloadModule } from '../boot';
  * both - it decides which pages it gets) and who it is, its next event or its
  * store, which modules to switch on, and where to go next. Every step can be skipped - skipping still
  * marks setup as done so the wizard never nags, and it can be re-run from
- * Settings → Booth profile.
+ * Settings → Business profile.
  */
 
 interface AvailableModule {
@@ -31,7 +31,7 @@ interface AvailableModule {
 const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   pos: { forWhom: 'The till. You need this to sell anything at all.', recommended: true },
   customs: {
-    forWhom: 'For selling across a border - Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock.',
+    forWhom: 'For selling across a border - Swiss EDEC, forms 1174/1187, proforma invoice and goods lists from your claimed stock. Uses your business details from the first step.',
     recommended: true,
   },
   'price-cards': { forWhom: 'Printable price tags straight from the catalogue. Handy at any table.', recommended: true },
@@ -46,7 +46,12 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   sourcing: { forWhom: 'Keep suppliers and draft reorders when stock runs low.', recommended: false },
   'shopify-sync': { forWhom: 'Only if you also run a Shopify store and want the catalogue matched against it.', recommended: false },
   migration: { forWhom: 'Only if you are moving from ZollTool. Import the backup once, then switch it off.', recommended: false },
+  'peppol-be': {
+    forWhom: 'Belgian B2B invoices as Peppol e-invoices. Takes your name, address, VAT and enterprise number from the first step; you only add the access point and payment details.',
+    recommended: false,
+  },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
+  commissions: { forWhom: 'For artists taking custom work: save the customer, take a deposit at the till, and give them a QR code to follow progress.', recommended: false },
 };
 
 const router = useRouter();
@@ -60,7 +65,7 @@ const error = ref<string | null>(null);
 // ── Step 1: what you run, and who ────────────────────────────────────────────
 type Runs = 'events' | 'stores' | 'both';
 const RUNS: { id: Runs; title: string; text: string }[] = [
-  { id: 'events', title: 'Events', text: 'Fairs, markets, conventions - a booth for a few days at a time.' },
+  { id: 'events', title: 'Events', text: 'Fairs, markets, conventions - a pop-up for a few days at a time.' },
   { id: 'stores', title: 'Stores', text: 'A shop, or several, open until you close them.' },
   { id: 'both', title: 'Both', text: 'Events and stores.' },
 ];
@@ -68,9 +73,12 @@ const toRuns = (s: SellsAt): Runs => (s.events && s.stores ? 'both' : s.stores ?
 const runs = ref<Runs>(toRuns(sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e)))));
 const runsEvents = computed(() => runs.value !== 'stores');
 const runsStores = computed(() => runs.value !== 'events');
+// Off unless chosen: nothing is shared until the owner agrees. Applied with the modules, since the pool lives in Public events.
+const shareEvents = ref(false);
 const name = ref(account.value?.accountName ?? '');
 const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
+const links = ref<ProfileLinks>({ ...EMPTY_PROFILE_LINKS, ...account.value?.profile.links });
 
 async function saveWho(): Promise<void> {
   busy.value = true;
@@ -79,6 +87,7 @@ async function saveWho(): Promise<void> {
     await updateProfile({
       sells: { events: runsEvents.value, stores: runsStores.value },
       artist: artist.value,
+      links: { ...links.value },
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
@@ -87,6 +96,7 @@ async function saveWho(): Promise<void> {
     const next = new Set(wanted.value);
     if (runsStores.value && modules.value.some((m) => m.moduleId === 'consignment')) next.add('consignment');
     if (!runsEvents.value) for (const id of ['customs-hub', 'customs-ch', 'customs-de']) next.delete(id);
+    if (runsEvents.value && shareEvents.value && modules.value.some((m) => m.moduleId === 'public-events')) next.add('public-events');
     wanted.value = next;
     step.value = 2;
   } catch (err) {
@@ -185,6 +195,13 @@ async function saveModules(): Promise<void> {
       mod.enabled = !mod.enabled;
     }
     if (changed.some((m) => m.enabled)) await loadEnabledModules(router);
+    if (runsEvents.value && shareEvents.value && wanted.value.has('public-events')) {
+      try {
+        await authFetch('/m/public-events/pool/settings', { method: 'PUT', body: JSON.stringify({ share: true }) });
+      } catch {
+        error.value = 'Could not turn on event sharing - you can turn it on under Settings.';
+      }
+    }
     step.value = 4;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not change those modules.';
@@ -225,9 +242,10 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-if="step === 1" class="card" @submit.prevent="saveWho">
       <h1>Welcome to Zollify</h1>
       <p class="lede">
-        One app for the booth: the till, stock, events and paperwork. First, who is behind the
-        table? These details go on receipts and customs documents, so they are worth getting right -
-        and you can change them any time under Settings.
+        One app for your business: the till, stock, events and paperwork. First, who is behind the
+        table? You enter this once: receipts, customs documents and e-invoices all read it from here,
+        so no module asks again. Everything past your name is optional, and you can change it any
+        time under Settings → Business profile.
       </p>
 
       <fieldset class="runs">
@@ -238,9 +256,21 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <span>{{ r.text }}</span>
         </label>
       </fieldset>
-      <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Booth profile.</p>
+      <fieldset v-if="runsEvents" class="runs share">
+        <legend>Help other artists find events?</legend>
+        <p class="lede small">Share the name, dates, place and link of your events with the community. Others can add them to their own events in one tap. Nobody can see who goes to which event. You can turn this off any time in Settings.</p>
+        <label :class="{ on: !shareEvents }">
+          <input v-model="shareEvents" type="radio" name="shareEvents" :value="false" />
+          <strong>No, keep my events to myself</strong>
+        </label>
+        <label :class="{ on: shareEvents }">
+          <input v-model="shareEvents" type="radio" name="shareEvents" :value="true" />
+          <strong>Yes, share my events</strong>
+        </label>
+      </fieldset>
+      <p class="lede small">This decides whether you get the Events page, the Stores page, or both. Change it any time under Settings → Business profile.</p>
 
-      <ArtistForm v-model="artist" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
+      <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
 
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="finish()">Skip setup</button>
@@ -272,7 +302,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-else-if="step === 3" class="card" @submit.prevent="saveModules">
       <h1>Switch on what you need</h1>
       <p class="lede">
-        Zollify is built from modules. Turn on the ones that fit your booth - anything you leave off
+        Zollify is built from modules. Turn on the ones that fit your business - anything you leave off
         stays out of the way and can be switched on later under Modules.
       </p>
 
@@ -307,7 +337,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <div v-else class="card">
       <h1>You're set up</h1>
       <p class="lede">
-        Here is the order most booths do things in. Each one takes a minute, and none of them has
+        Here is the order most sellers do things in. Each one takes a minute, and none of them has
         to happen today.
       </p>
 
@@ -319,7 +349,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         </li>
         <li>
           <strong>Count what you own</strong>
-          <span>One inventory for the whole booth. Events can claim a share of it.</span>
+          <span>One inventory for the whole business. Events can claim a share of it.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'stock' })">Open Inventory</button>
         </li>
         <li v-if="runsEvents">
@@ -359,6 +389,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .75rem; }
 .grid label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .runs { border: 0; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .5rem; }
+.runs.share p { grid-column: 1 / -1; margin: 0; }
 .runs legend { font-weight: 600; margin-bottom: .4rem; font-size: .95rem; }
 .runs label { display: flex; flex-direction: column; gap: .2rem; padding: .7rem .8rem; border: 1px solid var(--zfy-line); border-radius: 10px; cursor: pointer; font-size: .85rem; }
 .runs label.on { border-color: var(--zfy-accent); background: var(--zfy-accent-soft); }
@@ -367,7 +398,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .runs span { color: var(--zfy-muted); }
 .lede.small { font-size: .8rem; }
 .lede.ok { color: var(--zfy-accent-ink); }
-.steps { list-style: none; margin: 0; padding: 0; display: flex; gap: .5rem; counter-reset: step; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; counter-reset: step; }
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }
 .steps li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--zfy-line); font-variant-numeric: tabular-nums; }
 .steps li.current { color: var(--zfy-ink); font-weight: 600; }

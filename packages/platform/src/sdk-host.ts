@@ -13,6 +13,7 @@ import {
   type ShellUi,
   type StoreSchema,
   type TillLine,
+  type TillLineAccess,
   type TillLookup,
   type Unsubscribe,
 } from '@zollify/sdk';
@@ -20,7 +21,7 @@ import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
-import { lockTill, switchByBadge, tillSettings } from './till-lock';
+import { canLockTill, lockTill, switchByBadge } from './till-lock';
 import {
   allProducts,
   deleteProduct,
@@ -186,6 +187,7 @@ const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 /** The open till, when there is one - the module that sells registers here. */
 let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
 /** Modules that can resolve a code the catalogue does not know. */
+let tillLines: TillLineAccess | null = null;
 const tillLookups = new Set<(code: string) => Promise<TillLookup | null>>();
 
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
@@ -288,7 +290,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     data: coreData,
 
     account: () => getAccount(),
-    lock: { available: () => tillSettings.value.enabled, lock: () => lockTill(), badge: (code) => switchByBadge(code) },
+    lock: { available: () => canLockTill(), lock: () => lockTill(), badge: (code) => switchByBadge(code) },
 
     onAccountChange(handler) {
       guard();
@@ -325,6 +327,27 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         // The ref names the module that added the line - never one it chose.
         const { ref, ...rest } = line;
         return tillReceiver({ ...rest, ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}) });
+      },
+      findLine(key) {
+        guard();
+        const found = tillLines?.find(key);
+        // A module sees and changes only the lines it added itself.
+        if (!found || found.ref?.moduleId !== moduleId) return null;
+        return { key: found.key, name: found.name, qty: found.qty, unitPrice: found.unitPrice };
+      },
+      replaceLine(line) {
+        guard();
+        if (!tillLines || tillLines.find(line.key)?.ref?.moduleId !== moduleId) return false;
+        return tillLines.replace(line);
+      },
+      onLineAccess(access) {
+        guard();
+        tillLines = access;
+        const off = () => {
+          if (tillLines === access) tillLines = null;
+        };
+        subscriptions.push(off);
+        return off;
       },
       onAddLine(handler) {
         guard();

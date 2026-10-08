@@ -72,6 +72,7 @@ export { selfUpdates, currentAppVersion, checkForUpdate, downloadUpdate, install
 export { notifyShellUpdateReady, checkAndQueueShellUpdate, announceShellUpdate, currentShellVersion, checkShellUpdate, queueShellUpdate, shellUpdateQueued, reloadShellNow, type ShellUpdateCheck } from './shell-updates';
 export {
   tillSettings,
+  canLockTill,
   tillLocked,
   tillPeople,
   refreshTillPeople,

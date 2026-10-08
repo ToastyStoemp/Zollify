@@ -28,6 +28,7 @@
     "@zollify/public-events": "*",
     "@zollify/sdk": "*",
     "@zollify/shopify-sync": "*",
+    "@zollify/odoo-sync": "*",
     "@zollify/sourcing": "*",
     "@zollify/tax": "*",
     "@zollify/ui": "*",

@@ -42,6 +42,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),
   'shopify-sync': () => import('@zollify/shopify-sync'),
+  'odoo-sync': () => import('@zollify/odoo-sync'),
   'public-events': () => import('@zollify/public-events'),
   tax: () => import('@zollify/tax'),
   costs: () => import('@zollify/costs'),

@@ -52,7 +52,15 @@ export interface DeviceSummary {
   id: string;
   name: string | null;
   flavor: string | null;
+  /** What it is, from its user agent: "Zollify app on Android (SM-A536B)". */
+  device: string | null;
+  /** Whose sign-in it last used. */
+  userId: string;
+  userEmail: string | null;
+  /** Live sign-ins on it; 0 once every session was logged out or expired. */
+  sessions: number;
   lastSeenAt: number;
+  createdAt: number;
 }
 
 export interface PushResponse {

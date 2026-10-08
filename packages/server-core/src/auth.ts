@@ -22,6 +22,7 @@ import { generateSecret, otpauthUri, verifyToken, generateRecoveryCodes, hashRec
 import { issueChallenge, verifyChallenge } from './captcha';
 import { makeSecretBox } from './secretbox';
 import { parseDevice, lookupGeo, geoEnabled } from './session-info';
+import { touchDevice as touchDeviceRow } from './db';
 
 const ACCESS_TTL = '15m';
 const DAY = 24 * 3600 * 1000;
@@ -53,6 +54,10 @@ export interface JwtClaims {
   role: UserRole;
   /** Set on a person's token from a shared till: the device it was unlocked on. */
   till?: string;
+  /** The device the token was issued to, when the sign-in named one - so removing the device can end its tokens. */
+  dev?: string;
+  /** Issued at, seconds - set by the JWT library. */
+  iat?: number;
 }
 
 /**
@@ -64,7 +69,7 @@ export interface JwtClaims {
  */
 const TILL_DENIED: [RegExp, RegExp][] = [
   [/./, /^\/api\/(invites|tokens|webhooks|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
-  [/^(?!GET)/, /^\/api\/(device-users|sessions|users\/[^/]+\/events)(\/|$)/],
+  [/^(?!GET)/, /^\/api\/(device-users|sessions|devices|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
 ];
@@ -80,6 +85,11 @@ export function checkClaims(db: Database.Database, claims: JwtClaims, method: st
   const row = db.prepare('SELECT accountId, role FROM users WHERE id = ?').get(claims.sub) as { accountId: string; role: UserRole } | undefined;
   if (!row || row.accountId !== claims.accountId) return { code: 401, error: 'Not authenticated' };
   claims.role = row.role;
+  if (claims.dev) {
+    // The device was removed from the account after this token was issued.
+    const gone = db.prepare('SELECT revokedAt FROM device_revocations WHERE accountId = ? AND deviceId = ?').get(claims.accountId, claims.dev) as { revokedAt: number } | undefined;
+    if (gone && (claims.iat ?? 0) * 1000 < gone.revokedAt) return { code: 401, error: 'This device was removed from the account - sign in again.' };
+  }
   if (claims.till !== undefined) {
     const b = db.prepare('SELECT unlockedUntil FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(claims.accountId, claims.till, claims.sub) as { unlockedUntil: number } | undefined;
     if (!b || b.unlockedUntil <= Date.now()) return { code: 401, error: 'Not authenticated' };
@@ -162,7 +172,7 @@ export async function issueTokens(
   user: UserRow,
   session: SessionInfo = {},
 ): Promise<TokenResponse> {
-  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role };
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role, ...(session.deviceId ? { dev: session.deviceId } : {}) };
   const accessToken = app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
   const refreshToken = randomBytes(32).toString('hex');
   const now = Date.now();
@@ -233,12 +243,9 @@ export function checkSecondFactor(
   return used.changes === 1 ? 'recovery' : 'invalid';
 }
 
-export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
+export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string, device?: string, flavor?: string | null): void {
   if (!deviceId) return;
-  db.prepare(
-    `INSERT INTO devices (id, accountId, userId, name, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name) WHERE devices.accountId = excluded.accountId`,
-  ).run(deviceId, accountId, userId, name ?? null, Date.now(), Date.now());
+  touchDeviceRow(db, deviceId, accountId, userId, name ?? null, flavor ?? null, Date.now(), device ?? null);
 }
 
 /** Seed the server owner from env on first boot (OWNER_EMAIL / OWNER_PASSWORD). */
@@ -434,7 +441,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     }
 
     db.prepare('UPDATE users SET lastLoginAt = ? WHERE id = ?').run(Date.now(), user.id);
-    touchDevice(db, user.accountId, user.id, deviceId, deviceName);
+    touchDevice(db, user.accountId, user.id, deviceId, deviceName, parseDevice(req.headers['user-agent']), b.flavor ?? null);
     bumpMetric(db, user.accountId, 'logins');
     const tokens = await issueTokens(app, db, user, {
       deviceId,

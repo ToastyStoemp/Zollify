@@ -1,11 +1,32 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ModalShell } from '@zollify/ui';
 import { cleanLocation, type StorageLocation } from '../engine/storage';
-import { homeName, locations, removeLocation, rows, saveLocation, setHomeName, swapOrder } from '../state';
+import { devicePicks, homeName, isAdmin, locationName, locations, removeLocation, rows, saveLocation, setHomeName, swapOrder, thisDeviceId } from '../state';
 import { sdk } from '../runtime';
 
+const admin = isAdmin();
 const error = ref<string | null>(null);
+
+/** Device names, when this user may list the account's devices. */
+const deviceNames = ref<Map<string, string>>(new Map());
+onMounted(async () => {
+  if (!admin) return;
+  try {
+    const list = await sdk().realtime.devices();
+    deviceNames.value = new Map(list.map((d) => [d.id, d.name || d.device || 'Unnamed device']));
+  } catch {
+    // Names are a nicety; the picks still show by id.
+  }
+});
+const devices = computed(() =>
+  devicePicks.value
+    .map((d) => ({
+      ...d,
+      name: d.deviceId === thisDeviceId.value ? 'This device' : (deviceNames.value.get(d.deviceId) ?? `Device ${d.deviceId.slice(0, 8)}`),
+    }))
+    .sort((a, b) => Number(b.deviceId === thisDeviceId.value) - Number(a.deviceId === thisDeviceId.value) || a.name.localeCompare(b.name)),
+);
 
 const editing = ref<{ id: string | null; name: string; address: string; note: string } | null>(null);
 const formError = ref<string | null>(null);
@@ -35,7 +56,7 @@ async function submit(): Promise<void> {
   }
 }
 
-const holds = (id: string): number => rows.value.reduce((n, r) => n + (r.stored.get(id) ?? 0), 0);
+const holds = (id: string): number => rows.value.reduce((n, r) => n + Math.max(0, r.stored.get(id) ?? 0), 0);
 
 async function remove(l: StorageLocation): Promise<void> {
   error.value = null;
@@ -64,11 +85,12 @@ async function saveHome(): Promise<void> {
 <template>
   <div class="locations">
     <div class="card home">
-      <label>
-        <span>Name for the stock you keep with you</span>
+      <label v-if="admin">
+        <span>Name for the stock not at a location</span>
         <input v-model="homeDraft" type="text" maxlength="60" placeholder="Home" @change="saveHome" />
       </label>
-      <p class="hint">Everything not in a storage location or at one of your stores. Sales at events come out of here.</p>
+      <strong v-else>{{ homeName }}</strong>
+      <p class="hint">Everything not at a location or one of your stores. Devices that have not picked a location sell from here.</p>
     </div>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -80,17 +102,27 @@ async function saveHome(): Promise<void> {
           <span class="meta">{{ holds(l.id) }} unit{{ holds(l.id) === 1 ? '' : 's' }}<template v-if="l.address"> · {{ l.address }}</template></span>
           <span v-if="l.note" class="meta">{{ l.note }}</span>
         </div>
-        <div class="actions">
+        <div v-if="admin" class="actions">
           <button v-if="i > 0" type="button" class="quiet" aria-label="Move up" @click="moveUp(i)">↑</button>
           <button type="button" class="quiet" @click="startEdit(l)">Edit</button>
           <button type="button" class="quiet danger" @click="remove(l)">Remove</button>
         </div>
       </li>
     </ul>
-    <p v-else class="empty">No storage locations yet. Add the places you keep stock besides {{ homeName }}.</p>
+    <p v-else class="empty">No storage locations yet.<template v-if="admin"> Add the places you keep stock besides {{ homeName }}.</template><template v-else> An admin can add them.</template></p>
 
-    <div><button type="button" class="primary" @click="startNew">Add location</button></div>
-    <p class="hint">The pick list fetches from {{ homeName }} first, then from the locations in this order.</p>
+    <div v-if="admin"><button type="button" class="primary" @click="startNew">Add location</button></div>
+    <p class="hint">The pick list fetches from the device's own place first, then {{ homeName }}, then the locations in this order.</p>
+
+    <template v-if="devices.length">
+      <h2>Devices</h2>
+      <ul class="list devices">
+        <li v-for="d in devices" :key="d.deviceId" class="card">
+          <span>{{ d.name }}</span>
+          <span class="meta">sells from {{ locationName(d.locationId) }}</span>
+        </li>
+      </ul>
+    </template>
 
     <ModalShell v-if="editing" :title="editing.id ? 'Edit location' : 'New location'" @close="editing = null">
       <div class="form">
@@ -114,6 +146,8 @@ async function saveHome(): Promise<void> {
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; }
 .home { display: flex; flex-direction: column; gap: .4rem; }
 .home label, .form label { display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
+h2 { margin: .5rem 0 0; font-size: .95rem; color: var(--zfy-muted, #5a6472); }
+.devices li { padding: .55rem 1rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
 .what { display: flex; flex-direction: column; gap: .15rem; min-width: 0; }

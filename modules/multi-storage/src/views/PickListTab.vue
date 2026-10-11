@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { compareEvents, eventHasEnded } from '@zollify/shared';
-import { itemKey, pickPlan } from '../engine/storage';
-import { homeName, locationName, locations, move, rows } from '../state';
+import { itemKey, pickOrder, pickPlan, type Place } from '../engine/storage';
+import { locationName, locations, move, ownLocation, rows } from '../state';
 import { sdk } from '../runtime';
 
 /**
  * What to fetch from where for one event: its claims, minus what it already
- * sold, taken from Home first and then from storage in the locations' order.
+ * sold, taken from this device's own place first, then Home, then the other
+ * locations in their order.
  */
 
 const events = computed(() =>
@@ -41,7 +42,7 @@ interface Stop {
 const plan = computed(() => {
   if (!eventId.value) return { stops: [] as Stop[], short: [] as Pick[], claimed: 0 };
   const byKey = new Map(rows.value.map((r) => [r.key, r]));
-  const order = locations.value.map((l) => l.id);
+  const order = pickOrder(ownLocation.value, locations.value.map((l) => l.id));
   const stops = new Map<string | null, Pick[]>();
   const short: Pick[] = [];
   let claimed = 0;
@@ -59,28 +60,30 @@ const plan = computed(() => {
     }
     if (missing) short.push({ key: row.key, label: row.label, qty: missing });
   }
-  const ordered: Stop[] = [null, ...order].filter((id) => stops.has(id)).map((id) => ({ locationId: id, picks: stops.get(id)! }));
+  const ordered: Stop[] = order.filter((id) => stops.has(id)).map((id) => ({ locationId: id, picks: stops.get(id)! }));
   return { stops: ordered, short, claimed };
 });
 
-const busy = ref<string | null>(null);
+const busy = ref(false);
 const error = ref<string | null>(null);
 
-/** Fetched from storage: the units leave the location and are with you (Home) from now on. */
-async function fetched(locationId: string, picks: Pick[]): Promise<void> {
-  busy.value = locationId;
+const placeOf = (id: string | null): Place => (id === null ? { kind: 'home' } : { kind: 'location', id });
+
+/** Fetched: the units leave that place for the one this device sells from. */
+async function fetched(locationId: string | null, picks: Pick[]): Promise<void> {
+  busy.value = true;
   error.value = null;
   try {
     const byKey = new Map(rows.value.map((r) => [r.key, r]));
     for (const p of picks) {
       const row = byKey.get(p.key);
-      if (row) await move(row, { kind: 'location', id: locationId }, { kind: 'home' }, p.qty);
+      if (row) await move(row, placeOf(locationId), placeOf(ownLocation.value), p.qty);
     }
-    sdk().ui.toast(`Moved to ${homeName.value}.`, { kind: 'success' });
+    sdk().ui.toast(`Moved to ${locationName(ownLocation.value)}.`, { kind: 'success' });
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Could not record the pick.';
   } finally {
-    busy.value = null;
+    busy.value = false;
   }
 }
 
@@ -106,11 +109,12 @@ const units = (picks: Pick[]): number => picks.reduce((n, p) => n + p.qty, 0);
         <header>
           <h2>{{ locationName(stop.locationId) }}</h2>
           <span class="meta">{{ units(stop.picks) }} unit{{ units(stop.picks) === 1 ? '' : 's' }}</span>
+          <span v-if="stop.locationId === ownLocation" class="meta">this device</span>
           <button
-            v-if="stop.locationId"
+            v-else
             type="button"
             class="primary"
-            :disabled="busy !== null"
+            :disabled="busy"
             @click="fetched(stop.locationId, stop.picks)"
           >Fetched</button>
         </header>
@@ -126,7 +130,7 @@ const units = (picks: Pick[]): number => picks.reduce((n, p) => n + p.qty, 0);
         </ul>
       </div>
 
-      <p v-if="plan.stops.length" class="hint">Fetched moves those units out of storage to {{ homeName }}, where the event sells them from.</p>
+      <p v-if="plan.stops.length" class="hint">Fetched moves those units to {{ locationName(ownLocation) }}, the place this device sells from.</p>
     </template>
   </div>
 </template>

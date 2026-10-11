@@ -3,17 +3,19 @@ import { clearSdk, setSdk } from './runtime';
 import { loadStorage, loaded, resetStorage } from './state';
 
 /**
- * Storage locations - splits the one inventory by where it physically is, and
- * plans what to fetch from where for an event. See engine/storage.ts.
+ * Storage locations - splits the one inventory by where it physically is, lets
+ * each device pick the place it sells from, and plans what to fetch from where
+ * for an event. Staff move and count stock; admins manage the locations. See
+ * engine/storage.ts.
  */
 export default defineModule({
   id: 'multi-storage',
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Storage locations',
-  description: 'Keep stock at more than one place - a storage unit, the studio - and know what to fetch from where for each event.',
+  description: 'Keep stock at more than one place - a storage unit, the studio - sell from the one each device is at, and know what to fetch from where for each event.',
   requires: ['catalog'],
-  minRole: 'admin',
+  minRole: 'member',
 
   setup(sdk: Sdk) {
     setSdk(sdk);

@@ -424,6 +424,10 @@ export interface ImageApi {
  * colliding with another one. Not for anything large or high-frequency;
  * this is for the odd shared list or flag a module wants every device to
  * agree on.
+ *
+ * Only admins' writes reach other devices, except under `team.` (e.g.
+ * 'team.my-module.row'): those staff may write too, so keep there what
+ * colleagues change day to day, and configuration outside it.
  */
 export interface SyncedSettingsApi {
   get<T = unknown>(key: string): Promise<T | undefined>;

@@ -2,7 +2,7 @@ import { gzipSync } from 'node:zlib';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { PushRequestSchema, STAFF_OP_TYPES, SYNC_PUSH_MAX_BYTES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
+import { PushRequestSchema, SYNC_PUSH_MAX_BYTES, isStaffOp, isTeamSetting, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
 import { parseDevice } from '../session-info';
@@ -37,13 +37,6 @@ export function appendOps(db: Database.Database, rooms: Rooms, accountId: string
   rooms.nudge(accountId, latest);
   return ops.length;
 }
-
-/**
- * What a plain member - store staff - may change: sales, refunds and claims.
- * The catalogue, prices, discounts, events and settings are the owner's and
- * admins'. Their screens already hide those; this is the guarantee.
- */
-const STAFF_TYPES = new Set(STAFF_OP_TYPES);
 
 export function registerSyncRoutes(
   app: FastifyInstance,
@@ -96,8 +89,10 @@ export function registerSyncRoutes(
     return !!eid && allowed.has(eid);
   }
   // Which ops a restricted user is allowed to WRITE: only sales/stock for their
-  // events (never catalog, discounts, other events, or account settings).
+  // events and team settings (never catalog, discounts, other events, or
+  // account settings).
   function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
+    if (isTeamSetting(op)) return true;
     if (op.type === 'tx.revert') {
       // Consult the canonical first sale, never a client-supplied duplicate.
       // Earlier accepted ops in this push are already in the transaction.
@@ -125,7 +120,11 @@ export function registerSyncRoutes(
     // would wedge the client's outbox into a permanent retry loop (offline).
     const allowed = restrictionFor(claims.sub);
     const staff = claims.role === 'member';
-    const ops = (staff ? rawOps.filter((op) => STAFF_TYPES.has(op.type)) : rawOps).map((op) => stampSeller(db, op, claims, staff, deviceId));
+    // What a plain member - store staff - may change: sales, refunds, claims
+    // and team settings (see TEAM_SETTING_PREFIX). The catalogue, prices,
+    // discounts, events and other settings are the owner's and admins'. Their
+    // screens already hide those; this is the guarantee.
+    const ops = (staff ? rawOps.filter(isStaffOp) : rawOps).map((op) => stampSeller(db, op, claims, staff, deviceId));
     let dropped = rawOps.length - ops.length;
 
     let accepted = 0;

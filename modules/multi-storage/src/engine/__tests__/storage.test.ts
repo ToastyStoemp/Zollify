@@ -4,15 +4,32 @@ import {
   cleanLocation,
   indexAllocations,
   liveLocations,
+  locationAt,
+  locationSales,
+  pickOrder,
   pickPlan,
   planMove,
   storageRows,
+  withPick,
   type Allocation,
+  type DeviceHome,
+  type SaleRecord,
   type StorageLocation,
 } from '../storage';
 
 const loc = (id: string, order: number, extra: Partial<StorageLocation> = {}): StorageLocation => ({ id, name: id, order, updatedAt: 1, ...extra });
-const alloc = (locationId: string, qty: number, productId = 'p', variantId = ''): Allocation => ({ locationId, productId, variantId, qty, updatedAt: 1 });
+const alloc = (locationId: string, qty: number, updatedAt = 1, productId = 'p', variantId = ''): Allocation => ({ locationId, productId, variantId, qty, updatedAt });
+const sale = (deviceId: string, timestamp: number, qty: number, extra: Partial<SaleRecord> = {}): SaleRecord => ({
+  eventId: 'con',
+  deviceId,
+  timestamp,
+  items: [{ pid: 'p', vid: null, qty }],
+  ...extra,
+});
+const home = (deviceId: string, ...history: [string | null, number][]): [string, DeviceHome] => [
+  deviceId,
+  { deviceId, history: history.map(([locationId, from]) => ({ locationId, from })), updatedAt: 1 },
+];
 
 describe('locations', () => {
   it('leaves removed ones out and keeps their order', () => {
@@ -26,8 +43,9 @@ describe('locations', () => {
   });
 
   it('keys each allocation by location and item', () => {
-    expect(allocationKey('unit', 'p1', null)).toBe('multi-storage.alloc.unit|p1:');
-    expect(allocationKey('unit', 'p1', 'v2')).toBe('multi-storage.alloc.unit|p1:v2');
+    // Under team., so staff can write them.
+    expect(allocationKey('unit', 'p1', null)).toBe('team.multi-storage.alloc.unit|p1:');
+    expect(allocationKey('unit', 'p1', 'v2')).toBe('team.multi-storage.alloc.unit|p1:v2');
   });
 });
 
@@ -51,6 +69,68 @@ describe('stock by place', () => {
     const allocations = indexAllocations([alloc('unit', 30)], new Set(['unit']));
     const [row] = storageRows(entries, { remaining: () => 20, atStores: () => 0, allocations });
     expect(row!.home).toBe(-10);
+  });
+});
+
+describe('selling from a device location', () => {
+  const live = new Set(['unit', 'van']);
+  const noClaims = (_eventId: string, _key: string): boolean => false;
+  const entries = [{ productId: 'p', variantId: '', label: 'Print' }];
+  const rowFor = (remaining: number, sales: SaleRecord[], homes: [string, DeviceHome][], allocs: Allocation[], hasClaim = noClaims) =>
+    storageRows(entries, {
+      remaining: () => remaining,
+      atStores: () => 0,
+      allocations: indexAllocations(allocs, live),
+      sales: locationSales(sales, new Map(homes), live, hasClaim),
+    })[0]!;
+
+  it('takes an unclaimed sale out of the device location, never Home', () => {
+    // 50 counted, 20 of them in the van; the van device sold 3.
+    const row = rowFor(47, [sale('tablet', 10, 3)], [home('tablet', ['van', 5])], [alloc('van', 20, 1)]);
+    expect(row.stored.get('van')).toBe(17);
+    expect(row.home).toBe(30);
+  });
+
+  it('falls back to Home for a device that picked nothing', () => {
+    const row = rowFor(47, [sale('phone', 10, 3)], [], [alloc('van', 20, 1)]);
+    expect(row.stored.get('van')).toBe(20);
+    expect(row.home).toBe(27);
+  });
+
+  it('charges each sale to the pick in force when it was made', () => {
+    const homes = [home('tablet', ['van', 5], [null, 20], ['unit', 30])];
+    const sales = [sale('tablet', 10, 1), sale('tablet', 25, 2), sale('tablet', 35, 4)];
+    const row = rowFor(93, sales, homes, [alloc('van', 10, 1), alloc('unit', 40, 1)]);
+    expect(row.stored.get('van')).toBe(9);
+    expect(row.stored.get('unit')).toBe(36);
+    expect(row.home).toBe(48);
+  });
+
+  it('leaves out sales a count already reflects, reverted sales and claimed items', () => {
+    const sales = [sale('tablet', 10, 2), sale('tablet', 30, 1, { revertedAt: 31 }), sale('tablet', 40, 5, { eventId: 'claimed' })];
+    const row = rowFor(100, sales, [home('tablet', ['van', 0])], [alloc('van', 20, 15)], (eventId: string) => eventId === 'claimed');
+    expect(row.stored.get('van')).toBe(20);
+  });
+
+  it('can go negative, which the screen flags', () => {
+    const row = rowFor(45, [sale('tablet', 10, 5)], [home('tablet', ['van', 0])], [alloc('van', 2, 1)]);
+    expect(row.stored.get('van')).toBe(-3);
+  });
+
+  it('sends sales of a removed location back to Home', () => {
+    const row = rowFor(45, [sale('tablet', 10, 5)], [home('tablet', ['shed', 0])], []);
+    expect(row.stored.size).toBe(0);
+    expect(row.home).toBe(45);
+  });
+
+  it('keeps the pick history and ignores a pick that changes nothing', () => {
+    const first = withPick(undefined, 'd', 'van', 10);
+    expect(first.history).toEqual([{ locationId: 'van', from: 10 }]);
+    expect(withPick(first, 'd', 'van', 20)).toBe(first);
+    const back = withPick(first, 'd', null, 30);
+    expect(locationAt(back.history, 15)).toBe('van');
+    expect(locationAt(back.history, 30)).toBeNull();
+    expect(locationAt(back.history, 5)).toBeNull();
   });
 });
 
@@ -91,19 +171,24 @@ describe('moving stock', () => {
 describe('pick list', () => {
   const row = { home: 10, stored: new Map([['unit', 30], ['studio', 5]]) };
 
-  it('takes from home first, then storage in order', () => {
-    expect(pickPlan(25, row, ['studio', 'unit'])).toEqual({
+  it('fetches from the device place first, then Home, then the rest', () => {
+    expect(pickOrder('unit', ['studio', 'unit'])).toEqual(['unit', null, 'studio']);
+    expect(pickOrder(null, ['studio', 'unit'])).toEqual([null, 'studio', 'unit']);
+  });
+
+  it('takes places in that order', () => {
+    expect(pickPlan(25, row, [null, 'studio', 'unit'])).toEqual({
       steps: [{ locationId: null, qty: 10 }, { locationId: 'studio', qty: 5 }, { locationId: 'unit', qty: 10 }],
       short: 0,
     });
   });
 
   it('needs no trip when home has enough', () => {
-    expect(pickPlan(4, row, ['unit'])).toEqual({ steps: [{ locationId: null, qty: 4 }], short: 0 });
+    expect(pickPlan(4, row, [null, 'unit'])).toEqual({ steps: [{ locationId: null, qty: 4 }], short: 0 });
   });
 
   it('reports what nobody has', () => {
-    expect(pickPlan(50, row, ['unit', 'studio']).short).toBe(5);
-    expect(pickPlan(3, { home: -2, stored: new Map() }, []).short).toBe(3);
+    expect(pickPlan(50, row, [null, 'unit', 'studio']).short).toBe(5);
+    expect(pickPlan(3, { home: -2, stored: new Map() }, [null]).short).toBe(3);
   });
 });

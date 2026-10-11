@@ -12,7 +12,7 @@ import type {
   ProductMerge,
 } from '@zollify/shared';
 import { openCoreDb, type OutboxOp } from './db';
-import { STAFF_OP_TYPES } from '@zollify/shared';
+import { isStaffOp } from '@zollify/shared';
 import { authFetchAs, deviceFetch, getAccount, getDeviceAccount, personSession } from '../session';
 import { deviceFlavor, deviceId, deviceName } from './device';
 import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
@@ -275,7 +275,7 @@ async function push(): Promise<number> {
   const pusherOf = (op: OutboxOp): string | null | undefined => {
     if (!op.userId || !device || op.userId === device.userId) return null;
     if (personSession(op.userId)?.token) return op.userId;
-    if (device.role !== 'member' || STAFF_OP_TYPES.includes(op.type)) return null;
+    if (device.role !== 'member' || isStaffOp(op)) return null;
     return undefined;
   };
   for (let round = 0; round < 50; round++) {

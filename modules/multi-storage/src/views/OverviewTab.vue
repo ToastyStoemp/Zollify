@@ -2,10 +2,11 @@
 import { computed, ref } from 'vue';
 import { ModalShell } from '@zollify/ui';
 import type { Place, StorageRow } from '../engine/storage';
-import { countAt, hasStores, homeName, locations, move, rows } from '../state';
+import { countAt, hasStores, homeName, isAdmin, locations, move, ownLocation, rows } from '../state';
 import { sdk } from '../runtime';
 
 const emit = defineEmits<{ manage: [] }>();
+const admin = isAdmin();
 
 const query = ref('');
 const onlyStored = ref(false);
@@ -25,12 +26,12 @@ const totals = computed(() => {
   let home = 0;
   for (const r of shown.value) {
     home += Math.max(0, r.home);
-    for (const [id, qty] of r.stored) perLocation.set(id, (perLocation.get(id) ?? 0) + qty);
+    for (const [id, qty] of r.stored) perLocation.set(id, (perLocation.get(id) ?? 0) + Math.max(0, qty));
   }
   return { home, perLocation };
 });
 
-const overAllocated = computed(() => rows.value.filter((r) => r.home < 0).length);
+const overAllocated = computed(() => rows.value.filter((r) => r.home < 0 || [...r.stored.values()].some((q) => q < 0)).length);
 
 async function recount(row: StorageRow, locationId: string, event: Event): Promise<void> {
   const input = event.target as HTMLInputElement;
@@ -70,7 +71,7 @@ const fromHolds = computed(() => {
   const row = moving.value;
   if (!row) return null;
   if (from.value === 'home') return Math.max(0, row.home);
-  if (from.value.startsWith('loc:')) return row.stored.get(from.value.slice(4)) ?? 0;
+  if (from.value.startsWith('loc:')) return Math.max(0, row.stored.get(from.value.slice(4)) ?? 0);
   return null;
 });
 
@@ -95,7 +96,8 @@ async function submitMove(): Promise<void> {
   <div class="overview">
     <div v-if="!locations.length" class="empty">
       No storage locations yet.
-      <button type="button" class="primary" @click="emit('manage')">Add a location</button>
+      <button v-if="admin" type="button" class="primary" @click="emit('manage')">Add a location</button>
+      <template v-else>An admin can add them.</template>
     </div>
 
     <template v-else>
@@ -104,7 +106,7 @@ async function submitMove(): Promise<void> {
         <label class="check"><input v-model="onlyStored" type="checkbox" /> Only items in storage</label>
       </div>
       <p v-if="overAllocated" class="warn" role="status">
-        {{ overAllocated }} item{{ overAllocated === 1 ? ' has' : 's have' }} more in storage than is left in total. Recount under Inventory, or correct the storage figure.
+        {{ overAllocated }} item{{ overAllocated === 1 ? ' has' : 's have' }} more at the locations than is left in total. Recount under Inventory, or correct a location's figure.
       </p>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
 
@@ -113,8 +115,8 @@ async function submitMove(): Promise<void> {
           <thead>
             <tr>
               <th scope="col">Item</th>
-              <th scope="col" class="num">{{ homeName }}</th>
-              <th v-for="l in locations" :key="l.id" scope="col" class="num">{{ l.name }}</th>
+              <th scope="col" class="num">{{ homeName }}<small v-if="ownLocation === null">this device</small></th>
+              <th v-for="l in locations" :key="l.id" scope="col" class="num">{{ l.name }}<small v-if="ownLocation === l.id">this device</small></th>
               <th v-if="hasStores" scope="col" class="num" title="Claimed by your stores and not sold yet">At stores</th>
               <th scope="col" class="num" title="Last count minus sales since">Total</th>
               <th scope="col"><span class="sr">Actions</span></th>
@@ -131,6 +133,7 @@ async function submitMove(): Promise<void> {
                   step="1"
                   inputmode="numeric"
                   :value="r.stored.get(l.id) ?? 0"
+                  :class="{ neg: (r.stored.get(l.id) ?? 0) < 0 }"
                   :aria-label="`${r.label} at ${l.name}`"
                   @change="recount(r, l.id, $event)"
                 />
@@ -153,7 +156,7 @@ async function submitMove(): Promise<void> {
           </tfoot>
         </table>
       </div>
-      <p class="hint">Typing a number in a location records a count there; the difference comes from or goes back to {{ homeName }}. Use Move for new stock, or stock that is gone.</p>
+      <p class="hint">Typing a number in a location records a count there; the difference comes from or goes back to {{ homeName }}. Sales come out of the place the selling device picked, or {{ homeName }} when it picked none.<template v-if="admin"> Use Move for new stock, or stock that is gone.</template></p>
     </template>
 
     <ModalShell v-if="moving" :title="`Move · ${moving.label}`" @close="moving = null">
@@ -162,8 +165,8 @@ async function submitMove(): Promise<void> {
           <span>From</span>
           <select v-model="from">
             <option value="home">{{ homeName }} ({{ Math.max(0, moving.home) }})</option>
-            <option v-for="l in locations" :key="l.id" :value="`loc:${l.id}`">{{ l.name }} ({{ moving.stored.get(l.id) ?? 0 }})</option>
-            <option value="new">New stock (adds to the total)</option>
+            <option v-for="l in locations" :key="l.id" :value="`loc:${l.id}`">{{ l.name }} ({{ Math.max(0, moving.stored.get(l.id) ?? 0) }})</option>
+            <option v-if="admin" value="new">New stock (adds to the total)</option>
           </select>
         </label>
         <label>
@@ -171,7 +174,7 @@ async function submitMove(): Promise<void> {
           <select v-model="to">
             <option value="home">{{ homeName }}</option>
             <option v-for="l in locations" :key="l.id" :value="`loc:${l.id}`">{{ l.name }}</option>
-            <option value="gone">Gone - damaged, lost, given away (takes it off the total)</option>
+            <option v-if="admin" value="gone">Gone - damaged, lost, given away (takes it off the total)</option>
           </select>
         </label>
         <label>
@@ -200,6 +203,8 @@ async function submitMove(): Promise<void> {
 .error { margin: 0; color: var(--zfy-danger, #c6512f); }
 table th, table td { padding: .4rem .6rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); text-align: left; vertical-align: middle; }
 thead th { font-size: .78rem; color: var(--zfy-muted, #5a6472); font-weight: 600; white-space: nowrap; }
+thead th small { display: block; font-weight: 400; color: var(--zfy-accent, #0e7c66); }
+td.num input.neg { color: var(--zfy-danger, #c6512f); }
 tbody th { font-weight: 500; }
 tbody th small { display: block; color: var(--zfy-muted, #5a6472); font-size: .75rem; font-weight: 400; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }

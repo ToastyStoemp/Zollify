@@ -40,6 +40,7 @@ import {
   availabilityFor,
   clearClaim,
   onHandFor,
+  remainingFor,
   setClaim,
   setOnHand,
 } from './core/inventory';
@@ -60,7 +61,7 @@ import {
   upsertSalesEvent,
   visibleEvents,
 } from './core/sales-events';
-import { getSyncedSetting, setSyncedSetting } from './core/synced-settings';
+import { getSyncedSetting, listSyncedSettings, setSyncedSetting } from './core/synced-settings';
 
 export interface HostServices {
   contributions: ContributionRegistry;
@@ -153,6 +154,7 @@ const coreData: import('@zollify/sdk').DataApi = {
         (r) => r.productId === productId && r.variantId === (variantId ?? ''),
       )?.available ?? 0,
     onHand: (productId, variantId) => onHandFor(productId, variantId ?? ''),
+    remaining: (productId, variantId) => remainingFor(productId, variantId ?? ''),
     setOnHand: (productId, variantId, qty) => setOnHand(productId, variantId, qty),
     claim: (eventId, productId, variantId, qty) => setClaim(eventId, productId, variantId, qty),
     clearClaim: (eventId, productId, variantId) => clearClaim(eventId, productId, variantId),
@@ -178,6 +180,7 @@ const coreData: import('@zollify/sdk').DataApi = {
   settings: {
     get: (key) => getSyncedSetting(key),
     set: (key, value) => setSyncedSetting(key, value),
+    list: (prefix) => listSyncedSettings(prefix),
   },
 };
 

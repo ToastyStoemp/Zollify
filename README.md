@@ -40,6 +40,7 @@ modules/
   label-printer/  Bluetooth label printer for price tags and staff badges
   costs/          per-item cost from shipment batches, margins in the catalogue
   convention-checklist/  packing checklist per convention
+  multi-storage/  stock split across storage locations, pick lists per event
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
   consignment/    artists' work sold in your stores, commission and payouts (client + server half)
@@ -169,7 +170,22 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-E-invoices for Belgium (Peppol).
+Storage locations, E-invoices for Belgium (Peppol).
+
+*Storage locations* - the `multi-storage` module (admins) splits the one
+inventory by where it physically is: a storage unit, the studio, a friend's
+garage. Each location holds a counted figure per item, and **Home** (renamable)
+is the rest: what is left of the pile (last count minus every sale since),
+minus what is in storage, minus what the stores hold on their claims. Sales at
+events come out of Home, so a storage figure only moves when stock is moved:
+typing a count at a location moves the difference to or from Home, and Move
+also takes in new stock (raising the total) or writes off stock that is gone.
+The **pick list** takes an upcoming event's claims, minus what it sold, from
+Home first and then from storage in the locations' order, grouped per place;
+"Fetched" moves those units out of storage. Every location and every item at a
+location is its own synced setting, so two devices editing different rows never
+overwrite each other. More in storage than exists shows Home negative and
+flags the item.
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell

@@ -43,6 +43,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
     forWhom: 'Month-end books: cluster card and online takings per convention, verify against myPOS, book revenue and fees into Lexware, and keep a per-event P&L.',
     recommended: false,
   },
+  'multi-storage': { forWhom: 'Only if you keep stock in more than one place - a storage unit, the studio. Shows what is where and what to fetch for each event.', recommended: false },
   sourcing: { forWhom: 'Keep suppliers and draft reorders when stock runs low.', recommended: false },
   'shopify-sync': { forWhom: 'Only if you also run a Shopify store and want the catalogue matched against it.', recommended: false },
   migration: { forWhom: 'Only if you are moving from ZollTool. Import the backup once, then switch it off.', recommended: false },

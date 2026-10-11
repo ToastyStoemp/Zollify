@@ -32,3 +32,17 @@ export async function setSyncedSetting(key: string, value: unknown): Promise<voi
   await db.settings.put({ key, value: plain, updatedAt });
   await queueOp({ type: 'setting.upsert', payload: { key, value: plain, updatedAt } });
 }
+
+/**
+ * Every setting whose key starts with `prefix`, keyed by the full key. Lets a
+ * module keep one key per row - so two devices editing different rows never
+ * overwrite each other - and still read the lot back in one go.
+ */
+export async function listSyncedSettings<T>(prefix: string): Promise<Record<string, T>> {
+  if (!prefix) throw new Error('Listing settings needs a key prefix.');
+  const db = openCoreDb(requireAccountId());
+  const rows = await db.settings.where('key').startsWith(prefix).toArray();
+  const out: Record<string, T> = {};
+  for (const row of rows) out[row.key] = row.value as T;
+  return out;
+}

@@ -354,6 +354,8 @@ export interface InventoryApi {
   /** What this event can still sell of one item. */
   availableFor(eventId: string, productId: string, variantId?: string | null): number;
   onHand(productId: string, variantId?: string | null): number;
+  /** What is physically left: the last count minus every sale since. Claimed stock is still counted - it exists, it is only promised. */
+  remaining(productId: string, variantId?: string | null): number;
   setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
   /** Reserve stock for an event. */
   claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;
@@ -426,6 +428,8 @@ export interface ImageApi {
 export interface SyncedSettingsApi {
   get<T = unknown>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+  /** Every setting whose key starts with `prefix`, keyed by full key - for one key per row, read back in one go. */
+  list<T = unknown>(prefix: string): Promise<Record<string, T>>;
 }
 
 export interface DataApi {

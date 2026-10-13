@@ -22,6 +22,7 @@ import {
   saveFile,
 } from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
+import { EXAMPLES, addExampleProducts, isExample, removeExampleProducts } from '../lib/example-products';
 
 /**
  * The catalogue - ZollTool's, grouped by type, edited in a sheet.
@@ -358,6 +359,32 @@ async function dropUnusedImages(ids: string[]): Promise<void> {
   for (const id of new Set(ids)) if (!used.has(id)) await deleteImage(id).catch(() => {});
 }
 
+// ── Example products: a starter catalogue to try things with ───────────────
+const hasExamples = computed(() => allProducts.value.some(isExample));
+const examplesBusy = ref<string | null>(null);
+async function addExamples(): Promise<void> {
+  examplesBusy.value = `Adding 0 of ${EXAMPLES.length}…`;
+  error.value = null;
+  try {
+    await addExampleProducts((done, total) => (examplesBusy.value = `Adding ${done} of ${total}…`));
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not add the examples.';
+  } finally {
+    examplesBusy.value = null;
+  }
+}
+async function removeExamples(): Promise<void> {
+  if (!(await shellConfirm('The example products and their pictures are removed. Sales already made with them stay in the history.', 'Remove the examples?'))) return;
+  examplesBusy.value = 'Removing…';
+  try {
+    await removeExampleProducts();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not remove the examples.';
+  } finally {
+    examplesBusy.value = null;
+  }
+}
+
 async function save(): Promise<void> {
   if (!form.title.trim()) {
     error.value = 'Give the product a title before saving.';
@@ -478,6 +505,16 @@ async function remove(product: Product): Promise<void> {
     <p v-if="filter === 'customs'" class="hint">These would be left off or mis-weighed on customs documents. Set the tariff no., weight and origin under each product's Customs details.</p>
 
     <p v-if="!filtered.length" class="empty">{{ search || filter !== 'all' ? 'Nothing matches.' : 'No products yet.' }}</p>
+    <div v-if="canEdit && !search && filter === 'all' && (!allProducts.length || hasExamples)" class="examples">
+      <template v-if="!hasExamples">
+        <p class="hint">Just looking around? Add a few example products - prints in three sizes, sticker sheets, a pin, a keychain, postcards and a tote, with pictures, prices and some stock - to try the till, price sheet and labels with. They come out again with one tap.</p>
+        <button type="button" :disabled="!!examplesBusy" @click="addExamples"><Icon name="plus" :size="14" /> {{ examplesBusy ?? 'Add example products' }}</button>
+      </template>
+      <template v-else>
+        <p class="hint">The example products are in your catalogue. Sales you make with them are real sales, so take them out before you start selling.</p>
+        <button type="button" class="quiet danger" :disabled="!!examplesBusy" @click="removeExamples"><Icon name="trash" :size="14" /> {{ examplesBusy ?? 'Remove example products' }}</button>
+      </template>
+    </div>
 
     <section v-for="group in groups" :key="group.type" class="group">
       <h2><span class="swatch" :style="{ background: typeColor(group.type) }"></span><span :style="{ color: typeColor(group.type) }">{{ group.type }}</span><small>{{ group.products.length }}</small></h2>
@@ -745,4 +782,6 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
     border-radius: 50%; background: var(--zfy-accent); border: 1.5px solid var(--zfy-surface, #fff);
   }
 }
+.examples { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .75rem 1rem; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; margin-bottom: 1rem; }
+.examples .hint { flex: 1; min-width: 14rem; margin: 0; }
 </style>

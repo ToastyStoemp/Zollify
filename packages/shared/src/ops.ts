@@ -28,6 +28,26 @@ export interface Op {
 export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set'];
 
 /**
+ * Synced settings under this prefix are the team's, not the owner's: staff
+ * (and helpers limited to some events) may write them too. Day-to-day state a
+ * module wants every colleague to change - where stock sits, say - lives here;
+ * configuration stays outside it.
+ */
+export const TEAM_SETTING_PREFIX = 'team.';
+
+/** A synced setting the whole team may write. */
+export function isTeamSetting(op: { type: string; payload: unknown }): boolean {
+  if (op.type !== 'setting.upsert') return false;
+  const key = (op.payload as { key?: unknown } | null)?.key;
+  return typeof key === 'string' && key.startsWith(TEAM_SETTING_PREFIX) && key.length > TEAM_SETTING_PREFIX.length;
+}
+
+/** Whether staff may push this op: a sale, a refund, a claim, or a team setting. */
+export function isStaffOp(op: { type: string; payload: unknown }): boolean {
+  return STAFF_OP_TYPES.includes(op.type) || isTeamSetting(op);
+}
+
+/**
  * A staff badge as a scanner reads it: "ZS", then 24 digits (about 80 bits,
  * unguessable with the server's rate limits). Digits pack two to a Code 128
  * symbol, so the barcode fits a 40mm label at a width scanners read well.

@@ -26,6 +26,7 @@ COPY modules/shopify-sync/package.json modules/shopify-sync/
 COPY modules/price-cards/package.json modules/price-cards/
 COPY modules/label-printer/package.json modules/label-printer/
 COPY modules/convention-checklist/package.json modules/convention-checklist/
+COPY modules/multi-storage/package.json modules/multi-storage/
 COPY modules/consignment/package.json modules/consignment/
 COPY modules/consignment-artist/package.json modules/consignment-artist/
 COPY modules/commissions/package.json modules/commissions/

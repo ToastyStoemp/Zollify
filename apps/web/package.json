@@ -15,6 +15,7 @@
     "@zollify/consignment-artist": "*",
     "@zollify/commissions": "*",
     "@zollify/convention-checklist": "*",
+    "@zollify/multi-storage": "*",
     "@zollify/costs": "*",
     "@zollify/peppol-be": "*",
     "@zollify/customs-ch": "*",

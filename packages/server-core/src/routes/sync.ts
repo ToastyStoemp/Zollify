@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { PushRequestSchema, STAFF_OP_TYPES, SYNC_PUSH_MAX_BYTES, type PullResponse, type PushResponse, type ServerOp, type WireOp } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 import { bumpMetric, touchDevice } from '../db';
+import { parseDevice } from '../session-info';
 import type { Rooms } from '../ws';
 import { SYNC_WARN_AFTER, reasonOf, type ModuleProblems } from '../problems';
 
@@ -155,7 +156,7 @@ export function registerSyncRoutes(
           if (op.type === 'tx.create') txCount++;
         }
       }
-      touchDevice(db, deviceId, claims.accountId, claims.sub, deviceName ?? null, flavor ?? null, Date.now());
+      touchDevice(db, deviceId, claims.accountId, claims.sub, deviceName ?? null, flavor ?? null, Date.now(), parseDevice(req.headers['user-agent']));
       return { accepted, duplicates: rawOps.length - accepted, latestSeq: seq };
     })();
 

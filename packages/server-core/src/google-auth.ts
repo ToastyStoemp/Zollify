@@ -250,7 +250,7 @@ export function registerGoogleAuthRoutes(app: FastifyInstance, db: Database.Data
     if (claimed.changes !== 1) return reply.code(410).send({ status: 'expired', error: 'This sign-in has expired. Try again.' });
     db.prepare('DELETE FROM google_links WHERE id = ?').run(row.id);
     db.prepare('UPDATE users SET lastLoginAt = ?, googleSub = COALESCE(googleSub, ?) WHERE id = ?').run(now, row.googleSub, user.id);
-    touchDevice(db, user.accountId, user.id, row.deviceId ?? undefined, row.deviceName ?? undefined);
+    touchDevice(db, user.accountId, user.id, row.deviceId ?? undefined, row.deviceName ?? undefined, row.device ?? undefined, row.flavor);
     bumpMetric(db, user.accountId, 'logins');
     const tokens = await issueTokens(app, db, user, { deviceId: row.deviceId, deviceName: row.deviceName, flavor: row.flavor, ip: row.ip, device: row.device, geo: row.geo });
     return { status: 'approved', ...tokens, ...(deviceTrustToken ? { deviceTrustToken } : {}) };

@@ -32,8 +32,11 @@ import {
   subtotal,
   toCharged,
   total,
+  loadTestMode,
+  testMode,
 } from '../cart';
 import { getProvider } from '../payments/registry';
+import { testTerminalProvider } from '../payments/test-terminal';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
@@ -65,8 +68,8 @@ function toast(text: string, kind: 'ok' | 'bad' = 'ok'): void {
 const activeEvent = computed(() => sdk().data.events.active());
 const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
-const provider = computed(() => getProvider(providerId.value as never));
-const hasTerminal = computed(() => providerId.value !== 'manual');
+const provider = computed(() => (testMode.value ? testTerminalProvider : getProvider(providerId.value as never)));
+const hasTerminal = computed(() => testMode.value || providerId.value !== 'manual');
 const customMethods = ref<string[]>([]);
 
 // ── Terminal connection indicator: polled while the till is open ────────────
@@ -93,6 +96,7 @@ function tapTerminalState(): void {
 onMounted(async () => {
   void backfillBranding();
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  void loadTestMode();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
   const event = activeEvent.value;
@@ -741,7 +745,7 @@ async function sendLog(): Promise<void> {
 async function runTerminal(): Promise<void> {
   const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
   if (outcome.cancelled || payment.phase !== 'terminal') return;
-  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`);
+  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`, outcome.test);
   else {
     payment.error = outcome.error ?? 'Card payment declined';
     payment.phase = 'failed';
@@ -786,12 +790,20 @@ async function confirmPayment(): Promise<void> {
   if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
-  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`);
+  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
 }
 
-function finish(sale: SaleEvent, message: string): void {
+function finish(sale: SaleEvent, message: string, test = false): void {
   payment.phase = 'idle';
   showCartSheet.value = false;
+  if (test) {
+    // Nothing was recorded: no sale bar, no receipt link (the sale is not on the server), no paper.
+    toast(`${message} - TEST, not recorded`);
+    thankYouUntil = Date.now() + 6000;
+    publish({ total: sale.total });
+    void showAfterSale(sale, undefined);
+    return;
+  }
   // The transaction row lands a tick later; the sale itself has all the bar needs.
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
   // The bar answers "did that go through?"; after that it is in the way of
@@ -917,6 +929,7 @@ function lockTill(): void {
           <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
+        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Payments.">TEST MODE - nothing is recorded</router-link>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
         <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
@@ -1234,6 +1247,7 @@ function lockTill(): void {
 <style scoped>
 .pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
+.testmode { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: var(--zfy-danger, #c6512f); border-radius: 999px; padding: .25rem .7rem; text-decoration: none; white-space: nowrap; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }
 .iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }

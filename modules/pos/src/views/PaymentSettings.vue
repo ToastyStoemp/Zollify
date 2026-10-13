@@ -7,7 +7,7 @@ import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
-import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
+import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
 
 /**
@@ -53,6 +53,7 @@ onMounted(async () => {
   active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
+  void loadTestMode();
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
@@ -191,6 +192,13 @@ const ago = (ts: number): string => {
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
+async function toggleTestMode(e: Event): Promise<void> {
+  const on = (e.target as HTMLInputElement).checked;
+  await setTestMode(on);
+  sdk().ui.toast(on ? 'Test mode on - nothing the till does now is recorded.' : 'Test mode off - sales are recorded again.', { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
+  void refreshStatuses();
+}
+
 async function saveCardInBase(): Promise<void> {
   await setSetting(CARD_IN_BASE_KEY, cardInBase.value);
   // The till may already be open: pick up the setting (and a rate) now.
@@ -214,6 +222,15 @@ async function removeMethod(name: string): Promise<void> {
   <section class="payments">
     <h2>Payments</h2>
     <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
+
+    <h3>Test mode</h3>
+    <label class="toggle">
+      <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
+      <span class="main">
+        <span>Try the till without recording anything</span>
+        <small>Every step runs as usual - cart, discounts, cash or card, the receipt screen - but no sale is recorded: no transaction, no stock movement, nothing in the books, nothing synced. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
+      </span>
+    </label>
 
     <h3>Card payment terminal</h3>
     <ul class="providers">

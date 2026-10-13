@@ -6,7 +6,9 @@ export type PaymentProviderId =
   | 'mypos-glass'
   | 'bridge'
   | 'sumup'
-  | 'nexi-smartpos';
+  | 'nexi-smartpos'
+  /** The built-in test terminal, only while the till is in test mode - never picked as a provider. */
+  | 'test';
 
 export interface ProviderStatus {
   connected: boolean;

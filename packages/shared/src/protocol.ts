@@ -370,6 +370,21 @@ export interface AdminAccount {
   txTotal: number;
   /** Most recent op received or device seen, whichever is later (0 = never). */
   lastActivityAt: number;
+  /** The account that holds the server owner's login. */
+  ownsServer: boolean;
+  /** The first admin's email, so an account can be told apart from one with the same name. */
+  adminEmail: string | null;
+}
+
+/** One way an account is tied to another - an invite that made it, an artist consigning to a store. */
+export interface AdminAccountRelation {
+  from: { id: string; name: string };
+  to: { id: string; name: string };
+  /** 'invited' (from invited to), 'consignment' (to consigns to from), 'consignment-offer' (from offered consignment to to), or a module's own. */
+  kind: string;
+  /** What ties them, as a module describes it: the artist's name on the store's books, say. */
+  label: string;
+  since: number | null;
 }
 
 export interface AdminAccountDetail {

@@ -247,6 +247,18 @@ export const consignmentServerModule: ServerModule = {
     db.prepare('UPDATE consignors SET offerAccountId = NULL WHERE offerAccountId = ?').run(accountId);
   },
 
+  /** Who consigns to whom, for the server owner: linked artists, and offers still waiting for a yes. */
+  accountRelations: (db) => {
+    const rows = db.prepare('SELECT accountId, linkedAccountId, offerAccountId, doc, createdAt FROM consignors WHERE linkedAccountId IS NOT NULL OR offerAccountId IS NOT NULL').all() as (ConsignorRow & { offerAccountId: string | null })[];
+    return rows.map((r) => ({
+      from: r.accountId,
+      to: (r.linkedAccountId ?? r.offerAccountId)!,
+      kind: r.linkedAccountId ? 'consignment' : 'consignment-offer',
+      label: parseDoc(r.doc).name,
+      since: r.createdAt,
+    }));
+  },
+
   /** An artist's devices changed products: stores sharing them follow. */
   onOps: (svc, accountId, ops) => {
     followArtistChanges(svc, accountId, ops);

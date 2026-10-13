@@ -265,6 +265,31 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (accountId, deviceId)
   );
   `,
+  // v18 - sign in with Google: the Google account id on a user, and the
+  // waiting sign-ins (the app polls them, as it does device_links) - see
+  // google-auth.ts.
+  `
+  ALTER TABLE users ADD COLUMN googleSub TEXT;
+  CREATE UNIQUE INDEX idx_users_google ON users(googleSub);
+  CREATE TABLE google_links (
+    id         TEXT PRIMARY KEY,
+    pollHash   TEXT NOT NULL UNIQUE,
+    stateHash  TEXT NOT NULL UNIQUE,
+    status     TEXT NOT NULL CHECK (status IN ('pending','verified','failed','consumed')),
+    googleSub  TEXT,
+    email      TEXT,
+    failure    TEXT,
+    deviceId   TEXT,
+    deviceName TEXT,
+    flavor     TEXT,
+    ip         TEXT,
+    device     TEXT,
+    geo        TEXT,
+    createdAt  INTEGER NOT NULL,
+    expiresAt  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_google_links_expires ON google_links(expiresAt);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

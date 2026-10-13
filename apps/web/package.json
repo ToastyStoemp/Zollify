@@ -18,6 +18,7 @@
     "@zollify/multi-storage": "*",
     "@zollify/costs": "*",
     "@zollify/peppol-be": "*",
+    "@zollify/economic": "*",
     "@zollify/customs-ch": "*",
     "@zollify/customs-de": "*",
     "@zollify/customs-hub": "*",

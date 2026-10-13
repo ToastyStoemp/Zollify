@@ -51,6 +51,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
     forWhom: 'Belgian B2B invoices as Peppol e-invoices. Takes your name, address, VAT and enterprise number from the first step; you only add the access point and payment details.',
     recommended: false,
   },
+  economic: { forWhom: 'Danish books: each day of sales goes into your e-conomic journal with its VAT codes, renters’ shares kept apart, for your accountant to post.', recommended: false },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
   commissions: { forWhom: 'For artists taking custom work: save the customer, take a deposit at the till, and give them a QR code to follow progress.', recommended: false },
 };

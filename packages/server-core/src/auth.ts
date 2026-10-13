@@ -74,7 +74,7 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/./, /^\/api\/(invites|tokens|webhooks|problems|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
   [/^(?!GET)/, /^\/api\/(device-users|sessions|devices|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
-  [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point)(\/|$|\?)/],
+  [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point|economic\/grant)(\/|$|\?)/],
   [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
 ];
 

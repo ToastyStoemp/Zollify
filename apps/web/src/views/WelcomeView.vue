@@ -77,7 +77,10 @@ const runsStores = computed(() => runs.value !== 'events');
 // Off unless chosen: nothing is shared until the owner agrees. Applied with the modules, since the pool lives in Public events.
 const shareEvents = ref(false);
 const name = ref(account.value?.accountName ?? '');
-const artist = ref<ArtistDetails>({ ...(account.value?.profile.artist ?? emptyProfile().artist) });
+const startArtist = account.value?.profile.artist ?? emptyProfile().artist;
+// The contact email starts as the one they signed in with - nearly always the
+// right one, and still theirs to change. One already saved is kept.
+const artist = ref<ArtistDetails>({ ...startArtist, email: startArtist.email || account.value?.email || '' });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
 const links = ref<ProfileLinks>({ ...EMPTY_PROFILE_LINKS, ...account.value?.profile.links });
 

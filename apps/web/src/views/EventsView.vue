@@ -97,11 +97,20 @@ function fmtDates(e: SalesEvent): string {
   if (e.dateStart && e.dateEnd) return `${e.dateStart} → ${e.dateEnd}`;
   return e.dateStart || e.dateEnd || '';
 }
-function pill(e: SalesEvent): string {
-  if (e.id === activeEventId.value) return 'selling';
+/**
+ * One word for where an event is, as a seller would say it. The till's own
+ * event is "Selling now"; an event whose last day has passed but was never
+ * closed is "Ended", so it stands out until someone closes it.
+ */
+function pill(e: SalesEvent): { cls: string; label: string } {
+  const ended = !isStore(e) && e.status !== 'closed' && eventIsOver(e);
+  if (e.id === activeEventId.value) return ended ? { cls: 'ended', label: 'Ended - still on the till' } : { cls: 'selling', label: 'Selling now' };
   // A store has no dates to be "planned" for - it is open or it is not.
-  if (isStore(e)) return e.status === 'active' ? 'open' : 'closed';
-  return e.status;
+  if (isStore(e)) return e.status === 'active' ? { cls: 'open', label: 'Open' } : { cls: 'closed', label: 'Closed' };
+  if (e.status === 'closed') return { cls: 'closed', label: 'Finished' };
+  if (ended) return { cls: 'ended', label: 'Ended' };
+  const start = e.dateStart || e.dateEnd;
+  return start && start <= localIsoDay() ? { cls: 'active', label: 'On today' } : { cls: 'planned', label: 'Upcoming' };
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -486,11 +495,12 @@ async function save(): Promise<void> {
           <div class="title">
             <strong>{{ e.name }}</strong>
             <span v-if="e.edition" class="pill">{{ e.edition }}</span>
-            <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
+            <span :class="['pill', pill(e).cls]">{{ pill(e).label }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
+          <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ e.dateEnd || e.dateStart }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -658,6 +668,9 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .title strong { font-size: 1rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.pill.ended { background: transparent; border: 1px solid var(--zfy-warning); color: var(--zfy-warning-ink); }
+.ended-note { margin: 0; font-size: .82rem; color: var(--zfy-warning-ink); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
 .pill.planned { background: var(--zfy-signal-soft, #e4ecf6); color: var(--zfy-ink, #1a2230); }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }

@@ -6,6 +6,7 @@ import {
   occupancy,
   rentCharged,
   rentDue,
+  rentPaidAtTill,
   rentalEnd,
   rentalPeriods,
   rentalStatus,
@@ -78,5 +79,20 @@ describe('planner dates', () => {
     expect(rent).toEqual([{ consignorId: 'ana', amount: 80, currency: 'CHF' }]);
     const [s] = consignmentStatements([], [], ['ana'], rent);
     expect(s!.totals[0]).toMatchObject({ rent: 80, balance: -80 });
+  });
+
+  it('takes rent paid at the till off what is due, and a refund puts it back', () => {
+    const line = (id: string, lineTotal: number) => ({ qty: 1, lineTotal, ref: { moduleId: 'consignment', kind: 'space-rent', id } });
+    const txs = [
+      { items: [line('r1', 30), line('r2', 40)] },
+      { items: [line('r1', 15.1)] },
+      { items: [line('r1', 99)], revertedAt: 1 },
+      { items: [{ ...line('r1', 5), ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 'r1' } }] },
+    ] as unknown as Parameters<typeof rentPaidAtTill>[0];
+    const paid = rentPaidAtTill(txs);
+    expect(paid.get('r1')).toBe(45.1);
+    expect(rentDue([rental()], '2026-02-01', paid)).toEqual([{ consignorId: 'ana', amount: 34.9, currency: 'CHF' }]);
+    // Paid ahead: a credit on the balance.
+    expect(rentDue([rental()], '2026-01-01', new Map([['r1', 100]]))).toEqual([{ consignorId: 'ana', amount: -60, currency: 'CHF' }]);
   });
 });

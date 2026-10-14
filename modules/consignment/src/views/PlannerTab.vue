@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import type { ConsignmentFee, ConsignmentRental, ConsignmentSpace, SetupMoment } from '@zollify/shared';
-import { addMonths, fmtPrice, nextPeriodStart, occupancy, rentalEnd, rentalStatus } from '@zollify/shared';
+import { addMonths, fmtPrice, nextPeriodStart, occupancy, rentCharged, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   bookRental,
@@ -447,6 +447,10 @@ const fmtDay = (d: string): string => new Date(`${d}T00:00:00Z`).toLocaleDateStr
           {{ open.startDate }} to {{ rentalEnd(open) }} · {{ rentalStatus(open, now) }}
           <template v-if="open.endedOn"> · stopped early</template>
           <template v-if="open.upgradedFromId"> · upgraded from an earlier rental</template>
+        </p>
+        <p class="hint">
+          Rent so far {{ fmtPrice(rentCharged(open, now), open.currency) }} · paid at the till {{ fmtPrice(data?.rentPaid?.[open.id] ?? 0, open.currency) }}
+          <template v-if="open.deductFromSales"> · the rest comes off their sales</template>
         </p>
         <fieldset>
           <legend>Change or extend</legend>

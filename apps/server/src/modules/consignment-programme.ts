@@ -5,13 +5,19 @@ import { z } from 'zod';
 import {
   FeatureInputSchema,
   SignupInputSchema,
+  RENT_REF_KIND,
   SIGNUP_REF_KIND,
   WorkshopInputSchema,
   localDay,
   placeSignup,
   promoteFromWaitlist,
+  rentCharged,
+  rentPaidAtTill,
+  rentalEnd,
   seatsTaken,
   seatsWaiting,
+  type ConsignmentRental,
+  type ConsignmentSpace,
   type PublicProgramme,
   type SalesEvent,
   type Signup,
@@ -19,7 +25,7 @@ import {
   type Workshop,
 } from '@zollify/shared';
 import { issueChallenge, verifyChallenge, type Mailer, type ModuleContext, type PublicModuleContext } from '@zollify/server-core';
-import { accountName, consignorRow, parseDoc, replay } from './consignment';
+import { accountName, consignorRow, consignorRows, parseDoc, replay } from './consignment';
 import { booksSettings } from './consignment-books';
 import { accountEmail, address, buildIcs, fmtWhen, get, icsSequence, list, put, remove, tellArtist } from './consignment-planner';
 import { POW_SOLVER_JS } from './pow-client';
@@ -371,6 +377,38 @@ export function registerProgramme(app: FastifyInstance, ctx: ModuleContext): voi
         };
       }),
     };
+  });
+
+  /**
+   * Rent the till at a store can take: rentals of its spaces that are running
+   * or still owe something, with what was charged so far and paid at the till.
+   */
+  app.get<{ Querystring: { storeId?: string } }>('/till/rent', async (req) => {
+    const who = ctx.identity(req);
+    if (!mayUseStore(who, req.query.storeId)) return { rentals: [] };
+    const day = today(db, who.accountId);
+    const spaces = new Map(list<ConsignmentSpace>(db, who.accountId, 'spaces').map((s) => [s.id, s]));
+    const { transactions } = replay(db, who.accountId);
+    const paid = rentPaidAtTill(transactions);
+    const names = new Map(consignorRows(db, who.accountId).map((r) => [r.id, parseDoc(r.doc).name]));
+    const rentals = list<ConsignmentRental>(db, who.accountId, 'rentals')
+      .filter((r) => spaces.get(r.spaceId)?.storeId === req.query.storeId && r.startDate <= day)
+      .map((r) => ({
+        id: r.id,
+        consignorName: names.get(r.consignorId) ?? 'Artist',
+        spaceName: spaces.get(r.spaceId)!.name,
+        monthlyFee: r.monthlyFee,
+        currency: r.currency,
+        deductFromSales: r.deductFromSales,
+        endsOn: rentalEnd(r),
+        charged: rentCharged(r, day),
+        paidAtTill: paid.get(r.id) ?? 0,
+      }))
+      .filter((r) => day < r.endsOn || r.charged > r.paidAtTill)
+      .sort((a, b) => a.consignorName.localeCompare(b.consignorName));
+    // Sales the server has, so the till adds only its own not yet synced.
+    const counted = transactions.filter((t) => t.items.some((i) => i.ref?.moduleId === 'consignment' && i.ref.kind === RENT_REF_KIND)).map((t) => t.id);
+    return { rentals, counted };
   });
 
   /** The store books someone itself - a phone call, someone at the counter. */

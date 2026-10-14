@@ -304,6 +304,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_feedback_created ON feedback(createdAt);
   `,
+  // v20 - server settings the owner sets from Settings → Server admin instead
+  // of the .env file; values encrypted (see server-settings.ts)
+  `
+  CREATE TABLE server_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updatedAt  INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

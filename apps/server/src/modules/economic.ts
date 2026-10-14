@@ -106,7 +106,7 @@ const nextDay = (day: string): string => new Date(Date.parse(`${day}T12:00:00Z`)
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const GrantBody = z.object({ token: z.string().trim().min(10).max(200).nullable() });
 
-export function economicServerModule(jwtSecret: string, appSecret = process.env.ZOLLIFY_ECONOMIC_APP_SECRET ?? ''): ServerModule {
+export function economicServerModule(jwtSecret: string, fixedAppSecret?: string): ServerModule {
   const box = makeSecretBox(jwtSecret, 'zollify-economic-v1');
 
   return {
@@ -154,7 +154,9 @@ export function economicServerModule(jwtSecret: string, appSecret = process.env.
       };
       const journalOf = (accountId: string, day: string): DayJournal => dayJournal(salesOf(accountId), rentersOf(accountId), day, settingsOf(accountId));
       const todayOf = (accountId: string): string => localDay(Date.now(), settingsOf(accountId).timeZone);
-      const connection = (accountId: string) => ({ server: Boolean(appSecret), grant: Boolean(grantOf(accountId)) });
+      // Read on use, so a token saved in Server admin works without a restart.
+      const secretNow = (): string => fixedAppSecret ?? process.env.ZOLLIFY_ECONOMIC_APP_SECRET ?? '';
+      const connection = (accountId: string) => ({ server: Boolean(secretNow()), grant: Boolean(grantOf(accountId)) });
 
       // ── Settings ────────────────────────────────────────────────────────
 
@@ -183,6 +185,7 @@ export function economicServerModule(jwtSecret: string, appSecret = process.env.
 
       app.post('/test', async (req, reply) => {
         const grant = grantOf(who(req));
+        const appSecret = secretNow();
         if (!appSecret) return reply.code(503).send({ error: 'not_configured', message: 'This server is not registered with e-conomic yet.' });
         if (!grant) return reply.code(400).send({ error: 'no_grant', message: 'Connect your e-conomic agreement first.' });
         try {
@@ -230,6 +233,7 @@ export function economicServerModule(jwtSecret: string, appSecret = process.env.
         if (!day.success) return reply.code(400).send({ error: 'invalid_request' });
         const accountId = who(req);
         if (day.data >= todayOf(accountId)) return reply.code(409).send({ error: 'open_day', message: 'Book a day once it is over.' });
+        const appSecret = secretNow();
         if (!appSecret) return reply.code(503).send({ error: 'not_configured', message: 'This server is not registered with e-conomic yet.' });
         const grant = grantOf(accountId);
         if (!grant) return reply.code(400).send({ error: 'no_grant', message: 'Connect your e-conomic agreement first.' });

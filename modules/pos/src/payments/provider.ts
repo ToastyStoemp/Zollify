@@ -4,7 +4,6 @@ export type PaymentProviderId =
   | 'mypos-carbon'
   | 'mypos-carbon-remote'
   | 'mypos-glass'
-  | 'bridge'
   | 'sumup'
   | 'sumup-cloud'
   | 'nexi-smartpos'

@@ -87,7 +87,7 @@ Source: momsbekendtgørelsen § 63-64 (BEK 2246 of 30 November 2021, renumbered 
 | A3 | **Retention guarantee**: no deletion of sales for 5 years after the financial year; account deletion must export the sales log first (or refuse while records are inside the period) | The op log is append-only (reverts are new entries) but account delete wipes it; the online receipt link stops after `RECEIPT_TTL_DAYS` (400), which is fine | Bookkeeping act, momsbekendtgørelsen |
 | A4 | **e-conomic**: book shelf/space rent to its own income account at 25 %, and VAT codes for the 25 % rate on sales | Daily voucher exists; rent lines share the sales account | Bookkeeping act, VAT on rent |
 | A5 | **Self-billing statements**: written self-billing agreement with each artist (a checkbox and a stored text), both CVR numbers, no VAT line for unregistered artists | Artist invoices exist with numbers; VAT status of the artist not modelled | § 58 self-billing |
-| A6 | **Data processing agreement** template and a statement of hosting location (EU/EEA) | Not written | GDPR |
+| A6 | **Data processing agreement** template and a statement of hosting location | Hosted in Frankfurt, Germany (EU) - fine; the DPA text is not written | GDPR |
 | A7 | **MobilePay** offered as a ready-made payment method for Danish accounts | Possible today as a custom method name (like TWINT); nothing suggests it | Market expectation; cash acceptance is already there |
 | A8 | **Cash up (kasseafstemning)**: a daily cash count per store that books the difference, so the daily voucher matches the drawer | Cash-up view exists per event; not tied to the e-conomic voucher | Bookkeeping act "daily cash reconciliation" |
 

@@ -290,6 +290,20 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_google_links_expires ON google_links(expiresAt);
   `,
+  // v19 - feedback from the app: bug reports and ideas (see routes/feedback.ts)
+  `
+  CREATE TABLE feedback (
+    id         TEXT PRIMARY KEY,
+    accountId  TEXT NOT NULL REFERENCES accounts(id),
+    userId     TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('bug','idea')),
+    message    TEXT NOT NULL,
+    page       TEXT,
+    appVersion TEXT,
+    createdAt  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_feedback_created ON feedback(createdAt);
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

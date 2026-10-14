@@ -403,6 +403,28 @@ export interface AdminMetricRow {
   txCount: number;
 }
 
+/** A bug report or an idea sent from the app (Send feedback). */
+export const FeedbackSchema = z.object({
+  kind: z.enum(['bug', 'idea']),
+  message: z.string().trim().min(3, 'Say a little more.').max(4000),
+  /** The screen it was sent from, e.g. "/m/pos". */
+  page: z.string().max(200).optional(),
+  appVersion: z.string().max(60).optional(),
+});
+export type FeedbackInput = z.infer<typeof FeedbackSchema>;
+
+export interface AdminFeedbackEntry {
+  id: string;
+  accountId: string;
+  accountName: string;
+  email: string | null;
+  kind: 'bug' | 'idea';
+  message: string;
+  page: string | null;
+  appVersion: string | null;
+  createdAt: number;
+}
+
 export interface AdminLogEntry {
   id: string;
   accountId: string;

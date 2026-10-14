@@ -805,7 +805,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       db.prepare(
         'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
       ).run(accountId, accountId, accountId);
-      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'api_tokens', 'devices', 'notifications', 'webhooks']) {
+      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'feedback', 'api_tokens', 'devices', 'notifications', 'webhooks']) {
         db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
       }
       hooks.accountDeleted?.(accountId);

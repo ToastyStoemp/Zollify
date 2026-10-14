@@ -4,11 +4,13 @@ import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
+import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-cloud';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
+import SumupSoloPairing from './SumupSoloPairing.vue';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
@@ -33,7 +35,9 @@ async function refreshStatuses(): Promise<void> {
     const status = available ? await p.getStatus().catch((e) => ({ connected: false, detail: String(e) })) : { connected: false, detail: 'Not available on this device' };
     statuses.value[p.id] = { ...status, available };
   }
+  sumupCloud.value = active.value === 'sumup-cloud' ? await loadSumupCloudStatus().catch(() => null) : null;
 }
+const sumupCloud = ref<SumupCloudStatus | null>(null);
 
 const sumupKey = ref('');
 const editingKey = ref(false);
@@ -256,6 +260,12 @@ async function removeMethod(name: string): Promise<void> {
         <p class="hint">Only needed when this app was built with its own app id. Leave empty to use this server's key.</p>
       </details>
     </template>
+
+    <div v-if="active === 'sumup-cloud' && sumupCloud?.configured" class="carbon">
+      <p v-if="sumupCloud.merchant" class="hint">Connected to SumUp account <strong>{{ sumupCloud.merchant.name || sumupCloud.merchant.code }}</strong>.</p>
+      <p class="hint">The Solo takes the card over Wi-Fi or its own SIM - this till can be any device, a browser too.{{ sumupCloud.connected ? '' : ' Tap Connect above once to sign in to your SumUp account.' }}</p>
+      <SumupSoloPairing v-if="sumupCloud.connected" @picked="refreshStatuses" />
+    </div>
 
     <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">
       <div v-if="smartpos?.canManage" class="carbon">

@@ -259,7 +259,7 @@ const syncLine = computed(() => {
 
     <div class="grid">
       <!-- ── Today ───────────────────────────────────────────────────────── -->
-      <article class="card wide">
+      <article class="card wide today-card">
         <header class="chead">
           <h2>Today</h2>
           <router-link v-if="event" :to="placesRoute" class="sub">at {{ event.name }}</router-link>
@@ -400,6 +400,13 @@ h2 { margin: 0; font-size: 1rem; }
 .btn:hover { background: var(--zfy-surface-2); }
 .btn.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: var(--zfy-on-accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+/* On a phone the month calendar would fill the first screen: what is coming up and what runs low come first. */
+@media (max-width: 640px) {
+  .grid > .card.wide:not(.today-card) { order: 1; }
+  .today-card .figures { grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .today-card .figure { max-width: none; }
+  .today-card .figure.big strong { font-size: 1.4rem; }
+}
 .card { border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 .card.wide { grid-column: 1 / -1; }
 .chead { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }

@@ -7,6 +7,7 @@ import {
   booksFrom,
   countryCodeOf,
   fmtRate,
+  guessFromDevice,
   resolveEventVat,
   storeSetupDefaults,
   storeSetupProblem,
@@ -46,7 +47,7 @@ const zones: string[] = (() => {
 
 const form = reactive(
   storeSetupDefaults(DEFAULT_BOOKS_SETTINGS, {
-    country: account.value?.profile.artist.countryOfOrigin ?? '',
+    country: account.value?.profile.artist.countryOfOrigin || guessFromDevice()?.name || '',
     currency: account.value?.profile.defaultCurrency ?? '',
     timeZone: deviceZone,
   }),

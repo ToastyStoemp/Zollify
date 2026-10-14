@@ -196,6 +196,20 @@ describe('recording sales', () => {
   });
 });
 
+describe('receipt numbers', () => {
+  it('run on without gaps in the till series, and a refund takes none', async () => {
+    const series = tx.receiptSeries(await device.deviceId());
+    const a = await tx.recordSale(sale({ saleId: 'n-1' }));
+    const b = await tx.recordSale(sale({ saleId: 'n-2' }));
+    expect(a.receiptNumber).toBe(`${series}-0001`);
+    expect(b.receiptNumber).toBe(`${series}-0002`);
+    await tx.revertTransaction('n-1');
+    const c = await tx.recordSale(sale({ saleId: 'n-3' }));
+    expect(c.receiptNumber).toBe(`${series}-0003`);
+    expect(tx.getTransaction('n-1')?.receiptNumber).toBe(`${series}-0001`);
+  });
+});
+
 describe('reverting', () => {
   it('marks the sale rather than deleting it', async () => {
     // A till's history is a financial record; a refund that erased the sale

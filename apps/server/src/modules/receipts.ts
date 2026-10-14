@@ -311,7 +311,7 @@ export function publicReceipt(
     seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
-    number: tx.id.slice(-8).toUpperCase(),
+    number: tx.receiptNumber ?? tx.id.slice(-8).toUpperCase(),
     currency: tx.currency,
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),

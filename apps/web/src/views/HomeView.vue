@@ -17,6 +17,7 @@ import {
 } from '@zollify/platform';
 import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
+import GettingStarted from '../components/GettingStarted.vue';
 
 /**
  * Home is the booth's morning glance: where you are selling, how today is
@@ -258,6 +259,7 @@ const syncLine = computed(() => {
     </header>
 
     <div class="grid">
+      <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
       <article class="card wide today-card">
         <header class="chead">
@@ -267,7 +269,7 @@ const syncLine = computed(() => {
         </header>
         <p v-if="tillCheck.ended" class="stale" role="alert">
           <Icon name="alert-triangle" :size="14" />
-          <span>{{ event?.name }} ended {{ endedOn }} - sales still go to it.</span>
+          <span>{{ event?.name }} {{ event?.status === 'closed' ? 'is closed' : `ended ${endedOn}` }} - sales still go to it.</span>
           <button v-if="tillCheck.runningToday" type="button" class="link" @click="setActiveEvent(tillCheck.runningToday.id)">Switch to {{ tillCheck.runningToday.name }}</button>
           <router-link :to="placesRoute" class="link">{{ tillCheck.runningToday ? 'Events' : 'Close it or pick another' }}</router-link>
         </p>
@@ -408,7 +410,7 @@ h2 { margin: 0; font-size: 1rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
 /* On a phone the month calendar would fill the first screen: what is coming up and what runs low come first. */
 @media (max-width: 640px) {
-  .grid > .card.wide:not(.today-card) { order: 1; }
+  .grid > .card.wide:not(.today-card):not(.getting-started) { order: 1; }
   .today-card .figures { grid-template-columns: 1fr 1fr; gap: .5rem; }
   .today-card .figure { max-width: none; }
   .today-card .figure.big strong { font-size: 1.4rem; }

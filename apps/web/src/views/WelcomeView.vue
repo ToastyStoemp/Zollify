@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, emptyProfile, guessFromDevice, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -84,8 +84,9 @@ const toRuns = (s: SellsAt): Runs => (s.events && s.stores ? 'both' : s.stores ?
 const runs = ref<Runs>(toRuns(sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e)))));
 const runsEvents = computed(() => runs.value !== 'stores');
 const runsStores = computed(() => runs.value !== 'events');
-// Off unless chosen: nothing is shared until the owner agrees. Applied with the modules, since the pool lives in Public events.
-const shareEvents = ref(false);
+// Preselected, but still a choice the owner sees and confirms with Continue; skipping setup shares nothing.
+// Applied with the modules, since the pool lives in Public events.
+const shareEvents = ref(true);
 const name = ref(account.value?.accountName ?? '');
 const startArtist = account.value?.profile.artist ?? emptyProfile().artist;
 // The contact email starts as the one they signed in with - nearly always the
@@ -195,6 +196,62 @@ onMounted(async () => {
 function guideFor(mod: AvailableModule) {
   const g = GUIDE[mod.moduleId] ?? { forWhom: mod.description ?? '', recommended: false };
   return mod.moduleId === 'consignment' ? { ...g, recommended: runsStores.value } : g;
+}
+
+// ── The shared pool: pick the next convention instead of typing it ──────────
+// Other sellers' events (name, dates, place, link - never who goes). Adding one
+// copies it into this account's events, as Find events does.
+const poolOn = computed(() => modules.value.some((m) => m.moduleId === 'public-events' && m.enabled));
+const poolQuery = ref('');
+const poolResults = ref<PoolListing[]>([]);
+const poolAdded = ref<string[]>([]);
+const poolBusy = ref<string | null>(null);
+let poolTimer: ReturnType<typeof setTimeout> | undefined;
+async function searchPool(): Promise<void> {
+  try {
+    const q = new URLSearchParams({ q: poolQuery.value.trim(), limit: '6' });
+    poolResults.value = ((await authFetch(`/m/public-events/pool/listings?${q.toString()}`)) as { listings: PoolListing[] }).listings;
+  } catch {
+    poolResults.value = [];
+  }
+}
+watch(poolQuery, () => {
+  clearTimeout(poolTimer);
+  poolTimer = setTimeout(() => void searchPool(), 250);
+});
+watch(
+  () => step.value === 2 && poolOn.value,
+  (on) => {
+    if (on) void searchPool();
+  },
+);
+async function addFromPool(l: PoolListing): Promise<void> {
+  poolBusy.value = l.id;
+  error.value = null;
+  try {
+    const event: SalesEvent = {
+      id: crypto.randomUUID(),
+      name: l.name,
+      dateStart: l.dateStart,
+      dateEnd: l.dateEnd,
+      venue: { street: l.street, postcode: l.postcode, city: l.city, country: l.country },
+      currency: currency.value.trim().toUpperCase() || 'EUR',
+      status: 'planned',
+      notes: [l.venueName, l.description].filter(Boolean).join('\n') || undefined,
+      ...(l.url ? { booth: { link: l.url } } : {}),
+      updatedAt: Date.now(),
+    };
+    await upsertSalesEvent(event);
+    // Only so the pool stops offering it; the event is added either way.
+    await authFetch(`/m/public-events/pool/listings/${encodeURIComponent(l.id)}/adopt`, { method: 'POST', body: JSON.stringify({ eventId: event.id }) }).catch(() => undefined);
+    if (!poolAdded.value.length) await setActiveEvent(event.id);
+    poolAdded.value = [...poolAdded.value, l.name];
+    poolResults.value = poolResults.value.filter((x) => x.id !== l.id);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not add that event.';
+  } finally {
+    poolBusy.value = null;
+  }
 }
 
 /**
@@ -375,6 +432,18 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <h1>{{ runs === 'stores' ? 'Your store' : runs === 'both' ? 'Your next event and your store' : 'Your next event' }}</h1>
       <p class="lede">Every sale is filed against an event or a store, with its stock and paperwork. {{ runs === 'stores' ? 'Answer a few questions about your store' : runs === 'both' ? 'Name your next event and answer a few questions about your store' : 'Name your next convention' }} to get started, or skip.</p>
       <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} already synced in - you can skip this.</p>
+      <div v-if="runsEvents && poolOn" class="pool">
+        <label><span>Find your next convention</span><input v-model="poolQuery" type="search" placeholder="Search events other sellers share" /></label>
+        <p v-if="poolAdded.length" class="lede ok">Added: {{ poolAdded.join(', ') }}</p>
+        <ul v-if="poolResults.length" class="pool-list">
+          <li v-for="l in poolResults" :key="l.id">
+            <span class="pool-name"><strong>{{ l.name }}</strong><small>{{ fmtDayRange(l.dateStart, l.dateEnd) }}<template v-if="l.city || l.country"> · {{ [l.city, l.country].filter(Boolean).join(', ') }}</template></small></span>
+            <button type="button" :disabled="poolBusy !== null" @click="addFromPool(l)">{{ poolBusy === l.id ? 'Adding…' : 'Add' }}</button>
+          </li>
+        </ul>
+        <p v-else-if="poolQuery.trim()" class="lede small">No shared event by that name yet - add it below.</p>
+        <p class="lede small">Not listed? Add it yourself:</p>
+      </div>
       <div v-if="runsEvents" class="grid">
         <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
         <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
@@ -388,7 +457,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later.</p>
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="step = 1">Back</button>
-        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : runsEvents && eventForm.name.trim() ? 'Create & continue' : storeMade ? 'Continue' : 'Skip' }}</button>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : runsEvents && eventForm.name.trim() ? 'Create & continue' : storeMade || poolAdded.length ? 'Continue' : 'Skip' }}</button>
       </footer>
     </form>
 
@@ -528,6 +597,12 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .runs span { color: var(--zfy-muted); }
 .lede.small { font-size: .8rem; }
 .store-setup { display: flex; }
+.pool { display: flex; flex-direction: column; gap: .6rem; }
+.pool label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
+.pool-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.pool-list li { display: flex; align-items: center; gap: .75rem; padding: .55rem .75rem; border: 1px solid var(--zfy-line); border-radius: 10px; }
+.pool-name { flex: 1; display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
+.pool-name small { color: var(--zfy-muted); font-size: .8rem; }
 .lede.ok { color: var(--zfy-accent-ink); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; counter-reset: step; }
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }

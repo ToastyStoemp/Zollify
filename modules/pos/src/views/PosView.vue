@@ -955,7 +955,7 @@ function lockTill(): void {
 
       <div v-if="tillCheck.ended" class="stale" role="alert">
         <Icon name="alert-triangle" :size="16" />
-        <span><strong>{{ activeEvent?.name }} ended {{ fmtDay(tillCheck.endedOn) }}.</strong> Sales you ring up now still go to it.</span>
+        <span><strong>{{ activeEvent?.name }} {{ activeEvent?.status === 'closed' ? 'is closed' : `ended ${fmtDay(tillCheck.endedOn)}` }}.</strong> Sales you ring up now still go to it.</span>
         <button v-if="tillCheck.runningToday" type="button" class="primary" @click="sellAtToday">Sell at {{ tillCheck.runningToday.name }}</button>
         <router-link v-else :to="{ name: 'events' }" class="btn">Pick an event</router-link>
       </div>

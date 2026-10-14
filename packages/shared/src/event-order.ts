@@ -34,7 +34,8 @@ export function sortEvents<T extends Dated>(events: Iterable<T>, today = localIs
  * Whether the till's event is one that already ended, and which event runs
  * today instead. Sales are filed against the till's event, so selling into a
  * convention that finished weeks ago puts them in the wrong books, currency
- * and VAT. Stores never end by date.
+ * and VAT. Closed counts too - another device may have closed it while this
+ * till still had it open. Stores never end by date, only by being closed.
  */
 export function tillEventCheck(
   active: (Dated & Pick<SalesEvent, 'id' | 'kind'>) | null | undefined,
@@ -42,7 +43,7 @@ export function tillEventCheck(
   today = localIsoDay(),
 ): { ended: boolean; endedOn: string | null; runningToday: (Dated & Pick<SalesEvent, 'id'>) | null } {
   const isStore = (e: Pick<SalesEvent, 'kind'>) => e.kind === 'store';
-  const ended = !!active && !isStore(active) && active.status !== 'closed' && eventHasEnded(active, today);
+  const ended = !!active && (active.status === 'closed' || (!isStore(active) && eventHasEnded(active, today)));
   const runningToday =
     events.find((e) => !e.deletedAt && !isStore(e) && e.status !== 'closed' && e.id !== active?.id && !!e.dateStart && e.dateStart <= today && (e.dateEnd || e.dateStart) >= today) ?? null;
   return { ended, endedOn: ended ? (active!.dateEnd || active!.dateStart || null) : null, runningToday };

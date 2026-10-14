@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
 import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
@@ -166,6 +166,24 @@ const closeMenu = (): void => {
   menuFor.value = null;
 };
 onMounted(() => window.addEventListener('click', closeMenu));
+
+/**
+ * New event starts in Find events when the shared pool is there: most
+ * conventions are already in it, with dates and address. Find events sends
+ * people back here (?new=1, with what they searched as the name) for one
+ * that is not.
+ */
+const route = useRoute();
+function newEvent(): void {
+  if (hasRoute('public-events:find')) void router.push({ name: 'public-events:find' });
+  else openNew('event');
+}
+onMounted(() => {
+  if (route.query.new !== '1' || !canEdit.value) return;
+  openNew('event');
+  if (typeof route.query.name === 'string') form.name = route.query.name.slice(0, 120);
+  void router.replace({ query: {} });
+});
 onBeforeUnmount(() => window.removeEventListener('click', closeMenu));
 /** Whether the menu has anything in it for this tile (a helper may have nothing). */
 const hasMore = (e: SalesEvent): boolean =>
@@ -477,7 +495,7 @@ async function save(): Promise<void> {
       <h1>{{ storesPage ? 'Stores' : 'Events' }}</h1>
       <div v-if="canEdit" class="header-actions">
         <button v-if="storesPage" type="button" class="primary" @click="settingUp = true"><Icon name="plus" :size="16" /> New store</button>
-        <button v-else type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
+        <button v-else type="button" class="primary" @click="newEvent"><Icon name="plus" :size="16" /> New event</button>
       </div>
     </header>
 

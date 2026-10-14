@@ -20,8 +20,19 @@ type MyposId = 'mypos-go2' | 'mypos-carbon' | 'mypos-glass';
 
 const way = ref<Way | null>(null);
 const mypos = ref<MyposId>('mypos-go2');
-/** A Solo can go over the internet; an Air only over Bluetooth. */
-const sumupReader = ref<'solo' | 'air'>('solo');
+type SumupReader = 'solo' | 'solo-lite' | 'air';
+const sumupReader = ref<SumupReader>('solo');
+/**
+ * How the merchant wants to use a Solo: on its own over the internet (any
+ * till device) or paired with a phone or tablet over Bluetooth. Asked, never
+ * guessed. The Solo Lite and the Air only pair over Bluetooth.
+ */
+const soloRoute = ref<'cloud' | 'bluetooth' | null>(null);
+const SUMUP_READERS: { id: SumupReader; title: string; text: string }[] = [
+  { id: 'solo', title: 'Solo', text: 'With its own screen, Wi-Fi and SIM.' },
+  { id: 'solo-lite', title: 'Solo Lite', text: 'The smaller Solo - always paired with a phone or tablet.' },
+  { id: 'air', title: 'Air', text: 'No screen - always paired with a phone or tablet.' },
+];
 /** The SumUp account is connected on the server (the Solo route). */
 const sumupConnected = ref(false);
 const available = ref<Record<string, boolean>>({});
@@ -38,9 +49,13 @@ const MYPOS: { id: MyposId; title: string; text: string; needs: string }[] = [
 
 /** The terminal this choice means for this device, if it is one. */
 const cloud = computed(() => available.value['sumup-cloud'] === true);
-const providerId = computed<PaymentProviderId | null>(() =>
-  way.value === 'sumup' ? (sumupReader.value === 'solo' && cloud.value ? 'sumup-cloud' : 'sumup') : way.value === 'mypos' ? mypos.value : way.value === 'cash' ? 'manual' : null,
+const sumupProviderId = computed<PaymentProviderId | null>(() =>
+  sumupReader.value !== 'solo' ? 'sumup' : soloRoute.value === 'cloud' ? 'sumup-cloud' : soloRoute.value === 'bluetooth' ? 'sumup' : null,
 );
+const providerId = computed<PaymentProviderId | null>(() =>
+  way.value === 'sumup' ? sumupProviderId.value : way.value === 'mypos' ? mypos.value : way.value === 'cash' ? 'manual' : null,
+);
+const sumupTitle = computed(() => SUMUP_READERS.find((r) => r.id === sumupReader.value)!.title);
 const usable = computed(() => (providerId.value ? available.value[providerId.value] === true : false));
 
 async function refresh(): Promise<void> {
@@ -53,7 +68,7 @@ onMounted(async () => {
   const saved = await sdk().config.get<string>('activeProvider');
   if (saved === 'sumup' || saved === 'sumup-cloud') {
     way.value = 'sumup';
-    sumupReader.value = saved === 'sumup' ? 'air' : 'solo';
+    soloRoute.value = saved === 'sumup-cloud' ? 'cloud' : 'bluetooth';
   }
   else if (saved?.startsWith('mypos-') && MYPOS.some((m) => m.id === saved)) {
     way.value = 'mypos';
@@ -65,11 +80,12 @@ onMounted(async () => {
 onUnmounted(() => clearInterval(timer));
 
 /** Remembers the choice for this device, but only a terminal it can actually use. */
-async function pick(next: Way, device?: MyposId, reader?: 'solo' | 'air'): Promise<void> {
+async function pick(next: Way, device?: MyposId, reader?: SumupReader, route?: 'cloud' | 'bluetooth'): Promise<void> {
   error.value = null;
   way.value = next;
   if (device) mypos.value = device;
   if (reader) sumupReader.value = reader;
+  if (route) soloRoute.value = route;
   await refresh();
   if (providerId.value && (usable.value || providerId.value === 'manual')) await setActiveProvider(providerId.value);
 }
@@ -99,7 +115,7 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
     <p class="lede">Customers pay by card on a reader that works with Zollify. Pick yours and we set this device up for it. Skip this if you only take cash - you can come back under Settings → Payments.</p>
 
     <div class="ways" role="radiogroup" aria-label="How you take card payments">
-      <label :class="{ on: way === 'sumup' }"><input type="radio" name="way" :checked="way === 'sumup'" @change="pick('sumup')" /><strong>SumUp</strong><span>Solo or Air reader</span></label>
+      <label :class="{ on: way === 'sumup' }"><input type="radio" name="way" :checked="way === 'sumup'" @change="pick('sumup')" /><strong>SumUp</strong><span>Solo, Solo Lite or Air</span></label>
       <label :class="{ on: way === 'mypos' }"><input type="radio" name="way" :checked="way === 'mypos'" @change="pick('mypos')" /><strong>myPOS</strong><span>Go2, Carbon or Glass</span></label>
       <label :class="{ on: way === 'other' }"><input type="radio" name="way" :checked="way === 'other'" @change="pick('other')" /><strong>Another terminal</strong><span>Nexi SmartPOS and others</span></label>
       <label :class="{ on: way === 'cash' }"><input type="radio" name="way" :checked="way === 'cash'" @change="pick('cash')" /><strong>Cash for now</strong><span>Record card payments by hand</span></label>
@@ -109,17 +125,31 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 
     <!-- SumUp -->
     <div v-if="way === 'sumup'" class="devices" role="radiogroup" aria-label="Your SumUp reader">
-      <label :class="{ on: sumupReader === 'solo' }">
-        <input type="radio" name="sumup-reader" :checked="sumupReader === 'solo'" @change="pick('sumup', undefined, 'solo')" />
-        <strong>Solo</strong><span>{{ cloud ? 'Works with any device, a browser too - over Wi-Fi or its own SIM.' : 'Pairs with the Android app over Bluetooth.' }}</span>
-      </label>
-      <label :class="{ on: sumupReader === 'air' }">
-        <input type="radio" name="sumup-reader" :checked="sumupReader === 'air'" @change="pick('sumup', undefined, 'air')" />
-        <strong>Air</strong><span>Pairs with the Android app over Bluetooth.</span>
+      <label v-for="r in SUMUP_READERS" :key="r.id" :class="{ on: sumupReader === r.id }">
+        <input type="radio" name="sumup-reader" :checked="sumupReader === r.id" @change="pick('sumup', undefined, r.id)" />
+        <strong>{{ r.title }}</strong><span>{{ r.text }}</span>
       </label>
     </div>
 
-    <ol v-if="way === 'sumup' && providerId === 'sumup-cloud'" class="steps">
+    <fieldset v-if="way === 'sumup' && sumupReader === 'solo'" class="route">
+      <legend>How do you want to use your Solo?</legend>
+      <div class="devices" role="radiogroup" aria-label="How you use your Solo">
+        <label :class="{ on: soloRoute === 'cloud' }">
+          <input type="radio" name="solo-route" :checked="soloRoute === 'cloud'" @change="pick('sumup', undefined, 'solo', 'cloud')" />
+          <strong>On its own, over the internet</strong><span>The till can be any device - a laptop, a tablet, a browser. The Solo stays online over Wi-Fi or its SIM.</span>
+        </label>
+        <label :class="{ on: soloRoute === 'bluetooth' }">
+          <input type="radio" name="solo-route" :checked="soloRoute === 'bluetooth'" @change="pick('sumup', undefined, 'solo', 'bluetooth')" />
+          <strong>Paired with a phone or tablet</strong><span>Over Bluetooth, with the Zollify Android app on that phone or tablet.</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <p v-if="way === 'sumup' && providerId === 'sumup-cloud' && !cloud" class="note">
+      This Zollify server is not set up to reach SumUp over the internet yet. Ask whoever runs it to switch that on - or pair the Solo with a phone or tablet for now.
+    </p>
+
+    <ol v-if="way === 'sumup' && providerId === 'sumup-cloud' && cloud" class="steps">
       <li>
         <strong>A SumUp account and a Solo</strong>
         <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and get a Solo. Connect it to Wi-Fi, or use its own SIM.</span>
@@ -136,10 +166,10 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
       </li>
     </ol>
 
-    <ol v-else-if="way === 'sumup'" class="steps">
+    <ol v-else-if="way === 'sumup' && providerId === 'sumup'" class="steps">
       <li>
         <strong>A SumUp account and reader</strong>
-        <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and order a {{ sumupReader === 'air' ? 'Air' : 'Solo' }} reader.</span>
+        <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and order a {{ sumupTitle }}.</span>
       </li>
       <li :class="{ done: status?.connected }">
         <strong>Sign in to SumUp</strong>
@@ -181,7 +211,7 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
     <p v-else-if="way === 'other'" class="hint">Nexi SmartPOS and the other terminals are set up under Settings → Payments once you are in. Your choice there is kept for this device.</p>
     <p v-else-if="way === 'cash'" class="hint">Card payments are recorded by hand at the till: you confirm the card payment happened and the sale is booked. Add a reader any time under Settings → Payments.</p>
 
-    <p v-if="(way === 'sumup' || way === 'mypos') && !usable" class="note">
+    <p v-if="(way === 'sumup' || way === 'mypos') && providerId && providerId !== 'sumup-cloud' && !usable" class="note">
       Readers connect through the Zollify Android app{{ way === 'mypos' ? ` (${myposDevice.needs})` : '' }}, so there is nothing to connect from here. Open Zollify on your till device and finish under <strong>Settings → Payments</strong> - the steps above are what it needs.
     </p>
   </div>
@@ -200,6 +230,8 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 .ways input, .devices input { position: absolute; opacity: 0; pointer-events: none; }
 .ways label:focus-within, .devices label:focus-within { outline: 2px solid var(--zfy-accent); outline-offset: 2px; }
 .mypos { display: flex; flex-direction: column; gap: 1rem; }
+.route { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.route legend { font-weight: 600; font-size: .9rem; margin-bottom: .4rem; }
 .steps { margin: 0; padding: 0 0 0 1.4rem; display: flex; flex-direction: column; gap: .9rem; }
 .steps li { display: flex; flex-direction: column; gap: .25rem; align-items: flex-start; }
 .steps li span { font-size: .875rem; color: var(--zfy-muted); }

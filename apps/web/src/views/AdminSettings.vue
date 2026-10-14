@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { AdminAccount, AdminAccountDetail, AdminAccountRelation, AdminFeedbackEntry, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
 import { authFetch, shellConfirm } from '@zollify/platform';
 import { Icon } from '@zollify/ui';
+import ServerSettingsPanel from '../components/ServerSettingsPanel.vue';
 
 /**
  * Server admin - ported from ZollTool. Owner only: usage overview, activity
@@ -225,6 +226,8 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
           <span v-if="deployNote" class="hint">{{ deployNote }}</span>
         </div>
       </article>
+
+      <ServerSettingsPanel />
 
       <article class="card">
         <h3>Invites</h3>

@@ -10,10 +10,14 @@ describe('tillEventCheck', () => {
     expect(tillEventCheck(narcon, [narcon, asia], TODAY)).toEqual({ ended: true, endedOn: '2026-07-25', runningToday: asia });
   });
 
-  it('is quiet for an event under way, a store, or a closed event', () => {
+  it('is quiet for an event under way, or a store still open', () => {
     expect(tillEventCheck(asia, [narcon, asia], TODAY).ended).toBe(false);
     expect(tillEventCheck({ ...narcon, kind: 'store' as const }, [], TODAY).ended).toBe(false);
-    expect(tillEventCheck({ ...narcon, status: 'closed' as const }, [], TODAY).ended).toBe(false);
+  });
+
+  it('flags a till still on an event or store someone closed', () => {
+    expect(tillEventCheck({ ...narcon, status: 'closed' as const }, [], TODAY).ended).toBe(true);
+    expect(tillEventCheck({ ...narcon, kind: 'store' as const, status: 'closed' as const }, [], TODAY).ended).toBe(true);
   });
 
   it('never offers a closed or deleted event as today\'s', () => {

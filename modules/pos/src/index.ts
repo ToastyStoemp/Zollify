@@ -47,6 +47,15 @@ export default defineModule({
       order: 101,
     });
 
+    // First-run setup asks how the seller takes card payments; the full list stays under Settings → Payments.
+    sdk.setup.step({
+      id: 'payments',
+      title: 'Card payments',
+      component: () => import('./views/PaymentSetup.vue'),
+      minRole: 'admin',
+      order: 100,
+    });
+
     sdk.settings.panel({
       id: 'payments',
       label: 'Payments',

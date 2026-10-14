@@ -245,12 +245,16 @@ async function removeMethod(name: string): Promise<void> {
     </ul>
 
     <template v-if="statuses['sumup']?.available">
-      <label class="field">
-        <span>SumUp affiliate key</span>
-        <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
-        <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="From the SumUp developer dashboard" @change="saveKey" />
-      </label>
-      <p class="hint">Save the key and tap <strong>Connect</strong> to log in once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <details>
+        <summary>Your own app build</summary>
+        <label class="field">
+          <span>SumUp affiliate key</span>
+          <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
+          <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="Only for a build with its own app id" @change="saveKey" />
+        </label>
+        <p class="hint">Only needed when this app was built with its own app id. Leave empty to use this server's key.</p>
+      </details>
     </template>
 
     <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">

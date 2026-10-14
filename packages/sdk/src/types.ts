@@ -80,6 +80,20 @@ export interface SettingsPanel {
   order?: number;
 }
 
+/**
+ * A step a module adds to first-run setup, after the business and the first
+ * store or event. The shell owns the progress list and Back / Continue; the
+ * component is only the body, and every step can be skipped.
+ */
+export interface SetupStep {
+  id: string;
+  /** Names the step in the progress list. */
+  title: string;
+  component: ComponentLoader;
+  minRole?: Role;
+  order?: number;
+}
+
 // ── Cross-module events ─────────────────────────────────────────────────────
 
 export interface SaleLine {
@@ -514,6 +528,8 @@ export interface Sdk {
   routes: { add(route: RouteDef): void; addAll(routes: RouteDef[]): void };
   nav: { add(item: NavItem): void };
   settings: { panel(panel: SettingsPanel): void };
+  /** Adds a step to first-run setup (taking card payments, say). */
+  setup: { step(step: SetupStep): void };
   /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
   calendar: { source(source: CalendarSource): void };
   /** Adds a card to the home screen (low stock at the stores you consign with, say). */

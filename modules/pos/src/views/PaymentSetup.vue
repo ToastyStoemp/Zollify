@@ -2,14 +2,12 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { getProvider, setActiveProvider } from '../payments/registry';
 import type { PaymentProviderId } from '../payments/provider';
-import { SUMUP_KEY_SETTING } from '../payments/sumup';
-import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
 
 /**
  * First-run setup: how do you take card payments? Picks the terminal this
- * device uses and walks through what it needs - SumUp (account, affiliate
- * key, sign-in, reader) or myPOS (Go2, Carbon or Glass). A reader connects
+ * device uses and walks through what it needs - SumUp (account, sign-in,
+ * reader) or myPOS (Go2, Carbon or Glass). A reader connects
  * through the Android app, so on a computer this only explains what to do;
  * nothing is saved for a terminal this device cannot talk to. The full list,
  * with Nexi and the rest, stays under Settings → Payments.
@@ -17,15 +15,10 @@ import { sdk } from '../runtime';
 type Way = 'sumup' | 'mypos' | 'other' | 'cash';
 type MyposId = 'mypos-go2' | 'mypos-carbon' | 'mypos-glass';
 
-/** The Android app's id (capacitor.config.ts) - the one a SumUp affiliate key is made for. */
-const APP_ID = 'com.phuongninjin.zollify';
-
 const way = ref<Way | null>(null);
 const mypos = ref<MyposId>('mypos-go2');
 const available = ref<Record<string, boolean>>({});
 const status = ref<{ connected: boolean; detail?: string } | null>(null);
-const sumupKey = ref('');
-const keySaved = ref(false);
 const busy = ref(false);
 const error = ref<string | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
@@ -52,8 +45,6 @@ onMounted(async () => {
     way.value = 'mypos';
     mypos.value = saved as MyposId;
   } else if (saved && saved !== 'manual') way.value = 'other';
-  sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
-  keySaved.value = !!sumupKey.value.trim();
   await refresh();
   timer = setInterval(() => void refresh(), 3000);
 });
@@ -66,11 +57,6 @@ async function pick(next: Way, device?: MyposId): Promise<void> {
   if (device) mypos.value = device;
   await refresh();
   if (providerId.value && (usable.value || providerId.value === 'manual')) await setActiveProvider(providerId.value);
-}
-
-async function saveKey(): Promise<void> {
-  await setSetting(SUMUP_KEY_SETTING, sumupKey.value.trim());
-  keySaved.value = !!sumupKey.value.trim();
 }
 
 /** Runs one of the provider's own actions and says in words what went wrong. */
@@ -112,20 +98,10 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
         <strong>A SumUp account and reader</strong>
         <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and order a Solo or Air reader.</span>
       </li>
-      <li :class="{ done: keySaved }">
-        <strong>An affiliate key</strong>
-        <span>
-          In the <a href="https://developer.sumup.com/" target="_blank" rel="noopener noreferrer">SumUp developer dashboard</a> create an affiliate key for the app id <code>{{ APP_ID }}</code>, and paste it here.
-        </span>
-        <span v-if="usable" class="row">
-          <input v-model="sumupKey" type="password" autocomplete="off" placeholder="Affiliate key" />
-          <button type="button" :disabled="!sumupKey.trim()" @click="saveKey">{{ keySaved ? 'Update' : 'Save' }}</button>
-        </span>
-      </li>
       <li :class="{ done: status?.connected }">
         <strong>Sign in to SumUp</strong>
-        <span v-if="usable">{{ status?.connected ? 'Signed in.' : 'Opens SumUp’s own sign-in once; this device stays signed in.' }}</span>
-        <button v-if="usable && !status?.connected" type="button" :disabled="busy || !keySaved" @click="act('configure')">Sign in</button>
+        <span>{{ status?.connected ? 'Signed in.' : 'With your own SumUp email and password, on SumUp’s sign-in screen. Once - this device stays signed in.' }}</span>
+        <button v-if="usable && !status?.connected" type="button" :disabled="busy" @click="act('configure')">Sign in</button>
       </li>
       <li>
         <strong>Connect the reader</strong>
@@ -185,7 +161,4 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 .steps li { display: flex; flex-direction: column; gap: .25rem; align-items: flex-start; }
 .steps li span { font-size: .875rem; color: var(--zfy-muted); }
 .steps li.done strong::after { content: ' ✓'; color: var(--zfy-accent-ink); }
-.row { display: flex; gap: .5rem; width: 100%; max-width: 28rem; }
-.row input { flex: 1; }
-code { font-size: .85em; }
 </style>

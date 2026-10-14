@@ -572,6 +572,9 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
   routes: (ctx: ModuleContext) => async (app) => {
     // Nexi SmartPOS card payments - see smartpos.ts.
     registerSmartpos(app, ctx, smartposApps(ctx.db, box));
+    // SumUp's affiliate key names the app, not the merchant (it is no secret), so the
+    // server hands out its own and a merchant only signs in. Null = each device enters one.
+    app.get('/sumup/config', async () => ({ affiliateKey: process.env.SUMUP_AFFILIATE_KEY?.trim() || null }));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: base64BodyLimit(maxBytesFor('logo'), 4096) }, async (req, reply) => {

@@ -61,14 +61,15 @@ const router = useRouter();
 const account = currentAccount;
 const canRename = computed(() => account.value?.role === 'owner');
 
-// Stages: 1 who you are, 2 the event or store, then one per step a module adds
-// (card payments from the till), then Modules and Next steps.
+// Stages: 1 who you are, 2 the event or store, 3 modules, then one per step the
+// switched-on modules add (card payments from the till), then Next steps. Module
+// steps come after the module choice, so a module switched on there asks its own.
 const step = ref(1);
+const MODULES_STAGE = 3;
 const moduleSteps = computed(() => contributions.setupStepsFor(account.value?.role ?? 'member'));
 const moduleStepViews = computed(() => moduleSteps.value.map((s) => defineAsyncComponent(s.component)));
-const modulesStage = computed(() => 3 + moduleSteps.value.length);
-const nextStage = computed(() => modulesStage.value + 1);
-const moduleStep = computed(() => (step.value >= 3 && step.value < modulesStage.value ? step.value - 3 : -1));
+const nextStage = computed(() => MODULES_STAGE + 1 + moduleSteps.value.length);
+const moduleStep = computed(() => (step.value > MODULES_STAGE && step.value < nextStage.value ? step.value - MODULES_STAGE - 1 : -1));
 const busy = ref(false);
 const error = ref<string | null>(null);
 
@@ -221,7 +222,7 @@ async function saveModules(): Promise<void> {
         error.value = 'Could not turn on event sharing - you can turn it on under Settings.';
       }
     }
-    step.value = nextStage.value;
+    step.value = MODULES_STAGE + 1;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not change those modules.';
   } finally {
@@ -251,8 +252,8 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <ol class="steps" aria-label="Setup progress">
       <li :class="{ current: step === 1, done: step > 1 }">Who you are</li>
       <li :class="{ current: step === 2, done: step > 2 }">{{ step2Label }}</li>
-      <li v-for="(m, i) in moduleSteps" :key="m.id" :class="{ current: step === 3 + i, done: step > 3 + i }">{{ m.title }}</li>
-      <li :class="{ current: step === modulesStage, done: step > modulesStage }">Modules</li>
+      <li :class="{ current: step === MODULES_STAGE, done: step > MODULES_STAGE }">Modules</li>
+      <li v-for="(m, i) in moduleSteps" :key="m.id" :class="{ current: step === MODULES_STAGE + 1 + i, done: step > MODULES_STAGE + 1 + i }">{{ m.title }}</li>
       <li :class="{ current: step === nextStage }">Next steps</li>
     </ol>
 
@@ -328,7 +329,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </footer>
     </form>
 
-    <form v-else-if="step === modulesStage" class="card" @submit.prevent="saveModules">
+    <form v-else-if="step === MODULES_STAGE" class="card" @submit.prevent="saveModules">
       <h1>Switch on what you need</h1>
       <p class="lede">
         Zollify is built from modules. Turn on the ones that fit your business - anything you leave off
@@ -357,7 +358,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <p v-if="!modules.length" class="empty">No modules are published on this server yet.</p>
 
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="step = modulesStage - 1">Back</button>
+        <button type="button" class="quiet" :disabled="busy" @click="step = 2">Back</button>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Applying…' : 'Continue' }}</button>
       </footer>
     </form>
@@ -404,7 +405,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </ol>
 
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="step = modulesStage">Back</button>
+        <button type="button" class="quiet" :disabled="busy" @click="step = nextStage - 1">Back</button>
         <button type="button" class="primary" :disabled="busy" @click="finish()">{{ busy ? 'Finishing…' : 'Go to Home' }}</button>
       </footer>
     </div>

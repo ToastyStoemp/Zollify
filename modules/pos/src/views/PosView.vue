@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts } from '@zollify/shared';
+import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -66,6 +66,13 @@ function toast(text: string, kind: 'ok' | 'bad' = 'ok'): void {
 }
 
 const activeEvent = computed(() => sdk().data.events.active());
+/** The till still on a convention that already ended: sales would land in its books, currency and VAT. */
+const tillCheck = computed(() => tillEventCheck(activeEvent.value, sdk().data.events.list()));
+const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
+async function sellAtToday(): Promise<void> {
+  const e = tillCheck.value.runningToday;
+  if (e) await sdk().data.events.setActive(e.id);
+}
 const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
 const provider = computed(() => (testMode.value ? testTerminalProvider : getProvider(providerId.value as never)));
@@ -946,6 +953,13 @@ function lockTill(): void {
         </div>
       </header>
 
+      <div v-if="tillCheck.ended" class="stale" role="alert">
+        <Icon name="alert-triangle" :size="16" />
+        <span><strong>{{ activeEvent?.name }} ended {{ fmtDay(tillCheck.endedOn) }}.</strong> Sales you ring up now still go to it.</span>
+        <button v-if="tillCheck.runningToday" type="button" class="primary" @click="sellAtToday">Sell at {{ tillCheck.runningToday.name }}</button>
+        <router-link v-else :to="{ name: 'events' }" class="btn">Pick an event</router-link>
+      </div>
+
       <p v-if="notice" :class="['notice', notice.kind]" role="status">{{ notice.text }}</p>
 
       <div v-if="lastSale" class="last">
@@ -1248,6 +1262,9 @@ function lockTill(): void {
 .pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
 .testmode { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: var(--zfy-danger, #c6512f); border-radius: 999px; padding: .25rem .7rem; text-decoration: none; white-space: nowrap; }
+.stale { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .6rem 1rem 0; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #d99a2b); color: var(--zfy-warning-ink, #8a5a00); font-size: .875rem; }
+.stale span { flex: 1; min-width: 12rem; }
+.stale .btn { text-decoration: none; font-weight: 600; color: inherit; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }
 .iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }

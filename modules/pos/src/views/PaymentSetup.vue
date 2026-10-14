@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { getProvider, setActiveProvider } from '../payments/registry';
 import type { PaymentProviderId } from '../payments/provider';
 import { loadSumupCloudStatus } from '../payments/sumup-cloud';
+import { QrCode } from '@zollify/ui';
+import { isNativePlatform } from '../native/plugins';
 import { sdk } from '../runtime';
 import SumupSoloPairing from './SumupSoloPairing.vue';
 
@@ -63,6 +65,17 @@ onMounted(async () => {
   timer = setInterval(() => void refresh(), 3000);
 });
 onUnmounted(() => clearInterval(timer));
+
+/** Where to get the Android app readers need: the server's own download, when it publishes one. */
+const androidApp = ref<string | null>(null);
+onMounted(async () => {
+  if (isNativePlatform()) return;
+  try {
+    if ((await fetch('/api/updates/latest')).ok) androidApp.value = `${location.origin}/api/updates/download/full`;
+  } catch {
+    /* none published */
+  }
+});
 
 /** Remembers the choice for this device, but only a terminal it can actually use. */
 async function pick(next: Way, device?: MyposId, reader?: 'solo' | 'air'): Promise<void> {
@@ -183,7 +196,9 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 
     <p v-if="(way === 'sumup' || way === 'mypos') && !usable" class="note">
       Readers connect through the Zollify Android app{{ way === 'mypos' ? ` (${myposDevice.needs})` : '' }}, so there is nothing to connect from here. Open Zollify on your till device and finish under <strong>Settings → Payments</strong> - the steps above are what it needs.
+      <template v-if="androidApp"><br /><a :href="androidApp" download>Download the Android app</a>, or scan this with the phone or tablet:</template>
     </p>
+    <QrCode v-if="androidApp && (way === 'sumup' || way === 'mypos') && providerId && providerId !== 'sumup-cloud' && !usable" :value="androidApp" :size="120" label="Android app download QR code" />
   </div>
 </template>
 

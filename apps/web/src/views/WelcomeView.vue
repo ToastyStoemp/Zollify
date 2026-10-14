@@ -5,6 +5,7 @@ import { EMPTY_PROFILE_LINKS, emptyProfile, isStore, sellsAt, type ArtistDetails
 import { authFetch, currentAccount, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { DateRangePicker } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
+import StoreSetupWizard from '../components/StoreSetupWizard.vue';
 import { loadEnabledModules, unloadModule } from '../boot';
 
 /**
@@ -114,12 +115,27 @@ async function saveWho(): Promise<void> {
 // ── Step 2: the next event ───────────────────────────────────────────────────
 // Everything happens inside an event: stock, sales and paperwork. Leave the
 // name empty to skip; events that already synced in make this step moot.
-const eventForm = ref({ name: '', dateStart: '', dateEnd: '', storeName: '', storeCity: '' });
+const eventForm = ref({ name: '', dateStart: '', dateEnd: '' });
+// A store is set up by its own questions (VAT, artists, reports), in a window of their own.
+const settingUp = ref(false);
+const storeMade = ref(false);
+/** The wizard may have switched Consignment on; the module list and the wish list must agree before they are applied. */
+async function storeSetupClosed(): Promise<void> {
+  settingUp.value = false;
+  try {
+    const res = (await authFetch('/modules/available')) as { modules: AvailableModule[] };
+    const on = res.modules.find((m) => m.moduleId === 'consignment')?.enabled ?? false;
+    const mod = modules.value.find((m) => m.moduleId === 'consignment');
+    if (mod) mod.enabled = on;
+    if (on) wanted.value = new Set([...wanted.value, 'consignment']);
+  } catch {
+    /* the modules step falls back to what it loaded */
+  }
+}
 const step2Label = computed(() => (runs.value === 'both' ? 'Event & store' : runs.value === 'stores' ? 'Your store' : 'Next event'));
 async function saveEvent(): Promise<void> {
   const name = runsEvents.value ? eventForm.value.name.trim() : '';
-  const storeName = runsStores.value ? eventForm.value.storeName.trim() : '';
-  if (!name && !storeName) {
+  if (!name) {
     step.value = 3;
     return;
   }
@@ -127,18 +143,9 @@ async function saveEvent(): Promise<void> {
   error.value = null;
   try {
     const base = { venue: { country: artist.value.countryOfOrigin || undefined }, currency: currency.value.trim().toUpperCase() || 'CHF', status: 'active' as const, updatedAt: Date.now() };
-    let first: string | null = null;
-    if (storeName) {
-      const store: SalesEvent = { ...base, id: crypto.randomUUID(), name: storeName, kind: 'store', venue: { ...base.venue, city: eventForm.value.storeCity.trim() || undefined } };
-      await upsertSalesEvent(store);
-      first = store.id;
-    }
-    if (name) {
-      const event: SalesEvent = { ...base, id: crypto.randomUUID(), name, dateStart: eventForm.value.dateStart || undefined, dateEnd: eventForm.value.dateEnd || undefined };
-      await upsertSalesEvent(event);
-      first ??= event.id;
-    }
-    if (first) await setActiveEvent(first);
+    const event: SalesEvent = { ...base, id: crypto.randomUUID(), name, dateStart: eventForm.value.dateStart || undefined, dateEnd: eventForm.value.dateEnd || undefined };
+    await upsertSalesEvent(event);
+    await setActiveEvent(event.id);
     step.value = 3;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create that event.';
@@ -286,20 +293,20 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <!-- ── 2 ─────────────────────────────────────────────────────────────── -->
     <form v-else-if="step === 2" class="card" @submit.prevent="saveEvent">
       <h1>{{ runs === 'stores' ? 'Your store' : runs === 'both' ? 'Your next event and your store' : 'Your next event' }}</h1>
-      <p class="lede">Every sale is filed against an event or a store, with its stock and paperwork. Name {{ runs === 'stores' ? 'your store' : runs === 'both' ? 'them' : 'your next convention' }} to get started, or leave it empty to skip.</p>
+      <p class="lede">Every sale is filed against an event or a store, with its stock and paperwork. {{ runs === 'stores' ? 'Answer a few questions about your store' : runs === 'both' ? 'Name your next event and answer a few questions about your store' : 'Name your next convention' }} to get started, or skip.</p>
       <p v-if="visibleEvents.length" class="lede ok">{{ visibleEvents.length }} already synced in - you can skip this.</p>
       <div v-if="runsEvents" class="grid">
         <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
         <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
       </div>
-      <div v-if="runsStores" class="grid">
-        <label><span>Store name</span><input v-model="eventForm.storeName" type="text" placeholder="Atelier Zurich" /></label>
-        <label><span>City</span><input v-model="eventForm.storeCity" type="text" placeholder="Zurich" /></label>
+      <div v-if="runsStores" class="store-setup">
+        <p v-if="storeMade" class="lede ok">Your store is set up.</p>
+        <button v-else type="button" :disabled="busy" @click="settingUp = true">Set up your store</button>
       </div>
       <p class="lede small">Sells in {{ currency || 'your base currency' }}; add a local currency later.</p>
       <footer class="actions">
         <button type="button" class="quiet" :disabled="busy" @click="step = 1">Back</button>
-        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : (runsEvents && eventForm.name.trim()) || (runsStores && eventForm.storeName.trim()) ? 'Create & continue' : 'Skip' }}</button>
+        <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : runsEvents && eventForm.name.trim() ? 'Create & continue' : storeMade ? 'Continue' : 'Skip' }}</button>
       </footer>
     </form>
 
@@ -384,6 +391,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         <button type="button" class="primary" :disabled="busy" @click="finish()">{{ busy ? 'Finishing…' : 'Go to Home' }}</button>
       </footer>
     </div>
+    <StoreSetupWizard v-if="settingUp" onboarding @created="storeMade = true" @close="storeSetupClosed" />
   </section>
 </template>
 
@@ -402,6 +410,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .runs label:focus-within { outline: 2px solid var(--zfy-accent); outline-offset: 2px; }
 .runs span { color: var(--zfy-muted); }
 .lede.small { font-size: .8rem; }
+.store-setup { display: flex; }
 .lede.ok { color: var(--zfy-accent-ink); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; counter-reset: step; }
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }

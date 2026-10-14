@@ -92,6 +92,8 @@ export const BooksSettingsSchema = z.object({
   passCardFees: z.boolean().default(false),
   /** Suggested amount per fee reason, in the books' currency. */
   feePresets: z.partialRecord(FeeReasonSchema, z.number().min(0).max(1_000_000)).default({}),
+  /** Commission a new artist starts with, in percent; each artist can differ. */
+  defaultCommissionPct: z.number().min(0).max(100).default(40),
   /** Linked artists may put their own work on discount at the till. */
   artistDiscounts: z.boolean().default(true),
   /** The deepest discount an artist may set, in percent. */

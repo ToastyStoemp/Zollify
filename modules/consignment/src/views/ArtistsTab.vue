@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import type { Consignor } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { consignors, deleteConsignor, errorText, issueLinkCode, productsOf, publicUrl, saveConsignor, stores, unlinkConsignor } from '../api';
+import { consignors, deleteConsignor, errorText, issueLinkCode, loadBooksSettings, productsOf, publicUrl, saveConsignor, stores, unlinkConsignor } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -42,12 +42,22 @@ const form = reactive({
   archived: false,
 });
 
+// What a new artist starts with: the store's default commission, set in Reports or the store setup.
+const defaultCommission = ref('40');
+onMounted(async () => {
+  try {
+    defaultCommission.value = String((await loadBooksSettings()).defaultCommissionPct);
+  } catch {
+    /* the form keeps 40 */
+  }
+});
+
 function openNew(): void {
   editId.value = null;
   Object.assign(form, {
     name: '',
     email: '',
-    commissionPct: '40',
+    commissionPct: defaultCommission.value,
     // With a single store there is nothing to choose.
     storeIds: stores.value.length === 1 ? [stores.value[0]!.id] : [],
     storeCommission: {},

@@ -22,6 +22,7 @@ import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
+import { registerFeedbackRoutes } from './routes/feedback';
 import { registerEventFileRoutes } from './routes/event-files';
 import { registerUploadErrors, uploadConfig } from './upload-limits';
 import { registerUpdateRoutes } from './routes/updates';
@@ -312,6 +313,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir, opts.serverModules);
   registerLogRoutes(app, db, opts.dataDir);
+  registerFeedbackRoutes(app, db);
   registerEventFileRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
   if (opts.shellStoreDir) registerShellUpdateRoutes(app, opts.shellStoreDir);

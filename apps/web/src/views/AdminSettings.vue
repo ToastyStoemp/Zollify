@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import type { AdminAccount, AdminAccountDetail, AdminAccountRelation, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
+import type { AdminAccount, AdminAccountDetail, AdminAccountRelation, AdminFeedbackEntry, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
 import { authFetch, shellConfirm } from '@zollify/platform';
 import { Icon } from '@zollify/ui';
 
@@ -18,6 +18,7 @@ const accounts = ref<AdminAccount[]>([]);
 const relations = ref<AdminAccountRelation[]>([]);
 const metrics = ref<AdminMetricRow[]>([]);
 const logs = ref<AdminLogEntry[]>([]);
+const feedback = ref<AdminFeedbackEntry[]>([]);
 interface AdminSession {
   id: string;
   userId: string;
@@ -39,14 +40,16 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = null;
   try {
-    const [o, a, m, l, s, r] = await Promise.all([
+    const [o, a, m, l, s, r, f] = await Promise.all([
       authFetch('/admin/overview') as Promise<AdminOverview>,
       authFetch('/admin/accounts') as Promise<AdminAccount[]>,
       authFetch('/admin/metrics?days=30') as Promise<AdminMetricRow[]>,
       authFetch('/admin/logs') as Promise<AdminLogEntry[]>,
       authFetch('/admin/sessions') as Promise<{ sessions: AdminSession[] }>,
       authFetch('/admin/relations') as Promise<{ relations: AdminAccountRelation[] }>,
+      authFetch('/admin/feedback') as Promise<AdminFeedbackEntry[]>,
     ]);
+    feedback.value = f;
     overview.value = o;
     accounts.value = a;
     relations.value = r.relations;
@@ -273,6 +276,20 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
       </article>
 
       <article class="card">
+        <h3>Feedback</h3>
+        <p v-if="!feedback.length" class="hint">Nothing yet. People send it from Send feedback in the menu; it is also posted to Discord when FEEDBACK_DISCORD_WEBHOOK is set.</p>
+        <ul v-else class="list">
+          <li v-for="f in feedback" :key="f.id" class="feedback">
+            <span class="main">
+              <span><em :class="f.kind">{{ f.kind === 'bug' ? 'Bug' : 'Idea' }}</em> {{ f.accountName }}<template v-if="f.email"> · {{ f.email }}</template></span>
+              <small>{{ when(f.createdAt) }}<template v-if="f.page"> · {{ f.page }}</template><template v-if="f.appVersion"> · {{ f.appVersion }}</template> · {{ f.id.slice(0, 8) }}</small>
+            </span>
+            <p class="fb-msg">{{ f.message }}</p>
+          </li>
+        </ul>
+      </article>
+
+      <article class="card">
         <h3>Diagnostic logs</h3>
         <p v-if="!logs.length" class="hint">Nothing uploaded yet. A device sends its log from This device, or from a failed card payment.</p>
         <ul v-else class="list">
@@ -301,6 +318,11 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
 </template>
 
 <style scoped>
+.feedback { display: flex; flex-direction: column; gap: .3rem; }
+.fb-msg { margin: 0; white-space: pre-wrap; font-size: .875rem; }
+.feedback em { font-style: normal; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; padding: .05rem .4rem; border-radius: 999px; margin-right: .3rem; }
+.feedback em.bug { background: var(--zfy-signal-soft); color: var(--zfy-danger); }
+.feedback em.idea { background: var(--zfy-accent-soft); color: var(--zfy-accent-ink); }
 .admin { display: flex; flex-direction: column; gap: .8rem; max-width: 52rem; }
 .head { display: flex; align-items: center; gap: .6rem; }
 .head h2 { flex: 1; margin: 0; font-size: 1.05rem; }

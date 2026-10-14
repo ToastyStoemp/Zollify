@@ -50,6 +50,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'consignment-artist': () => import('@zollify/consignment-artist'),
   commissions: () => import('@zollify/commissions'),
   'peppol-be': () => import('@zollify/peppol-be'),
+  economic: () => import('@zollify/economic'),
 };
 
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */

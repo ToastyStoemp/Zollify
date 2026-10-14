@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -93,10 +93,9 @@ const statsById = computed(() => {
 });
 const stats = (id: string) => statsById.value.get(id) ?? { count: 0, revenue: 0, currency: baseCurrency.value };
 
-function fmtDates(e: SalesEvent): string {
-  if (e.dateStart && e.dateEnd) return `${e.dateStart} → ${e.dateEnd}`;
-  return e.dateStart || e.dateEnd || '';
-}
+const fmtDates = (e: SalesEvent): string => fmtDayRange(e.dateStart, e.dateEnd);
+/** Conventions run days, not weeks: a month-long one is almost always a mistyped end date. */
+const formDays = computed(() => eventDays(form.dateStart, form.dateEnd));
 /**
  * One word for where an event is, as a seller would say it. The till's own
  * event is "Selling now"; an event whose last day has passed but was never
@@ -500,7 +499,7 @@ async function save(): Promise<void> {
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
-          <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ e.dateEnd || e.dateStart }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
+          <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ fmtDayRange(e.dateEnd || e.dateStart) }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -546,7 +545,7 @@ async function save(): Promise<void> {
       <div class="form">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <label><span>Name</span><input v-model="form.name" type="text" required /></label>
-        <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /></label>
+        <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /><small v-if="formDays > 14" class="warn">That is {{ formDays }} days - check the end date.</small></label>
         <p v-else class="hint">A store is open until you close it - no dates. Its stock claims reserve what is on its shelves, and it sells through the till like an event.</p>
         <div class="two">
           <label><span>Street</span><input v-model="form.street" type="text" /></label>

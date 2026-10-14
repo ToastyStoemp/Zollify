@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { editionLabelOf, suggestEditionLabels } from '@zollify/shared';
+import { editionLabelOf, fmtDayRange, suggestEditionLabels } from '@zollify/shared';
 import { DateRangePicker, ModalShell } from '@zollify/ui';
 import {
   createNextEdition,
@@ -30,7 +30,7 @@ const busy = ref(false);
 
 const label = ref('');
 const fmtDates = (e: { dateStart?: string; dateEnd?: string }): string =>
-  e.dateStart && e.dateEnd && e.dateStart !== e.dateEnd ? `${e.dateStart} → ${e.dateEnd}` : e.dateStart || e.dateEnd || 'No dates';
+  fmtDayRange(e.dateStart, e.dateEnd) || 'No dates';
 
 // Rename this edition
 const editLabel = ref(event.value?.edition ?? '');

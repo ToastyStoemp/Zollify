@@ -15,7 +15,7 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
+import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 
 /**
@@ -112,11 +112,7 @@ function daysUntil(iso: string): string {
   return `in ${Math.round(d / 7)} weeks`;
 }
 
-function range(e: { dateStart?: string; dateEnd?: string }): string {
-  const f = (s: string): string => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  if (!e.dateStart) return '';
-  return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} - ${f(e.dateEnd)}` : f(e.dateStart);
-}
+const range = (e: { dateStart?: string; dateEnd?: string }): string => (e.dateStart ? fmtDayRange(e.dateStart, e.dateEnd) : '');
 
 // ── Calendar ─────────────────────────────────────────────────────────────────
 const calMonth = ref(new Date(startOfDay.value.getFullYear(), startOfDay.value.getMonth(), 1));

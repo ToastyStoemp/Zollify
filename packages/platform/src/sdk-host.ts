@@ -10,6 +10,7 @@ import {
   type SaleLineRef,
   type Sdk,
   type SettingsPanel,
+  type SetupStep,
   type ShellUi,
   type StoreSchema,
   type TillLine,
@@ -243,6 +244,13 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       panel(panel: SettingsPanel) {
         guard();
         services.contributions.addSettingsPanel(moduleId, panel);
+      },
+    },
+
+    setup: {
+      step(step: SetupStep) {
+        guard();
+        services.contributions.addSetupStep(moduleId, step);
       },
     },
 

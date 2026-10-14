@@ -1,5 +1,6 @@
 import type { PaymentProvider, PaymentProviderId } from './provider';
 import { MyPos, hasNativePlugin } from '../native/plugins';
+import { sdk } from '../runtime';
 import { manualProvider } from './manual';
 import { myposGo2Provider } from './mypos-go2';
 import { myposCarbonProvider } from './mypos-carbon';
@@ -26,6 +27,12 @@ export function allProviders(): PaymentProvider[] {
 
 export function getProvider(id: PaymentProviderId | undefined): PaymentProvider {
   return providers.find((p) => p.id === id) ?? manualProvider;
+}
+
+/** Makes `id` the card terminal this device uses - what picking it under Settings → Payments does. */
+export async function setActiveProvider(id: PaymentProviderId): Promise<void> {
+  await sdk().config.set('activeProvider', id);
+  onActiveProviderChanged(id);
 }
 
 export async function availableProviders(): Promise<PaymentProvider[]> {

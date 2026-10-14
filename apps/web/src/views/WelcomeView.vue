@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, emptyProfile, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, emptyProfile, guessFromDevice, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -93,6 +93,12 @@ const startArtist = account.value?.profile.artist ?? emptyProfile().artist;
 const artist = ref<ArtistDetails>({ ...startArtist, email: startArtist.email || account.value?.email || '' });
 const currency = ref(account.value?.profile.defaultCurrency ?? 'CHF');
 const links = ref<ProfileLinks>({ ...EMPTY_PROFILE_LINKS, ...account.value?.profile.links });
+// A new business starts from where its device is (time zone, then language) - never over a country already saved.
+const guessed = !artist.value.countryOfOrigin ? guessFromDevice() : null;
+if (guessed) {
+  artist.value.countryOfOrigin = guessed.name;
+  if (guessed.currency) currency.value = guessed.currency;
+}
 
 async function saveWho(): Promise<void> {
   busy.value = true;
@@ -355,6 +361,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         </label>
       </fieldset>
 
+      <p v-if="guessed" class="lede small">Country and currency are a guess from this device's settings - change them if they are wrong.</p>
       <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" compact :show-eori="runsEvents" />
 
       <footer class="actions">
@@ -372,7 +379,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         <label><span>Event name</span><input v-model="eventForm.name" type="text" placeholder="Fantasy Basel 2026" /></label>
         <label><span>Dates</span><DateRangePicker v-model:start="eventForm.dateStart" v-model:end="eventForm.dateEnd" start-label="Starts" end-label="Ends" /></label>
         <label><span>City</span><input v-model="eventForm.city" type="text" placeholder="Basel" /></label>
-        <label><span>Country</span><CountryPicker v-model="eventForm.country" store="name" :placeholder="artist.countryOfOrigin || 'Switzerland'" /><small class="lede small">Sets the VAT and tells you if you need customs papers.</small></label>
+        <label><span>Country</span><CountryPicker v-model="eventForm.country" store="name" :placeholder="artist.countryOfOrigin || 'Country'" /><small class="lede small">Sets the VAT and tells you if you need customs papers.</small></label>
       </div>
       <div v-if="runsStores" class="store-setup">
         <p v-if="storeMade" class="lede ok">Your store is set up.</p>

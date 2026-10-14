@@ -131,6 +131,7 @@ const form = reactive({
   cardFeePct: '' as string | number,
   cardFeeFixed: '' as string | number,
   passCardFees: false,
+  defaultCommissionPct: 40 as string | number,
   presets: {} as Record<string, string | number>,
   artistDiscounts: true,
   artistDiscountMaxPct: 30 as string | number,
@@ -149,6 +150,7 @@ function openSettings(): void {
     cardFeePct: s.cardFeePct || '',
     cardFeeFixed: s.cardFeeFixed || '',
     passCardFees: s.passCardFees,
+    defaultCommissionPct: s.defaultCommissionPct,
     presets: Object.fromEntries(reasons.map(([id]) => [id, s.feePresets[id] ?? ''])),
     artistDiscounts: s.artistDiscounts,
     artistDiscountMaxPct: s.artistDiscountMaxPct,
@@ -169,6 +171,7 @@ async function saveSettings(): Promise<void> {
       cardFeePct: num(form.cardFeePct),
       cardFeeFixed: num(form.cardFeeFixed),
       passCardFees: form.passCardFees,
+      defaultCommissionPct: Math.min(100, num(form.defaultCommissionPct)),
       feePresets: presets,
       artistDiscounts: form.artistDiscounts,
       artistDiscountMaxPct: Math.min(100, Math.max(1, num(form.artistDiscountMaxPct) || 30)),
@@ -326,6 +329,10 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           </div>
           <label class="check"><input v-model="form.passCardFees" type="checkbox" /> Artists carry their part of card costs on their own sales</label>
           <small class="hint">Their part follows the split: on a sale where the artist gets 60%, they carry 60% of what the card cost.</small>
+        </fieldset>
+        <fieldset>
+          <legend>New artists</legend>
+          <label><span>Commission a new artist starts with (%)</span><input v-model="form.defaultCommissionPct" type="number" min="0" max="100" inputmode="decimal" /><small class="hint">You can change it for each artist, and per store.</small></label>
         </fieldset>
         <fieldset>
           <legend>Artists' discounts</legend>

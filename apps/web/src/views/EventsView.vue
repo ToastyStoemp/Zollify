@@ -6,6 +6,7 @@ import { BOOTH_LIMITS, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, sa
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
+import StoreSetupWizard from '../components/StoreSetupWizard.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -234,6 +235,8 @@ const carriedLayout = ref<BoothLayout | undefined>();
 /** Set when Duplicate filled in booth details or a layout, so the dialog can ask for a check. */
 const boothCopied = ref(false);
 
+/** A new store goes through the setup questions; an existing one is edited with the plain form. */
+const settingUp = ref(false);
 function openNew(kind: SalesEventKind = 'event'): void {
   editId.value = null;
   carriedLayout.value = undefined;
@@ -465,7 +468,7 @@ async function save(): Promise<void> {
     <header>
       <h1>{{ storesPage ? 'Stores' : 'Events' }}</h1>
       <div v-if="canEdit" class="header-actions">
-        <button v-if="storesPage" type="button" class="primary" @click="openNew('store')"><Icon name="plus" :size="16" /> New store</button>
+        <button v-if="storesPage" type="button" class="primary" @click="settingUp = true"><Icon name="plus" :size="16" /> New store</button>
         <button v-else type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
       </div>
     </header>
@@ -524,6 +527,7 @@ async function save(): Promise<void> {
       </ul>
     </template>
 
+    <StoreSetupWizard v-if="settingUp" @close="settingUp = false" />
     <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" />
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
     <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />

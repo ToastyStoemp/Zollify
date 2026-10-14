@@ -135,7 +135,7 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
       </ol>
     </div>
 
-    <p v-else-if="way === 'other'" class="hint">Nexi SmartPOS, a ZollBridge desktop terminal and the rest are set up under Settings → Payments once you are in. Your choice there is kept for this device.</p>
+    <p v-else-if="way === 'other'" class="hint">Nexi SmartPOS and the other terminals are set up under Settings → Payments once you are in. Your choice there is kept for this device.</p>
     <p v-else-if="way === 'cash'" class="hint">Card payments are recorded by hand at the till: you confirm the card payment happened and the sale is booked. Add a reader any time under Settings → Payments.</p>
 
     <p v-if="(way === 'sumup' || way === 'mypos') && !usable" class="note">

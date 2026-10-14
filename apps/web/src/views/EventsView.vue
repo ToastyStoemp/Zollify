@@ -495,7 +495,6 @@ async function save(): Promise<void> {
             <strong>{{ e.name }}</strong>
             <span v-if="e.edition" class="pill">{{ e.edition }}</span>
             <span :class="['pill', pill(e).cls]">{{ pill(e).label }}</span>
-            <button v-if="canEdit && pill(e).cls === 'ended'" type="button" class="close-ended" :aria-label="`Close ${e.name}`" @click="close(e)">Close</button>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
@@ -666,8 +665,6 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .card.active { border-color: var(--zfy-accent, #0e7c66); box-shadow: 0 0 0 1px var(--zfy-accent, #0e7c66); }
 .title { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .title strong { font-size: 1rem; }
-.close-ended { margin-left: auto; font: inherit; font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; line-height: normal; border-radius: 999px; padding: .15rem .6rem; border: 1px solid var(--zfy-line); background: transparent; color: var(--zfy-muted); cursor: pointer; }
-.close-ended:hover { border-color: var(--zfy-warning); color: var(--zfy-warning-ink); }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .pill.ended { background: transparent; border: 1px solid var(--zfy-warning); color: var(--zfy-warning-ink); }

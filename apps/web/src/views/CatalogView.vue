@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref } from 'vue';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
-import { HS_CODES, checkPickedFile, csvCell, fmtPrice, localIsoDay } from '@zollify/shared';
+import { HS_CODES, checkPickedFile, crossesCustomsBorder, csvCell, fmtPrice, localIsoDay } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
-import { loader } from '../boot';
+import { contributions } from '../boot';
 import {
   activeEventId,
   allProducts,
   availabilityFor,
   currentAccount,
   deleteImage,
+  eventIsOver,
   deleteProduct,
   freeFor,
   mergeProducts,
@@ -20,6 +21,7 @@ import {
   soldTotal,
   upsertProduct,
   saveFile,
+  visibleEvents,
 } from '@zollify/platform';
 import ProductThumb from '../components/ProductThumb.vue';
 
@@ -99,8 +101,17 @@ function customsIssues(p: Product): string[] {
   return out;
 }
 
-/** Issues are only worth flagging on every row when the booth actually does customs paperwork. */
-const customsOn = loader.isLoaded('customs-ch') || loader.isLoaded('customs-de');
+/** Customs fields and checks only exist for a business with a customs module switched on. */
+const customsOn = computed(() => contributions.routes.some((r) => r.moduleId === 'customs-ch' || r.moduleId === 'customs-de'));
+/**
+ * Issues are only worth flagging on every row when stock is about to cross a
+ * customs border: an event still to come in a country outside the home
+ * country's customs union. Otherwise they wait under the Customs issues filter.
+ */
+const borderAhead = computed(() => {
+  const home = currentAccount.value?.profile.artist.countryOfOrigin;
+  return visibleEvents.value.some((e) => !e.deletedAt && e.status !== 'closed' && !eventIsOver(e) && crossesCustomsBorder(home, e.venue?.country));
+});
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -454,9 +465,9 @@ async function remove(product: Product): Promise<void> {
           <select v-model="filter" aria-label="Show">
             <option value="all">All products</option>
             <option value="low" :disabled="!activeEventId">Low stock at the event</option>
-            <option value="customs">Customs issues</option>
+            <option v-if="customsOn" value="customs">Customs issues</option>
             <option value="notForSale">Not for sale</option>
-            <option value="unlisted">Unlisted</option>
+            <option value="unlisted">Left off lists</option>
           </select>
         </div>
         <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" aria-label="Merge products" @click="openMerge"><Icon name="layers" :size="14" /> <span class="label">Merge</span></button>
@@ -486,7 +497,7 @@ async function remove(product: Product): Promise<void> {
           <button type="button" class="row" @click="canEdit ? openEdit(p) : undefined">
             <ProductThumb :image-id="p.imageId" :alt="p.title" :size="40" />
             <span class="main">
-              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">unlisted</em><em v-if="customsOn && customsIssues(p).length" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
+              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">off lists</em><em v-if="customsOn && (borderAhead || filter === 'customs') && customsIssues(p).length" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
               <span class="sub">{{ p.sku }}<template v-if="p.sku && p.variants.length"> · </template><template v-if="p.variants.length">{{ p.variants.length }} variant{{ p.variants.length === 1 ? '' : 's' }}</template></span>
             </span>
             <span class="side">
@@ -583,7 +594,7 @@ async function remove(product: Product): Promise<void> {
           <small class="hint">The actual rate follows each event's country - see Settings → VAT.</small>
         </label>
 
-        <details class="customs" :open="Boolean(form.tariffNo || form.originCountry || form.year || form.material)">
+        <details v-if="customsOn" class="customs" :open="Boolean(form.tariffNo || form.originCountry || form.year || form.material)">
           <summary>Customs details</summary>
           <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
           <div class="two">
@@ -604,7 +615,7 @@ async function remove(product: Product): Promise<void> {
 
         <div class="toggles">
           <label class="inline"><input v-model="form.forSale" type="checkbox" /> <span>For sale</span></label>
-          <label class="inline"><input v-model="form.unlisted" type="checkbox" /> <span>Unlisted (left off customs documents)</span></label>
+          <label class="inline"><input v-model="form.unlisted" type="checkbox" /> <span>{{ customsOn ? 'Leave off price sheets, labels and customs papers' : 'Leave off price sheets and labels' }}</span></label>
         </div>
 
         <fieldset class="variants">
@@ -623,13 +634,13 @@ async function remove(product: Product): Promise<void> {
             <input v-model="v.price" type="number" step="0.05" min="0" placeholder="Price" aria-label="Variant price" inputmode="decimal" />
             <input v-model.number="v.onHand" type="number" min="0" placeholder="On hand" aria-label="On hand" inputmode="numeric" />
             <span class="vbtns">
-              <label class="vunlisted" :title="`Unlisted (left off customs documents) - ${v.name || 'this variant'}`">
-                <input v-model="v.unlisted" type="checkbox" :aria-label="`Unlisted (left off customs documents) - ${v.name || 'this variant'}`" />
+              <label class="vunlisted" :title="`Leave ${v.name || 'this variant'} off price sheets and labels${customsOn ? ' and customs papers' : ''}`">
+                <input v-model="v.unlisted" type="checkbox" :aria-label="`Leave ${v.name || 'this variant'} off price sheets and labels${customsOn ? ' and customs papers' : ''}`" />
               </label>
-              <button v-if="!isArtwork(form.type) && v.material === undefined" type="button" class="quiet" title="Override material for this variant" :aria-label="`Override material for ${v.name || 'this variant'}`" @click="v.material = ''"><Icon name="plus" :size="12" /></button>
+              <button v-if="customsOn && !isArtwork(form.type) && v.material === undefined" type="button" class="quiet" title="Override material for this variant" :aria-label="`Override material for ${v.name || 'this variant'}`" @click="v.material = ''"><Icon name="plus" :size="12" /></button>
               <button type="button" class="quiet" :aria-label="`Remove variant ${v.name || i + 1}`" @click="removeVariant(i)"><Icon name="x" :size="14" /></button>
             </span>
-            <div v-if="v.material !== undefined" class="vmaterial">
+            <div v-if="customsOn && v.material !== undefined" class="vmaterial">
               <input v-model="v.material" type="text" :placeholder="form.material || 'Material'" :aria-label="`Material override for ${v.name || 'this variant'}`" />
               <button type="button" class="quiet" title="Remove override - use the product's material" :aria-label="`Remove material override for ${v.name || 'this variant'}`" @click="v.material = undefined"><Icon name="x" :size="12" /></button>
             </div>

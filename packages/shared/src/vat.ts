@@ -60,6 +60,19 @@ export function countryCodeOf(country: string | undefined | null): string {
   return COUNTRY_CODES[(country ?? '').trim().toLowerCase()] ?? '';
 }
 
+/**
+ * Whether taking stock from one country to the other means customs papers:
+ * two known countries, not the same, and not both inside the EU's customs
+ * union. Countries by name or code.
+ */
+// ponytail: the EU's union only; Switzerland-Liechtenstein and Monaco-France count as borders here.
+export function crossesCustomsBorder(from: string | undefined | null, to: string | undefined | null): boolean {
+  const a = countryCodeOf(from) || (from ?? '').trim().toUpperCase();
+  const b = countryCodeOf(to) || (to ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(a) || !/^[A-Z]{2}$/.test(b) || a === b) return false;
+  return !(EU_COUNTRIES.includes(a) && EU_COUNTRIES.includes(b));
+}
+
 /** Which rate a product takes: the country's standard rate, or its reduced rate (books, some art). */
 export type TaxClass = 'standard' | 'reduced';
 

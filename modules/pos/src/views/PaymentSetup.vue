@@ -2,14 +2,17 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { getProvider, setActiveProvider } from '../payments/registry';
 import type { PaymentProviderId } from '../payments/provider';
+import { loadSumupCloudStatus } from '../payments/sumup-cloud';
 import { sdk } from '../runtime';
+import SumupSoloPairing from './SumupSoloPairing.vue';
 
 /**
  * First-run setup: how do you take card payments? Picks the terminal this
  * device uses and walks through what it needs - SumUp (account, sign-in,
- * reader) or myPOS (Go2, Carbon or Glass). A reader connects
- * through the Android app, so on a computer this only explains what to do;
- * nothing is saved for a terminal this device cannot talk to. The full list,
+ * reader) or myPOS (Go2, Carbon or Glass). A SumUp Solo works from any
+ * device over the internet when the server is set up for it; every other
+ * reader connects through the Android app, so on a computer this only
+ * explains what to do and saves nothing for a terminal it cannot talk to. The full list,
  * with Nexi and the rest, stays under Settings → Payments.
  */
 type Way = 'sumup' | 'mypos' | 'other' | 'cash';
@@ -17,6 +20,10 @@ type MyposId = 'mypos-go2' | 'mypos-carbon' | 'mypos-glass';
 
 const way = ref<Way | null>(null);
 const mypos = ref<MyposId>('mypos-go2');
+/** A Solo can go over the internet; an Air only over Bluetooth. */
+const sumupReader = ref<'solo' | 'air'>('solo');
+/** The SumUp account is connected on the server (the Solo route). */
+const sumupConnected = ref(false);
 const available = ref<Record<string, boolean>>({});
 const status = ref<{ connected: boolean; detail?: string } | null>(null);
 const busy = ref(false);
@@ -30,17 +37,24 @@ const MYPOS: { id: MyposId; title: string; text: string; needs: string }[] = [
 ];
 
 /** The terminal this choice means for this device, if it is one. */
-const providerId = computed<PaymentProviderId | null>(() => (way.value === 'sumup' ? 'sumup' : way.value === 'mypos' ? mypos.value : way.value === 'cash' ? 'manual' : null));
+const cloud = computed(() => available.value['sumup-cloud'] === true);
+const providerId = computed<PaymentProviderId | null>(() =>
+  way.value === 'sumup' ? (sumupReader.value === 'solo' && cloud.value ? 'sumup-cloud' : 'sumup') : way.value === 'mypos' ? mypos.value : way.value === 'cash' ? 'manual' : null,
+);
 const usable = computed(() => (providerId.value ? available.value[providerId.value] === true : false));
 
 async function refresh(): Promise<void> {
-  for (const id of ['sumup', 'mypos-go2', 'mypos-carbon', 'mypos-glass'] as const) available.value[id] = await getProvider(id).isAvailable();
+  for (const id of ['sumup', 'sumup-cloud', 'mypos-go2', 'mypos-carbon', 'mypos-glass'] as const) available.value[id] = await getProvider(id).isAvailable();
+  sumupConnected.value = providerId.value === 'sumup-cloud' ? ((await loadSumupCloudStatus().catch(() => null))?.connected ?? false) : false;
   status.value = providerId.value && usable.value ? await getProvider(providerId.value).getStatus().catch((e) => ({ connected: false, detail: String(e) })) : null;
 }
 
 onMounted(async () => {
   const saved = await sdk().config.get<string>('activeProvider');
-  if (saved === 'sumup') way.value = 'sumup';
+  if (saved === 'sumup' || saved === 'sumup-cloud') {
+    way.value = 'sumup';
+    sumupReader.value = saved === 'sumup' ? 'air' : 'solo';
+  }
   else if (saved?.startsWith('mypos-') && MYPOS.some((m) => m.id === saved)) {
     way.value = 'mypos';
     mypos.value = saved as MyposId;
@@ -51,10 +65,11 @@ onMounted(async () => {
 onUnmounted(() => clearInterval(timer));
 
 /** Remembers the choice for this device, but only a terminal it can actually use. */
-async function pick(next: Way, device?: MyposId): Promise<void> {
+async function pick(next: Way, device?: MyposId, reader?: 'solo' | 'air'): Promise<void> {
   error.value = null;
   way.value = next;
   if (device) mypos.value = device;
+  if (reader) sumupReader.value = reader;
   await refresh();
   if (providerId.value && (usable.value || providerId.value === 'manual')) await setActiveProvider(providerId.value);
 }
@@ -93,10 +108,38 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <!-- SumUp -->
-    <ol v-if="way === 'sumup'" class="steps">
+    <div v-if="way === 'sumup'" class="devices" role="radiogroup" aria-label="Your SumUp reader">
+      <label :class="{ on: sumupReader === 'solo' }">
+        <input type="radio" name="sumup-reader" :checked="sumupReader === 'solo'" @change="pick('sumup', undefined, 'solo')" />
+        <strong>Solo</strong><span>{{ cloud ? 'Works with any device, a browser too - over Wi-Fi or its own SIM.' : 'Pairs with the Android app over Bluetooth.' }}</span>
+      </label>
+      <label :class="{ on: sumupReader === 'air' }">
+        <input type="radio" name="sumup-reader" :checked="sumupReader === 'air'" @change="pick('sumup', undefined, 'air')" />
+        <strong>Air</strong><span>Pairs with the Android app over Bluetooth.</span>
+      </label>
+    </div>
+
+    <ol v-if="way === 'sumup' && providerId === 'sumup-cloud'" class="steps">
+      <li>
+        <strong>A SumUp account and a Solo</strong>
+        <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and get a Solo. Connect it to Wi-Fi, or use its own SIM.</span>
+      </li>
+      <li :class="{ done: sumupConnected }">
+        <strong>Connect your SumUp account</strong>
+        <span>{{ sumupConnected ? 'Connected.' : 'Sign in with your own SumUp email and password, in a window that closes by itself.' }}</span>
+        <button v-if="!sumupConnected" type="button" :disabled="busy" @click="act('configure')">Connect SumUp</button>
+      </li>
+      <li :class="{ done: status?.connected }">
+        <strong>Pair your Solo</strong>
+        <SumupSoloPairing v-if="sumupConnected" @picked="refresh" />
+        <span v-else>After connecting, type in the code the Solo shows.</span>
+      </li>
+    </ol>
+
+    <ol v-else-if="way === 'sumup'" class="steps">
       <li>
         <strong>A SumUp account and reader</strong>
-        <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and order a Solo or Air reader.</span>
+        <span>Sign up at <a href="https://www.sumup.com/" target="_blank" rel="noopener noreferrer">sumup.com</a> and order a {{ sumupReader === 'air' ? 'Air' : 'Solo' }} reader.</span>
       </li>
       <li :class="{ done: status?.connected }">
         <strong>Sign in to SumUp</strong>

@@ -62,6 +62,8 @@ export {
   onAccountChange,
   currentAccount,
   isAuthenticated,
+  resumeOffline,
+  signedInOffline,
   type LoginResult,
 } from './session';
 export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';

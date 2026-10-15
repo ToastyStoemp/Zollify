@@ -136,7 +136,11 @@ export function mobilepayApi(db: Database.Database, box: SecretBox) {
     });
     const json = ((await res.json().catch(() => ({}))) ?? {}) as { access_token?: unknown; expires_in?: unknown };
     if (!res.ok || typeof json.access_token !== 'string') {
-      if (res.status === 401 || res.status === 403) throw new MobilepayError(401, 'MobilePay did not accept these keys - check the client id, client secret, subscription key and MSN, and that they are for the right environment.');
+      // The token endpoint answers 400 to a malformed client id or subscription key and 401 to a wrong secret: all three mean "not these keys".
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        const why = (json as { detail?: string; error_description?: string }).error_description || (json as { detail?: string }).detail;
+        throw new MobilepayError(401, `MobilePay did not accept these keys${why ? ` (${why})` : ''} - check the client id, client secret, subscription key and MSN, and that they are for the right environment.`);
+      }
       throw new MobilepayError(502, refusal(res.status, json));
     }
     const expires = Number(json.expires_in) || 3600;

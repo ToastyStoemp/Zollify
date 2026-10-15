@@ -88,7 +88,7 @@ Source: momsbekendtgørelsen § 63-64 (BEK 2246 of 30 November 2021, renumbered 
 | A4 | **e-conomic**: book shelf/space rent to its own income account at 25 %, and VAT codes for the 25 % rate on sales | Daily voucher exists; rent lines share the sales account | Bookkeeping act, VAT on rent |
 | A5 | **Self-billing statements**: written self-billing agreement with each artist (a checkbox and a stored text), both CVR numbers, no VAT line for unregistered artists | Artist invoices exist with numbers; VAT status of the artist not modelled | § 58 self-billing |
 | A6 | **Data processing agreement** template and a statement of hosting location | Hosted in Frankfurt, Germany (EU) - fine; the DPA text is not written | GDPR |
-| A7 | **MobilePay** offered as a ready-made payment method for Danish accounts | Possible today as a custom method name (like TWINT); nothing suggests it | Market expectation; cash acceptance is already there |
+| A7 | **MobilePay** QR from the till | Done: the account enters its Vipps MobilePay ePayment keys under Settings → Payments; the till shows a QR, captures on payment. Tap-on-terminal MobilePay already worked as a card | Market expectation; cash acceptance is already there |
 | A8 | **Cash up (kasseafstemning)**: a daily cash count per store that books the difference, so the daily voucher matches the drawer | Cash-up view exists per event; not tied to the e-conomic voucher | Bookkeeping act "daily cash reconciliation" |
 
 A1 is the one real code change for the prospect; A3 and A4 are small; the rest is settings and text.

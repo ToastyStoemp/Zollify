@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
 import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected, setDisplaySubscribed } from '@zollify/platform';
-import { AfterSalePanel, Icon } from '@zollify/ui';
+import { AfterSalePanel, Icon, QrCode } from '@zollify/ui';
 
 /**
  * Customer display - ZollTool's. This device mirrors another register's cart
@@ -130,6 +130,10 @@ const amount = (n: number): string => n.toFixed(2);
       <div class="total">
         <p class="label">Total</p>
         <p class="figure"><span class="cur">{{ current.currency }}</span><span class="num">{{ amount(current.total) }}</span></p>
+      </div>
+      <div v-if="current.payQr" class="payqr">
+        <QrCode :value="current.payQr" :size="260" label="MobilePay QR code" />
+        <p class="hint pulse">Scan with MobilePay to pay</p>
       </div>
     </template>
   </div>

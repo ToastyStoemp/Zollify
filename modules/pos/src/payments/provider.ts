@@ -7,6 +7,7 @@ export type PaymentProviderId =
   | 'sumup'
   | 'sumup-cloud'
   | 'nexi-smartpos'
+  | 'mobilepay'
   /** The built-in test terminal, only while the till is in test mode - never picked as a provider. */
   | 'test';
 

@@ -9,11 +9,14 @@ import type {
   PaymentResultMessage,
   PaymentTriggerMessage,
   ShellUpdateMessage,
+  TseRequestMessage,
+  TseResultMessage,
 } from '@zollify/shared';
 import { getAccessToken, getAccount, getApiBase, refreshAccessToken } from '../session';
 import { announceShellUpdate } from '../shell-updates';
 import { deviceFlavor, deviceId } from './device';
 import { setLiveChannelProbe, syncNow } from './sync';
+import { setTseTransport } from './tse';
 import { loadNotifications, resetNotifications } from './notifications';
 
 /**
@@ -24,7 +27,20 @@ import { loadNotifications, resetNotifications } from './notifications';
  */
 
 export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
-type Incoming = NudgeMessage | NotificationMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage | DisplayListenersMessage;
+type TseMessage = TseRequestMessage | TseResultMessage;
+type Incoming = NudgeMessage | NotificationMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage | TseMessage | DisplayListenersMessage;
+
+// Signing through a main TSE device travels this channel: tse.ts sends and
+// listens through what is handed over here, so it needs no import of this
+// module (which would make a cycle through sync).
+const tseListeners = new Set<(msg: TseMessage) => void>();
+setTseTransport({
+  send: (msg) => sendDirect(msg),
+  on: (handler) => {
+    tseListeners.add(handler);
+    return () => tseListeners.delete(handler);
+  },
+});
 
 const paymentListeners = new Set<(msg: PaymentMessage) => void>();
 /** Point-to-point payment trigger/result messages addressed to this device. */
@@ -121,6 +137,8 @@ async function connect(): Promise<void> {
       displayCarts[msg.from] = { ...msg.cart, deviceId: msg.from, receivedAt: Date.now() };
     } else if ((msg?.type === 'payment.trigger' || msg?.type === 'payment.result') && typeof msg.requestId === 'string') {
       for (const h of paymentListeners) h(msg);
+    } else if ((msg?.type === 'tse.request' || msg?.type === 'tse.result') && typeof msg.requestId === 'string') {
+      for (const h of tseListeners) h(msg);
     }
   };
   ws.onclose = (ev) => {
@@ -181,6 +199,10 @@ export function setDisplaySubscribed(on: boolean): void {
 
 /** Sends a payment trigger or result to one named device. Best effort; nothing is stored. */
 export function sendPaymentMessage(msg: PaymentMessage): boolean {
+  return sendDirect(msg);
+}
+
+function sendDirect(msg: PaymentMessage | TseMessage): boolean {
   if (!socket || socket.readyState !== socket.OPEN) return false;
   socket.send(JSON.stringify(msg));
   return true;

@@ -1,12 +1,15 @@
 import { computed, reactive, ref } from 'vue';
 import type { SaleEvent } from '@zollify/sdk';
-import type { PaymentLeg, Transaction, TxItem } from '@zollify/shared';
-import { openCoreDb, type CoreDb } from './db';
+import type { PaymentLeg, Transaction, TseHandle, TxItem } from '@zollify/shared';
+import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
 import { getProduct } from './catalog';
+import { getSalesEvent } from './sales-events';
+import { signCancellation, signSale, tseRequiredFor } from './tse';
+import { localDay, takeReceiptNumber } from './closings';
 
 /**
  * Recorded sales.
@@ -139,39 +142,29 @@ export function saleToTransaction(
 
 const withConsignor = (consignorId: string | undefined): Pick<TxItem, 'consignorId'> => (consignorId ? { consignorId } : {});
 
-const RECEIPT_SEQ_KEY = 'core.receiptSeq';
-
-/** The series a till numbers its receipts in: the end of its device id, readable on paper. */
-export const receiptSeries = (device: string): string => device.replace(/-/g, '').slice(-6).toUpperCase();
-
 /**
- * The next receipt number on this till, taken inside the write that records
- * the sale so no number is used twice or skipped. One series per till keeps
- * numbering gap-free offline; a device never shares its counter, so the
- * counter is a local setting, not a synced one.
+ * Receipt numbers are taken in receipt-numbers.ts: counted per till, gap-free,
+ * inside the write that records the sale (`tx.receipt`). Sales numbered before
+ * that keep their `receiptNumber` string; the till's count carries on from it.
  */
-async function nextReceiptNumber(db: CoreDb, device: string): Promise<string> {
-  const row = await db.settings.get(RECEIPT_SEQ_KEY);
-  const n = (typeof row?.value === 'number' ? row.value : 0) + 1;
-  await db.settings.put({ key: RECEIPT_SEQ_KEY, value: n });
-  return `${receiptSeries(device)}-${String(n).padStart(4, '0')}`;
-}
-
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
   const who = getAccount();
   const device = await deviceId();
-  const base = toPlain({
+  const tx = toPlain({
     ...saleToTransaction(sale, device, (id) => getProduct(id)?.consignorId),
     // The server stamps this too, from the signed-in user; this copy is so the till that made the sale knows without a round trip.
     ...(who ? { soldBy: { userId: who.userId, email: who.email } } : {}),
   });
+  tx.receipt = await takeReceiptNumber({ day: localDay(tx.timestamp), eventId: tx.eventId, currency: tx.currency });
+  // KassenSichV: a sale in Germany is signed by this device's TSE before it
+  // is stored, over the same figures its receipt prints. A TSE failure is
+  // kept on the sale rather than stopping it.
+  if (tseRequiredFor(getSalesEvent(tx.eventId))) {
+    tx.tse = toPlain(await signSale(tx, sale.tseHandle as TseHandle | undefined));
+  }
 
-  const tx = await db.transaction('rw', db.settings, db.transactions, async () => {
-    const numbered: Transaction = { ...base, receiptNumber: await nextReceiptNumber(db, device) };
-    await db.transactions.put(numbered);
-    return numbered;
-  });
+  await db.transactions.put(tx);
   transactions.set(tx.id, tx);
   await queueOp({ type: 'tx.create', payload: tx });
   return tx;
@@ -191,11 +184,17 @@ export async function revertTransaction(id: string): Promise<void> {
   if (existing.revertedAt) return;
 
   const revertedAt = Date.now();
-  const reverted: Transaction = toPlain({ ...existing, revertedAt, revertedBy: crypto.randomUUID() });
+  // A signed sale is cancelled by a signed receipt of its own, with the
+  // same figures negative - with a TSE there is no other way to cancel.
+  // It is numbered as a receipt of its own, on the till that cancels it.
+  const revertReceipt = await takeReceiptNumber({ day: localDay(revertedAt), eventId: existing.eventId, currency: existing.currency });
+  const revertTse = existing.tse ? toPlain(await signCancellation(existing)) : undefined;
+  const marker = { revertedAt, revertedBy: crypto.randomUUID(), revertReceipt, ...(revertTse ? { revertTse } : {}) };
+  const reverted: Transaction = toPlain({ ...existing, ...marker });
 
   await db.transactions.put(reverted);
   transactions.set(id, reverted);
-  await queueOp({ type: 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
+  await queueOp({ type: 'tx.revert', payload: { id, ...marker } });
 }
 
 /**

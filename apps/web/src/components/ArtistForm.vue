@@ -122,6 +122,14 @@ function fillVat(): void {
         <label><span>Other link label</span><input v-model="links.otherLabel" type="text" maxlength="30" placeholder="Newsletter" /></label>
         <label><span>Other link</span><input v-model="links.otherUrl" type="text" inputmode="url" placeholder="https://" /></label>
       </div>
+      <p class="note">
+        Legal pages: your online receipts and public events page carry an imprint (your name, address and VAT number from above) and a
+        privacy notice. If your website has its own imprint and privacy policy, link them here and the pages point there too.
+      </p>
+      <div class="grid">
+        <label><span>Imprint page</span><input v-model="links.imprintUrl" type="text" inputmode="url" placeholder="https://example.com/imprint" /></label>
+        <label><span>Privacy policy</span><input v-model="links.privacyUrl" type="text" inputmode="url" placeholder="https://example.com/privacy" /></label>
+      </div>
     </details>
   </div>
 </template>

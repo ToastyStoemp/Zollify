@@ -22,6 +22,8 @@ const DEVICE_NAME_KEY = 'core.deviceName';
 const PENDING_ID_KEY = 'core.deviceId.pending';
 
 let cachedId: string | null = null;
+/** The first lookup in flight: callers racing it must not each make up an id of their own. */
+let pending: Promise<string> | null = null;
 
 function requireAccountId(): string {
   const account = getAccount();
@@ -44,6 +46,11 @@ function pendingId(): string {
 export async function deviceId(): Promise<string> {
   if (cachedId) return cachedId;
   if (!getAccount()) return pendingId();
+  pending ??= readOrCreateId().finally(() => (pending = null));
+  return pending;
+}
+
+async function readOrCreateId(): Promise<string> {
   const db = openCoreDb(requireAccountId());
   const row = await db.settings.get(DEVICE_ID_KEY);
   const existing = row?.value as string | undefined;
@@ -85,4 +92,5 @@ export function deviceFlavor(): string {
 
 export function resetDeviceCache(): void {
   cachedId = null;
+  pending = null;
 }

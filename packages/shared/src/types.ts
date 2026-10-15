@@ -1,6 +1,7 @@
 /** Data model v2 - shared between app and server. Grows in Phase 1/3. */
 import type { BoothLayout } from './booth-layout';
 import type { EventVat, SaleTax, TaxClass } from './vat';
+import type { SaleTse } from './tse';
 
 export type EventStatus = 'planned' | 'active' | 'closed';
 
@@ -376,11 +377,10 @@ export interface Transaction {
    */
   receiptToken?: string;
   /**
-   * The number printed on the receipt: `<series>-<count>`, where the series
-   * is the till that made the sale and the count runs on without gaps on that
-   * till. Invoice rules (DK momsbekendtgørelsen § 64, DE GoBD, BE) want a
-   * sequential number per series; a random id does not pass. Absent on sales
-   * made before numbering - those show the end of the id instead.
+   * The earlier form of the receipt number, `<series>-<count>` with the series
+   * taken from the till's device id. Only on sales numbered before `receipt`
+   * took over; still printed as it was. Sales from before any numbering show
+   * the end of the id instead.
    */
   receiptNumber?: string;
   /**
@@ -397,6 +397,85 @@ export interface Transaction {
   tax?: SaleTax;
   /** Who rang it up - set by the server from the signed-in user, so staff cash-ups add up per person. */
   soldBy?: { userId: string; email: string | null };
+  /** KassenSichV: the TSE signature of this sale, or why there is none. Only on sales a TSE had to sign. */
+  tse?: SaleTse;
+  /** The TSE signature of the cancelling receipt, when a signed sale was reverted. */
+  revertTse?: SaleTse;
+  /** The receipt number this sale was given by its till. Absent on sales from before receipts were numbered. */
+  receipt?: ReceiptNumber;
+  /** The cancelling receipt's own number, when reverted - a cancellation is a receipt of its own. */
+  revertReceipt?: ReceiptNumber;
+}
+
+/**
+ * A till's closing (Kassenabschluss, DSFinV-K "Z"): the receipts it took
+ * since its previous closing, closed once and never changed. Every receipt
+ * belongs to exactly one closing; the tax export is organised by them.
+ *
+ * Made by the till itself - when the day, the event or the currency changes
+ * before its next receipt, at start-up on a new day, or by hand - so its
+ * numbers never collide with another device's.
+ */
+export interface CashClosing {
+  id: string;
+  till: string;
+  /** Z_NR: counts up per till from 1, never reset. */
+  number: number;
+  createdAt: number;
+  /** The local day its receipts were taken on, YYYY-MM-DD. */
+  businessDay: string;
+  /** The receipt numbers on the till it covers, both included. */
+  firstReceipt: number;
+  lastReceipt: number;
+  eventId: string;
+  currency: string;
+  deviceId: string;
+  /** What the till is and runs, for the export's master data. */
+  device: { brand: string; model: string; software: string; version: string };
+  /** Figures at closing time, so an export can be checked against them. */
+  receipts: number;
+  total: number;
+  cash: number;
+}
+
+/**
+ * A receipt's number: counted up per till, without gaps, as German (and
+ * Austrian) till rules expect. `till` names the till that counted it, so
+ * two devices on one account never print the same receipt number.
+ */
+export interface ReceiptNumber {
+  till: string;
+  number: number;
+}
+
+/** Why cash went into or out of the till - the DSFinV-K business case it is booked as. */
+export type CashMovementReason = 'float' | 'deposit' | 'withdrawal' | 'bank';
+
+/**
+ * Cash put into or taken out of the till that is not a sale: the starting
+ * float, the owner's own money in or out, cash taken to the bank. German
+ * till rules want each one recorded as a receipt of its own, numbered on the
+ * till, signed by the TSE and summed in the day's closing - and it is what
+ * makes the counted box explainable anywhere. Never changed once recorded.
+ */
+export interface CashMovement {
+  id: string;
+  eventId: string;
+  deviceId: string;
+  timestamp: number;
+  /** 'in' adds to the till (float, deposit); 'out' takes from it (withdrawal, bank). */
+  direction: 'in' | 'out';
+  reason: CashMovementReason;
+  /** Always positive; `direction` says which way. */
+  amount: number;
+  currency: string;
+  note?: string;
+  /** Who recorded it, for the cash-up. */
+  by?: { userId: string; email: string | null };
+  /** The receipt number the till gave it. */
+  receipt?: ReceiptNumber;
+  /** KassenSichV: the TSE signature over it, or why there is none. Only when a TSE had to sign. */
+  tse?: SaleTse;
 }
 
 export interface AsCharged {

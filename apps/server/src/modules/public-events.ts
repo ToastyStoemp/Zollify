@@ -8,7 +8,9 @@ import {
   buildBio,
   buildIcs,
   planBoothCleanup,
+  eventsPageLegal,
   splitPublicEvents,
+  type LegalBlock,
   type SalesEvent,
   type StoredEventOverlay,
   type PublicEvent,
@@ -16,6 +18,7 @@ import {
 } from '@zollify/shared';
 import {
   isEnabled,
+  parseProfile,
   reduceEvents,
   type ModuleContext,
   type ModuleServices,
@@ -162,6 +165,7 @@ interface Site {
   upcoming: PublicEvent[];
   past: PublicEvent[];
   base: string;
+  legal: LegalBlock;
 }
 
 /** Everything one public response needs; null when the slug is unknown or the module is off. */
@@ -170,13 +174,16 @@ function loadSite(ctx: PublicModuleContext, req: FastifyRequest, slug: string): 
   if (!accountId || !ctx.isEnabled(accountId)) return null;
   const config = readConfig(ctx.db, accountId);
   const { upcoming, past } = splitPublicEvents(eventsFor(ctx.db, accountId), readOverlays(ctx.db, accountId), config.pastLimit);
+  const org = config.orgName || accountName(ctx.db, accountId);
+  const profile = parseProfile((ctx.db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined)?.profile);
   return {
     accountId,
     config,
-    org: config.orgName || accountName(ctx.db, accountId),
+    org,
     upcoming,
     past,
     base: `${publicOrigin(req)}/p/public-events/${slug}`,
+    legal: eventsPageLegal({ artist: profile.artist, accountName: org, links: profile.links, operator: process.env.LEGAL_OPERATOR }),
   };
 }
 
@@ -236,6 +243,11 @@ h2.sec{font-size:1.05rem;font-weight:700;margin:36px 0 14px;padding-bottom:8px;b
 .past li{padding:10px 0;border-top:1px solid var(--border);color:var(--muted);font-size:.9rem}
 .empty{color:var(--muted);font-size:.92rem;padding:8px 0}
 footer{margin-top:48px;text-align:center;color:var(--muted);font-size:.72rem}
+footer .legal{margin-top:14px;text-align:left;max-width:40rem;margin-left:auto;margin-right:auto}
+footer .legal summary{cursor:pointer;text-align:center}
+footer .legal h3{font-size:.8rem;margin:12px 0 4px;color:var(--ink)}
+footer .legal p{margin:4px 0}
+footer .legal a{color:var(--accent-ink)}
 .view-toggle{display:flex;gap:6px;justify-content:center;margin:20px 0 -6px}
 .view-toggle button{font:inherit;font-weight:700;font-size:.8rem;padding:6px 16px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer}
 .view-toggle button.on{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
@@ -260,6 +272,15 @@ function card(ev: PublicEvent): string {
   const blurb = ev.blurb ? `<div class="meta">${h(ev.blurb)}</div>` : '';
   const link = ev.link ? `<a class="link" href="${h(ev.link)}" target="_blank" rel="noopener">Event details →</a>` : '';
   return `<div class="card">${now}<div class="name">${h(ev.name)}</div><div class="date">${range(ev.start, ev.end)}</div>${loc}${booth}${blurb}${link}</div>`;
+}
+
+/** Imprint and privacy notice, collapsed under the page. The seller's own pages are linked when set. */
+function legalHtml(l: LegalBlock): string {
+  const link = (url: string | undefined, label: string): string => (url ? `<p><a href="${h(url)}" rel="noopener" target="_blank">${label}</a></p>` : '');
+  return `<details class="legal"><summary>Imprint &amp; privacy</summary>
+<h3>Imprint</h3>${l.imprint.map((x) => `<p>${h(x)}</p>`).join('')}${link(l.imprintUrl, 'Full imprint')}
+<h3>Privacy</h3>${link(l.privacyUrl, 'Privacy policy')}${l.privacy.map((x) => `<p>${h(x)}</p>`).join('')}${l.operator ? `<p>Hosted by ${h(l.operator)}, who processes this page on the publisher's behalf.</p>` : ''}
+</details>`;
 }
 
 function renderPage(site: Site): string {
@@ -303,7 +324,8 @@ function renderPage(site: Site): string {
   <div id="zev-view-cal" class="cal"></div>
   ${pastHtml}
 </main>
-<footer>Events update automatically from our sales system.</footer>
+<footer>Events update automatically from our sales system.
+${legalHtml(site.legal)}</footer>
 </div>
 <script type="application/json" id="zev-data">${calendarData}</script>
 <script src="${site.base}/calendar.js" defer></script>

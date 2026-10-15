@@ -19,6 +19,8 @@ import {
   type ReceiptSocials,
   type SalesEvent,
   type Transaction,
+  receiptLegal,
+  type LegalBlock,
 } from '@zollify/shared';
 import {
   decodeUpload,
@@ -31,6 +33,9 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { registerDsfinvk } from './dsfinvk/route';
+import { FISKALY_BASE, FiskalyApi } from './fiskaly/api';
+import { migrateFiskaly, registerFiskaly } from './fiskaly/route';
 import { POW_SOLVER_JS } from './pow-client';
 import { nextPublicEvents } from './public-events';
 import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
@@ -240,6 +245,13 @@ function eventName(db: Database.Database, accountId: string, eventId: string): s
   return ev.deletedAt ? '' : String(ev.name ?? '');
 }
 
+/** The legal block: the seller as controller, their own imprint and privacy pages when set, and who hosts the server. */
+function legalFor(db: Database.Database, accountId: string): LegalBlock {
+  const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as { name: string; profile: string | null } | undefined;
+  const profile = parseProfile(row?.profile);
+  return receiptLegal({ artist: profile.artist, accountName: row?.name ?? '', links: profile.links, operator: process.env.LEGAL_OPERATOR }, TTL_DAYS);
+}
+
 function seller(db: Database.Database, accountId: string, tx: Transaction): PublicReceipt['seller'] {
   const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
     | { name: string; profile: string | null }
@@ -262,7 +274,12 @@ export interface PublicReceipt {
   seller: { name: string; address: string[]; vatId?: string; vatLabel?: string };
   event: string;
   at: number;
+  /** The till's receipt number, or - on a sale from before numbering - a short reference. */
   number: string;
+  /** The till that numbered it; absent with a short reference. */
+  till?: string;
+  /** The cancelling receipt's number, when the sale was cancelled. */
+  cancelledBy?: { number: string; till: string };
   currency: string;
   lines: { title: string; variant?: string; qty: number; amount: number; /** VAT rate letter, when a sale has more than one. */ vat?: string }[];
   discounts: { name: string; amount: number }[];
@@ -277,6 +294,32 @@ export interface PublicReceipt {
   nextEvents?: { name: string; city: string; start: string; end: string }[];
   /** VAT included per rate, or the exemption the sale was made under. */
   vat: { rows: { letter?: string; rate: string; net: number; vat: number }[]; exemptNote?: string; exNumber?: string };
+  /** KassenSichV: what a receipt in Germany must show of the TSE signature, or that the TSE was out. */
+  tse?: PublicTse;
+  revertTse?: PublicTse;
+  /** Imprint and privacy notice - the seller's own pages when set, the built-in text otherwise. */
+  legal: LegalBlock;
+}
+
+type PublicTse =
+  | { failed: true }
+  | { transactionNumber: number; signatureCounter: number; start: string; finish: string; clientId: string; serial: string; signature: string; test?: true };
+
+/** Only the fields a German receipt carries - never the failure reason, which can name the device. */
+function publicTse(tse: Transaction['tse']): PublicTse | undefined {
+  if (!tse) return undefined;
+  if ('failed' in tse) return { failed: true };
+  const s = tse.signed;
+  return {
+    transactionNumber: Number(s.transactionNumber) || 0,
+    signatureCounter: Number(s.signatureCounter) || 0,
+    start: String(s.start).slice(0, 30),
+    finish: String(s.finish).slice(0, 30),
+    clientId: String(s.clientId).slice(0, 60),
+    serial: String(s.serial).slice(0, 128),
+    signature: String(s.signature).slice(0, 400),
+    ...(s.test ? { test: true as const } : {}),
+  };
 }
 
 /** Lines at the till's price, in the currency the customer paid - see receiptBreakdown. */
@@ -305,7 +348,7 @@ function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string
 /** The whitelist. Anything not copied here does not leave the server. */
 export function publicReceipt(
   tx: Transaction,
-  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'> },
+  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'>; legal: LegalBlock },
 ): PublicReceipt {
   const rows = vatBreakdown(tx);
   const exempt = tx.tax?.exempt === true;
@@ -314,7 +357,12 @@ export function publicReceipt(
     seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
-    number: tx.receiptNumber ?? tx.id.slice(-8).toUpperCase(),
+    // Numbered per till; sales numbered the earlier way keep that number, older ones the end of the id.
+    number: tx.receipt ? String(Number(tx.receipt.number) || 0) : (tx.receiptNumber ?? tx.id.slice(-8).toUpperCase()),
+    ...(tx.receipt ? { till: String(tx.receipt.till).slice(0, 60) } : {}),
+    ...(tx.revertedAt && tx.revertReceipt
+      ? { cancelledBy: { number: String(Number(tx.revertReceipt.number) || 0), till: String(tx.revertReceipt.till).slice(0, 60) } }
+      : {}),
     currency: tx.currency,
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
@@ -332,7 +380,10 @@ export function publicReceipt(
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
       footer: (extra.branding?.footer ?? '').split('\n').map((l) => l.trim()).filter(Boolean).slice(0, 12),
     },
+    ...(publicTse(tx.tse) ? { tse: publicTse(tx.tse) } : {}),
+    ...(publicTse(tx.revertTse) ? { revertTse: publicTse(tx.revertTse) } : {}),
     ...extra.footer,
+    legal: extra.legal,
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -398,6 +449,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .good { color: var(--accent); }
 .row.muted { color: var(--muted); font-size: .85rem; margin: .1rem 0; }
 .row.net { padding-left: 1rem; }
+.mono { font-family: ui-monospace, monospace; font-size: .7rem; word-break: break-all; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .linkrow { margin: .3rem 0; overflow-wrap: anywhere; }
 .linkrow a { color: var(--accent); }
@@ -405,7 +457,12 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
 .actions { display: flex; justify-content: center; margin-top: 1rem; }
-@media print { body { background: #fff; } .card { border: 0; } .actions { display: none; } }
+.legal { margin-top: 1.25rem; color: var(--muted); font-size: .78rem; }
+.legal summary { cursor: pointer; text-align: center; }
+.legal h2 { font-size: .85rem; margin: 1rem 0 .3rem; color: var(--ink); }
+.legal p { margin: .3rem 0; }
+.legal a { color: var(--accent); }
+@media print { body { background: #fff; } .card { border: 0; } .actions, .legal { display: none; } }
 </style>
 </head>
 <body>
@@ -493,6 +550,7 @@ ${POW_SOLVER_JS}
     receiptEl.appendChild(el('hr'));
     if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
+    if (r.till) receiptEl.appendChild(el('p', 'muted', 'Receipt no. ' + r.number + ' · Till ' + r.till));
     receiptEl.appendChild(el('hr'));
     r.lines.forEach(function (l) {
       receiptEl.appendChild(row(l.qty + ' × ' + l.title + (l.variant ? ' · ' + l.variant : ''), money(l.amount, r.currency) + (l.vat ? ' ' + l.vat : '')));
@@ -512,6 +570,22 @@ ${POW_SOLVER_JS}
     });
     if (vat.exemptNote) receiptEl.appendChild(el('p', 'muted c', vat.exemptNote));
     if (vat.exNumber) receiptEl.appendChild(el('p', 'muted c', 'EX: ' + vat.exNumber));
+    var c = r.cancelledBy;
+    [['TSE', r.tse, r.till], ['TSE - Storno' + (c ? ' - receipt no. ' + c.number : ''), r.revertTse, c && c.till]].forEach(function (pair) {
+      var t = pair[1];
+      if (!t) return;
+      receiptEl.appendChild(el('hr'));
+      receiptEl.appendChild(el('p', 'muted', pair[0]));
+      if (t.failed) { receiptEl.appendChild(el('p', 'muted', 'TSE ausgefallen - Beleg ohne TSE-Signatur')); return; }
+      if (t.test) receiptEl.appendChild(el('p', 'muted', 'Test-TSE - nicht zertifiziert'));
+      receiptEl.appendChild(row('Transaktion', String(t.transactionNumber), 'muted'));
+      receiptEl.appendChild(row('Signaturzähler', String(t.signatureCounter), 'muted'));
+      receiptEl.appendChild(row('Start', new Date(t.start).toLocaleString(), 'muted'));
+      receiptEl.appendChild(row('Ende', new Date(t.finish).toLocaleString(), 'muted'));
+      if (t.clientId !== pair[2]) receiptEl.appendChild(row('Kasse', t.clientId, 'muted'));
+      receiptEl.appendChild(el('p', 'muted mono', 'TSE ' + t.serial));
+      receiptEl.appendChild(el('p', 'muted mono', 'Signatur ' + t.signature));
+    });
     r.payments.forEach(function (p) {
       receiptEl.appendChild(row(p.label, money(p.amount, r.currency)));
       if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
@@ -519,12 +593,30 @@ ${POW_SOLVER_JS}
     receiptEl.appendChild(el('hr'));
     footer(r);
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
-    receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    if (c) receiptEl.appendChild(el('p', 'muted c', 'Cancelled by receipt no. ' + c.number + (c.till !== r.till ? ' (till ' + c.till + ')' : '')));
+    if (!r.till) receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    legal(r.legal);
     statusEl.hidden = true;
     receiptEl.hidden = false;
     printBtn.hidden = false;
   }
   printBtn.onclick = function () { window.print(); };
+
+  // Imprint and privacy notice, below the receipt. The seller's own pages are
+  // linked when set; the built-in text is shown otherwise. Links only when https.
+  function legal(l) {
+    if (!l) return;
+    var box = el('details', 'legal');
+    box.appendChild(el('summary', '', 'Imprint & privacy'));
+    box.appendChild(el('h2', '', 'Imprint'));
+    (l.imprint || []).forEach(function (line) { box.appendChild(el('p', '', line)); });
+    if (typeof l.imprintUrl === 'string' && /^https:\/\//.test(l.imprintUrl)) { var a = el('a', '', 'Full imprint'); a.href = l.imprintUrl; a.rel = 'noopener'; a.target = '_blank'; box.appendChild(el('p')).appendChild(a); }
+    box.appendChild(el('h2', '', 'Privacy'));
+    if (typeof l.privacyUrl === 'string' && /^https:\/\//.test(l.privacyUrl)) { var b = el('a', '', 'Privacy policy'); b.href = l.privacyUrl; b.rel = 'noopener'; b.target = '_blank'; box.appendChild(el('p')).appendChild(b); }
+    (l.privacy || []).forEach(function (line) { box.appendChild(el('p', '', line)); });
+    if (l.operator) box.appendChild(el('p', '', 'Hosted by ' + l.operator + ', who processes this page on the seller\'s behalf.'));
+    document.querySelector('main').appendChild(box);
+  }
 
   function fail(res) {
     if (res.status === 429) say('Too many attempts from this network. Please try again later.');
@@ -559,6 +651,34 @@ function ipOf(req: FastifyRequest): string {
   return req.ip;
 }
 
+export interface PosServerOptions {
+  /** For tests: fiskaly's API stand-in. */
+  fiskaly?: FiskalyApi;
+}
+
+/**
+ * The till's server half. Built with the server secret: it keeps the
+ * account's fiskaly credentials encrypted (see fiskaly/route.ts), next to
+ * the payment providers' own.
+ */
+export function posServerModule(jwtSecret: string, options: PosServerOptions = {}): ServerModule {
+  const base = receiptsServerModule(jwtSecret);
+  const box = makeSecretBox(jwtSecret, 'zollify-module-credentials-v1');
+  const fiskaly = options.fiskaly ?? new FiskalyApi((url, init) => fetch(url, init), process.env.FISKALY_BASE_URL || FISKALY_BASE);
+  return {
+    ...base,
+    migrate(db) {
+      base.migrate!(db);
+      migrateFiskaly(db);
+    },
+    routes: (ctx: ModuleContext) => async (app) => {
+      await base.routes!(ctx)(app, {});
+      // KassenSichV: the fiskaly cloud TSE, signed here.
+      registerFiskaly(app, ctx, box, fiskaly);
+    },
+  };
+}
+
 /** The POS module's server half. The secret encrypts each account's Poynt app key at rest. */
 export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtSecret, 'zollify-smartpos-v1')): ServerModule => ({
   id: MODULE_ID,
@@ -582,6 +702,9 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     // server hands out its own and a merchant only signs in. Null = each device enters one.
     app.get('/sumup/config', async () => ({ affiliateKey: process.env.SUMUP_AFFILIATE_KEY?.trim() || null }));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
+
+    // KassenSichV: the DSFinV-K export of the till records.
+    registerDsfinvk(app, ctx);
 
     app.put<{ Body: { logo?: unknown; footer?: unknown } }>('/branding', { bodyLimit: base64BodyLimit(maxBytesFor('logo'), 4096) }, async (req, reply) => {
       const who = ctx.identity(req);
@@ -675,6 +798,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
           footer: footerExtras(ctx.db, found.accountId),
+          legal: legalFor(ctx.db, found.accountId),
         });
       },
     );

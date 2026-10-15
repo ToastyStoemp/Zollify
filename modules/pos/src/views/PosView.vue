@@ -849,11 +849,15 @@ function holdAfterSale(ms: number): void {
 }
 async function showAfterSale(sale: SaleEvent, receiptUrl: string | undefined): Promise<void> {
   const [prefs, canPrint, logo] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false), screenLogo().catch(() => undefined)]);
-  const url = prefs.receiptQr ? receiptUrl : undefined;
+  // Belegausgabepflicht (§ 146a AO): at an event in Germany every customer is
+  // offered a receipt, whatever this device's after-sale settings say - the QR
+  // to the online receipt on screen, paper on request through the print button.
+  const mustOffer = sdk().tse?.required(sale.eventId) ?? false;
+  const url = prefs.receiptQr || mustOffer ? receiptUrl : undefined;
   if (!prefs.thankYou && !url) return;
   // An auto-print may already be under way by the time this resolves.
   const print = printing.get(sale.saleId) ?? 'idle';
-  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo, canPrint, print };
+  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou || mustOffer, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo, canPrint, print };
   // Offering to print means waiting for an answer, same as a QR to scan.
   holdAfterSale(url || canPrint ? 30_000 : 4000);
 }

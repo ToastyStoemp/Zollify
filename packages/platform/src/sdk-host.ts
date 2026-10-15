@@ -36,6 +36,7 @@ import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessag
 import { deviceId } from './core/device';
 import { fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
+import { abortTse, beginTse, tseRequiredFor } from './core/tse';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import {
   availabilityFor,
@@ -188,6 +189,18 @@ const coreData: import('@zollify/sdk').DataApi = {
 const CONFIG_STORE = 'config';
 const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 
+/**
+ * A module's saved config value, read by the shell - for screens that look
+ * across modules (the legal checklist reading the till's payment methods).
+ * Same store the module's own sdk.config uses; undefined when unset or signed out.
+ */
+export async function readModuleConfig<T>(moduleId: string, key: string): Promise<T | undefined> {
+  const account = getAccount();
+  if (!account) return undefined;
+  const row = await openModuleDb(account.accountId, `${moduleId}-config`, CONFIG_SCHEMA).table<{ key: string; value: unknown }>(CONFIG_STORE).get(key);
+  return row?.value as T | undefined;
+}
+
 /** The open till, when there is one - the module that sells registers here. */
 let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
 /** Modules that can resolve a code the catalogue does not know. */
@@ -308,6 +321,12 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       const off = onAccountChange(handler);
       subscriptions.push(off);
       return off;
+    },
+
+    tse: {
+      required: (eventId) => tseRequiredFor(eventId ? getSalesEvent(eventId) : undefined),
+      begin: () => beginTse(),
+      abort: (handle) => abortTse(handle),
     },
 
     display: {

@@ -44,7 +44,7 @@ export {
   type LoadStatus,
   type LoaderOptions,
 } from './loader';
-export { createModuleHost, type ModuleHost, type HostServices } from './sdk-host';
+export { createModuleHost, readModuleConfig, type ModuleHost, type HostServices } from './sdk-host';
 export {
   applyLogin,
   applyUser,

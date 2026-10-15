@@ -47,6 +47,13 @@ export function mintReceiptToken(): string | undefined {
   return mint?.();
 }
 
+/** Any text as a printable QR (base64 PNG, paper width), or none on an older shell. */
+export async function qrPng(value: string, codeDots?: number): Promise<string | undefined> {
+  const raster = (ui as Record<string, unknown>).qrPngBase64 as ((value: string, opts?: { codeDots?: number }) => Promise<string>) | undefined;
+  if (!raster) return undefined;
+  return raster(value, codeDots ? { codeDots } : undefined).catch(() => undefined);
+}
+
 /** The receipt link as a printable QR (base64 PNG, paper width), or none. */
 export async function receiptQrPng(token: string | undefined): Promise<string | undefined> {
   const url = receiptUrl(token);

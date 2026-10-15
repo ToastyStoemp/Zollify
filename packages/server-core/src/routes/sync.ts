@@ -74,7 +74,7 @@ export function registerSyncRoutes(
     const p = op.payload as Record<string, unknown> | null;
     if (!p) return undefined;
     if (op.type === 'event.upsert') return p.id as string;
-    return p.eventId as string | undefined; // event.close, tx.create, stock.set
+    return p.eventId as string | undefined; // event.close, tx.create, stock.set, closing.create, cash.move
   };
   // Which ops a restricted user is allowed to RECEIVE.
   function opReadable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
@@ -102,7 +102,8 @@ export function registerSyncRoutes(
       const eid = (txEventOf.get(accountId, txId) as { eid?: string } | undefined)?.eid;
       return !!eid && allowed.has(eid);
     }
-    if (op.type === 'tx.create' || op.type === 'stock.set') {
+    // A helper's till closes its own days at the events it sells at.
+    if (op.type === 'tx.create' || op.type === 'stock.set' || op.type === 'closing.create' || op.type === 'cash.move') {
       const eid = eventIdOf(op);
       return !!eid && allowed.has(eid);
     }

@@ -1,9 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { CURRENCY_COINS, denominationsFor, fmtPrice, round2, seesSalesTotals } from '@zollify/shared';
+import type { CashMovementReason } from '@zollify/shared';
 import {
+  CASH_MOVEMENT_REASONS,
   activeEventId,
+  allClosings,
+  cashMovementTotals,
+  cashMovementsFor,
+  closeTillNow,
+  recordCashMovement,
+  kassensichvVisible,
   currentAccount,
+  openReceipts,
+  tillId,
   getSalesEvent,
   recentTransactions,
   visibleEvents,
@@ -80,7 +90,7 @@ const currency = computed(
 const denominations = computed(() => denominationsFor(currency.value));
 
 /** Nothing typed yet: the difference is not a finding, just arithmetic. */
-const hasCounted = computed(() => counted.value.size > 0 || float.value > 0);
+const hasCounted = computed(() => counted.value.size > 0 || openingFloat.value > 0);
 
 const takings = computed(() => {
   let cash = 0;
@@ -106,8 +116,38 @@ const countedTotal = computed(() =>
   round2([...counted.value.entries()].reduce((sum, [value, qty]) => sum + value * qty, 0)),
 );
 
-/** What should be in the box: the float you started with plus cash taken. */
-const expected = computed(() => round2(float.value + takings.value.cash));
+// ── Cash in and out (Einlagen/Entnahmen) ───────────────────────────────────
+// Recorded movements are receipts of their own on the till - numbered, signed
+// at an event in Germany, counted into the closing and the tax export. The
+// typed float above stays for tills that do not record them.
+const movements = computed(() => cashMovementsFor(eventId.value).filter((m) => m.currency === currency.value));
+const moved = computed(() => cashMovementTotals(eventId.value, currency.value));
+/** A recorded float replaces the typed one, so the box is not explained twice. */
+const openingFloat = computed(() => (moved.value.float > 0 ? moved.value.float : float.value));
+const moveReason = ref<CashMovementReason>('float');
+const moveAmount = ref<number | null>(null);
+const moveNote = ref('');
+const moving = ref(false);
+const moveError = ref<string | null>(null);
+async function addMovement(): Promise<void> {
+  moving.value = true;
+  moveError.value = null;
+  try {
+    await recordCashMovement({ eventId: eventId.value, reason: moveReason.value, amount: moveAmount.value ?? 0, currency: currency.value, note: moveNote.value });
+    moveAmount.value = null;
+    moveNote.value = '';
+    await refreshTill();
+  } catch (err) {
+    moveError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    moving.value = false;
+  }
+}
+const reasonLabel = (id: CashMovementReason): string => CASH_MOVEMENT_REASONS.find((r) => r.id === id)?.label ?? id;
+const fmtWhen = (ms: number): string => new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+/** What should be in the box: the float you started with, plus cash taken, plus cash put in less cash taken out. */
+const expected = computed(() => round2(openingFloat.value + takings.value.cash + moved.value.moved));
 
 const variance = computed(() => round2(countedTotal.value - expected.value));
 
@@ -126,6 +166,33 @@ function setCount(value: number, qty: number): void {
   if (qty > 0) next.set(value, Math.floor(qty));
   else next.delete(value);
   counted.value = next;
+}
+
+// ── Closing the day on this till (Kassenabschluss) ─────────────────────────
+// Every receipt this device took since its last closing goes into one. The
+// till also closes itself when the day, event or currency changes, and at
+// start-up on a new day - this is for closing at the end of a day by hand.
+const till = ref('');
+const open = ref(0);
+const closing = ref(false);
+const closeError = ref<string | null>(null);
+const lastClosing = computed(() => allClosings().find((c) => c.till === till.value) ?? null);
+async function refreshTill(): Promise<void> {
+  till.value = await tillId();
+  open.value = await openReceipts();
+}
+onMounted(() => void refreshTill().catch(() => undefined));
+async function closeDay(): Promise<void> {
+  closing.value = true;
+  closeError.value = null;
+  try {
+    await closeTillNow();
+    await refreshTill();
+  } catch (err) {
+    closeError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    closing.value = false;
+  }
 }
 
 function label(value: number): string {
@@ -185,12 +252,67 @@ function isCoin(value: number): boolean {
         </li>
       </ul>
 
+      <div v-if="kassensichvVisible()" class="close-day">
+        <h2>Close the day</h2>
+        <p class="sub">
+          This device ({{ till }}) has taken {{ open }} receipt{{ open === 1 ? '' : 's' }} since its last closing.
+          Closing files them - numbered, never changed - for the tax export. The till also closes on its own when the day or event changes.
+        </p>
+        <p v-if="lastClosing" class="sub">
+          Last closing: no. {{ lastClosing.number }}, {{ lastClosing.businessDay }} - {{ lastClosing.receipts }} receipt{{ lastClosing.receipts === 1 ? '' : 's' }},
+          {{ fmtPrice(lastClosing.total, lastClosing.currency || currency) }}
+        </p>
+        <p v-if="closeError" class="bad" role="alert">{{ closeError }}</p>
+        <div><button type="button" :disabled="closing || open === 0" @click="closeDay">{{ closing ? 'Closing…' : 'Close the day' }}</button></div>
+      </div>
+
+      <div v-if="kassensichvVisible()" class="close-day movements">
+        <h2>Cash in and out</h2>
+        <p class="sub">
+          Starting cash, money put in or taken out, cash to the bank: each is a receipt of its own on this till, signed in Germany and
+          counted into the closing - so the box can be explained to an inspector.
+        </p>
+        <form class="move-form" @submit.prevent="addMovement">
+          <label>
+            <span>What</span>
+            <select v-model="moveReason">
+              <option v-for="r in CASH_MOVEMENT_REASONS" :key="r.id" :value="r.id">{{ r.label }}</option>
+            </select>
+          </label>
+          <label>
+            <span>Amount ({{ currency }})</span>
+            <input v-model.number="moveAmount" type="number" min="0.01" step="0.01" required />
+          </label>
+          <label class="note">
+            <span>Note</span>
+            <input v-model="moveNote" type="text" maxlength="200" placeholder="Optional" />
+          </label>
+          <button type="submit" :disabled="moving || !moveAmount">{{ moving ? 'Recording…' : 'Record' }}</button>
+        </form>
+        <p v-if="moveError" class="bad" role="alert">{{ moveError }}</p>
+        <ul v-if="movements.length" class="move-list">
+          <li v-for="m in movements" :key="m.id">
+            <span class="when">{{ fmtWhen(m.timestamp) }}</span>
+            <span>{{ reasonLabel(m.reason) }}<template v-if="m.note"> - {{ m.note }}</template></span>
+            <span v-if="m.receipt" class="no">no. {{ m.receipt.number }}</span>
+            <strong :class="{ bad: m.direction === 'out' }">{{ m.direction === 'out' ? '-' : '+' }}{{ fmtPrice(m.amount, m.currency) }}</strong>
+            <span v-if="m.tse && 'failed' in m.tse" class="bad">not signed</span>
+          </li>
+        </ul>
+      </div>
+
       <div class="count">
         <h2>Count the box</h2>
-        <label class="float">
+        <label v-if="moved.float > 0" class="float">
+          <span>Opening float</span>
+          <strong>{{ fmtPrice(moved.float, currency) }}</strong>
+          <span class="sub">recorded as starting cash</span>
+        </label>
+        <label v-else class="float">
           <span>Opening float</span>
           <input v-model.number="float" type="number" min="0" step="0.01" />
         </label>
+        <p v-if="moved.moved !== 0" class="hint">Cash put in less taken out: {{ moved.moved > 0 ? '+' : '' }}{{ fmtPrice(moved.moved, currency) }}</p>
 
         <div class="denoms">
           <label v-for="value in denominations" :key="value" :class="{ coin: isCoin(value) }">
@@ -244,8 +366,19 @@ h2 { margin: 0; font-size: 1.05rem; }
 .totals strong { font-size: 1.2rem; font-variant-numeric: tabular-nums; }
 .totals .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .count { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .75rem; max-width: 34rem; }
+.close-day { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: 1rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .5rem; max-width: 34rem; }
+.close-day .sub { margin: 0; font-size: .875rem; color: var(--zfy-muted, #5a6472); }
 .float { display: flex; align-items: center; gap: .5rem; font-size: .875rem; }
 .float input { width: 8rem; }
+.float .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
+.move-form { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; align-items: end; }
+.move-form label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
+.move-form label.note { grid-column: 1 / -1; }
+.move-form button { grid-column: 1 / -1; justify-self: start; }
+.move-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
+.move-list li { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; }
+.move-list .when, .move-list .no { color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
+.move-list strong { margin-left: auto; font-variant-numeric: tabular-nums; }
 .denoms { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.5rem, 1fr)); gap: .4rem; }
 .denoms label { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 .denoms label > span { min-width: 2.4rem; font-variant-numeric: tabular-nums; }

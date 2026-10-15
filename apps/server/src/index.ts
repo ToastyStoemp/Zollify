@@ -9,7 +9,7 @@ import { publicEventsServerModule } from './modules/public-events';
 import { commissionsServerModule } from './modules/commissions';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
-import { receiptsServerModule } from './modules/receipts';
+import { posServerModule } from './modules/receipts';
 import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
 import { peppolServerModule } from './modules/peppol-be';
 import { economicServerModule } from './modules/economic';
@@ -75,7 +75,7 @@ async function main(): Promise<void> {
     publicEventsServerModule,
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
-    receiptsServerModule(jwtSecret),
+    posServerModule(jwtSecret),
     consignmentServerModule,
     consignmentArtistServerModule,
     commissionsServerModule,

@@ -24,6 +24,7 @@ const backup = await import('../core/backup');
 const catalog = await import('../core/catalog');
 const events = await import('../core/sales-events');
 const device = await import('../core/device');
+const tse = await import('../core/tse');
 const images = await import('../core/images');
 
 function sale(over: Partial<SaleEvent> = {}): SaleEvent {
@@ -197,16 +198,24 @@ describe('recording sales', () => {
 });
 
 describe('receipt numbers', () => {
-  it('run on without gaps in the till series, and a refund takes none', async () => {
-    const series = tx.receiptSeries(await device.deviceId());
+  it('run on without gaps on the till, and a refund is numbered as a receipt of its own', async () => {
+    const till = await tse.tillId();
     const a = await tx.recordSale(sale({ saleId: 'n-1' }));
     const b = await tx.recordSale(sale({ saleId: 'n-2' }));
-    expect(a.receiptNumber).toBe(`${series}-0001`);
-    expect(b.receiptNumber).toBe(`${series}-0002`);
+    expect(a.receipt).toEqual({ till, number: 1 });
+    expect(b.receipt).toEqual({ till, number: 2 });
     await tx.revertTransaction('n-1');
     const c = await tx.recordSale(sale({ saleId: 'n-3' }));
-    expect(c.receiptNumber).toBe(`${series}-0003`);
-    expect(tx.getTransaction('n-1')?.receiptNumber).toBe(`${series}-0001`);
+    expect(c.receipt).toEqual({ till, number: 4 });
+    expect(tx.getTransaction('n-1')?.receipt).toEqual({ till, number: 1 });
+    expect(tx.getTransaction('n-1')?.revertReceipt).toEqual({ till, number: 3 });
+  });
+
+  it('carry on from the count of the earlier <series>-<count> numbering', async () => {
+    const db = openCoreDb(account.accountId);
+    await db.settings.put({ key: 'core.receiptSeq', value: 41 });
+    const a = await tx.recordSale(sale({ saleId: 'n-legacy' }));
+    expect(a.receipt?.number).toBe(42);
   });
 });
 

@@ -21,6 +21,9 @@ export interface ProfileLinks {
   youtube: string;
   otherUrl: string;
   otherLabel: string;
+  /** The business's own imprint (Impressum) and privacy pages, linked from the online receipt and the events page. */
+  imprintUrl: string;
+  privacyUrl: string;
 }
 
 /** What only the receipt decides: whether the links reach paper, and whether next events show. */
@@ -43,6 +46,8 @@ export const EMPTY_PROFILE_LINKS: ProfileLinks = {
   youtube: '',
   otherUrl: '',
   otherLabel: '',
+  imprintUrl: '',
+  privacyUrl: '',
 };
 
 export const EMPTY_RECEIPT_SOCIALS: ReceiptSocials = {
@@ -54,9 +59,11 @@ export const EMPTY_RECEIPT_SOCIALS: ReceiptSocials = {
 export const RECEIPT_URL_MAX = 200;
 export const RECEIPT_LABEL_MAX = 30;
 
-type UrlKey = 'webstore' | 'instagram' | 'tiktok' | 'facebook' | 'bluesky' | 'mastodon' | 'youtube' | 'otherUrl';
+type UrlKey = 'webstore' | 'instagram' | 'tiktok' | 'facebook' | 'bluesky' | 'mastodon' | 'youtube' | 'otherUrl' | 'imprintUrl' | 'privacyUrl';
 
-export const LINK_URL_KEYS: UrlKey[] = ['webstore', 'instagram', 'tiktok', 'facebook', 'bluesky', 'mastodon', 'youtube', 'otherUrl'];
+export const LINK_URL_KEYS: UrlKey[] = ['webstore', 'instagram', 'tiktok', 'facebook', 'bluesky', 'mastodon', 'youtube', 'otherUrl', 'imprintUrl', 'privacyUrl'];
+/** Legal pages are not "find us online" links: they go in the imprint block, not the footer row. */
+export const LEGAL_URL_KEYS: UrlKey[] = ['imprintUrl', 'privacyUrl'];
 const HANDLE_RE = /^@?([A-Za-z0-9._]{1,30})$/;
 const HANDLE_URL: Partial<Record<UrlKey, (h: string) => string>> = {
   instagram: (h) => `https://www.instagram.com/${h}`,
@@ -71,6 +78,8 @@ const FIELD_NAME: Record<UrlKey, string> = {
   mastodon: 'Mastodon',
   youtube: 'YouTube',
   otherUrl: 'The other link',
+  imprintUrl: 'The imprint link',
+  privacyUrl: 'The privacy policy link',
 };
 
 /** A clean https URL, or an Error naming what is wrong. Blank in, blank out. */
@@ -110,6 +119,12 @@ export function cleanProfileLinks(input: unknown): ProfileLinks {
 
 /** Whether any link is set. */
 export const hasProfileLinks = (l: Partial<ProfileLinks> | null | undefined): boolean => !!l && LINK_URL_KEYS.some((k) => !!l[k]);
+
+/** The imprint and privacy links, when set - for the legal block of a public page. */
+export const legalLinks = (l: Partial<ProfileLinks> | null | undefined): { imprintUrl?: string; privacyUrl?: string } => ({
+  ...(l?.imprintUrl ? { imprintUrl: l.imprintUrl } : {}),
+  ...(l?.privacyUrl ? { privacyUrl: l.privacyUrl } : {}),
+});
 
 /** The receipt-only switches; anything but `true` is off. */
 export function cleanReceiptToggles(input: unknown): ReceiptToggles {

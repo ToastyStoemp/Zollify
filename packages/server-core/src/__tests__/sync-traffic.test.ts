@@ -152,6 +152,24 @@ describe('customer display relay', () => {
     terminal.close();
   });
 
+  it('relays a TSE request to the main TSE device alone, and answers at once when it is not connected', async () => {
+    const phone = await open('phone');
+    const carbon = await open('carbon');
+    const other = await open('other');
+    phone.send(JSON.stringify({ type: 'tse.request', to: 'carbon', requestId: 'r1', op: 'start', clientId: 'PHONE-1' }));
+    await settle();
+    expect(carbon.inbox.filter((m) => m.type === 'tse.request')).toEqual([{ type: 'tse.request', to: 'carbon', from: 'phone', requestId: 'r1', op: 'start', clientId: 'PHONE-1' }]);
+    expect(other.inbox.filter((m) => m.type === 'tse.request')).toHaveLength(0);
+    carbon.send(JSON.stringify({ type: 'tse.result', to: 'phone', requestId: 'r1', ok: true, number: 1, time: 1 }));
+    await settle();
+    expect(phone.inbox.filter((m) => m.type === 'tse.result')).toEqual([{ type: 'tse.result', to: 'phone', from: 'carbon', requestId: 'r1', ok: true, number: 1, time: 1 }]);
+
+    phone.send(JSON.stringify({ type: 'tse.request', to: 'gone', requestId: 'r2', op: 'info' }));
+    await settle();
+    expect(phone.inbox.find((m) => m.requestId === 'r2')).toMatchObject({ type: 'tse.result', ok: false, from: 'gone', error: expect.stringContaining('not connected') });
+    for (const ws of [phone, carbon, other]) ws.close();
+  });
+
   it('keeps sending carts to an older client that never says what it is', async () => {
     const till = await open('till-2');
     const old = await open('old-display');

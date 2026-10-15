@@ -1,6 +1,6 @@
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
-import type { CardSettlement } from '@zollify/shared';
+import type { CardSettlement, TseHandle } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
@@ -272,6 +272,33 @@ export function clear(): void {
   cart.custom = null;
 }
 
+// ── KassenSichV: one TSE transaction per sale ───────────────────────────────
+// The rules want the TSE transaction started when the sale starts - the first
+// item - and finished when it is paid. Core finishes and signs it when it
+// records the sale; a cart emptied without a sale closes it as abandoned.
+// Only where this device must sign (an event in Germany, a TSE configured).
+let pendingTse: Promise<TseHandle> | null = null;
+watch(
+  () => cart.lines.length,
+  (n, before) => {
+    const tse = sdk().tse;
+    if (!tse) return;
+    if (before === 0 && n > 0 && !pendingTse && tse.required(cart.eventId)) pendingTse = tse.begin();
+    else if (n === 0 && pendingTse) {
+      const abandoned = pendingTse;
+      pendingTse = null;
+      void abandoned.then((h) => tse.abort(h));
+    }
+  },
+);
+
+/** The started transaction for the sale being paid, handed over with it (and no longer the cart's to abort). */
+async function takeTse(): Promise<TseHandle | undefined> {
+  const pending = pendingTse;
+  pendingTse = null;
+  return pending ? await pending : undefined;
+}
+
 export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
@@ -445,6 +472,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
     if (Math.abs(priced.reduce((sum, l) => sum + l.lineTotal, 0) - base) > 0.001) priced = distributeTotal(priced, base);
 
     const tax = saleTaxFor(cart.eventId, priced.map((l) => l.productId));
+    const tseHandle = await takeTse();
     const sale: SaleEvent = {
       saleId,
       eventId: cart.eventId,
@@ -457,6 +485,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),
+      ...(tseHandle ? { tseHandle } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.
       receiptToken: mintReceiptToken(),

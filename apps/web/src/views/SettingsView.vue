@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { currentAccount } from '@zollify/platform';
+import { currentAccount, kassensichvVisible } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { Icon } from '@zollify/ui';
@@ -12,6 +12,8 @@ interface Panel {
   label: string;
   group: string;
   minRole?: Role;
+  /** Shown only while this holds - a feature switched off on the account. */
+  when?: () => boolean;
   component: () => Promise<Component | { default: Component }>;
 }
 
@@ -37,9 +39,29 @@ const corePanels: Omit<Panel, 'group'>[] = [
     component: () => import('./VatSettings.vue'),
   },
   {
+    id: 'core.legal',
+    label: 'Legal setup',
+    minRole: 'admin',
+    component: () => import('./LegalSetupView.vue'),
+  },
+  {
     id: 'core.data',
     label: 'Backup & restore',
     component: () => import('./DataSettings.vue'),
+  },
+  {
+    id: 'core.fiskaly',
+    label: 'TSE (fiskaly cloud)',
+    minRole: 'admin',
+    when: kassensichvVisible,
+    component: () => import('./FiskalySettings.vue'),
+  },
+  {
+    id: 'core.taxexport',
+    label: 'Tax export (Germany)',
+    minRole: 'admin',
+    when: kassensichvVisible,
+    component: () => import('./TaxExportSettings.vue'),
   },
   {
     id: 'core.security',
@@ -90,9 +112,9 @@ const corePanels: Omit<Panel, 'group'>[] = [
  */
 const GROUPS = ['Business', 'Selling', 'Books & paperwork', 'Connections', 'Data & devices', 'Advanced', 'More'];
 const GROUP_OF: [RegExp, string][] = [
-  [/^core\.(profile|team|security)$/, 'Business'],
+  [/^core\.(profile|team|security|legal)$/, 'Business'],
   [/^core\.vat$|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
-  [/^(customs-[a-z]+|peppol-be|economic|tax|consignment|costs)\./, 'Books & paperwork'],
+  [/^(customs-[a-z]+|peppol-be|economic|tax|consignment|costs)\.|^core\.(fiskaly|taxexport)$/, 'Books & paperwork'],
   [/^core\.webhooks$|^shopify-sync\./, 'Connections'],
   [/^core\.(data|device)$/, 'Data & devices'],
   [/^core\.(problems|modules|admin)$/, 'Advanced'],
@@ -112,7 +134,7 @@ const panels = computed<Panel[]>(() => {
   const role = account.value?.role;
   if (!role) return [];
 
-  const core = corePanels.filter((p) => !p.minRole || roleAtLeast(role, p.minRole)).map((p) => ({ ...p, group: groupOf(p.id) }));
+  const core = corePanels.filter((p) => (!p.minRole || roleAtLeast(role, p.minRole)) && (!p.when || p.when())).map((p) => ({ ...p, group: groupOf(p.id) }));
   const fromModules: Panel[] = contributions.settingsFor(role).map((p) => ({
     id: p.id,
     label: p.label,

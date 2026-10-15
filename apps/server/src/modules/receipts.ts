@@ -12,6 +12,7 @@ import {
   receiptBreakdown,
   receiptFooterLinks,
   vatBreakdown,
+  vatIdLabel,
   type ProfileLinks,
   type PublicEvent,
   type ReceiptFooterLink,
@@ -239,24 +240,26 @@ function eventName(db: Database.Database, accountId: string, eventId: string): s
   return ev.deletedAt ? '' : String(ev.name ?? '');
 }
 
-function seller(db: Database.Database, accountId: string): PublicReceipt['seller'] {
+function seller(db: Database.Database, accountId: string, tx: Transaction): PublicReceipt['seller'] {
   const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
     | { name: string; profile: string | null }
     | undefined;
   const artist = parseProfile(row?.profile).artist;
+  const vatId = artist.vatId.trim() || undefined;
   return {
     // Phone, email and EORI stay off: a receipt needs who sold it and their
     // tax registration, not a way to reach them at home.
     name: artist.companyName.trim() || artist.fullName.trim() || row?.name || '',
     address: [artist.street, artist.postCodeCity, artist.countryOfOrigin].map((s) => s.trim()).filter(Boolean),
-    vatId: artist.vatId.trim() || undefined,
+    ...(vatId ? { vatId, vatLabel: vatIdLabel(tx.tax?.country || artist.countryOfOrigin) } : {}),
   };
 }
 
 // ── What the customer sees ──────────────────────────────────────────────────
 
 export interface PublicReceipt {
-  seller: { name: string; address: string[]; vatId?: string };
+  /** `vatLabel`: what the seller's country calls the number - CVR, UID, USt-IdNr. - so the receipt reads as a local one. */
+  seller: { name: string; address: string[]; vatId?: string; vatLabel?: string };
   event: string;
   at: number;
   number: string;
@@ -486,7 +489,7 @@ ${POW_SOLVER_JS}
     }
     if (r.seller.name) receiptEl.appendChild(el('h1', '', r.seller.name));
     r.seller.address.forEach(function (line) { receiptEl.appendChild(el('p', 'muted c', line)); });
-    if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', 'VAT ' + r.seller.vatId));
+    if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', (r.seller.vatLabel || 'VAT') + ' ' + r.seller.vatId));
     receiptEl.appendChild(el('hr'));
     if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
@@ -668,7 +671,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         if (Date.now() - found.tx.timestamp > TTL_DAYS * 86_400_000) return notFound();
 
         return publicReceipt(found.tx, {
-          seller: seller(ctx.db, found.accountId),
+          seller: seller(ctx.db, found.accountId, found.tx),
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
           footer: footerExtras(ctx.db, found.accountId),

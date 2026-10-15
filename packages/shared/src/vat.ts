@@ -61,6 +61,37 @@ export function countryCodeOf(country: string | undefined | null): string {
 }
 
 /**
+ * What a country calls the tax number a receipt must carry. Denmark's
+ * rules say "CVR", Germany's "USt-IdNr.", Switzerland's "UID"; a customer or
+ * an inspector looks for that word. Unknown countries get "VAT".
+ */
+const VAT_ID_LABELS: Record<string, string> = {
+  DK: 'CVR',
+  DE: 'USt-IdNr.',
+  AT: 'UID',
+  CH: 'UID',
+  LI: 'UID',
+  BE: 'BTW',
+  NL: 'BTW',
+  LU: 'TVA',
+  FR: 'TVA',
+  IT: 'P.IVA',
+  ES: 'NIF',
+  PT: 'NIF',
+  SE: 'Momsreg.nr',
+  FI: 'ALV',
+  NO: 'MVA',
+  PL: 'NIP',
+  CZ: 'DIČ',
+};
+
+/** The label for a VAT/tax number in a country, by name or code. */
+export function vatIdLabel(country: string | undefined | null): string {
+  const code = /^[A-Za-z]{2}$/.test((country ?? '').trim()) ? (country ?? '').trim().toUpperCase() : countryCodeOf(country);
+  return VAT_ID_LABELS[code] ?? 'VAT';
+}
+
+/**
  * Whether taking stock from one country to the other means customs papers:
  * two known countries, not the same, and not both inside the EU's customs
  * union. Countries by name or code.

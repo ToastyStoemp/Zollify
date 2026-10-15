@@ -9,7 +9,8 @@ export function fmtAmount(n: number | null | undefined): string {
 
 export function fmtPrice(n: number | null | undefined, currency: string): string {
   if (n == null || Number.isNaN(n)) return '-';
-  return `${currency} ${n.toFixed(2)}`;
+  // Codes are upper case however they were stored (an import once wrote "Eur").
+  return `${currency.toUpperCase()} ${n.toFixed(2)}`;
 }
 
 /** Rounds to the nearest `increment` (e.g. 5/10/20/50). 0/negative falls back to cents. */

@@ -137,6 +137,13 @@ describe('reports', () => {
     expect(await balance()).toBe(58.8); // 60 less her 60% of the 2.00 card fee
   });
 
+  it('keeps the commission a new artist starts with, and starts at 40', async () => {
+    expect((await call(store, 'GET', '/books/settings')).json().settings.defaultCommissionPct).toBe(40);
+    expect((await call(store, 'PUT', '/books/settings', { timeZone: 'Europe/Zurich', defaultCommissionPct: 101 })).statusCode).toBe(400);
+    await call(store, 'PUT', '/books/settings', { timeZone: 'Europe/Zurich', cardFeePct: 2, passCardFees: true, feePresets: { no_show: 25 }, defaultCommissionPct: 35 });
+    expect((await call(store, 'GET', '/books/settings')).json().settings).toMatchObject({ defaultCommissionPct: 35, cardFeePct: 2 });
+  });
+
   it('reports the current period, as JSON and as a spreadsheet', async () => {
     const list = (await call(store, 'GET', '/reports')).json();
     expect(list.periods).toHaveLength(12);

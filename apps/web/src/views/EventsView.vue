@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
+import StoreSetupWizard from '../components/StoreSetupWizard.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
   activeEventId,
@@ -92,15 +93,23 @@ const statsById = computed(() => {
 });
 const stats = (id: string) => statsById.value.get(id) ?? { count: 0, revenue: 0, currency: baseCurrency.value };
 
-function fmtDates(e: SalesEvent): string {
-  if (e.dateStart && e.dateEnd) return `${e.dateStart} → ${e.dateEnd}`;
-  return e.dateStart || e.dateEnd || '';
-}
-function pill(e: SalesEvent): string {
-  if (e.id === activeEventId.value) return 'selling';
+const fmtDates = (e: SalesEvent): string => fmtDayRange(e.dateStart, e.dateEnd);
+/** Conventions run days, not weeks: a month-long one is almost always a mistyped end date. */
+const formDays = computed(() => eventDays(form.dateStart, form.dateEnd));
+/**
+ * One word for where an event is, as a seller would say it. The till's own
+ * event is "Selling now"; an event whose last day has passed but was never
+ * closed is "Ended", so it stands out until someone closes it.
+ */
+function pill(e: SalesEvent): { cls: string; label: string } {
+  const ended = !isStore(e) && e.status !== 'closed' && eventIsOver(e);
+  if (e.id === activeEventId.value) return ended ? { cls: 'ended', label: 'Ended - still on the till' } : { cls: 'selling', label: 'Selling now' };
   // A store has no dates to be "planned" for - it is open or it is not.
-  if (isStore(e)) return e.status === 'active' ? 'open' : 'closed';
-  return e.status;
+  if (isStore(e)) return e.status === 'active' ? { cls: 'open', label: 'Open' } : { cls: 'closed', label: 'Closed' };
+  if (e.status === 'closed') return { cls: 'closed', label: 'Finished' };
+  if (ended) return { cls: 'ended', label: 'Ended' };
+  const start = e.dateStart || e.dateEnd;
+  return start && start <= localIsoDay() ? { cls: 'active', label: 'On today' } : { cls: 'planned', label: 'Upcoming' };
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -157,6 +166,24 @@ const closeMenu = (): void => {
   menuFor.value = null;
 };
 onMounted(() => window.addEventListener('click', closeMenu));
+
+/**
+ * New event starts in Find events when the shared pool is there: most
+ * conventions are already in it, with dates and address. Find events sends
+ * people back here (?new=1, with what they searched as the name) for one
+ * that is not.
+ */
+const route = useRoute();
+function newEvent(): void {
+  if (hasRoute('public-events:find')) void router.push({ name: 'public-events:find' });
+  else openNew('event');
+}
+onMounted(() => {
+  if (route.query.new !== '1' || !canEdit.value) return;
+  openNew('event');
+  if (typeof route.query.name === 'string') form.name = route.query.name.slice(0, 120);
+  void router.replace({ query: {} });
+});
 onBeforeUnmount(() => window.removeEventListener('click', closeMenu));
 /** Whether the menu has anything in it for this tile (a helper may have nothing). */
 const hasMore = (e: SalesEvent): boolean =>
@@ -234,6 +261,8 @@ const carriedLayout = ref<BoothLayout | undefined>();
 /** Set when Duplicate filled in booth details or a layout, so the dialog can ask for a check. */
 const boothCopied = ref(false);
 
+/** A new store goes through the setup questions; an existing one is edited with the plain form. */
+const settingUp = ref(false);
 function openNew(kind: SalesEventKind = 'event'): void {
   editId.value = null;
   carriedLayout.value = undefined;
@@ -246,7 +275,7 @@ function openNew(kind: SalesEventKind = 'event'): void {
     street: '',
     postcode: '',
     city: '',
-    country: account.value?.profile.artist.countryOfOrigin || 'Switzerland',
+    country: account.value?.profile.artist.countryOfOrigin || guessFromDevice()?.name || '',
     tin: '',
     boothHall: '',
     boothNumber: '',
@@ -465,8 +494,8 @@ async function save(): Promise<void> {
     <header>
       <h1>{{ storesPage ? 'Stores' : 'Events' }}</h1>
       <div v-if="canEdit" class="header-actions">
-        <button v-if="storesPage" type="button" class="primary" @click="openNew('store')"><Icon name="plus" :size="16" /> New store</button>
-        <button v-else type="button" class="primary" @click="openNew('event')"><Icon name="plus" :size="16" /> New event</button>
+        <button v-if="storesPage" type="button" class="primary" @click="settingUp = true"><Icon name="plus" :size="16" /> New store</button>
+        <button v-else type="button" class="primary" @click="newEvent"><Icon name="plus" :size="16" /> New event</button>
       </div>
     </header>
 
@@ -483,11 +512,12 @@ async function save(): Promise<void> {
           <div class="title">
             <strong>{{ e.name }}</strong>
             <span v-if="e.edition" class="pill">{{ e.edition }}</span>
-            <span :class="['pill', pill(e)]">{{ pill(e) }}</span>
+            <span :class="['pill', pill(e).cls]">{{ pill(e).label }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
+          <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ fmtDayRange(e.dateEnd || e.dateStart) }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
             <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
@@ -524,6 +554,7 @@ async function save(): Promise<void> {
       </ul>
     </template>
 
+    <StoreSetupWizard v-if="settingUp" @close="settingUp = false" />
     <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" />
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
     <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />
@@ -532,7 +563,7 @@ async function save(): Promise<void> {
       <div class="form">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <label><span>Name</span><input v-model="form.name" type="text" required /></label>
-        <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /></label>
+        <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /><small v-if="formDays > 14" class="warn">That is {{ formDays }} days - check the end date.</small></label>
         <p v-else class="hint">A store is open until you close it - no dates. Its stock claims reserve what is on its shelves, and it sells through the till like an event.</p>
         <div class="two">
           <label><span>Street</span><input v-model="form.street" type="text" /></label>
@@ -654,6 +685,9 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .title strong { font-size: 1rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.pill.ended { background: transparent; border: 1px solid var(--zfy-warning); color: var(--zfy-warning-ink); }
+.ended-note { margin: 0; font-size: .82rem; color: var(--zfy-warning-ink); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }
 .pill.planned { background: var(--zfy-signal-soft, #e4ecf6); color: var(--zfy-ink, #1a2230); }
 .when { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .stats { margin: 0; font-size: .875rem; }

@@ -1,8 +1,9 @@
-import { computed, reactive } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
 import type { CardSettlement } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
+import { testTerminalProvider } from './payments/test-terminal';
 import type { PaymentProvider, PaymentResult } from './payments/provider';
 import { logDiagnostic } from './lib/diagnostics';
 import { sdk } from './runtime';
@@ -73,6 +74,25 @@ export const isConverting = computed(
  * event's own pricing rate, which can be a deliberate round 1:1.
  */
 export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
+
+/**
+ * Test mode: the till runs every step of a sale - cart, discounts, the card
+ * on a pretend terminal, the receipt screen - and records nothing. No
+ * transaction, no stock movement, no books, nothing synced. For trying the
+ * till out, training a helper, or checking a receipt layout, without a
+ * refund to make afterwards. Device-local and switched on by hand, with a
+ * banner on the till for as long as it is on.
+ */
+export const TEST_MODE_KEY = 'testMode';
+export const testMode = ref(false);
+export async function loadTestMode(): Promise<boolean> {
+  testMode.value = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  return testMode.value;
+}
+export async function setTestMode(on: boolean): Promise<void> {
+  testMode.value = on;
+  await sdk().config.set(TEST_MODE_KEY, on);
+}
 export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
 export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
 
@@ -256,6 +276,8 @@ export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
   sale?: SaleEvent;
+  /** Test mode: the sale went through the motions and was not recorded anywhere. */
+  test?: boolean;
   /** The seller abandoned this attempt (cancelCheckout) - nothing was recorded, whatever the terminal answered. */
   cancelled?: boolean;
 }
@@ -387,7 +409,8 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       if (cardInBase.value && !onCardSettled) {
         return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Payments.` };
       }
-      const provider = getProvider(pay.terminal.providerId as never);
+      // In test mode every card goes to the pretend terminal, whatever is configured.
+      const provider = testMode.value ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
       activeProvider = provider;
       const result = await provider
         .startPayment(
@@ -463,6 +486,12 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       },
     };
 
+    // Test mode: the sale is handed back for the screen and never announced,
+    // so nothing records, books, restocks or syncs it.
+    if (testMode.value) {
+      clear();
+      return { approved: true, sale, test: true };
+    }
     sdk().events.emit('sale', sale);
     clear();
     return { approved: true, sale };

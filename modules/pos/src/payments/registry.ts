@@ -1,11 +1,12 @@
 import type { PaymentProvider, PaymentProviderId } from './provider';
 import { MyPos, hasNativePlugin } from '../native/plugins';
+import { sdk } from '../runtime';
 import { manualProvider } from './manual';
 import { myposGo2Provider } from './mypos-go2';
 import { myposCarbonProvider } from './mypos-carbon';
 import { myposGlassProvider } from './mypos-glass';
-import { bridgeProvider, bridgeConnection } from './bridge-ws';
 import { sumupProvider } from './sumup';
+import { sumupCloudProvider } from './sumup-cloud';
 import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
 import { nexiSmartposProvider } from './nexi-smartpos';
 import { adyenTerminalProvider } from './adyen-terminal';
@@ -16,8 +17,8 @@ const providers: PaymentProvider[] = [
   myposCarbonProvider,
   myposCarbonRemoteProvider,
   myposGlassProvider,
-  bridgeProvider,
   sumupProvider,
+  sumupCloudProvider,
   nexiSmartposProvider,
   adyenTerminalProvider,
 ];
@@ -30,6 +31,12 @@ export function getProvider(id: PaymentProviderId | undefined): PaymentProvider 
   return providers.find((p) => p.id === id) ?? manualProvider;
 }
 
+/** Makes `id` the card terminal this device uses - what picking it under Settings → Payments does. */
+export async function setActiveProvider(id: PaymentProviderId): Promise<void> {
+  await sdk().config.set('activeProvider', id);
+  onActiveProviderChanged(id);
+}
+
 export async function availableProviders(): Promise<PaymentProvider[]> {
   const flags = await Promise.all(providers.map((p) => p.isAvailable()));
   return providers.filter((_, i) => flags[i]);
@@ -38,15 +45,11 @@ export async function availableProviders(): Promise<PaymentProvider[]> {
 /**
  * Called on app start and whenever the provider selection changes. Connections
  * are only established for the provider that is actually in use:
- * - bridge: keep its websocket alive only while selected
  * - MyPOS GO2: enter Bluetooth-connectable state only while selected - the
  *   native plugin deliberately never auto-connects on its own, so a paired
  *   terminal isn't grabbed when a different provider (or none) is configured.
  */
 export function onActiveProviderChanged(id: PaymentProviderId): void {
-  if (id === 'bridge') bridgeConnection.connect();
-  else bridgeConnection.disconnect();
-
   if (id === 'mypos-go2' && hasNativePlugin('MyPos')) {
     void MyPos.connectTerminal().catch(() => {});
   }

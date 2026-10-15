@@ -107,6 +107,9 @@ watch(mode, (next) => {
   }
 });
 
+/** Scrolling the page over a focused count must not change it: the field lets go of focus instead. */
+const blurOnWheel = (e: WheelEvent): void => (e.target as HTMLInputElement).blur();
+
 async function updateOnHand(productId: string, variantId: string, value: number): Promise<void> {
   error.value = null;
   try {
@@ -253,20 +256,22 @@ async function carryOver(): Promise<void> {
             :class="{ short: row.overCommitted }"
           >
             <td class="item"><ProductThumb :image-id="imageOf(row.productId, row.variantId)" :alt="row.label" :size="28" /><span>{{ row.label }}</span></td>
-            <td class="num">
+            <td class="num" data-label="On hand">
               <input
                 v-if="canEdit"
                 type="number"
                 min="0"
+                inputmode="numeric"
                 :value="row.onHand"
                 :aria-label="`Units owned of ${row.label}`"
+                @wheel="blurOnWheel"
                 @change="updateOnHand(row.productId, row.variantId, Number(($event.target as HTMLInputElement).value))"
               />
               <span v-else>{{ row.onHand }}</span>
             </td>
-            <td class="num">{{ row.claimed }}</td>
-            <td class="num">{{ row.sold }}</td>
-            <td class="num" :class="{ bad: row.counted && row.free < 0 }">{{ row.counted ? row.free : '-' }}</td>
+            <td class="num" data-label="Claimed">{{ row.claimed }}</td>
+            <td class="num" data-label="Sold">{{ row.sold }}</td>
+            <td class="num" data-label="Free" :class="{ bad: row.counted && row.free < 0 }">{{ row.counted ? row.free : '-' }}</td>
           </tr>
           </template>
         </tbody>
@@ -348,22 +353,24 @@ async function carryOver(): Promise<void> {
             :class="{ short: row.available < 0 }"
           >
             <td class="item"><ProductThumb :image-id="imageOf(row.productId, row.variantId)" :alt="row.label" :size="28" /><span>{{ row.label }}</span></td>
-            <td class="num">
+            <td class="num" data-label="Claim">
               <input
                 v-if="canEdit"
                 type="number"
                 min="0"
+                inputmode="numeric"
                 placeholder="-"
+                @wheel="blurOnWheel"
                 :value="row.claimed ?? ''"
                 :aria-label="`Claim for ${row.label}`"
                 @change="updateClaim(row.productId, row.variantId, ($event.target as HTMLInputElement).value)"
               />
               <span v-else>{{ row.claimed ?? '-' }}</span>
             </td>
-            <td class="num">{{ row.soldHere }}</td>
+            <td class="num" data-label="Sold here">{{ row.soldHere }}</td>
             <!-- Negative means more was sold than the claim allowed: the claim
                  is wrong, not the sales, so it is flagged rather than clamped. -->
-            <td class="num" :class="{ bad: row.available < 0 }">{{ row.available }}</td>
+            <td class="num" data-label="Available" :class="{ bad: row.available < 0 }">{{ row.available }}</td>
             <td class="source">
               <template v-if="row.source === 'claim'">reserved</template>
               <template v-else>
@@ -407,4 +414,18 @@ tr.group th { padding: .35rem .75rem; font-size: .75rem; font-weight: 600; backg
 td.item { white-space: normal; min-width: 14rem; }
 td.item span { display: inline-block; vertical-align: middle; margin-left: .5rem; }
 td.item :deep(img), td.item :deep(.thumb) { vertical-align: middle; }
+
+/* A phone counts stock standing in the storage room: one card per item, every figure in view, a big field to type in. */
+@media (max-width: 600px) {
+  .table-scroll table, .table-scroll tbody { display: block; min-width: 0; }
+  .table-scroll thead { display: none; }
+  .table-scroll tbody tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .3rem .6rem; padding: .7rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
+  .table-scroll tbody tr.group { display: block; padding: 0; }
+  .table-scroll td { border: 0; padding: 0; white-space: normal; }
+  .table-scroll td.item { grid-column: 1 / -1; min-width: 0; }
+  .table-scroll td.num { text-align: left; }
+  .table-scroll td.num::before { content: attr(data-label); display: block; font-size: .7rem; letter-spacing: .04em; color: var(--zfy-muted, #5a6472); }
+  .table-scroll td.source { grid-column: 1 / -1; }
+  .num input { width: 100%; min-height: 2.6rem; font-size: 1.05rem; text-align: left; }
+}
 </style>

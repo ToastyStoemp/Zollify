@@ -223,7 +223,22 @@ export function issueInvoices(db: Database.Database, accountId: string, period: 
       if (!lines.length) continue;
       const seq = ((db.prepare('SELECT MAX(seq) AS m FROM consignment_invoices WHERE accountId = ? AND year = ?').get(accountId, year) as { m: number | null }).m ?? 0) + 1;
       const number = invoiceNumber(settings.accounting.invoicePrefix, period.to, seq);
-      const invoice: ArtistInvoice = { number, date: period.to, period, consignorId: a.consignorId, consignorName: a.name, currency: a.currency, lines, total: invoiceTotal(lines), issuedAt: now };
+      const row = consignorRow(db, accountId, a.consignorId);
+      const doc = row ? parseDoc(row.doc) : null;
+      const invoice: ArtistInvoice = {
+        number,
+        date: period.to,
+        period,
+        consignorId: a.consignorId,
+        consignorName: a.name,
+        ...(doc?.vatId ? { consignorVatId: doc.vatId } : {}),
+        vatRegistered: doc?.vatRegistered ?? false,
+        selfBillingAgreedOn: doc?.selfBillingAgreedOn ?? null,
+        currency: a.currency,
+        lines,
+        total: invoiceTotal(lines),
+        issuedAt: now,
+      };
       insert.run(accountId, number, year, seq, period.from, a.consignorId, a.currency, JSON.stringify(invoice));
     }
   })();

@@ -40,6 +40,7 @@ modules/
   label-printer/  Bluetooth label printer for price tags and staff badges
   costs/          per-item cost from shipment batches, margins in the catalogue
   convention-checklist/  packing checklist per convention
+  multi-storage/  stock split across storage locations, pick lists per event
   public-events/  public "where to find us" page, shop widget, iCal feed, Instagram bio
   tax/            payment clustering, myPOS verify, Lexware booking, per-event ledger (client + server half)
   consignment/    artists' work sold in your stores, commission and payouts (client + server half)
@@ -169,7 +170,27 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-E-invoices for Belgium (Peppol).
+Storage locations, E-invoices for Belgium (Peppol).
+
+*Storage locations* - the `multi-storage` module splits the one inventory by
+where it physically is: a storage unit, the studio, a friend's garage. Each
+location holds a counted figure per item, minus what was sold from it since,
+and **Home** (renamable) is the rest: what is left of the pile (last count
+minus every sale since), minus what is at the locations, minus what the stores
+hold on their claims. Each device picks the place it sells from (*This device
+sells from*): a sale at an event with no claim on the item comes out of the
+place its device had picked when the sale was made, so changing the pick never
+moves past sales, and a device that picked none sells from Home. Claimed sales
+come out of the claim. Typing a count at a location moves the difference to or
+from Home, and Move shifts stock between places. The **pick list** takes an
+upcoming event's claims, minus what it sold, from the device's own place
+first, then Home, then the locations in order, grouped per place; "Fetched"
+moves those units to the device's place. Staff move and count stock and pick
+their device's place; admins add, rename and remove locations, and take in new
+stock or write off stock that is gone (those change the counted total).
+Allocations and device picks are synced settings under `team.`, the prefix
+staff may write; every row is its own key, so two devices editing different
+rows never overwrite each other. A place holding less than nothing is flagged.
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell

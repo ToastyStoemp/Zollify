@@ -8,6 +8,7 @@ import {
   SetupResponseSchema,
   SpaceInputSchema,
   UpgradeInputSchema,
+  rentPaidAtTill,
   rentalEnd,
   type ConsignmentRental,
   type ConsignmentSpace,
@@ -213,6 +214,7 @@ export function registerPlanner(app: FastifyInstance, ctx: ModuleContext, side: 
         spaces: list<ConsignmentSpace>(db, who.accountId, 'spaces'),
         rentals: list<ConsignmentRental>(db, who.accountId, 'rentals'),
         setups: list<SetupMoment>(db, who.accountId, 'setups').sort(bySoonest),
+        rentPaid: Object.fromEntries(rentPaidAtTill(replay(db, who.accountId).transactions)),
         emailEnabled: ctx.mail.enabled,
       };
     });

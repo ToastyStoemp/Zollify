@@ -12,6 +12,7 @@ import {
   receiptBreakdown,
   receiptFooterLinks,
   vatBreakdown,
+  vatIdLabel,
   type ProfileLinks,
   type PublicEvent,
   type ReceiptFooterLink,
@@ -33,6 +34,7 @@ import {
 import { POW_SOLVER_JS } from './pow-client';
 import { nextPublicEvents } from './public-events';
 import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
+import { SUMUP_TABLES, migrateSumupCloud, registerSumupCloud, registerSumupCloudPublic, sumupLinks } from './sumup-cloud';
 import { ADYEN_TABLES, adyenApps, migrateAdyen, registerAdyen } from './adyen-terminal';
 
 /**
@@ -239,24 +241,26 @@ function eventName(db: Database.Database, accountId: string, eventId: string): s
   return ev.deletedAt ? '' : String(ev.name ?? '');
 }
 
-function seller(db: Database.Database, accountId: string): PublicReceipt['seller'] {
+function seller(db: Database.Database, accountId: string, tx: Transaction): PublicReceipt['seller'] {
   const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
     | { name: string; profile: string | null }
     | undefined;
   const artist = parseProfile(row?.profile).artist;
+  const vatId = artist.vatId.trim() || undefined;
   return {
     // Phone, email and EORI stay off: a receipt needs who sold it and their
     // tax registration, not a way to reach them at home.
     name: artist.companyName.trim() || artist.fullName.trim() || row?.name || '',
     address: [artist.street, artist.postCodeCity, artist.countryOfOrigin].map((s) => s.trim()).filter(Boolean),
-    vatId: artist.vatId.trim() || undefined,
+    ...(vatId ? { vatId, vatLabel: vatIdLabel(tx.tax?.country || artist.countryOfOrigin) } : {}),
   };
 }
 
 // ── What the customer sees ──────────────────────────────────────────────────
 
 export interface PublicReceipt {
-  seller: { name: string; address: string[]; vatId?: string };
+  /** `vatLabel`: what the seller's country calls the number - CVR, UID, USt-IdNr. - so the receipt reads as a local one. */
+  seller: { name: string; address: string[]; vatId?: string; vatLabel?: string };
   event: string;
   at: number;
   number: string;
@@ -311,7 +315,7 @@ export function publicReceipt(
     seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
     event: extra.event,
     at: tx.timestamp,
-    number: tx.id.slice(-8).toUpperCase(),
+    number: tx.receiptNumber ?? tx.id.slice(-8).toUpperCase(),
     currency: tx.currency,
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
@@ -432,9 +436,8 @@ ${POW_SOLVER_JS}
   function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function row(left, right, cls) { var r = el('div', 'row' + (cls ? ' ' + cls : '')); r.appendChild(el('span', '', left)); r.appendChild(el('span', '', right)); return r; }
 
+  // The token stays in the address: refreshing or bookmarking the page keeps the receipt.
   var token = (location.hash || '').slice(1);
-  // Drop the token from the address bar and history once read.
-  try { history.replaceState(null, '', location.pathname); } catch (e) {}
   if (!/^[A-Za-z0-9_-]{22}$/.test(token)) { say('This receipt link is incomplete. Please scan the code again.'); return; }
 
   function money(n, cur) {
@@ -487,7 +490,7 @@ ${POW_SOLVER_JS}
     }
     if (r.seller.name) receiptEl.appendChild(el('h1', '', r.seller.name));
     r.seller.address.forEach(function (line) { receiptEl.appendChild(el('p', 'muted c', line)); });
-    if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', 'VAT ' + r.seller.vatId));
+    if (r.seller.vatId) receiptEl.appendChild(el('p', 'muted c', (r.seller.vatLabel || 'VAT') + ' ' + r.seller.vatId));
     receiptEl.appendChild(el('hr'));
     if (r.event) receiptEl.appendChild(el('p', 'muted', r.event));
     receiptEl.appendChild(el('p', 'muted', new Date(r.at).toLocaleString()));
@@ -564,16 +567,22 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     migrate(db);
     migrateReceiptSocials(db);
     migrateSmartpos(db);
+    migrateSumupCloud(db);
     migrateAdyen(db);
   },
   onAccountDeleted: (db, accountId) => {
-    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states', ...ADYEN_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states', ...SUMUP_TABLES, ...ADYEN_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
   },
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {
     // Nexi SmartPOS card payments - see smartpos.ts.
     registerSmartpos(app, ctx, smartposApps(ctx.db, box));
+    // SumUp Solo over SumUp's Cloud API - see sumup-cloud.ts.
+    registerSumupCloud(app, ctx, sumupLinks(ctx.db, box));
+    // SumUp's affiliate key names the app, not the merchant (it is no secret), so the
+    // server hands out its own and a merchant only signs in. Null = each device enters one.
+    app.get('/sumup/config', async () => ({ affiliateKey: process.env.SUMUP_AFFILIATE_KEY?.trim() || null }));
     // Adyen terminals (Verifone V400m and the rest) - see adyen-terminal.ts.
     registerAdyen(app, ctx, adyenApps(ctx.db, adyenBox));
     app.get('/branding', async (req) => readBranding(ctx.db, ctx.identity(req).accountId));
@@ -625,6 +634,8 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
   publicRoutes: (ctx: PublicModuleContext) => async (app) => {
     // The merchant coming back from Poynt, and the terminal's payment callbacks.
     registerSmartposPublic(app, ctx, smartposApps(ctx.db, box));
+    // The merchant coming back from SumUp after connecting their account.
+    registerSumupCloudPublic(app, ctx, box);
     // Undo the /p/ prefix's cross-origin allowances: a receipt is never meant
     // to be embedded or fetched from anywhere but its own page.
     app.addHook('onSend', async (_req, reply) => {
@@ -664,7 +675,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
         if (Date.now() - found.tx.timestamp > TTL_DAYS * 86_400_000) return notFound();
 
         return publicReceipt(found.tx, {
-          seller: seller(ctx.db, found.accountId),
+          seller: seller(ctx.db, found.accountId, found.tx),
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
           footer: footerExtras(ctx.db, found.accountId),

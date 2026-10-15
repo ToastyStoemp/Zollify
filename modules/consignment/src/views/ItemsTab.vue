@@ -113,6 +113,13 @@ async function assignPicked(): Promise<void> {
 
 // ── Import from the linked artist's catalogue ─────────────────────────────
 const pricingOpen = ref(false);
+/**
+ * Shared items with no price in the store's currency yet: the server keeps
+ * them off the till (for sale = off) rather than sell at a number in the
+ * wrong currency. Without saying so here they look stocked and simply never
+ * appear at the till.
+ */
+const offTill = computed(() => productsOf(consignorId.value).filter((p) => p.consignorProductId && !p.forSale));
 const importing = ref(false);
 const catalog = ref<CatalogProduct[]>([]);
 const toImport = ref<string[]>([]);
@@ -164,6 +171,11 @@ async function runImport(): Promise<void> {
         <template v-if="artistStores.length > 1">Put a number under a store to reserve stock there; leave it blank and the store sells from what is unreserved.</template>
       </p>
 
+      <div v-if="offTill.length" class="offtill" role="status">
+        <p><strong>{{ offTill.length }} shared item{{ offTill.length === 1 ? ' is' : 's are' }} not on the till yet.</strong> {{ consignor?.name }}'s prices are in another currency than your store's ({{ currency }}), and there is no exchange rate for them. Set a rate, or a price per item, and they go on sale at every till with the next sync.</p>
+        <button type="button" class="primary" @click="pricingOpen = true"><Icon name="coins" :size="14" /> Set prices</button>
+      </div>
+
       <p v-if="!rows.length" class="empty">No items for {{ consignor?.name }} yet.</p>
       <div v-else class="table-wrap">
         <table>
@@ -178,8 +190,8 @@ async function runImport(): Promise<void> {
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="`${r.product.id}:${r.variantId}`">
-              <td>{{ r.label }}<span v-if="r.product.sku" class="hint"> · {{ r.product.sku }}</span></td>
-              <td class="num">{{ fmtPrice(r.price, currency) }}</td>
+              <td>{{ r.label }}<span v-if="r.product.sku" class="hint"> · {{ r.product.sku }}</span><span v-if="r.product.consignorProductId && !r.product.forSale" class="badge">not on the till</span></td>
+              <td class="num">{{ r.product.consignorProductId && !r.product.forSale ? '-' : fmtPrice(r.price, currency) }}</td>
               <td class="num"><input type="number" min="0" step="1" inputmode="numeric" :value="onHand(r)" :aria-label="`On hand, ${r.label}`" @change="setOnHand(r, $event)" /></td>
               <td v-for="s in artistStores.length > 1 ? artistStores : []" :key="s.id" class="num">
                 <input type="number" min="0" step="1" inputmode="numeric" placeholder="-" :value="claimOf(s.id, r) ?? ''" :aria-label="`${s.name}, ${r.label}`" @change="setClaim(s.id, r, $event)" />
@@ -260,4 +272,7 @@ td input[type='number'] { width: 5rem; text-align: right; }
 label.check { display: flex; align-items: center; gap: .4rem; font-size: .875rem; flex-wrap: wrap; }
 .pill { font-size: .62rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .1rem .45rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .footer { display: flex; justify-content: flex-end; gap: .5rem; }
+.offtill { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; padding: .7rem .9rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #c08a2e); background: color-mix(in srgb, var(--zfy-warning, #c08a2e) 10%, transparent); }
+.offtill p { flex: 1; min-width: 14rem; margin: 0; font-size: .85rem; }
+.badge { margin-left: .4rem; font-size: .66rem; font-weight: 600; padding: .05rem .4rem; border-radius: 999px; color: var(--zfy-warning, #8a5f12); background: color-mix(in srgb, var(--zfy-warning, #c08a2e) 16%, transparent); white-space: nowrap; }
 </style>

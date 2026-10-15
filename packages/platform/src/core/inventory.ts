@@ -220,6 +220,23 @@ export function soldTotal(productId: string, variantId: string | null = ''): num
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
+const soldSinceCountByKey = computed(() => {
+  const out = new Map<string, number>();
+  for (const forEvent of soldSinceCountByEventAndKey.value.values()) {
+    for (const [key, qty] of forEvent) out.set(key, (out.get(key) ?? 0) + qty);
+  }
+  return out;
+});
+
+/**
+ * What is physically left of the pile: the last count minus every sale made
+ * since, claimed or not. Unlike Free, claims are not subtracted - claimed
+ * stock still exists, it is only promised.
+ */
+export function remainingFor(productId: string, variantId: string | null = ''): number {
+  return onHandFor(productId, variantId) - (soldSinceCountByKey.value.get(stockKey(productId, variantId)) ?? 0);
+}
+
 /**
  * A claim only reserves stock while its event is still to come or under way.
  * Once the event is over (closed, or its last day has passed) whatever it

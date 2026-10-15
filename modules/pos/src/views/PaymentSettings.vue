@@ -4,12 +4,14 @@ import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
+import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-cloud';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { ADYEN_TERMINAL_SETTING, loadAdyenStatus, loadAdyenTerminals, removeAdyenApp, saveAdyenApp, type AdyenStatus, type AdyenTerminal } from '../payments/adyen-terminal';
 import { getSetting, setSetting } from '../lib/settings';
-import { CARD_IN_BASE_KEY, loadCardFx } from '../cart';
+import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
+import SumupSoloPairing from './SumupSoloPairing.vue';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
@@ -34,7 +36,9 @@ async function refreshStatuses(): Promise<void> {
     const status = available ? await p.getStatus().catch((e) => ({ connected: false, detail: String(e) })) : { connected: false, detail: 'Not available on this device' };
     statuses.value[p.id] = { ...status, available };
   }
+  sumupCloud.value = active.value === 'sumup-cloud' ? await loadSumupCloudStatus().catch(() => null) : null;
 }
+const sumupCloud = ref<SumupCloudStatus | null>(null);
 
 const sumupKey = ref('');
 const editingKey = ref(false);
@@ -54,6 +58,7 @@ onMounted(async () => {
   active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
+  void loadTestMode();
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
@@ -249,6 +254,13 @@ const ago = (ts: number): string => {
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
+async function toggleTestMode(e: Event): Promise<void> {
+  const on = (e.target as HTMLInputElement).checked;
+  await setTestMode(on);
+  sdk().ui.toast(on ? 'Test mode on - nothing the till does now is recorded.' : 'Test mode off - sales are recorded again.', { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
+  void refreshStatuses();
+}
+
 async function saveCardInBase(): Promise<void> {
   await setSetting(CARD_IN_BASE_KEY, cardInBase.value);
   // The till may already be open: pick up the setting (and a rate) now.
@@ -273,6 +285,15 @@ async function removeMethod(name: string): Promise<void> {
     <h2>Payments</h2>
     <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
 
+    <h3>Test mode</h3>
+    <label class="toggle">
+      <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
+      <span class="main">
+        <span>Try the till without recording anything</span>
+        <small>Every step runs as usual - cart, discounts, cash or card, the receipt screen - but no sale is recorded: no transaction, no stock movement, nothing in the books, nothing synced. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
+      </span>
+    </label>
+
     <h3>Card payment terminal</h3>
     <ul class="providers">
       <li v-for="p in providers" :key="p.id" :class="{ off: !statuses[p.id]?.available }">
@@ -286,13 +307,23 @@ async function removeMethod(name: string): Promise<void> {
     </ul>
 
     <template v-if="statuses['sumup']?.available">
-      <label class="field">
-        <span>SumUp affiliate key</span>
-        <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
-        <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="From the SumUp developer dashboard" @change="saveKey" />
-      </label>
-      <p class="hint">Save the key and tap <strong>Connect</strong> to log in once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <details>
+        <summary>Your own app build</summary>
+        <label class="field">
+          <span>SumUp affiliate key</span>
+          <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
+          <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="Only for a build with its own app id" @change="saveKey" />
+        </label>
+        <p class="hint">Only needed when this app was built with its own app id. Leave empty to use this server's key.</p>
+      </details>
     </template>
+
+    <div v-if="active === 'sumup-cloud' && sumupCloud?.configured" class="carbon">
+      <p v-if="sumupCloud.merchant" class="hint">Connected to SumUp account <strong>{{ sumupCloud.merchant.name || sumupCloud.merchant.code }}</strong>.</p>
+      <p class="hint">The Solo takes the card over Wi-Fi or its own SIM - this till can be any device, a browser too.{{ sumupCloud.connected ? '' : ' Tap Connect above once to sign in to your SumUp account.' }}</p>
+      <SumupSoloPairing v-if="sumupCloud.connected" @picked="refreshStatuses" />
+    </div>
 
     <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">
       <div v-if="smartpos?.canManage" class="carbon">

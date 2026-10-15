@@ -46,6 +46,7 @@ export function applyUser(user: TokenResponse['user']): void {
   if (account.value && account.value.userId !== next.userId) {
     setAccount({ ...account.value, accountName: next.accountName, profile: next.profile });
   } else setAccount(next);
+  if (account.value?.userId === next.userId) remember(account.value);
 }
 
 /**
@@ -102,6 +103,51 @@ export const currentAccount = computed(() => {
   return account.value ? (active()?.snapshot ?? account.value) : null;
 });
 export const isAuthenticated = computed(() => account.value !== null);
+/** Signed in from what this device remembers, the server not reached yet: data is local, syncing waits. */
+export const signedInOffline = computed(() => account.value !== null && accessToken.value === null);
+
+// ── Starting without the server ─────────────────────────────────────────────
+//
+// A booth restarts the app at a venue with no signal. The data is on the
+// device (per account, see core/db.ts) and the refresh token is too, but the
+// server is needed to turn it into a session - so the app used to open on the
+// login screen and nothing could be sold until the signal came back.
+//
+// Now the device remembers who signed it in: the account snapshot only (ids,
+// role, profile), never a token. Starting without the server resumes as that
+// person; the first request that reaches the server renews the session or,
+// if the server refuses it (removed, signed out elsewhere), ends it then. A
+// refusal or a sign-out forgets the snapshot at once.
+const REMEMBER_KEY = 'zollify.device-account';
+/** Longest a remembered sign-in is used without the server - the web refresh token's default life. */
+const REMEMBER_MS = 30 * 24 * 3600 * 1000;
+
+function remember(snapshot: AccountSnapshot | null): void {
+  try {
+    if (snapshot) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ snapshot, at: Date.now() }));
+    else localStorage.removeItem(REMEMBER_KEY);
+  } catch {
+    /* no storage: the app simply needs the server to start, as before */
+  }
+}
+
+/**
+ * Starts as the person who last signed this device in, when the server could
+ * not be reached. False when nobody is remembered, or it was too long ago.
+ */
+export function resumeOffline(now = Date.now()): boolean {
+  if (account.value) return false;
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (!raw) return false;
+    const { snapshot, at } = JSON.parse(raw) as { snapshot?: AccountSnapshot; at?: number };
+    if (!snapshot?.accountId || !snapshot.userId || typeof at !== 'number' || now - at > REMEMBER_MS) return false;
+    setAccount(snapshot);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** The live bearer token, for the one place (the realtime socket) that cannot use authFetch. */
 export function getAccessToken(): string | null {
@@ -183,6 +229,7 @@ export function applyLogin(result: LoginResult): void {
   // malformed claim means "refresh soon" rather than "never refresh".
   expiresAt.value = expiryFromJwt(result.accessToken) || Date.now() + 60_000;
   setAccount(toSnapshot(result.user));
+  remember(account.value);
 }
 
 export function clearSession(): void {
@@ -191,6 +238,7 @@ export function clearSession(): void {
   people.clear();
   activeUserId.value = null;
   setAccount(null);
+  remember(null);
 }
 
 /**

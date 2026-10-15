@@ -87,6 +87,11 @@ export interface ArtistInvoice {
   period: ReportPeriod;
   consignorId: string;
   consignorName: string;
+  /** The artist's tax number and VAT status as they were when issued; a self-billed statement must say both. */
+  consignorVatId?: string;
+  vatRegistered?: boolean;
+  /** When the artist agreed to self-billing; null means issued without an agreement on file. */
+  selfBillingAgreedOn?: string | null;
   currency: string;
   lines: InvoiceLine[];
   /** What the period earned the artist: the lines summed. */
@@ -129,12 +134,16 @@ export function journalCsv(invoices: ArtistInvoice[], s: AccountingSettings): st
     fees: s.accountFees,
   };
   const cell = (v: string | number): string => (typeof v === 'number' ? v.toFixed(2) : csvCell(v));
-  const out = [['Date', 'Voucher', 'Text', 'Account', 'Contra account', 'Amount', 'Currency'].join(',')];
+  const out = [['Date', 'Voucher', 'Text', 'Account', 'Contra account', 'Amount', 'Currency', 'Counterparty tax no.', 'VAT registered'].join(',')];
   for (const inv of invoices) {
     for (const l of inv.lines) {
       // Bookkeeping reads from the store's side: commission and fees are income, the artist's share is owed.
       const amount = l.kind === 'sales' ? l.amount : -l.amount;
-      out.push([inv.date, inv.number, `${l.text} - ${inv.consignorName}`, account[l.kind], l.kind === 'sales' ? '' : s.accountArtistPayable, amount, inv.currency].map(cell).join(','));
+      out.push(
+        [inv.date, inv.number, `${l.text} - ${inv.consignorName}`, account[l.kind], l.kind === 'sales' ? '' : s.accountArtistPayable, amount, inv.currency, inv.consignorVatId ?? '', inv.vatRegistered ? 'yes' : 'no']
+          .map(cell)
+          .join(','),
+      );
     }
   }
   return out.join('\n') + '\n';

@@ -80,6 +80,20 @@ export interface SettingsPanel {
   order?: number;
 }
 
+/**
+ * A step a module adds to first-run setup, after the business and the first
+ * store or event. The shell owns the progress list and Back / Continue; the
+ * component is only the body, and every step can be skipped.
+ */
+export interface SetupStep {
+  id: string;
+  /** Names the step in the progress list. */
+  title: string;
+  component: ComponentLoader;
+  minRole?: Role;
+  order?: number;
+}
+
 // ── Cross-module events ─────────────────────────────────────────────────────
 
 export interface SaleLine {
@@ -354,6 +368,8 @@ export interface InventoryApi {
   /** What this event can still sell of one item. */
   availableFor(eventId: string, productId: string, variantId?: string | null): number;
   onHand(productId: string, variantId?: string | null): number;
+  /** What is physically left: the last count minus every sale since. Claimed stock is still counted - it exists, it is only promised. */
+  remaining(productId: string, variantId?: string | null): number;
   setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
   /** Reserve stock for an event. */
   claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;
@@ -422,10 +438,16 @@ export interface ImageApi {
  * colliding with another one. Not for anything large or high-frequency;
  * this is for the odd shared list or flag a module wants every device to
  * agree on.
+ *
+ * Only admins' writes reach other devices, except under `team.` (e.g.
+ * 'team.my-module.row'): those staff may write too, so keep there what
+ * colleagues change day to day, and configuration outside it.
  */
 export interface SyncedSettingsApi {
   get<T = unknown>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+  /** Every setting whose key starts with `prefix`, keyed by full key - for one key per row, read back in one go. */
+  list<T = unknown>(prefix: string): Promise<Record<string, T>>;
 }
 
 export interface DataApi {
@@ -506,6 +528,8 @@ export interface Sdk {
   routes: { add(route: RouteDef): void; addAll(routes: RouteDef[]): void };
   nav: { add(item: NavItem): void };
   settings: { panel(panel: SettingsPanel): void };
+  /** Adds a step to first-run setup (taking card payments, say). */
+  setup: { step(step: SetupStep): void };
   /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
   calendar: { source(source: CalendarSource): void };
   /** Adds a card to the home screen (low stock at the stores you consign with, say). */

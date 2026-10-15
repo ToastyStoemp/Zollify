@@ -39,6 +39,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'price-cards': () => import('@zollify/price-cards'),
   'label-printer': () => import('@zollify/label-printer'),
   'convention-checklist': () => import('@zollify/convention-checklist'),
+  'multi-storage': () => import('@zollify/multi-storage'),
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),
   'shopify-sync': () => import('@zollify/shopify-sync'),
@@ -49,6 +50,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'consignment-artist': () => import('@zollify/consignment-artist'),
   commissions: () => import('@zollify/commissions'),
   'peppol-be': () => import('@zollify/peppol-be'),
+  economic: () => import('@zollify/economic'),
 };
 
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */
@@ -162,12 +164,31 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   const account = getAccount();
   if (!account) return [];
 
+  // Which modules are on comes from the server; the last answer is kept per
+  // account, so starting without the server (no signal at the venue) still
+  // brings up the till and the rest from the bundles already on the device.
+  const manifestKey = `zollify.manifest.${account.accountId}`;
   let manifest: ManifestResponse;
   try {
     manifest = (await authFetch('/modules/manifest')) as ManifestResponse;
+    try {
+      localStorage.setItem(manifestKey, JSON.stringify(manifest));
+    } catch {
+      /* no storage: the next offline start simply has no modules, as before */
+    }
   } catch (err) {
-    console.error('[zollify] could not fetch the module manifest', err);
-    return [];
+    let cached: ManifestResponse | null = null;
+    try {
+      cached = JSON.parse(localStorage.getItem(manifestKey) ?? 'null') as ManifestResponse | null;
+    } catch {
+      cached = null;
+    }
+    if (!cached?.modules) {
+      console.error('[zollify] could not fetch the module manifest', err);
+      return [];
+    }
+    console.warn('[zollify] server not reached - starting the modules this device last ran');
+    manifest = cached;
   }
 
   // Routes are registered through the sink as each module mounts; a module

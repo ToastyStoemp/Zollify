@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { baseFactor, commissionFor, type Consignor } from './consignment';
+import { RENT_REF_KIND, baseFactor, commissionFor, type Consignor } from './consignment';
 import { localDay } from './consignment-books';
 import type { Transaction } from './types';
 
@@ -31,6 +31,8 @@ export const EconomicSettingsSchema = z.object({
     .object({
       /** Own goods, and renters' goods in a commission sale. */
       sales: AccountNumber.nullable().default(null),
+      /** Shelf and space rent taken at the till: a taxable service, not exempt letting. */
+      rent: AccountNumber.nullable().default(null),
       /** The store's commission on renters' goods, as an agent. */
       commission: AccountNumber.nullable().default(null),
       /** Owed to renters (skyldig til reollejere), as an agent. */
@@ -71,6 +73,7 @@ export interface DayJournal {
 
 const TEXT: Record<EconomicAccountKey, string> = {
   sales: 'Varesalg',
+  rent: 'Reolleje',
   commission: 'Kommission reolsalg',
   renters: 'Skyldig til reollejere',
   cash: 'Kontant',
@@ -117,7 +120,9 @@ export function dayJournal(
       const vatCode = rate == null ? undefined : settings.vatCodes[String(rate)];
       if (rate != null && !vatCode) problems.add(`No e-conomic VAT code set for ${rate}%.`);
       credited += gross;
-      if (item.consignorId && settings.consignment === 'agency') {
+      if (item.ref?.moduleId === 'consignment' && item.ref.kind === RENT_REF_KIND) {
+        add('rent', -sign * gross, vatCode);
+      } else if (item.consignorId && settings.consignment === 'agency') {
         const consignor = byId.get(item.consignorId);
         const pct = typeof item.commissionPct === 'number' ? item.commissionPct : consignor ? commissionFor(consignor, tx.eventId) : null;
         if (pct == null) {
@@ -145,7 +150,7 @@ export function dayJournal(
 
   if (currencies.size > 1) problems.add(`Sales in more than one currency (${[...currencies].join(', ')}) - book this day by hand.`);
 
-  const order: EconomicAccountKey[] = ['sales', 'commission', 'renters', 'cash', 'card'];
+  const order: EconomicAccountKey[] = ['sales', 'rent', 'commission', 'renters', 'cash', 'card'];
   const lines = [...buckets.values()]
     .filter((b) => b.minor !== 0)
     .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key) || (a.vatCode ?? '').localeCompare(b.vatCode ?? ''))

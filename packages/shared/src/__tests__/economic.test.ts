@@ -30,7 +30,7 @@ const tx = (id: string, items: TxItem[], extra: Partial<Transaction> = {}): Tran
   ...extra,
 });
 
-const settings = EconomicSettingsSchema.parse({ accounts: { sales: 1010, commission: 1020, renters: 6800, cash: 5800, card: 5810 } });
+const settings = EconomicSettingsSchema.parse({ accounts: { sales: 1010, rent: 1030, commission: 1020, renters: 6800, cash: 5800, card: 5810 } });
 const renters = [{ id: 'mia', name: 'Mia', commissionPct: 20, storeCommission: {} }];
 const sum = (lines: { amount: number }[]) => Math.round(lines.reduce((s, l) => s + l.amount * 100, 0));
 const line = (j: ReturnType<typeof dayJournal>, key: string) => j.lines.find((l) => l.key === key);
@@ -56,6 +56,15 @@ describe('e-conomic day journal', () => {
     expect(line(j, 'cash')!.amount).toBe(50);
     expect(line(j, 'card')!.amount).toBe(380);
     expect(j.total).toBe(430);
+  });
+
+  it('books shelf rent taken at the till to its own account, with VAT', () => {
+    const rent: TxItem = { ...item('module:rent', 300), ref: { moduleId: 'consignment', kind: 'space-rent', id: 'r1' } };
+    const j = dayJournal([tx('a', [rent, item('mug', 100)])], renters, DAY, settings);
+    expect(j.problems).toEqual([]);
+    expect(sum(j.lines)).toBe(0);
+    expect(line(j, 'rent')).toMatchObject({ account: 1030, amount: -300, vatCode: 'U25' });
+    expect(line(j, 'sales')!.amount).toBe(-100);
   });
 
   it('books renters\' goods as own sales in a commission sale', () => {

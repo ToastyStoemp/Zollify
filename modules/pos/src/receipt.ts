@@ -268,7 +268,7 @@ export function buildReceiptLines(
     lines.push(center('Scan for your receipt online'));
     lines.push({ kind: 'space' });
   }
-  lines.push(center(`Receipt ${tx.id.slice(-8)}`));
+  lines.push(center(`Receipt ${tx.receiptNumber ?? tx.id.slice(-8)}`));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 

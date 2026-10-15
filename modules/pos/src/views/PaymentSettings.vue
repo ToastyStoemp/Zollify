@@ -4,6 +4,7 @@ import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
+import { GO2_HOST_SETTING, GO2_PORT_SETTING, GO2_TRANSPORT_SETTING, connectGo2, type Go2Transport } from '../payments/mypos-go2';
 import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-cloud';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
@@ -39,6 +40,20 @@ async function refreshStatuses(): Promise<void> {
 }
 const sumupCloud = ref<SumupCloudStatus | null>(null);
 
+const go2 = ref({ transport: 'bluetooth' as Go2Transport, host: '', port: '8080' });
+async function saveGo2(): Promise<void> {
+  await setSetting(GO2_TRANSPORT_SETTING, go2.value.transport);
+  await setSetting(GO2_HOST_SETTING, go2.value.host.trim());
+  await setSetting(GO2_PORT_SETTING, Number(go2.value.port) || 8080);
+  if (active.value === 'mypos-go2') {
+    try {
+      await connectGo2();
+    } catch (err) {
+      sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
+    }
+  }
+  void refreshStatuses();
+}
 const sumupKey = ref('');
 const editingKey = ref(false);
 const hasKey = computed(() => !!sumupKey.value.trim());
@@ -59,6 +74,11 @@ onMounted(async () => {
   cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
   void loadTestMode();
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
+  go2.value = {
+    transport: ((await getSetting<string>(GO2_TRANSPORT_SETTING)) === 'wifi' ? 'wifi' : 'bluetooth') as Go2Transport,
+    host: (await getSetting<string>(GO2_HOST_SETTING)) ?? '',
+    port: String((await getSetting<number | string>(GO2_PORT_SETTING)) ?? 8080),
+  };
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
   smartposTerminal.value = (await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING))?.deviceId ?? '';
@@ -248,6 +268,22 @@ async function removeMethod(name: string): Promise<void> {
       </li>
     </ul>
 
+    <template v-if="active === 'mypos-go2' && statuses['mypos-go2']?.available">
+      <div class="carbon">
+        <div class="row"><span class="label">How this device reaches the Go2</span></div>
+        <label class="inline"><input v-model="go2.transport" type="radio" value="bluetooth" @change="saveGo2" /> <span>Bluetooth</span></label>
+        <label class="inline"><input v-model="go2.transport" type="radio" value="wifi" @change="saveGo2" /> <span>Wi-Fi (same network)</span></label>
+        <template v-if="go2.transport === 'wifi'">
+          <div class="row">
+            <label class="field grow"><span>Terminal IP address</span><input v-model="go2.host" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.1.100" @change="saveGo2" /></label>
+            <label class="field port"><span>Port</span><input v-model="go2.port" type="number" inputmode="numeric" min="1" max="65535" @change="saveGo2" /></label>
+          </div>
+          <p class="hint">Put the Go2 in slave mode on the same Wi-Fi as this device. Its IP address is under the terminal’s connection settings. Port 8080 unless you changed it there. Then tap <strong>Connect</strong> above.</p>
+        </template>
+        <p v-else class="hint">Bluetooth only works on a Go2 ordered with the Bluetooth module - a plain Go2 has none, however long it scans. If pairing never finds the terminal, use Wi-Fi.</p>
+      </div>
+    </template>
+
     <template v-if="statuses['sumup']?.available">
       <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
       <details>
@@ -375,4 +411,7 @@ code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius
 .toggle input { margin-top: .2rem; }
 .add { display: flex; gap: .4rem; }
 .add input { flex: 1; min-width: 0; }
+.port { max-width: 7rem; }
+.grow { flex: 1; }
+label.inline { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 </style>

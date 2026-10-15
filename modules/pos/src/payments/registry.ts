@@ -1,8 +1,8 @@
 import type { PaymentProvider, PaymentProviderId } from './provider';
-import { MyPos, hasNativePlugin } from '../native/plugins';
+import { hasNativePlugin } from '../native/plugins';
 import { sdk } from '../runtime';
 import { manualProvider } from './manual';
-import { myposGo2Provider } from './mypos-go2';
+import { connectGo2, myposGo2Provider } from './mypos-go2';
 import { myposCarbonProvider } from './mypos-carbon';
 import { myposGlassProvider } from './mypos-glass';
 import { sumupProvider } from './sumup';
@@ -49,6 +49,6 @@ export async function availableProviders(): Promise<PaymentProvider[]> {
  */
 export function onActiveProviderChanged(id: PaymentProviderId): void {
   if (id === 'mypos-go2' && hasNativePlugin('MyPos')) {
-    void MyPos.connectTerminal().catch(() => {});
+    void connectGo2().catch(() => {});
   }
 }

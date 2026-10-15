@@ -566,6 +566,11 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <QrCode :value="androidApp.url" :size="120" label="Android app download QR code" class="qr" />
         </li>
         <li>
+          <strong>Check the legal setup for {{ artist.countryOfOrigin || 'your country' }}</strong>
+          <span>What a till must do where you sell - VAT on receipts, Germany’s TSE, Denmark’s bookkeeping - with what is done and what is left.</span>
+          <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.legal' } })">Open Legal setup</button>
+        </li>
+        <li>
           <strong>Invite helpers</strong>
           <span>Give someone the till for one event without handing over the whole account.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.team' } })">Open Team</button>

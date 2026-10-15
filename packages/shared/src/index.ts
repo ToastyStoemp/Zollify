@@ -19,6 +19,7 @@ export * from './split';
 export * from './vat';
 export * from './tse';
 export * from './legal';
+export * from './legal-checklist';
 export * from './consignment';
 export * from './store-events';
 export * from './event-files';

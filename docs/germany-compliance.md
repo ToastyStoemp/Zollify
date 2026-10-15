@@ -91,6 +91,10 @@ elektronischer Aufzeichnungssysteme**. Settings → Tax export (Germany) → **T
 
 Test TSEs (fiskaly TEST, Zollify's test TSE) are flagged in the register and are not reported.
 
+## In the app: Settings → Legal setup
+
+Settings → Legal setup turns this document into a checklist per country the business sells in (its home country, its stores, its events): what is already in place (read from the profile, VAT settings, TSE, modules and connections), what to set and where, and what happens outside Zollify (a filing, a signed agreement) for the owner to confirm. The rules are in `packages/shared/src/legal-checklist.ts`; this document carries the sources.
+
 ## Switching it on
 
 Settings → Modules → Built in → **Germany (KassenSichV)**, per account. It shows the TSE settings (This device), closing the day (Cash up) and the tax export panel; switched off they are hidden. The signing itself is core and never follows the switch: a device that has a TSE (or signs through a main TSE device) keeps signing and keeps its screens. Creating or editing an event in Germany warns when its sales would go unsigned - the switch off, or no device with a TSE - and the event card says so too.

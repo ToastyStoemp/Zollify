@@ -78,6 +78,10 @@ Source: momsbekendtgørelsen § 63-64 (BEK 2246 of 30 November 2021, renumbered 
 
 ## What Zollify has, and what is missing
 
+## In the app: Settings → Legal setup
+
+Settings → Legal setup turns this document into a checklist per country the business sells in (its home country, its stores, its events): what is already in place (read from the profile, VAT settings, TSE, modules and connections), what to set and where, and what happens outside Zollify (a filing, a signed agreement) for the owner to confirm. The rules are in `packages/shared/src/legal-checklist.ts`; this document carries the sources.
+
 ### Tier A - needed for any Danish customer (consignment shops included)
 
 | # | Change | Status today | Why |

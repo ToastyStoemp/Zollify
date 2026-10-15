@@ -39,6 +39,12 @@ const corePanels: Omit<Panel, 'group'>[] = [
     component: () => import('./VatSettings.vue'),
   },
   {
+    id: 'core.legal',
+    label: 'Legal setup',
+    minRole: 'admin',
+    component: () => import('./LegalSetupView.vue'),
+  },
+  {
     id: 'core.data',
     label: 'Backup & restore',
     component: () => import('./DataSettings.vue'),
@@ -106,7 +112,7 @@ const corePanels: Omit<Panel, 'group'>[] = [
  */
 const GROUPS = ['Business', 'Selling', 'Books & paperwork', 'Connections', 'Data & devices', 'Advanced', 'More'];
 const GROUP_OF: [RegExp, string][] = [
-  [/^core\.(profile|team|security)$/, 'Business'],
+  [/^core\.(profile|team|security|legal)$/, 'Business'],
   [/^core\.vat$|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
   [/^(customs-[a-z]+|peppol-be|economic|tax|consignment|costs)\.|^core\.(fiskaly|taxexport)$/, 'Books & paperwork'],
   [/^core\.webhooks$|^shopify-sync\./, 'Connections'],

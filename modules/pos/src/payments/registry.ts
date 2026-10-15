@@ -9,6 +9,7 @@ import { sumupProvider } from './sumup';
 import { sumupCloudProvider } from './sumup-cloud';
 import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
 import { nexiSmartposProvider } from './nexi-smartpos';
+import { mobilepayProvider } from './mobilepay';
 
 const providers: PaymentProvider[] = [
   manualProvider,
@@ -19,6 +20,7 @@ const providers: PaymentProvider[] = [
   sumupProvider,
   sumupCloudProvider,
   nexiSmartposProvider,
+  mobilepayProvider,
 ];
 
 export function allProviders(): PaymentProvider[] {

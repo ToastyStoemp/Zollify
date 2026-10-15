@@ -11,6 +11,7 @@ import { getSetting, setSetting } from '../lib/settings';
 import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
 import SumupSoloPairing from './SumupSoloPairing.vue';
+import MobilePayKeys from './MobilePayKeys.vue';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
@@ -244,9 +245,10 @@ async function removeMethod(name: string): Promise<void> {
         <span :class="['dot', statuses[p.id]?.connected ? 'on' : statuses[p.id]?.available ? 'idle' : 'off']"></span>
         <button v-if="p.configure && statuses[p.id]?.available" type="button" class="quiet" @click="run(p, 'configure', 'Connecting…')">Connect</button>
         <button v-if="p.pairReader && statuses[p.id]?.connected" type="button" class="quiet" @click="run(p, 'pairReader', 'Reader settings closed')">Pair reader</button>
-        <button v-if="p.disconnect && statuses[p.id]?.connected" type="button" class="quiet danger" @click="run(p, 'disconnect', 'Disconnected')">Log out</button>
+        <button v-if="p.disconnect && statuses[p.id]?.connected && p.id !== 'mobilepay'" type="button" class="quiet danger" @click="run(p, 'disconnect', 'Disconnected')">Log out</button>
       </li>
     </ul>
+    <MobilePayKeys v-if="statuses['mobilepay']?.available" @changed="refreshStatuses" />
 
     <template v-if="statuses['sumup']?.available">
       <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>

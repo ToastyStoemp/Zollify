@@ -37,6 +37,8 @@ import {
 } from '../cart';
 import { getProvider } from '../payments/registry';
 import { testTerminalProvider } from '../payments/test-terminal';
+import { MOBILEPAY_METHOD, loadMobilepayStatus, mobilepayQr } from '../payments/mobilepay';
+import { QrCode } from '../lib/after-sale';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
@@ -78,6 +80,13 @@ const providerId = ref('manual');
 const provider = computed(() => (testMode.value ? testTerminalProvider : getProvider(providerId.value as never)));
 const hasTerminal = computed(() => testMode.value || providerId.value !== 'manual');
 const customMethods = ref<string[]>([]);
+/** MobilePay keys are on the account: the till gets a MobilePay button next to a card terminal, or it is the terminal. */
+const mobilepayReady = ref(false);
+onMounted(() => {
+  void loadMobilepayStatus()
+    .then((s) => (mobilepayReady.value = s.connected))
+    .catch(() => undefined);
+});
 
 // ── Terminal connection indicator: polled while the till is open ────────────
 const terminalConnected = ref<boolean | null>(null); // null = still checking
@@ -617,6 +626,7 @@ function publish(paid?: { total: number; receiptUrl?: string }): void {
       : [...appliedDiscounts.value.map((r) => ({ name: r.rule.name, amount: r.amount })), ...(cart.custom && customDiscountCharged.value > 0 ? [{ name: cart.custom.name, amount: customDiscountCharged.value }] : [])],
     total: paid ? paid.total : total.value,
     paid,
+    ...(mobilepayQr.value ? { payQr: mobilepayQr.value } : {}),
     ts: Date.now(),
   });
 }
@@ -704,8 +714,14 @@ function startPayment(method: string): void {
     void beginCardPayment();
     return;
   }
+  if (method === MOBILEPAY_METHOD) {
+    payment.phase = 'terminal';
+    void runTerminal('mobilepay');
+    return;
+  }
   payment.phase = 'confirm';
 }
+const onMobilepay = computed(() => payment.method === MOBILEPAY_METHOD || (payment.method === 'card' && providerId.value === 'mobilepay' && !testMode.value));
 
 /** A reader that needs an interactive sign-in (SumUp) and isn't signed in gets a connect-or-choose screen instead of a failing terminal call. */
 async function beginCardPayment(): Promise<void> {
@@ -749,12 +765,13 @@ async function sendLog(): Promise<void> {
   }
 }
 
-async function runTerminal(): Promise<void> {
-  const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
+async function runTerminal(id: string = providerId.value): Promise<void> {
+  const viaMobilepay = payment.method === MOBILEPAY_METHOD;
+  const outcome = await checkout(crypto.randomUUID(), { method: viaMobilepay ? MOBILEPAY_METHOD : 'card', terminal: { providerId: id } });
   if (outcome.cancelled || payment.phase !== 'terminal') return;
-  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`, outcome.test);
+  if (outcome.approved) finish(outcome.sale!, `${viaMobilepay ? 'MobilePay' : 'Card'} approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`, outcome.test);
   else {
-    payment.error = outcome.error ?? 'Card payment declined';
+    payment.error = outcome.error ?? `${viaMobilepay ? 'MobilePay' : 'Card'} payment declined`;
     payment.phase = 'failed';
   }
 }
@@ -764,12 +781,12 @@ async function runTerminal(): Promise<void> {
 async function retryCard(): Promise<void> {
   await cancelCheckout();
   payment.phase = 'terminal';
-  void runTerminal();
+  void runTerminal(payment.method === MOBILEPAY_METHOD ? 'mobilepay' : undefined);
 }
 async function completeByHand(): Promise<void> {
   await cancelCheckout();
   payment.phase = 'confirm';
-  payment.method = 'card';
+  if (payment.method !== MOBILEPAY_METHOD) payment.method = 'card';
 }
 
 async function confirmPayment(): Promise<void> {
@@ -1077,6 +1094,7 @@ function lockTill(): void {
           <button type="button" class="card" :disabled="!itemCount" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount" @click="startPayment('split')">Split</button>
           <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount" @click="startPayment(m)">{{ m }}</button>
+          <button v-if="mobilepayReady && providerId !== 'mobilepay' && !testMode" type="button" class="custom mobilepay" :disabled="!itemCount" @click="startPayment(MOBILEPAY_METHOD)">MobilePay</button>
         </div>
       </footer>
     </aside>
@@ -1192,12 +1210,19 @@ function lockTill(): void {
         </template>
 
         <template v-else-if="payment.phase === 'terminal'">
-          <p class="pulse">Present card to terminal…</p>
-          <p class="hint">{{ provider.label }}</p>
+          <template v-if="onMobilepay">
+            <div v-if="mobilepayQr && QrCode" class="payqr"><component :is="QrCode" :value="mobilepayQr" :size="220" label="MobilePay QR code" /></div>
+            <p class="pulse">{{ mobilepayQr ? 'Customer scans the code with MobilePay…' : 'Asking MobilePay for a code…' }}</p>
+            <p class="hint">The code is on the customer display too, when one is on.</p>
+          </template>
+          <template v-else>
+            <p class="pulse">Present card to terminal…</p>
+            <p class="hint">{{ provider.label }}</p>
+          </template>
         </template>
 
         <template v-else-if="payment.phase === 'failed'">
-          <p class="bad strong">Card payment didn't go through</p>
+          <p class="bad strong">{{ onMobilepay ? 'MobilePay' : 'Card' }} payment didn't go through</p>
           <p v-if="payment.error" class="hint">{{ payment.error }}</p>
           <p class="hint">Retry the card, or complete the sale by hand if it was paid another way.</p>
           <button type="button" class="quiet" :disabled="sendingLog" @click="sendLog">{{ sendingLog ? 'Sending…' : logSent ? 'Log sent' : 'Send log to support' }}</button>
@@ -1235,7 +1260,7 @@ function lockTill(): void {
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
           <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
-          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
+          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">{{ onMobilepay ? 'Try again' : 'Retry card' }}</button>
           <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
         </div>

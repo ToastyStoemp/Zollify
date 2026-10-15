@@ -283,6 +283,8 @@ export interface DisplayCart {
    * itself whether to show it as a QR code.
    */
   paid?: { total: number; receiptUrl?: string };
+  /** A link the customer must scan to pay (MobilePay) while the register waits; displays draw it as a QR code. */
+  payQr?: string;
   ts: number;
 }
 

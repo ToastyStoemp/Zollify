@@ -17,6 +17,7 @@ const ok = ref<string | null>(null);
 
 const ACCOUNTS: { key: keyof EconomicSettings['accounts']; label: string; hint: string; agency?: boolean }[] = [
   { key: 'sales', label: 'Sales', hint: 'Your own goods' },
+  { key: 'rent', label: 'Shelf rent', hint: 'Space rent taken at the till, with VAT' },
   { key: 'commission', label: 'Commission', hint: "Your share of renters' sales", agency: true },
   { key: 'renters', label: 'Owed to renters', hint: 'Liability until paid out', agency: true },
   { key: 'cash', label: 'Cash', hint: 'Till cash' },

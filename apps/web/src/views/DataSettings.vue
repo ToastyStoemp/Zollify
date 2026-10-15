@@ -39,17 +39,26 @@ const eventIdsForExport = computed<string[] | undefined>(() =>
   eventScope.value === 'selected' ? [...selectedEventIds.value] : undefined,
 );
 
+/**
+ * Set once a backup that includes every sale was saved from this page. Sales
+ * are accounting records with a retention period, so the server refuses to
+ * erase them until the app says they were saved elsewhere.
+ */
+const salesArchived = ref(false);
+
 /** Owner only: server-side erase plus a local reset; the page reloads into an empty booth. */
 async function wipe(): Promise<void> {
   const ok = await shellConfirm(
-    'Erase every product, event, sale and photo in this account, on the server and on this device? Export a backup first - this cannot be undone.',
+    salesArchived.value
+      ? 'Erase every product, event, sale and photo in this account, on the server and on this device? Keep the backup you saved - this cannot be undone.'
+      : 'Erase every product, event, sale and photo in this account, on the server and on this device? Sales still inside their retention period are refused until a backup with all sales was saved from this page.',
     'Erase everything',
   );
   if (!ok) return;
   busy.value = 'wipe';
   error.value = null;
   try {
-    await wipeAccountData();
+    await wipeAccountData({ archived: salesArchived.value });
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not erase the data.';
     busy.value = null;
@@ -76,6 +85,7 @@ async function exportBackup(): Promise<void> {
     status.value =
       `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events and ` +
       `${backup.transactions.length} sales.`;
+    if (include.value.transactions && !eventIdsForExport.value) salesArchived.value = true;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create a backup.';
   } finally {
@@ -222,6 +232,7 @@ async function confirmRestore(): Promise<void> {
       <h2 class="danger-h">Start from scratch</h2>
       <p class="hint">
         Erases every product, event, sale and photo in this account - on the server and on this device.
+        Sales are kept for their retention period until a backup with every sale has been saved from this page{{ salesArchived ? ' - done' : '' }}.
         Other devices empty themselves at their next sync. Users, invites and the business profile stay.
       </p>
       <div class="actions">

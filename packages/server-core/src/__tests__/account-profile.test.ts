@@ -234,3 +234,32 @@ describe('account profile', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe('erasing the account data', () => {
+  const push = (ops: { opId: string; type: string; payload: unknown }[]) =>
+    app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'till', ops: ops.map((o, i) => ({ ...o, deviceId: 'till', ts: i + 1 })) } });
+  const sale = (id: string, timestamp: number) => ({
+    opId: `op-wipe-${id.padStart(12, '0')}`,
+    type: 'tx.create',
+    payload: { id, eventId: 'e', deviceId: 'till', timestamp, method: 'cash', payments: [], items: [], discounts: [], total: 1, currency: 'EUR' },
+  });
+
+  it('keeps sales inside their retention period until a backup was saved', async () => {
+    expect((await push([sale('s1', Date.now()), sale('s2', Date.UTC(2001, 5, 1))])).statusCode).toBe(200);
+    const refused = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: {} });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: 'retention', sales: 1 });
+    const pull = await app.inject({ method: 'GET', url: '/api/sync/pull?since=0', headers: auth() });
+    expect(pull.json().ops).toHaveLength(2);
+
+    const ok = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: { archived: true } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().removedOps).toBe(2);
+  });
+
+  it('erases at once when every sale is past its retention', async () => {
+    await push([sale('s3', Date.UTC(2001, 5, 1))]);
+    const ok = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: {} });
+    expect(ok.statusCode).toBe(200);
+  });
+});

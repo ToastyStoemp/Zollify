@@ -11,6 +11,23 @@ import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth'
  * per account with no offline write path worth building - the wizard runs on
  * a signed-in device, and every other device reads it at its next login.
  */
+/**
+ * How long sales are kept: five years from the end of the financial year is
+ * the common EU floor (DK bogføringsloven, BE, NL); DE and CH want ten.
+ * Counted from the calendar year of the sale, which is the strictest reading
+ * for a financial year that follows the calendar.
+ */
+export const SALES_RETENTION_YEARS = 10;
+
+/** Sales on the log made in a year whose retention has not yet run out. */
+export function salesInRetention(db: Database.Database, accountId: string, now = new Date()): number {
+  const cutoff = Date.UTC(now.getUTCFullYear() - SALES_RETENTION_YEARS, 0, 1);
+  const row = db
+    .prepare(`SELECT count(*) AS n FROM ops WHERE accountId = ? AND type = 'tx.create' AND json_extract(payload, '$.timestamp') >= ?`)
+    .get(accountId, cutoff) as { n: number };
+  return row.n;
+}
+
 export function registerAccountRoutes(
   app: FastifyInstance,
   db: Database.Database,
@@ -28,6 +45,18 @@ export function registerAccountRoutes(
     const claims = req.user as JwtClaims;
     if (claims.role !== 'owner') {
       return reply.code(403).send({ error: 'forbidden', message: 'Only the owner can erase the account data.' });
+    }
+    // Sales are accounting records: kept for the retention period, whatever the
+    // owner wants erased. The app only sends `archived` after a backup with the
+    // sales in it was saved, so the records survive outside this server.
+    const archived = (req.body as { archived?: unknown } | null)?.archived === true;
+    const inPeriod = salesInRetention(db, claims.accountId);
+    if (inPeriod && !archived) {
+      return reply.code(409).send({
+        error: 'retention',
+        message: `${inPeriod} sale${inPeriod === 1 ? '' : 's'} must be kept for ${SALES_RETENTION_YEARS} years after the end of the year they were made. Save a backup that includes sales first.`,
+        sales: inPeriod,
+      });
     }
     const removed = db.transaction((accountId: string) => {
       const ops = db.prepare('DELETE FROM ops WHERE accountId = ?').run(accountId).changes;

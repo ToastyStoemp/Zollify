@@ -6,7 +6,7 @@
  * message, and `hasNativePlugin` is the single check providers use to decide
  * whether to offer themselves at all. On the web that means myPOS GO2, Carbon,
  * Glass and SumUp simply don't appear in the provider list - manual and the
- * bridge do, and the booth can still sell.
+ * Nexi SmartPOS do, and the booth can still sell.
  */
 
 export type NativePluginName =

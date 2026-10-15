@@ -36,3 +36,6 @@ export * from './commissions';
 export * from './commission-customers';
 export * from './upload-limits';
 export * from './event-order';
+export * from './economic';
+export * from './store-setup';
+export * from './locale-guess';

@@ -12,6 +12,7 @@ import {
   isStore,
   localDay,
   rentDue,
+  rentPaidAtTill,
   type ArtistConsignment,
   type ConsignedItem,
   type ConsignmentPayout,
@@ -62,8 +63,8 @@ export const ARTIST_MODULE_ID = 'consignment-artist';
 /** Which half a route file is registering for. */
 export type Side = 'store' | 'artist';
 
-/** All a staff account may call: the till's view of workshops and artists' items. */
-const TILL_ROUTES = new Set(['GET /till/workshops', 'POST /workshops/:id/signups', 'POST /scan']);
+/** All a staff account may call: the till's view of workshops, rent and artists' items. */
+const TILL_ROUTES = new Set(['GET /till/workshops', 'GET /till/rent', 'POST /workshops/:id/signups', 'POST /scan']);
 const LINK_TTL = 14 * 24 * 3600 * 1000;
 
 function migrate(db: Database.Database): void {
@@ -245,6 +246,18 @@ export const consignmentServerModule: ServerModule = {
     // Stores that had this account as a linked (or invited) artist keep the consignor, unlinked.
     db.prepare('UPDATE consignors SET linkedAccountId = NULL WHERE linkedAccountId = ?').run(accountId);
     db.prepare('UPDATE consignors SET offerAccountId = NULL WHERE offerAccountId = ?').run(accountId);
+  },
+
+  /** Who consigns to whom, for the server owner: linked artists, and offers still waiting for a yes. */
+  accountRelations: (db) => {
+    const rows = db.prepare('SELECT accountId, linkedAccountId, offerAccountId, doc, createdAt FROM consignors WHERE linkedAccountId IS NOT NULL OR offerAccountId IS NOT NULL').all() as (ConsignorRow & { offerAccountId: string | null })[];
+    return rows.map((r) => ({
+      from: r.accountId,
+      to: (r.linkedAccountId ?? r.offerAccountId)!,
+      kind: r.linkedAccountId ? 'consignment' : 'consignment-offer',
+      label: parseDoc(r.doc).name,
+      since: r.createdAt,
+    }));
   },
 
   /** An artist's devices changed products: stores sharing them follow. */
@@ -462,7 +475,7 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
       lines,
       payouts,
       fees,
-      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today(db, who.accountId)), feesDue(fees)),
+      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today(db, who.accountId), rentPaidAtTill(transactions)), feesDue(fees)),
     };
   });
 
@@ -647,7 +660,7 @@ function artistView(
       lines,
       payouts,
       [consignor.id],
-      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today(db, storeAccountId)),
+      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today(db, storeAccountId), rentPaidAtTill(transactions)),
       feesDue(feesOf(db, storeAccountId, consignor.id)),
     )[0]!,
   };

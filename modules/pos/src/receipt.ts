@@ -1,7 +1,7 @@
 import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { fmtPrice, printableLink, receiptFooterLinks } from '@zollify/shared';
+import { fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { receiptQrPng } from './lib/after-sale';
 import { serverBranding, serverSocials } from './lib/branding';
@@ -54,6 +54,13 @@ export function resolveVatNumber(artist: ArtistInfo, country?: string): string {
     if (hit) return hit.vatNumber.trim();
   }
   return artist.vatNumber?.trim() ?? '';
+}
+
+/** The country whose registration `resolveVatNumber` prints: the event's when it has one of its own, else home. */
+function vatCountry(artist: ArtistInfo, eventCountry?: string): string | undefined {
+  const c = eventCountry?.trim().toLowerCase();
+  const own = !!c && !!artist.vatNumbers?.some((v) => v.country.trim().toLowerCase() === c && v.vatNumber.trim());
+  return own ? eventCountry : artist.countryOfOrigin;
 }
 
 export const RECEIPT_KEYS = {
@@ -186,7 +193,7 @@ export function buildReceiptLines(
   if (artist.email) lines.push(center(artist.email));
   // An exempt sale prints its exemption instead (see the VAT block below).
   const vat = tx.tax?.exempt ? '' : resolveVatNumber(artist, eventCountry);
-  if (vat) lines.push(center(`VAT: ${vat}`));
+  if (vat) lines.push(center(`${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}`));
 
   lines.push({ kind: 'text', text: DIVIDER });
   const when = new Date(tx.timestamp);
@@ -268,7 +275,7 @@ export function buildReceiptLines(
     lines.push(center('Scan for your receipt online'));
     lines.push({ kind: 'space' });
   }
-  lines.push(center(`Receipt ${tx.id.slice(-8)}`));
+  lines.push(center(`Receipt ${tx.receiptNumber ?? tx.id.slice(-8)}`));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 

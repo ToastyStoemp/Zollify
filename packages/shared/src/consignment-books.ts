@@ -7,6 +7,7 @@ import {
   consignmentLines,
   consignmentStatements,
   rentDue,
+  rentPaidAtTill,
   rentalPeriods,
   type CardFees,
   type ConsignmentLine,
@@ -92,6 +93,8 @@ export const BooksSettingsSchema = z.object({
   passCardFees: z.boolean().default(false),
   /** Suggested amount per fee reason, in the books' currency. */
   feePresets: z.partialRecord(FeeReasonSchema, z.number().min(0).max(1_000_000)).default({}),
+  /** Commission a new artist starts with, in percent; each artist can differ. */
+  defaultCommissionPct: z.number().min(0).max(100).default(40),
   /** Linked artists may put their own work on discount at the till. */
   artistDiscounts: z.boolean().default(true),
   /** The deepest discount an artist may set, in percent. */
@@ -344,15 +347,21 @@ export function storeReport(input: ReportInput): StoreReport {
   };
 
   // Artists: the period's activity, and the balance at its end.
+  // Rent paid at the till in the period comes off the rent charged in it.
+  const paidInPeriod = rentPaidAtTill(txs);
   const rentIn = input.rentals
     .filter((r) => r.deductFromSales)
-    .flatMap((r) => rentalPeriods(r).filter(inPeriod).map(() => ({ consignorId: r.consignorId, amount: r.monthlyFee, currency: r.currency })));
+    .flatMap((r) => [
+      ...rentalPeriods(r).filter(inPeriod).map(() => ({ consignorId: r.consignorId, amount: r.monthlyFee, currency: r.currency })),
+      ...(paidInPeriod.get(r.id) ? [{ consignorId: r.consignorId, amount: -paidInPeriod.get(r.id)!, currency: r.currency }] : []),
+    ]);
   const feesIn = feesDue(input.fees.filter((f) => inPeriod(f.date)));
   const paidIn = input.payouts.filter((p) => inPeriod(p.date));
   const periodStatements = consignmentStatements(lines, paidIn, [], rentIn, feesIn);
 
+  const upToEnd = input.transactions.filter((t) => localDay(t.timestamp, tz) <= period.to);
   const allLines = consignmentLines(
-    input.transactions.filter((t) => localDay(t.timestamp, tz) <= period.to),
+    upToEnd,
     input.consignors,
     passed,
   );
@@ -360,7 +369,7 @@ export function storeReport(input: ReportInput): StoreReport {
     allLines,
     input.payouts.filter((p) => p.date <= period.to),
     [],
-    rentDue(input.rentals, period.to),
+    rentDue(input.rentals, period.to, rentPaidAtTill(upToEnd)),
     feesDue(input.fees.filter((f) => f.date <= period.to)),
   );
   const closingBy = new Map(closing.flatMap((s) => s.totals.map((t) => [`${s.consignorId}|${t.currency}`, t.balance])));

@@ -12,6 +12,7 @@ import { taxServerModule } from './modules/tax/index';
 import { receiptsServerModule } from './modules/receipts';
 import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
 import { peppolServerModule } from './modules/peppol-be';
+import { economicServerModule } from './modules/economic';
 
 loadDotEnv();
 
@@ -26,8 +27,11 @@ loadDotEnv();
  */
 
 
-/** What a brand-new account starts with, so it isn't an empty shell. */
-const DEFAULT_MODULES = ['pos', 'customs-hub', 'customs-ch'];
+/**
+ * What a brand-new account starts with, so it isn't an empty shell. Public
+ * events is in so setup can offer the shared event pool for the first event.
+ */
+const DEFAULT_MODULES = ['pos', 'customs-hub', 'customs-ch', 'public-events'];
 
 /**
  * The signing secret, minted once and kept in the data volume when the
@@ -76,6 +80,7 @@ async function main(): Promise<void> {
     consignmentArtistServerModule,
     commissionsServerModule,
     peppolServerModule(jwtSecret),
+    economicServerModule(jwtSecret),
   ];
 
   const app = await buildGateway({

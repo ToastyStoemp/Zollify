@@ -112,6 +112,7 @@ export {
   inventoryLoaded,
   stockKey,
   onHandFor,
+  remainingFor,
   claimFor,
   claimsForEvent,
   unsoldFrom,
@@ -151,5 +152,5 @@ export { mergeProducts, materializeMerge } from './merge';
 export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead } from './notifications';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
-export { getSyncedSetting, setSyncedSetting } from './synced-settings';
+export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced-settings';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

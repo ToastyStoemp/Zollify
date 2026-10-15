@@ -92,6 +92,26 @@ describe('staff accounts', () => {
     expect(types).toEqual(['tx.create', 'stock.set']);
   });
 
+  it('may write team settings, and only those', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth(staff),
+      payload: {
+        deviceId: 'till-2',
+        ops: [
+          op('setting.upsert', { key: 'team.storage.row', value: { qty: 3 }, updatedAt: 9 }),
+          op('setting.upsert', { key: 'team.', value: 1, updatedAt: 9 }),
+          op('setting.upsert', { key: 'storage.location', value: 1, updatedAt: 9 }),
+        ],
+      },
+    });
+    expect(res.json()).toMatchObject({ accepted: 1 });
+    const keys = (await pull()).filter((o) => o.type === 'setting.upsert').map((o) => o.payload.key);
+    expect(keys).toContain('team.storage.row');
+    expect(keys).not.toContain('storage.location');
+  });
+
   it('stamps the real seller on a staff sale, whatever the device said', async () => {
     const sale = (await pull()).find((o) => o.type === 'tx.create')!;
     expect(sale.payload.soldBy).toMatchObject({ email: 'sam@shop.test' });

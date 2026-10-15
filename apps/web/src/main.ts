@@ -19,6 +19,7 @@ import {
   loadTransactions,
   refreshAccessToken,
   refreshPendingCount,
+  resumeOffline,
   startAutoSync,
   startRealtime,
   startTillLock,
@@ -69,7 +70,9 @@ async function start(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
-  await refreshAccessToken().catch(() => false);
+  // No server (no signal at the venue, the gateway restarting): resume as whoever
+  // signed this device in, from what is already on it. A refusal clears that first.
+  if (!(await refreshAccessToken().catch(() => false)) && !getAccount()) resumeOffline();
 
   // Core data before modules: POS and Customs read the catalogue and events
   // through the SDK during setup, so it has to be there when they mount.

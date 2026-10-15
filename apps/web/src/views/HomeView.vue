@@ -11,11 +11,13 @@ import {
   inventoryRows,
   lastSyncAt,
   recentTransactions,
+  setActiveEvent,
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt } from '@zollify/shared';
+import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
+import GettingStarted from '../components/GettingStarted.vue';
 
 /**
  * Home is the booth's morning glance: where you are selling, how today is
@@ -58,6 +60,9 @@ const greeting = computed(() => {
 
 // ── Today at the active event ───────────────────────────────────────────────
 const event = activeEvent;
+/** Still on a convention that ended: say so, and offer the one running today. */
+const tillCheck = computed(() => tillEventCheck(event.value, visibleEvents.value));
+const endedOn = computed(() => (tillCheck.value.endedOn ? new Date(`${tillCheck.value.endedOn}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''));
 
 const todaysSales = computed(() =>
   recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.value.getTime() && (!event.value || t.eventId === event.value.id)),
@@ -108,11 +113,7 @@ function daysUntil(iso: string): string {
   return `in ${Math.round(d / 7)} weeks`;
 }
 
-function range(e: { dateStart?: string; dateEnd?: string }): string {
-  const f = (s: string): string => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  if (!e.dateStart) return '';
-  return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} - ${f(e.dateEnd)}` : f(e.dateStart);
-}
+const range = (e: { dateStart?: string; dateEnd?: string }): string => (e.dateStart ? fmtDayRange(e.dateStart, e.dateEnd) : '');
 
 // ── Calendar ─────────────────────────────────────────────────────────────────
 const calMonth = ref(new Date(startOfDay.value.getFullYear(), startOfDay.value.getMonth(), 1));
@@ -258,13 +259,20 @@ const syncLine = computed(() => {
     </header>
 
     <div class="grid">
+      <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
-      <article class="card wide">
+      <article class="card wide today-card">
         <header class="chead">
           <h2>Today</h2>
           <router-link v-if="event" :to="placesRoute" class="sub">at {{ event.name }}</router-link>
           <router-link v-else :to="placesRoute" class="sub warn"><Icon name="alert-triangle" :size="14" /> {{ runs.events ? "No active event - sales won't be filed against one" : "No store open - sales won't be filed against one" }}</router-link>
         </header>
+        <p v-if="tillCheck.ended" class="stale" role="alert">
+          <Icon name="alert-triangle" :size="14" />
+          <span>{{ event?.name }} {{ event?.status === 'closed' ? 'is closed' : `ended ${endedOn}` }} - sales still go to it.</span>
+          <button v-if="tillCheck.runningToday" type="button" class="link" @click="setActiveEvent(tillCheck.runningToday.id)">Switch to {{ tillCheck.runningToday.name }}</button>
+          <router-link :to="placesRoute" class="link">{{ tillCheck.runningToday ? 'Events' : 'Close it or pick another' }}</router-link>
+        </p>
         <p v-if="!showTotals" class="hint">Sales totals are kept for the owner. Ring up sales in the till; your own sales are under History.</p>
         <div v-if="showTotals" class="figures">
           <div class="figure big">
@@ -400,11 +408,20 @@ h2 { margin: 0; font-size: 1rem; }
 .btn:hover { background: var(--zfy-surface-2); }
 .btn.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: var(--zfy-on-accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+/* On a phone the month calendar would fill the first screen: what is coming up and what runs low come first. */
+@media (max-width: 640px) {
+  .grid > .card.wide:not(.today-card):not(.getting-started) { order: 1; }
+  .today-card .figures { grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .today-card .figure { max-width: none; }
+  .today-card .figure.big strong { font-size: 1.4rem; }
+}
 .card { border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 .card.wide { grid-column: 1 / -1; }
 .chead { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .sub { color: var(--zfy-muted); font-size: .85rem; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; }
 .sub.warn { color: var(--zfy-warning-ink); }
+.stale { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .7rem; margin: 0 0 .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-warning); border-radius: 10px; color: var(--zfy-warning-ink); font-size: .85rem; }
+.stale .link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted); }
 .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
 .figure { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-bg); max-width: 16rem; }

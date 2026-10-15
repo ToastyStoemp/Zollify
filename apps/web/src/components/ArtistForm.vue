@@ -10,7 +10,16 @@ import { CountryPicker, CurrencyPicker } from '@zollify/ui';
  * panel so the two can never drift apart in what they ask for.
  */
 const model = defineModel<ArtistDetails>({ required: true });
-const props = defineProps<{ canRename: boolean }>();
+const props = withDefaults(
+  defineProps<{
+    canRename: boolean;
+    /** First-run setup: name, country and currency up front, the rest folded away until a module needs it. */
+    compact?: boolean;
+    /** EORI only matters to a business taking stock across a border. */
+    showEori?: boolean;
+  }>(),
+  { compact: false, showEori: true },
+);
 const name = defineModel<string>('name', { default: '' });
 const currency = defineModel<string>('currency', { default: 'CHF' });
 const links = defineModel<ProfileLinks>('links', { default: () => ({ ...EMPTY_PROFILE_LINKS }) });
@@ -33,6 +42,21 @@ function fillVat(): void {
       <small>Shown in the sidebar and to everyone you invite.</small>
     </label>
 
+    <div v-if="props.compact" class="grid">
+      <label>
+        <span>Country</span>
+        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Switzerland" />
+        <small>Decides the VAT and paperwork your events start with.</small>
+      </label>
+      <label>
+        <span>Currency</span>
+        <CurrencyPicker v-model="currency" />
+        <small>Your books are kept in this. New events start with it.</small>
+      </label>
+    </div>
+
+    <component :is="props.compact ? 'details' : 'div'" :class="props.compact ? 'online' : 'plain'">
+    <summary v-if="props.compact">Address and tax details <span class="opt">(optional - receipts and paperwork use them)</span></summary>
     <div class="grid">
       <label>
         <span>Your name</span>
@@ -50,7 +74,7 @@ function fillVat(): void {
         <span>Postcode and city</span>
         <input v-model="model.postCodeCity" type="text" placeholder="8000 Zürich" />
       </label>
-      <label>
+      <label v-if="!props.compact">
         <span>Country</span>
         <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Switzerland" />
       </label>
@@ -71,17 +95,18 @@ function fillVat(): void {
         <input v-model="model.enterpriseNumber" type="text" class="mono" placeholder="0123.456.749" @blur="fillVat" />
         <small>KBO/BCE. Fills the VAT number if that is empty, and your e-invoices use it.</small>
       </label>
-      <label>
+      <label v-if="props.showEori">
         <span>EORI number</span>
         <input v-model="model.eori" type="text" class="mono" />
         <small>Required on EU export declarations - Germany, not Switzerland.</small>
       </label>
-      <label>
+      <label v-if="!props.compact">
         <span>Currency</span>
         <CurrencyPicker v-model="currency" />
         <small>Your books are kept in this. New events start with it.</small>
       </label>
     </div>
+    </component>
 
     <details class="online" :open="linksOpen">
       <summary>Webstore and socials <span class="opt">(optional)</span></summary>
@@ -110,6 +135,7 @@ small { color: var(--zfy-muted); font-size: .78rem; }
 .online summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
 .online[open] summary { margin-bottom: .5rem; }
 .opt { font-weight: 400; color: var(--zfy-muted); }
+.plain { display: contents; }
 .note { margin: 0 0 .6rem; color: var(--zfy-muted); font-size: .8rem; }
 .mono { font-family: ui-monospace, monospace; font-size: .85rem; }
 </style>

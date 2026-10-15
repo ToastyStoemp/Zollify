@@ -1,4 +1,4 @@
-import { countryCodeOf, paidLineTotals, receiptBreakdown, vatBreakdown, type CashClosing, type SalesEvent, type Transaction, type TseSignature } from '@zollify/shared';
+import { countryCodeOf, paidLineTotals, receiptBreakdown, vatBreakdown, type CashClosing, type CashMovement, type SalesEvent, type Transaction, type TseSignature } from '@zollify/shared';
 import { DTD_FILE, GDPDU_DTD, INDEX_XML } from './official';
 
 /**
@@ -19,12 +19,17 @@ import { DTD_FILE, GDPDU_DTD, INDEX_XML } from './official';
  *   - VAT keys per Anlage 2: 19% → 1, 7% → 2, 10.7% → 3, 5.5% → 4; a sale
  *     exempt as a small business → 6 ("Umsatzsteuerfrei"); a sale without
  *     VAT data → 7 ("UmsatzsteuerNichtErmittelbar");
- *   - payments: cash "Bar", everything else "Unbar", named after the method.
+ *   - payments: cash "Bar", everything else "Unbar", named after the method;
+ *   - cash put in or taken out (CashMovement) is a "Beleg" of its own with
+ *     one line: GV_TYP Anfangsbestand, Privateinlage, Privatentnahme or
+ *     Geldtransit, VAT key 5 (not taxable), paid "Bar" - negative going out.
  */
 
 export interface DsfinvkInput {
   closings: CashClosing[];
   transactions: Transaction[];
+  /** Cash put into or taken out of tills; optional so older callers need not pass it. */
+  movements?: CashMovement[];
   events: SalesEvent[];
   seller: { name: string; street: string; postCodeCity: string; country: string; vatId: string; taxNumber?: string };
   /** Closings whose business day is in this range (YYYY-MM-DD, both included). */
@@ -134,6 +139,7 @@ const VAT_KEYS: Record<number, { satz: number; beschr: string }> = {
   2: { satz: 7, beschr: 'Ermäßigter Steuersatz' },
   3: { satz: 10.7, beschr: 'Durchschnittsatz (§ 24 Abs. 1 Nr. 3 UStG)' },
   4: { satz: 5.5, beschr: 'Durchschnittsatz (§ 24 Abs. 1 Nr. 1 UStG)' },
+  5: { satz: 0, beschr: 'Nicht Steuerbar' },
   6: { satz: 0, beschr: 'Umsatzsteuerfrei' },
   7: { satz: 0, beschr: 'UmsatzsteuerNichtErmittelbar' },
 };
@@ -162,6 +168,33 @@ interface Bon {
   /** -1 for the cancellation of a sale. */
   sign: 1 | -1;
   tse: Transaction['tse'];
+  /** Set when the receipt is cash put in or taken out rather than a sale. */
+  move?: CashMovement;
+}
+
+/** The DSFinV-K business case and receipt name of a cash movement. */
+const MOVEMENT_CASES: Record<CashMovement['reason'], { gv: string; name: string }> = {
+  float: { gv: 'Anfangsbestand', name: 'Anfangsbestand' },
+  deposit: { gv: 'Privateinlage', name: 'Einlage' },
+  withdrawal: { gv: 'Privatentnahme', name: 'Entnahme' },
+  bank: { gv: 'Geldtransit', name: 'Geldtransit' },
+};
+
+/** A movement as a stand-in sale, so the shared receipt plumbing (timestamps, payments) reads it. */
+function movementAsTx(m: CashMovement): Transaction {
+  const signed = m.direction === 'out' ? -m.amount : m.amount;
+  return {
+    id: m.id,
+    eventId: m.eventId,
+    deviceId: m.deviceId,
+    timestamp: m.timestamp,
+    method: 'cash',
+    payments: [{ kind: 'cash', amount: signed }],
+    items: [],
+    discounts: [],
+    total: signed,
+    currency: m.currency,
+  } as Transaction;
 }
 
 export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
@@ -178,6 +211,9 @@ export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
   for (const tx of input.transactions) {
     if (tx.receipt) put(tx.receipt.till, { tx, number: tx.receipt.number, sign: 1, tse: tx.tse });
     if (tx.revertReceipt) put(tx.revertReceipt.till, { tx, number: tx.revertReceipt.number, sign: -1, tse: tx.revertTse });
+  }
+  for (const m of input.movements ?? []) {
+    if (m.receipt) put(m.receipt.till, { tx: movementAsTx(m), number: m.receipt.number, sign: 1, tse: m.tse, move: m });
   }
 
   // Where each receipt was closed, for references from cancellations.
@@ -226,6 +262,8 @@ export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
     let unknownVat = false;
     const sumsByKey = new Map<number, { brutto: number; netto: number; ust: number }>();
     const sumsByPayment = new Map<string, { typ: string; name: string; amount: number }>();
+    /** Cash movements per business case (Anfangsbestand, Privateinlage, ...), all key 5. */
+    const sumsByCase = new Map<string, number>();
     let cash = 0;
     let payments = 0;
 
@@ -238,20 +276,45 @@ export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
       const end = sign > 0 ? tx.timestamp : (tx.revertedAt ?? tx.timestamp);
 
       // Receipt head, as printed.
+      const moveCase = bon.move ? MOVEMENT_CASES[bon.move.reason] : null;
       t['transactions.csv']!.push({
         ...head,
         BON_NR: bon.number,
         BON_TYP: 'Beleg',
-        BON_NAME: sign < 0 ? 'Storno' : '',
+        BON_NAME: moveCase ? moveCase.name : sign < 0 ? 'Storno' : '',
         BON_STORNO: sign < 0 ? '1' : '0',
         BON_START: stamp(sig ? Date.parse(sig.start) : end),
         BON_ENDE: stamp(end),
         UMS_BRUTTO: money(s(tx.total)),
       });
 
+      if (bon.move && moveCase) {
+        // Cash in or out: one line, not taxable (key 5), as its business case.
+        usedKeys.add(5);
+        const amount = money(s(tx.total));
+        const line = { ...head, POS_ZEILE: '1' };
+        t['transactions_vat.csv']!.push({ ...head, UST_SCHLUESSEL: 5, BON_BRUTTO: amount, BON_NETTO: amount, BON_UST: money(0) });
+        t['lines.csv']!.push({
+          ...line,
+          ARTIKELTEXT: [moveCase.name, bon.move.note].filter(Boolean).join(' - ').slice(0, 255),
+          GV_TYP: moveCase.gv,
+          INHAUS: '0',
+          P_STORNO: '0',
+          AGENTUR_ID: 0,
+          ART_NR: moveCase.gv,
+          MENGE: qty(1),
+          STK_BR: amount,
+        });
+        t['lines_vat.csv']!.push({ ...line, UST_SCHLUESSEL: 5, POS_BRUTTO: amount, POS_NETTO: amount, POS_UST: money(0) });
+        const caseSum = sumsByCase.get(moveCase.gv) ?? 0;
+        sumsByCase.set(moveCase.gv, caseSum + amount);
+      }
+
       // VAT per key, as printed on the receipt.
       const printed = vatBreakdown(tx);
-      if (printed.length) {
+      if (bon.move) {
+        /* done above */
+      } else if (printed.length) {
         for (const r of printed) {
           const key = vatKey(tx, r.rate) ?? 7;
           usedKeys.add(key);
@@ -352,6 +415,9 @@ export function buildDsfinvk(input: DsfinvkInput): DsfinvkResult {
     // Closing totals.
     for (const [key, sum] of [...sumsByKey].sort((a, b) => a[0] - b[0])) {
       t['businesscases.csv']!.push({ ...z, GV_TYP: 'Umsatz', AGENTUR_ID: 0, UST_SCHLUESSEL: key, Z_UMS_BRUTTO: money(sum.brutto), Z_UMS_NETTO: money(sum.netto), Z_UST: money(sum.ust) });
+    }
+    for (const [gv, sum] of sumsByCase) {
+      t['businesscases.csv']!.push({ ...z, GV_TYP: gv, AGENTUR_ID: 0, UST_SCHLUESSEL: 5, Z_UMS_BRUTTO: money(sum), Z_UMS_NETTO: money(sum), Z_UST: money(0) });
     }
     for (const p of sumsByPayment.values()) t['payment.csv']!.push({ ...z, ZAHLART_TYP: p.typ, ZAHLART_NAME: p.name, Z_ZAHLART_BETRAG: money(p.amount) });
     t['cash_per_currency.csv']!.push({ ...z, ZAHLART_WAEH: c.currency, ZAHLART_BETRAG_WAEH: money(cash) });

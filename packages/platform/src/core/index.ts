@@ -185,4 +185,14 @@ export {
 } from './tse';
 export { nextReceiptNumber } from './receipt-numbers';
 export { loadClosings, allClosings, closeStaleDay, closeTillNow, openReceipts, resetClosingCache, localDay } from './closings';
+export {
+  loadCashMovements,
+  cashMovements,
+  cashMovementsFor,
+  cashMovementTotals,
+  recordCashMovement,
+  resetCashMovementCache,
+  CASH_MOVEMENT_REASONS,
+  type CashMovementInput,
+} from './cash-movements';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';

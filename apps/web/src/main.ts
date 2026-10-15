@@ -16,6 +16,7 @@ import {
   loadInventory,
   loadTseSettings,
   loadClosings,
+  loadCashMovements,
   closeStaleDay,
   loadSalesEvents,
   loadDiscounts,
@@ -88,6 +89,7 @@ async function boot(): Promise<void> {
       loadInventory().catch((err) => console.error('[zollify] inventory load failed', err)),
       loadTseSettings().catch((err) => console.error('[zollify] TSE settings load failed', err)),
       loadClosings().catch((err) => console.error('[zollify] closings load failed', err)),
+      loadCashMovements().catch((err) => console.error('[zollify] cash movements load failed', err)),
       refreshPendingCount().catch(() => {}),
     ]);
     // A till left unclosed overnight closes yesterday before today's first sale.

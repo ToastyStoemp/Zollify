@@ -7,7 +7,7 @@ import type {
   Product,
   SalesEvent,
   Transaction,
-  CashClosing,
+  CashClosing, CashMovement,
 } from '@zollify/shared';
 
 /**
@@ -66,6 +66,7 @@ export type CoreDb = Dexie & {
   ops: Dexie.Table<OutboxOp, number>;
   settings: Dexie.Table<SettingRow, string>;
   closings: EntityTable<CashClosing, 'id'>;
+  cashMoves: EntityTable<CashMovement, 'id'>;
 };
 
 const open = new Map<string, CoreDb>();
@@ -131,6 +132,8 @@ export function openCoreDb(accountId: string): CoreDb {
   db.version(3).stores({ eventFiles: 'id, eventId' });
   /** v4: tills' closings (Kassenabschlüsse) - see closings.ts. */
   db.version(4).stores({ closings: 'id, till, createdAt' });
+  /** v5: cash put into or taken out of a till - see cash-movements.ts. */
+  db.version(5).stores({ cashMoves: 'id, eventId, timestamp' });
 
   open.set(name, db);
   return db;

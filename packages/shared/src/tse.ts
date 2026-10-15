@@ -83,6 +83,17 @@ const toMinor = (n: number): number => Math.round(n * 100);
 export class TseDataError extends Error {}
 
 /**
+ * processData for cash put into or taken out of the till ("Kassenbeleg-V1"):
+ * a "Beleg" with nothing taxable - every VAT slot 0.00 - and the cash as its
+ * one payment, negative when taken out. The DSFinV-K's way of signing an
+ * Einlage, Entnahme or Geldtransit.
+ */
+export function kassenbelegCashData(amountEur: number, direction: 'in' | 'out'): string {
+  const m = toMinor(Math.abs(amountEur)) * (direction === 'out' ? -1 : 1);
+  return `Beleg^0.00_0.00_0.00_0.00_0.00^${amount(m)}:Bar`;
+}
+
+/**
  * processData for a sale ("Kassenbeleg-V1"): <Vorgangstyp>^<gross per VAT
  * slot>^<payments>. Gross amounts are what each line cost after discounts -
  * the same figures the receipt prints. `sign` -1 gives the cancelling

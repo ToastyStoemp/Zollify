@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { zipSync, strToU8 } from 'fflate';
-import type { CashClosing } from '@zollify/shared';
+import type { CashClosing, CashMovement } from '@zollify/shared';
 import { parseProfile, reduceEvents, reduceMerges, reduceTransactions, type ModuleContext } from '@zollify/server-core';
 import { buildDsfinvk, type DsfinvkResult } from './build';
 
@@ -30,10 +30,16 @@ export function registerDsfinvk(app: FastifyInstance, ctx: ModuleContext): void 
       const c = op.payload as CashClosing;
       if (c?.id && !closings.has(c.id)) closings.set(c.id, c);
     }
+    const movements = new Map<string, CashMovement>();
+    for (const op of opsFor(accountId, ['cash.move'])) {
+      const m = op.payload as CashMovement;
+      if (m?.id && m.receipt && !movements.has(m.id)) movements.set(m.id, m);
+    }
     const row = ctx.db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as { name: string; profile: string | null } | undefined;
     const artist = parseProfile(row?.profile).artist;
     return buildDsfinvk({
       closings: [...closings.values()],
+      movements: [...movements.values()],
       transactions: reduceTransactions(txOps, reduceMerges(txOps)),
       events: reduceEvents(opsFor(accountId, ['event.upsert', 'event.close'])),
       seller: {

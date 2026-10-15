@@ -1,4 +1,4 @@
-import type { ReceiptNumber, Transaction } from '@zollify/shared';
+import type { CashMovement, ReceiptNumber, Transaction } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { tillId } from './tse';
@@ -25,19 +25,20 @@ function requireAccountId(): string {
 }
 
 /** The highest number a till already used here - so a lost counter carries on rather than starting again. */
-function highestIn(rows: Transaction[], till: string): number {
+function highestIn(rows: Transaction[], moves: CashMovement[], till: string): number {
   let max = 0;
   for (const tx of rows) {
     if (tx.receipt?.till === till) max = Math.max(max, tx.receipt.number);
     if (tx.revertReceipt?.till === till) max = Math.max(max, tx.revertReceipt.number);
   }
+  for (const m of moves) if (m.receipt?.till === till) max = Math.max(max, m.receipt.number);
   return max;
 }
 
 /** Where a till without a counter yet carries on from: its highest number used, or the count of the earlier numbering. */
 async function startingNumber(db: ReturnType<typeof openCoreDb>, till: string): Promise<number> {
   const legacy = (await db.settings.get(LEGACY_KEY))?.value;
-  return Math.max(highestIn(await db.transactions.toArray(), till), typeof legacy === 'number' ? legacy : 0);
+  return Math.max(highestIn(await db.transactions.toArray(), await db.cashMoves.toArray(), till), typeof legacy === 'number' ? legacy : 0);
 }
 
 /** What a receipt was taken for: a till closes when the next one differs (see closings.ts). */
@@ -63,7 +64,7 @@ export async function lastReceipt(till: string): Promise<{ number: number; conte
 export async function nextReceiptNumber(context?: ReceiptContext): Promise<ReceiptNumber> {
   const till = await tillId();
   const db = openCoreDb(requireAccountId());
-  return db.transaction('rw', db.settings, db.transactions, async () => {
+  return db.transaction('rw', db.settings, db.transactions, db.cashMoves, async () => {
     const counters = { ...((await db.settings.get(KEY))?.value as Record<string, number> | undefined) };
     const last = counters[till] ?? (await startingNumber(db, till));
     const number = last + 1;

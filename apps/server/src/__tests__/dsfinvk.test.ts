@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CashClosing, SalesEvent, Transaction, TseSignature } from '@zollify/shared';
+import type { CashClosing, CashMovement, SalesEvent, Transaction, TseSignature } from '@zollify/shared';
 import { COLUMNS, buildDsfinvk, type DsfinvkInput } from '../modules/dsfinvk/build';
 
 /**
@@ -228,5 +228,54 @@ describe('DSFinV-K export', () => {
     const odd: Transaction = { ...exempt, items: [{ ...exempt.items[0]!, title: 'Print; "A3"', variantLabel: undefined }] };
     const files = buildDsfinvk(input({ transactions: [sale, odd] })).files;
     expect(files['lines.csv']).toContain(';"Print; ""A3""";');
+  });
+});
+
+describe('cash movements in the export', () => {
+  const float: CashMovement = {
+    id: 'cm-1',
+    eventId: 'ev-de',
+    deviceId: 'dev-1',
+    timestamp: at - 3600_000,
+    direction: 'in',
+    reason: 'float',
+    amount: 50,
+    currency: 'EUR',
+    receipt: { till: 'ZOLLIFY-TILL1', number: 4 },
+    tse: { signed: sig({ transactionNumber: 3, signatureCounter: 5, processData: 'Beleg^0.00_0.00_0.00_0.00_0.00^50.00:Bar' }) },
+  };
+  const bank: CashMovement = { ...float, id: 'cm-2', timestamp: at + 7200_000, direction: 'out', reason: 'bank', amount: 20.5, note: 'Evening run', receipt: { till: 'ZOLLIFY-TILL1', number: 5 }, tse: undefined };
+  const out = buildDsfinvk(input({ closings: [{ ...closing, lastReceipt: 5, receipts: 5, cash: 29.5 }], movements: [float, bank] }));
+
+  it('are receipts of their own: one not-taxable line as their business case, paid in cash, negative going out', () => {
+    const heads = table(out.files, 'transactions.csv');
+    expect(heads.map((h) => [h.BON_ID, h.BON_TYP, h.BON_NAME, h.UMS_BRUTTO])).toEqual([
+      ['1', 'Beleg', '', '46,70'],
+      ['2', 'Beleg', '', '12,00'],
+      ['3', 'Beleg', 'Storno', '-46,70'],
+      ['4', 'Beleg', 'Anfangsbestand', '50,00'],
+      ['5', 'Beleg', 'Geldtransit', '-20,50'],
+    ]);
+    const lines = table(out.files, 'lines.csv').filter((l) => Number(l.BON_ID) >= 4);
+    expect(lines.map((l) => [l.BON_ID, l.GV_TYP, l.ARTIKELTEXT, l.MENGE, l.STK_BR])).toEqual([
+      ['4', 'Anfangsbestand', 'Anfangsbestand', '1,000', '50,00000'],
+      ['5', 'Geldtransit', 'Geldtransit - Evening run', '1,000', '-20,50000'],
+    ]);
+    expect(table(out.files, 'lines_vat.csv').filter((l) => l.BON_ID === '5')).toEqual([expect.objectContaining({ UST_SCHLUESSEL: '5', POS_BRUTTO: '-20,50000', POS_NETTO: '-20,50000', POS_UST: '0,00000' })]);
+    expect(table(out.files, 'datapayment.csv').filter((p) => Number(p.BON_ID) >= 4).map((p) => [p.ZAHLART_TYP, p.BASISWAEH_BETRAG])).toEqual([['Bar', '50,00'], ['Bar', '-20,50']]);
+    expect(table(out.files, 'transactions_tse.csv').find((r) => r.BON_ID === '4')).toMatchObject({ TSE_TANR: '3', TSE_VORGANGSDATEN: 'Beleg^0.00_0.00_0.00_0.00_0.00^50.00:Bar' });
+  });
+
+  it('are summed into the closing: business cases by key 5, the cash in the box, and the VAT key listed', () => {
+    const cases = table(out.files, 'businesscases.csv').filter((r) => r.GV_TYP !== 'Umsatz');
+    expect(cases.map((r) => [r.GV_TYP, r.UST_SCHLUESSEL, r.Z_UMS_BRUTTO, r.Z_UST])).toEqual([
+      ['Anfangsbestand', '5', '50,00000', '0,00000'],
+      ['Geldtransit', '5', '-20,50000', '0,00000'],
+    ]);
+    expect(table(out.files, 'cash_per_currency.csv')).toEqual([expect.objectContaining({ ZAHLART_BETRAG_WAEH: '29,50' })]);
+    expect(table(out.files, 'cashpointclosing.csv')[0]).toMatchObject({ Z_SE_BARZAHLUNGEN: '29,50', Z_ENDE_ID: '5' });
+    expect(table(out.files, 'vat.csv').map((r) => r.UST_SCHLUESSEL)).toContain('5');
+    expect(out.receipts).toBe(5);
+    expect(out.warnings).not.toContainEqual(expect.stringContaining('not on the server'));
   });
 });

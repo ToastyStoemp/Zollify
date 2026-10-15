@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { CashClosing, ReceiptNumber, Transaction } from '@zollify/shared';
+import type { CashClosing, CashMovement, ReceiptNumber, Transaction } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -114,19 +114,29 @@ function deviceInfo(): CashClosing['device'] {
   };
 }
 
-/** The receipts (sales and cancellations) a till took in a number range, with what they came to. */
-function receiptsIn(rows: Transaction[], till: string, from: number, to: number): { total: number; cash: number; count: number } {
+/**
+ * The receipts a till took in a number range - sales, cancellations and cash
+ * movements - with what they came to. `total` is turnover; `cash` is what
+ * went into the box, movements included, so it matches a count of the box.
+ */
+function receiptsIn(rows: Transaction[], moves: CashMovement[], till: string, from: number, to: number): { total: number; cash: number; count: number } {
   let total = 0;
   let cash = 0;
   let count = 0;
+  const inRange = (r: ReceiptNumber | undefined): boolean => r?.till === till && r.number >= from && r.number <= to;
   const add = (tx: Transaction, sign: 1 | -1): void => {
     count++;
     total += sign * Math.round(tx.total * 100);
     for (const leg of tx.payments) if (leg.kind === 'cash') cash += sign * Math.round(leg.amount * 100);
   };
   for (const tx of rows) {
-    if (tx.receipt?.till === till && tx.receipt.number >= from && tx.receipt.number <= to) add(tx, 1);
-    if (tx.revertReceipt?.till === till && tx.revertReceipt.number >= from && tx.revertReceipt.number <= to) add(tx, -1);
+    if (inRange(tx.receipt)) add(tx, 1);
+    if (inRange(tx.revertReceipt)) add(tx, -1);
+  }
+  for (const m of moves) {
+    if (!inRange(m.receipt)) continue;
+    count++;
+    cash += Math.round(m.amount * 100) * (m.direction === 'out' ? -1 : 1);
   }
   return { total: total / 100, cash: cash / 100, count };
 }
@@ -135,7 +145,7 @@ async function close(till: string, lastNumber: number, context: ReceiptContext |
   const from = lastClosedOn(till) + 1;
   if (lastNumber < from) return null;
   const db = openCoreDb(requireAccountId());
-  const sums = receiptsIn(await db.transactions.toArray(), till, from, lastNumber);
+  const sums = receiptsIn(await db.transactions.toArray(), await db.cashMoves.toArray(), till, from, lastNumber);
   let number = 0;
   for (const c of closings.values()) if (c.till === till) number = Math.max(number, c.number);
   const now = Date.now();

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction, TxItem } from '../types';
-import { TseDataError, kassenbelegData, tseQrPayload, type TseSignature } from '../tse';
+import { TseDataError, kassenbelegCashData, kassenbelegData, tseQrPayload, type TseSignature } from '../tse';
 
 /** Expected strings are the worked examples from the DSFinV-K 2.4 itself. */
 
@@ -81,5 +81,12 @@ describe('tseQrPayload (receipt QR, V0)', () => {
     expect(tseQrPayload(sig)).toBe(
       'V0;AMA-2642;Kassenbeleg-V1;Beleg^4.05_3.00_0.00_0.00_0.00^7.05:Bar;13;44131;2019-11-22T11:29:48.000Z;2019-11-22T11:29:49.000Z;ecdsa-plain-SHA384;unixTime;K8zsZ6Nj;BBXNYQEr',
     );
+  });
+});
+
+describe('kassenbelegCashData', () => {
+  it('describes cash in or out as a Beleg with nothing taxable', () => {
+    expect(kassenbelegCashData(50, 'in')).toBe('Beleg^0.00_0.00_0.00_0.00_0.00^50.00:Bar');
+    expect(kassenbelegCashData(20.5, 'out')).toBe('Beleg^0.00_0.00_0.00_0.00_0.00^-20.50:Bar');
   });
 });

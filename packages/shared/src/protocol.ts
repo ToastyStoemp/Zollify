@@ -21,6 +21,8 @@ export const OpTypeSchema = z.enum([
   'setting.upsert',
   /** A till's closing (CashClosing). Insert-if-absent, never changed. */
   'closing.create',
+  /** Cash put into or taken out of a till (CashMovement). Insert-if-absent, never changed. */
+  'cash.move',
 ]);
 
 export const OpSchema = z.object({

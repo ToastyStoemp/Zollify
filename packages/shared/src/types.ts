@@ -448,6 +448,36 @@ export interface ReceiptNumber {
   number: number;
 }
 
+/** Why cash went into or out of the till - the DSFinV-K business case it is booked as. */
+export type CashMovementReason = 'float' | 'deposit' | 'withdrawal' | 'bank';
+
+/**
+ * Cash put into or taken out of the till that is not a sale: the starting
+ * float, the owner's own money in or out, cash taken to the bank. German
+ * till rules want each one recorded as a receipt of its own, numbered on the
+ * till, signed by the TSE and summed in the day's closing - and it is what
+ * makes the counted box explainable anywhere. Never changed once recorded.
+ */
+export interface CashMovement {
+  id: string;
+  eventId: string;
+  deviceId: string;
+  timestamp: number;
+  /** 'in' adds to the till (float, deposit); 'out' takes from it (withdrawal, bank). */
+  direction: 'in' | 'out';
+  reason: CashMovementReason;
+  /** Always positive; `direction` says which way. */
+  amount: number;
+  currency: string;
+  note?: string;
+  /** Who recorded it, for the cash-up. */
+  by?: { userId: string; email: string | null };
+  /** The receipt number the till gave it. */
+  receipt?: ReceiptNumber;
+  /** KassenSichV: the TSE signature over it, or why there is none. Only when a TSE had to sign. */
+  tse?: SaleTse;
+}
+
 export interface AsCharged {
   listTotals: number[];
   /**

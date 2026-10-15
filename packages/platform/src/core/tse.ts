@@ -3,8 +3,10 @@ import {
   TSE_PROCESS_TYPE,
   TseDataError,
   countryCodeOf,
+  kassenbelegCashData,
   kassenbelegData,
   tseTime,
+  type CashMovement,
   type SaleTse,
   type SalesEvent,
   type Transaction,
@@ -397,6 +399,19 @@ export async function signCancellation(tx: Transaction): Promise<SaleTse> {
     return { signed: await finishWith(d, started, data) };
   } catch (err) {
     return { failed: { reason: reasonOf(err), at: Date.now() } };
+  }
+}
+
+/** Signs cash put into or taken out of the till - a receipt of its own with nothing taxable. Never throws. */
+export async function signCashMovement(move: Pick<CashMovement, 'amount' | 'direction' | 'currency'>): Promise<SaleTse> {
+  const d = driver();
+  if (!d) return { failed: { reason: 'No TSE configured on this device.', at: Date.now() } };
+  try {
+    if ((move.currency || '').toUpperCase() !== 'EUR') throw new TseDataError(`Cash in Germany is signed in EUR, this is in ${move.currency}.`);
+    const started = await startOn(d);
+    return { signed: await finishWith(d, started, kassenbelegCashData(move.amount, move.direction)) };
+  } catch (err) {
+    return { failed: { reason: err instanceof TseDataError ? err.message : reasonOf(err), at: Date.now() } };
   }
 }
 

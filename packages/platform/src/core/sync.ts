@@ -11,6 +11,7 @@ import type {
   InventoryItem,
   ProductMerge,
   CashClosing,
+  CashMovement,
 } from '@zollify/shared';
 import { openCoreDb, type OutboxOp } from './db';
 import { isStaffOp } from '@zollify/shared';
@@ -26,6 +27,7 @@ import { loadInventory } from './inventory';
 import { base64ToBlob } from './images';
 import { KASSENSICHV_KEY, TSE_MAIN_KEY, applyKassensichv, applyMainTseDevices } from './tse';
 import { applyClosing } from './closings';
+import { applyCashMovement } from './cash-movements';
 
 /**
  * Offline-first sync.
@@ -242,6 +244,8 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
     }
     case 'closing.create':
       return applyClosing(op.payload as CashClosing);
+    case 'cash.move':
+      return applyCashMovement(op.payload as CashMovement);
     case 'setting.upsert': {
       // Generic account-wide key/value, LWW on updatedAt - currently used
       // for the synced default active event (see DEFAULT_ACTIVE_KEY in

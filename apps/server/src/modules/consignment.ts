@@ -12,6 +12,7 @@ import {
   isStore,
   localDay,
   rentDue,
+  rentPaidAtTill,
   type ArtistConsignment,
   type ConsignedItem,
   type ConsignmentPayout,
@@ -62,8 +63,8 @@ export const ARTIST_MODULE_ID = 'consignment-artist';
 /** Which half a route file is registering for. */
 export type Side = 'store' | 'artist';
 
-/** All a staff account may call: the till's view of workshops and artists' items. */
-const TILL_ROUTES = new Set(['GET /till/workshops', 'POST /workshops/:id/signups', 'POST /scan']);
+/** All a staff account may call: the till's view of workshops, rent and artists' items. */
+const TILL_ROUTES = new Set(['GET /till/workshops', 'GET /till/rent', 'POST /workshops/:id/signups', 'POST /scan']);
 const LINK_TTL = 14 * 24 * 3600 * 1000;
 
 function migrate(db: Database.Database): void {
@@ -474,7 +475,7 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
       lines,
       payouts,
       fees,
-      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today(db, who.accountId)), feesDue(fees)),
+      statements: consignmentStatements(lines, payouts, consignors.map((c) => c.id), rentDue(rentalsOf(db, who.accountId), today(db, who.accountId), rentPaidAtTill(transactions)), feesDue(fees)),
     };
   });
 
@@ -659,7 +660,7 @@ function artistView(
       lines,
       payouts,
       [consignor.id],
-      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today(db, storeAccountId)),
+      rentDue(rentalsOf(db, storeAccountId).filter((r) => r.consignorId === consignor.id), today(db, storeAccountId), rentPaidAtTill(transactions)),
       feesDue(feesOf(db, storeAccountId, consignor.id)),
     )[0]!,
   };

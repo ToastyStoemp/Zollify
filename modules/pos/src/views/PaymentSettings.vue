@@ -27,7 +27,8 @@ interface Status {
 }
 const statuses = ref<Record<string, Status>>({});
 const active = ref<string>('manual');
-const providers = allProviders();
+// MobilePay has its own keys panel and its own till button, next to whichever card terminal is picked.
+const providers = allProviders().filter((p) => p.id !== 'mobilepay');
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
 async function refreshStatuses(): Promise<void> {

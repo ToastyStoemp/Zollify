@@ -111,7 +111,9 @@ function tapTerminalState(): void {
 
 onMounted(async () => {
   void backfillBranding();
-  providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  // MobilePay is never the card terminal: it is its own method button (see below), so an old 'mobilepay' choice reads as none.
+  const saved = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  providerId.value = saved === 'mobilepay' ? 'manual' : saved;
   void loadTestMode();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
@@ -721,7 +723,7 @@ function startPayment(method: string): void {
   }
   payment.phase = 'confirm';
 }
-const onMobilepay = computed(() => payment.method === MOBILEPAY_METHOD || (payment.method === 'card' && providerId.value === 'mobilepay' && !testMode.value));
+const onMobilepay = computed(() => payment.method === MOBILEPAY_METHOD);
 
 /** A reader that needs an interactive sign-in (SumUp) and isn't signed in gets a connect-or-choose screen instead of a failing terminal call. */
 async function beginCardPayment(): Promise<void> {
@@ -1094,7 +1096,7 @@ function lockTill(): void {
           <button type="button" class="card" :disabled="!itemCount" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount" @click="startPayment('split')">Split</button>
           <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount" @click="startPayment(m)">{{ m }}</button>
-          <button v-if="mobilepayReady && providerId !== 'mobilepay' && !testMode" type="button" class="custom mobilepay" :disabled="!itemCount" @click="startPayment(MOBILEPAY_METHOD)">MobilePay</button>
+          <button v-if="mobilepayReady && !testMode" type="button" class="custom mobilepay" :disabled="!itemCount" @click="startPayment(MOBILEPAY_METHOD)">MobilePay</button>
         </div>
       </footer>
     </aside>

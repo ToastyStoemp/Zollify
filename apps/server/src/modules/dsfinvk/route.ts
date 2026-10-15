@@ -3,6 +3,7 @@ import { zipSync, strToU8 } from 'fflate';
 import type { CashClosing, CashMovement } from '@zollify/shared';
 import { parseProfile, reduceEvents, reduceMerges, reduceTransactions, type ModuleContext } from '@zollify/server-core';
 import { buildDsfinvk, type DsfinvkResult } from './build';
+import { tillRegister, type TillRecord } from './tills';
 
 /**
  * GET /api/m/pos/dsfinvk?from=YYYY-MM-DD&to=YYYY-MM-DD[&all=1][&download=1]
@@ -11,6 +12,10 @@ import { buildDsfinvk, type DsfinvkResult } from './build';
  * account. Without `download` it answers what the export would hold and
  * what is missing; with it, the ZIP. Owners and admins only: it is the
  * whole sales record.
+ *
+ * GET /api/m/pos/dsfinvk/tills - the till register for the tax office's
+ * notification (§ 146a Abs. 4 AO): every till serial number with its device,
+ * dates and TSEs.
  */
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -23,7 +28,8 @@ export function registerDsfinvk(app: FastifyInstance, ctx: ModuleContext): void 
         .all(accountId, ...types) as { opId: string; type: string; payload: string }[]
     ).map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) as unknown }));
 
-  function build(accountId: string, from: string, to: string, germanyOnly: boolean): DsfinvkResult {
+  /** The till records of an account: closings, cash movements and the sales as the devices synced them. */
+  function records(accountId: string) {
     const txOps = opsFor(accountId, ['tx.create', 'tx.revert', 'product.merge']);
     const closings = new Map<string, CashClosing>();
     for (const op of opsFor(accountId, ['closing.create'])) {
@@ -35,12 +41,14 @@ export function registerDsfinvk(app: FastifyInstance, ctx: ModuleContext): void 
       const m = op.payload as CashMovement;
       if (m?.id && m.receipt && !movements.has(m.id)) movements.set(m.id, m);
     }
+    return { closings: [...closings.values()], movements: [...movements.values()], transactions: reduceTransactions(txOps, reduceMerges(txOps)) };
+  }
+
+  function build(accountId: string, from: string, to: string, germanyOnly: boolean): DsfinvkResult {
     const row = ctx.db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as { name: string; profile: string | null } | undefined;
     const artist = parseProfile(row?.profile).artist;
     return buildDsfinvk({
-      closings: [...closings.values()],
-      movements: [...movements.values()],
-      transactions: reduceTransactions(txOps, reduceMerges(txOps)),
+      ...records(accountId),
       events: reduceEvents(opsFor(accountId, ['event.upsert', 'event.close'])),
       seller: {
         name: artist.companyName.trim() || artist.fullName.trim() || row?.name || '',
@@ -54,6 +62,14 @@ export function registerDsfinvk(app: FastifyInstance, ctx: ModuleContext): void 
       germanyOnly,
     });
   }
+
+  app.get('/dsfinvk/tills', async (req, reply): Promise<{ tills: TillRecord[] } | undefined> => {
+    const who = ctx.identity(req);
+    if (who.role !== 'owner' && who.role !== 'admin') {
+      return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can read the till register.' });
+    }
+    return { tills: tillRegister(records(who.accountId)) };
+  });
 
   app.get<{ Querystring: { from?: string; to?: string; all?: string; download?: string } }>('/dsfinvk', async (req, reply) => {
     const who = ctx.identity(req);

@@ -190,7 +190,10 @@ describe('online receipts', () => {
         { title: 'Harbour print', qty: 2, amount: 40 },
         { title: 'Sticker', qty: 1, amount: 5 },
       ],
+      // Imprint and privacy notice: the seller as controller, never their phone or email.
+      legal: { imprint: ['Harbour Prints', 'Hafenweg 1', '8000 Zürich', 'VAT no. CHE-123.456.789'] },
     });
+    expect(body.legal.privacy.join(' ')).toContain('Harbour Prints');
     for (const secret of ['secret-device-id', 'PROC-REF-123', 'AUTH999', 'mypos', 'p-1', 'ev-1', 'tx-0000', TOKEN, '+41', 'home@example', 'EORI', accountId]) {
       expect(res.body).not.toContain(secret);
     }

@@ -53,15 +53,15 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 | TSE signing | **Built**: fiskaly cloud TSE ready to use - see [`fiskaly-setup.md`](fiskaly-setup.md); Swissbit hardware driver pending. A sale in Germany starts a TSE transaction at its first item and is signed when recorded, over the receipt's figures (DSFinV-K `Kassenbeleg-V1`); an outage keeps the till selling and marks the sale and receipt "TSE ausgefallen". Devices with a TSE can be made **main TSE devices**: every device without one (a backup phone, a sale marked paid on another terminal) is assigned to one of them - once, with a warning, as a till belongs to exactly one TSE in normal operation (AEAO zu § 146a) - and signs there over the live connection, under its own till number. While the assigned one is out, another main TSE device signs as a stand-in (marked so in the export) and the outage is logged with start, end and reason, synced per till; with none reachable the sale is marked unsigned. A device moving to another TSE becomes a new till (new till serial number). Works today with an uncertified test TSE. | For hardware: the native Swissbit driver, once a TSE (and its SDK) is bought - see [`tse-swissbit.md`](tse-swissbit.md). Payment terminals (myPOS Carbon/Go 2, SumUp) don't provide a TSE; it belongs to the till software. |
 | VAT per sale | **Done**: each event charges its country's standard or reduced rate per product (Settings → VAT, the event form, the product's "VAT rate"), or the small-business exemption; every sale keeps a snapshot (`tx.tax`) | Map the stored rates to DSFinV-K VAT keys when building the export. |
 | Receipt content (§6 KassenSichV) | **Done**: seller name, address and VAT ID, date, a receipt number counted per till (sales and cancellations alike, never reused), the till, items, total, payment type; VAT and net per rate with lettered lines, or the exemption note and EX number; for signed sales the TSE transaction number, signature counter, start and end time, TSE serial and the DSFinV-K QR code (paper) - also on screen and on the online receipt. Settings warns when the profile lacks the name or address. | - |
-| A receipt for every sale | QR and printing are optional per device | A Germany mode (e.g. by event country) where every sale must offer a receipt by QR, print or both, with paper always available on request. |
+| A receipt for every sale | **Done**: at an event in Germany the after-sale screen always shows the QR to the online receipt with the print button beside it, whatever the device's after-sale settings - paper on request. | - |
 | Cancellations | **Done**: reverting a sale gives a cancellation receipt of its own - its own number, its own TSE signature, every amount negative, pointing to the receipt it cancels; reprinting a reverted sale prints both | - |
 | DSFinV-K export | **Done**: Settings → Tax export (Germany) checks a period, lists what is missing (a day not closed, a receipt not synced, a test TSE) and downloads the ZIP: all 20 files with the official index.xml and DTD, built on the server from every device's synced records. Passes an independent DSFinV-K validator. See "How the export maps Zollify" below. | The TSE's certificate (from the Swissbit driver); the TSE's own TAR export (Swissbit driver). |
 | Daily closing and cash movements | **Done**: each till closes itself when the day, event or currency changes before its next receipt, at start-up on a new day, or by hand (Cash up → Close the day); numbered per till, synced, never changed. Cash up → Cash in and out records the starting cash, money put in or taken out and cash to the bank, each as a receipt of its own on the till (numbered, TSE-signed in Germany, synced), counted into the closing's cash and exported as Anfangsbestand, Privateinlage, Privatentnahme or Geldtransit (VAT key 5). | - |
-| Unchangeable records | Append-only change log, sales never deleted (good) | Keep as is. Add a training-mode flag so practice sales are marked as such. |
-| Till registration | Device list with names | Store a serial number and start and end dates per device, and generate the data to enter in ELSTER. |
-| Record keeping | Server keeps the change log; online receipts expire after 400 days | Keep server data and backups for 8 to 10 years, independent of the online receipt's expiry. |
-| Documentation | None | A template Verfahrensdokumentation to complete. |
-| Privacy and imprint | None | Privacy and imprint links on the online receipt and events pages, plus a retention policy. |
+| Unchangeable records | **Done**: append-only change log, sales never deleted; practice is done in test payments mode (Settings → POS), which records no sales at all, so there is nothing to mark as training. | Keep as is. |
+| Till registration | **Done**: Settings → Tax export (Germany) → Till register lists every till serial number with its device, first and last receipt and the TSEs that signed for it (test TSEs flagged), and copies as text for the ELSTER form - see "Reporting the tills" below. | The TSE's certification ID comes from its maker; a decommissioning date is the last receipt (or the day you retired the device). |
+| Record keeping | Server keeps the change log for good; nothing is deleted by age. Only the online receipt *link* expires (400 days, `RECEIPT_TTL_DAYS`); the sale stays. | Keep server backups for 10 years (§ 147 AO); export a full DSFinV-K ZIP and a backup before closing an account. |
+| Documentation | **Done**: [`verfahrensdokumentation-vorlage.md`](verfahrensdokumentation-vorlage.md) - a German template with Zollify's parts (system, data flow, TSE, export, retention) filled in and the business's parts marked to complete. | Fill it in; have the tax advisor read it. |
+| Privacy and imprint | **Done**: the online receipt and the public events page carry an "Imprint & privacy" block - the business name, address and VAT number from the profile, a plain-language privacy notice (what the page shows, no cookies, the anti-guessing puzzle, how long the link lives, 10-year retention of the sale), and links to the business's own imprint and privacy pages when set under Settings → Business profile → Webstore and socials. `LEGAL_OPERATOR` names the hosting provider. | - |
 
 ## Suggested order
 
@@ -70,9 +70,26 @@ Mostly not relevant: sales to consumers and receipts up to €250 are exempt. It
 3. ~~Receipt TSE block and QR, receipt numbers, cancellation receipts~~ done.
 4. ~~Daily closings and cash movements~~ done.
 5. ~~DSFinV-K export~~ done.
-6. Add till registration data and the documentation template.
+6. ~~Till registration data, documentation template, privacy and imprint~~ done.
 
 Steps 1-3 are needed before selling at a German convention. Steps 4-5 are needed for a tax inspection (Kassennachschau / Außenprüfung).
+
+## Reporting the tills (§ 146a Abs. 4 AO)
+
+Since 1 January 2025 every electronic till and its TSE must be reported to the tax office within a month of first use,
+and again within a month of taking it out of use - through **Mein ELSTER → Formulare → Mitteilung über die Verwendung
+elektronischer Aufzeichnungssysteme**. Settings → Tax export (Germany) → **Till register** lists what to enter:
+
+| ELSTER asks | Zollify gives |
+|---|---|
+| Betriebsstätte | your business address (Settings → Business profile); the tills are mobile and belong to it - confirm with the tax advisor |
+| Art des Aufzeichnungssystems | computer-based till (software): "Zollify", version as shown |
+| Seriennummer des Aufzeichnungssystems | the till serial number (`ZOLLIFY-…` or the one you set) |
+| Anschaffungsdatum / Inbetriebnahme | the date of the first receipt (or the day you bought the device) |
+| Außerbetriebnahme | the last receipt, once you retire a device - a till keeps its number for good; a new device is a new till |
+| TSE: Art, Seriennummer, Zertifizierungs-ID, Inbetriebnahme | cloud TSE (fiskaly) or hardware (Swissbit); serial and first-signed date from the register; the certification ID (BSI-K-TR-…) from fiskaly's dashboard or the Swissbit data sheet |
+
+Test TSEs (fiskaly TEST, Zollify's test TSE) are flagged in the register and are not reported.
 
 ## Switching it on
 

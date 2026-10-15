@@ -19,6 +19,8 @@ import {
   type ReceiptSocials,
   type SalesEvent,
   type Transaction,
+  receiptLegal,
+  type LegalBlock,
 } from '@zollify/shared';
 import {
   decodeUpload,
@@ -243,6 +245,13 @@ function eventName(db: Database.Database, accountId: string, eventId: string): s
   return ev.deletedAt ? '' : String(ev.name ?? '');
 }
 
+/** The legal block: the seller as controller, their own imprint and privacy pages when set, and who hosts the server. */
+function legalFor(db: Database.Database, accountId: string): LegalBlock {
+  const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as { name: string; profile: string | null } | undefined;
+  const profile = parseProfile(row?.profile);
+  return receiptLegal({ artist: profile.artist, accountName: row?.name ?? '', links: profile.links, operator: process.env.LEGAL_OPERATOR }, TTL_DAYS);
+}
+
 function seller(db: Database.Database, accountId: string, tx: Transaction): PublicReceipt['seller'] {
   const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
     | { name: string; profile: string | null }
@@ -288,6 +297,8 @@ export interface PublicReceipt {
   /** KassenSichV: what a receipt in Germany must show of the TSE signature, or that the TSE was out. */
   tse?: PublicTse;
   revertTse?: PublicTse;
+  /** Imprint and privacy notice - the seller's own pages when set, the built-in text otherwise. */
+  legal: LegalBlock;
 }
 
 type PublicTse =
@@ -337,7 +348,7 @@ function paymentLabel(tx: Transaction, kind: 'cash' | 'card', cardBrand?: string
 /** The whitelist. Anything not copied here does not leave the server. */
 export function publicReceipt(
   tx: Transaction,
-  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'> },
+  extra: { seller: PublicReceipt['seller']; event: string; branding?: Branding; footer?: Pick<PublicReceipt, 'links' | 'nextEvents'>; legal: LegalBlock },
 ): PublicReceipt {
   const rows = vatBreakdown(tx);
   const exempt = tx.tax?.exempt === true;
@@ -372,6 +383,7 @@ export function publicReceipt(
     ...(publicTse(tx.tse) ? { tse: publicTse(tx.tse) } : {}),
     ...(publicTse(tx.revertTse) ? { revertTse: publicTse(tx.revertTse) } : {}),
     ...extra.footer,
+    legal: extra.legal,
     vat: {
       rows: rows.map((r) => ({ ...(rows.length > 1 ? { letter: r.letter } : {}), rate: fmtRate(r.rate), net: r.net, vat: r.vat })),
       ...(exempt && tx.tax?.note ? { exemptNote: String(tx.tax.note).slice(0, 200) } : {}),
@@ -445,7 +457,12 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
 .actions { display: flex; justify-content: center; margin-top: 1rem; }
-@media print { body { background: #fff; } .card { border: 0; } .actions { display: none; } }
+.legal { margin-top: 1.25rem; color: var(--muted); font-size: .78rem; }
+.legal summary { cursor: pointer; text-align: center; }
+.legal h2 { font-size: .85rem; margin: 1rem 0 .3rem; color: var(--ink); }
+.legal p { margin: .3rem 0; }
+.legal a { color: var(--accent); }
+@media print { body { background: #fff; } .card { border: 0; } .actions, .legal { display: none; } }
 </style>
 </head>
 <body>
@@ -578,11 +595,28 @@ ${POW_SOLVER_JS}
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     if (c) receiptEl.appendChild(el('p', 'muted c', 'Cancelled by receipt no. ' + c.number + (c.till !== r.till ? ' (till ' + c.till + ')' : '')));
     if (!r.till) receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));
+    legal(r.legal);
     statusEl.hidden = true;
     receiptEl.hidden = false;
     printBtn.hidden = false;
   }
   printBtn.onclick = function () { window.print(); };
+
+  // Imprint and privacy notice, below the receipt. The seller's own pages are
+  // linked when set; the built-in text is shown otherwise. Links only when https.
+  function legal(l) {
+    if (!l) return;
+    var box = el('details', 'legal');
+    box.appendChild(el('summary', '', 'Imprint & privacy'));
+    box.appendChild(el('h2', '', 'Imprint'));
+    (l.imprint || []).forEach(function (line) { box.appendChild(el('p', '', line)); });
+    if (typeof l.imprintUrl === 'string' && /^https:\/\//.test(l.imprintUrl)) { var a = el('a', '', 'Full imprint'); a.href = l.imprintUrl; a.rel = 'noopener'; a.target = '_blank'; box.appendChild(el('p')).appendChild(a); }
+    box.appendChild(el('h2', '', 'Privacy'));
+    if (typeof l.privacyUrl === 'string' && /^https:\/\//.test(l.privacyUrl)) { var b = el('a', '', 'Privacy policy'); b.href = l.privacyUrl; b.rel = 'noopener'; b.target = '_blank'; box.appendChild(el('p')).appendChild(b); }
+    (l.privacy || []).forEach(function (line) { box.appendChild(el('p', '', line)); });
+    if (l.operator) box.appendChild(el('p', '', 'Hosted by ' + l.operator + ', who processes this page on the seller\'s behalf.'));
+    document.querySelector('main').appendChild(box);
+  }
 
   function fail(res) {
     if (res.status === 429) say('Too many attempts from this network. Please try again later.');
@@ -764,6 +798,7 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
           event: eventName(ctx.db, found.accountId, found.tx.eventId),
           branding: readBranding(ctx.db, found.accountId),
           footer: footerExtras(ctx.db, found.accountId),
+          legal: legalFor(ctx.db, found.accountId),
         });
       },
     );

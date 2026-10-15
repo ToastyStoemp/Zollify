@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { authFetch, saveFile } from '@zollify/platform';
+import { authFetch, createShellUi, saveFile } from '@zollify/platform';
+
+const ui = createShellUi('shell');
 
 /**
  * The DSFinV-K export: the till records a German tax inspection asks for
@@ -37,6 +39,65 @@ async function check(): Promise<void> {
     error.value = err instanceof Error ? err.message : String(err);
   } finally {
     busy.value = false;
+  }
+}
+
+// ── Till register (§ 146a Abs. 4 AO) ────────────────────────────────────────
+// Every electronic till and its TSE must be reported to the tax office in Mein
+// ELSTER within a month of first use (and again when taken out of use). The
+// register lists what to enter, from the synced records of every device.
+interface TillTse {
+  serial: string;
+  algorithm: string;
+  test: boolean;
+  firstSignedAt: number;
+  lastSignedAt: number;
+  signatures: number;
+}
+interface TillRecord {
+  till: string;
+  deviceIds: string[];
+  device: { brand: string; model: string; software: string; version: string } | null;
+  firstReceiptAt: number | null;
+  lastReceiptAt: number | null;
+  receipts: number;
+  closings: number;
+  tses: TillTse[];
+}
+const tills = ref<TillRecord[] | null>(null);
+const tillsBusy = ref(false);
+const day = (ms: number | null): string => (ms == null ? '-' : new Date(ms).toLocaleDateString());
+const deviceLabel = (t: TillRecord): string => (t.device ? `${t.device.brand} ${t.device.model} - ${t.device.software} ${t.device.version}` : 'Zollify');
+async function loadTills(): Promise<void> {
+  tillsBusy.value = true;
+  error.value = null;
+  try {
+    tills.value = ((await authFetch('/m/pos/dsfinvk/tills')) as { tills: TillRecord[] }).tills;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    tillsBusy.value = false;
+  }
+}
+/** The register as text, to paste into the ELSTER form or send to the tax advisor. */
+function tillsText(): string {
+  const lines: string[] = ['Till register (§ 146a Abs. 4 AO)', ''];
+  for (const t of tills.value ?? []) {
+    lines.push(`Till serial number: ${t.till}`);
+    lines.push(`  Type: computer-based till (software) - ${deviceLabel(t)}`);
+    lines.push(`  First receipt: ${day(t.firstReceiptAt)}  Last receipt: ${day(t.lastReceiptAt)}  Receipts: ${t.receipts}`);
+    for (const s of t.tses) lines.push(`  TSE: ${s.serial} (${s.algorithm}${s.test ? ', TEST - not to be reported' : ''}) from ${day(s.firstSignedAt)} to ${day(s.lastSignedAt)}`);
+    if (!t.tses.length) lines.push('  TSE: none has signed for this till');
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+async function copyTills(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(tillsText());
+    ui.toast('Copied.');
+  } catch {
+    ui.toast('Could not copy - select the table instead.', { kind: 'error' });
   }
 }
 
@@ -85,6 +146,41 @@ async function download(): Promise<void> {
       </ul>
       <p v-else-if="summary.closings" class="ok">Nothing missing.</p>
     </template>
+
+    <h2>Till register (§ 146a Abs. 4 AO)</h2>
+    <p class="hint">
+      Every electronic till and its TSE is reported to the tax office in Mein ELSTER ("Mitteilung über die Verwendung elektronischer
+      Aufzeichnungssysteme") within a month of its first use, and again when it is taken out of use. This lists what to enter, from every
+      device's synced records: the till serial number, the device, the dates and the TSE that signed for it. The TSE's certification
+      ID comes from its maker (fiskaly's dashboard, the Swissbit data sheet). See docs/germany-compliance.md.
+    </p>
+    <div class="row">
+      <button type="button" :disabled="tillsBusy" @click="loadTills">{{ tillsBusy ? 'Loading…' : tills ? 'Refresh' : 'Show tills' }}</button>
+      <button v-if="tills?.length" type="button" @click="copyTills">Copy as text</button>
+    </div>
+    <template v-if="tills">
+      <p v-if="!tills.length" class="result">No till has taken a receipt yet.</p>
+      <table v-else class="tills">
+        <thead>
+          <tr><th>Till serial number</th><th>Device</th><th>First receipt</th><th>Last receipt</th><th>TSE</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="t in tills" :key="t.till">
+            <td class="mono">{{ t.till }}</td>
+            <td>{{ deviceLabel(t) }}<br /><small>{{ t.receipts }} receipt{{ t.receipts === 1 ? '' : 's' }}, {{ t.closings }} closing{{ t.closings === 1 ? '' : 's' }}</small></td>
+            <td>{{ day(t.firstReceiptAt) }}</td>
+            <td>{{ day(t.lastReceiptAt) }}</td>
+            <td>
+              <template v-if="!t.tses.length"><span class="warn">none</span></template>
+              <div v-for="s in t.tses" :key="s.serial" class="tse">
+                <span class="mono">{{ s.serial }}</span>
+                <small>{{ s.algorithm }}<template v-if="s.test"> - <span class="warn">test, not reported</span></template> · {{ day(s.firstSignedAt) }} - {{ day(s.lastSignedAt) }}</small>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
   </section>
 </template>
 
@@ -100,4 +196,11 @@ h2 { margin: 0; font-size: 1.1rem; }
 .warnings { margin: 0; padding-left: 1.2rem; color: var(--zfy-warning-ink, #8a5a1e); font-size: .875rem; display: flex; flex-direction: column; gap: .25rem; }
 .ok { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); font-size: .875rem; }
 .error { margin: 0; color: var(--zfy-danger, #c6512f); font-size: .875rem; }
+.tills { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.tills th, .tills td { text-align: left; vertical-align: top; padding: .4rem .5rem; border-top: 1px solid var(--zfy-line, #d6dde4); }
+.tills th { font-weight: 600; color: var(--zfy-muted, #5a6472); border-top: 0; }
+.tills small { color: var(--zfy-muted, #5a6472); display: block; }
+.tse { margin-bottom: .3rem; }
+.mono { font-family: ui-monospace, monospace; font-size: .78rem; word-break: break-all; }
+.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 </style>

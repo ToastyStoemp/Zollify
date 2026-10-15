@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { FEE_REASONS, fmtPrice, journalCsv, reportCsv, type ArtistInvoice, type BooksSettings, type FeeReason, type ReportPeriod, type StoreReport } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { errorText, issueInvoices, loadInvoices, loadReport, loadReports, payReport, paymentFile, saveBooksSettings, today } from '../api';
+import { consignors, errorText, issueInvoices, loadConsignors, loadInvoices, loadReport, loadReports, payReport, paymentFile, saveBooksSettings, today } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -44,7 +44,7 @@ async function loadOne(): Promise<void> {
 }
 onMounted(async () => {
   try {
-    await loadList();
+    await Promise.all([loadList(), loadConsignors()]);
   } catch (err) {
     emit('error', errorText(err, 'Could not load reports.'));
   }
@@ -64,6 +64,11 @@ async function download(): Promise<void> {
 // ── Paying out ──────────────────────────────────────────────────────────────
 const picked = ref(new Set<string>());
 const owed = computed(() => report.value?.artists.filter((a) => a.balance > 0) ?? []);
+/** Artists on this report with no written self-billing agreement: their statements are not invoices yet. */
+const unagreed = computed(() => {
+  const agreed = new Map(consignors.value.map((c) => [c.id, !!c.selfBillingAgreedOn]));
+  return [...new Set((report.value?.artists ?? []).filter((a) => agreed.get(a.consignorId) === false).map((a) => a.name))];
+});
 function toggle(id: string): void {
   const next = new Set(picked.value);
   if (next.has(id)) next.delete(id);
@@ -266,6 +271,7 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           <button type="button" :disabled="!invoices.length" @click="downloadJournal"><Icon name="download" :size="14" /> Journal CSV</button>
           <button type="button" :disabled="!owed.length" @click="downloadPayments"><Icon name="banknote" :size="14" /> Bank payment file</button>
         </div>
+        <p v-if="unagreed.length" class="warn">No self-billing agreement on file for {{ unagreed.join(', ') }} - their statements are not valid invoices until there is one (Artists → edit).</p>
         <p v-if="invoices.length" class="hint">{{ invoices.length }} invoice{{ invoices.length === 1 ? '' : 's' }} issued: {{ invoices[0]!.number }}<template v-if="invoices.length > 1"> to {{ invoices[invoices.length - 1]!.number }}</template>. Issued invoices never change. The payment file (ISO 20022 pain.001) uses the invoice number as each transfer's reference, so the bank statement matches back to it.</p>
         <p class="hint">Earned is the period's share less card costs, rent and fees. Owed is everything unpaid as of {{ fmtDay(report.period.to) }} - what a payout settles. Paying never pays the same money twice.</p>
       </section>
@@ -388,6 +394,7 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
 .grow { flex: 1; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
+.warn { margin: 0; color: var(--zfy-danger, #c6512f); font-size: .84rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .card { display: flex; flex-direction: column; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); min-width: 0; }

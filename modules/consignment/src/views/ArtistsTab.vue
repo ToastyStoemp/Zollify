@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { Consignor } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { consignors, deleteConsignor, errorText, issueLinkCode, loadBooksSettings, productsOf, publicUrl, saveConsignor, stores, unlinkConsignor } from '../api';
+import { consignors, deleteConsignor, errorText, issueLinkCode, loadBooksSettings, productsOf, publicUrl, saveConsignor, stores, today, unlinkConsignor } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -39,6 +39,10 @@ const form = reactive({
   note: '',
   iban: '',
   bic: '',
+  vatId: '',
+  vatRegistered: false,
+  selfBillingAgreed: false,
+  selfBillingAgreedOn: '',
   archived: false,
 });
 
@@ -64,6 +68,10 @@ function openNew(): void {
     note: '',
     iban: '',
     bic: '',
+    vatId: '',
+    vatRegistered: false,
+    selfBillingAgreed: false,
+    selfBillingAgreedOn: '',
     archived: false,
   });
   formError.value = null;
@@ -80,6 +88,10 @@ function openEdit(c: Consignor): void {
     note: c.note,
     iban: c.iban,
     bic: c.bic,
+    vatId: c.vatId,
+    vatRegistered: c.vatRegistered,
+    selfBillingAgreed: !!c.selfBillingAgreedOn,
+    selfBillingAgreedOn: c.selfBillingAgreedOn ?? '',
     archived: c.archived,
   });
   formError.value = null;
@@ -114,6 +126,9 @@ async function save(): Promise<void> {
       note: form.note.trim(),
       iban: form.iban,
       bic: form.bic,
+      vatId: form.vatId.trim(),
+      vatRegistered: form.vatRegistered,
+      selfBillingAgreedOn: form.selfBillingAgreed ? form.selfBillingAgreedOn || today() : null,
       archived: form.archived,
     });
     editing.value = false;
@@ -248,6 +263,13 @@ const fmtDate = (ms: number): string => new Date(ms).toLocaleDateString();
           <label><span>BIC</span><input v-model="form.bic" type="text" autocomplete="off" placeholder="Optional" /></label>
         </div>
         <small class="hint">Where you pay this artist - used for the bank payment file under Reports.</small>
+        <div class="two">
+          <label><span>Tax number</span><input v-model="form.vatId" type="text" autocomplete="off" placeholder="CVR / VAT number" /></label>
+          <label class="check"><input v-model="form.vatRegistered" type="checkbox" /> VAT-registered</label>
+        </div>
+        <label class="check"><input v-model="form.selfBillingAgreed" type="checkbox" /> Agreed in writing that you write their sales statements (self-billing)</label>
+        <label v-if="form.selfBillingAgreed"><span>Agreed on</span><input v-model="form.selfBillingAgreedOn" type="date" /></label>
+        <small class="hint">A statement you issue on an artist's behalf is only an invoice with a written self-billing agreement. Printed on the statement with the tax number and VAT status.</small>
         <label><span>Note</span><textarea v-model="form.note" rows="2" placeholder="Agreement, pickup schedule…" /></label>
         <label v-if="editId" class="check"><input v-model="form.archived" type="checkbox" /> Archived - no longer consigning</label>
       </div>

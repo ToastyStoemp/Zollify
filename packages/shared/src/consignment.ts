@@ -37,6 +37,16 @@ export const ConsignorInputSchema = z.object({
   /** Where the store pays them; needed for the payout file. */
   iban: IbanSchema,
   bic: BicSchema,
+  /** The artist's own tax number (CVR, USt-IdNr., UID…), printed on the self-billed statement. */
+  vatId: z.string().trim().max(40).default(''),
+  /** VAT-registered artists get VAT on their statement; the rest none - a Danish artist under DKK 300,000 is not. */
+  vatRegistered: z.boolean().default(false),
+  /**
+   * The day the artist agreed in writing that the store writes their sales
+   * statements (self-billing / afregningsbilag). Without it the statement is
+   * not a valid invoice for either side; the store is told so before issuing.
+   */
+  selfBillingAgreedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
 });
 export type ConsignorInput = z.infer<typeof ConsignorInputSchema>;
 
@@ -51,6 +61,9 @@ export interface Consignor {
   archived: boolean;
   iban: string;
   bic: string;
+  vatId: string;
+  vatRegistered: boolean;
+  selfBillingAgreedOn: string | null;
   /** Name of the artist's own Zollify account, once they have linked it. */
   linkedAccountName: string | null;
   linked: boolean;

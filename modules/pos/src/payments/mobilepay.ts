@@ -32,9 +32,22 @@ export interface MobilepayKeysInput {
   subscriptionKey: string;
 }
 
-export const loadMobilepayStatus = (): Promise<MobilepayStatus> => sdk().http.get<MobilepayStatus>('mobilepay/status');
-export const saveMobilepayKeys = (keys: MobilepayKeysInput): Promise<MobilepayStatus> => sdk().http.put<MobilepayStatus>('mobilepay/keys', keys);
-export const clearMobilepayKeys = (): Promise<MobilepayStatus> => sdk().http.del<MobilepayStatus>('mobilepay/keys');
+/** Settings asks every provider for its status every few seconds; one answer serves all the asks of a moment. */
+let statusCache: { at: number; value: Promise<MobilepayStatus> } | null = null;
+const STATUS_TTL_MS = 3000;
+export const loadMobilepayStatus = (): Promise<MobilepayStatus> => {
+  if (statusCache && Date.now() - statusCache.at < STATUS_TTL_MS) return statusCache.value;
+  const value = sdk().http.get<MobilepayStatus>('mobilepay/status');
+  statusCache = { at: Date.now(), value };
+  value.catch(() => (statusCache = null));
+  return value;
+};
+const settled = (p: Promise<MobilepayStatus>): Promise<MobilepayStatus> => {
+  statusCache = null;
+  return p;
+};
+export const saveMobilepayKeys = (keys: MobilepayKeysInput): Promise<MobilepayStatus> => settled(sdk().http.put<MobilepayStatus>('mobilepay/keys', keys));
+export const clearMobilepayKeys = (): Promise<MobilepayStatus> => settled(sdk().http.del<MobilepayStatus>('mobilepay/keys'));
 
 /** The link the customer's phone must scan right now, for the till and the customer display to draw; null between payments. */
 export const mobilepayQr = ref<string | null>(null);

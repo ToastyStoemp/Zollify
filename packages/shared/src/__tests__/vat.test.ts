@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TxItem } from '../types';
-import { countryCodeOf, resolveEventVat, saleTaxFor, vatBreakdown, type EventVat } from '../vat';
+import { countryCodeOf, crossesCustomsBorder, resolveEventVat, saleTaxFor, vatBreakdown, vatIdLabel, type EventVat } from '../vat';
 
 const ev = (country: string, vat?: EventVat) => ({ venue: { country }, vat });
 const profile = (exemptCountries: string[] = [], extra: Record<string, string> = {}) => ({
@@ -8,6 +8,17 @@ const profile = (exemptCountries: string[] = [], extra: Record<string, string> =
   vat: { exemptCountries, exNumber: '', homeNote: '', crossBorderNote: '', ...extra },
 });
 const item = (lineTotal: number, qty = 1): TxItem => ({ pid: 'p', vid: null, title: 't', qty, unitPrice: lineTotal / qty, lineTotal });
+
+describe('vatIdLabel', () => {
+  it('names the tax number the way the country does, by code or name', () => {
+    expect(vatIdLabel('DK')).toBe('CVR');
+    expect(vatIdLabel('Denmark')).toBe('CVR');
+    expect(vatIdLabel('Germany')).toBe('USt-IdNr.');
+    expect(vatIdLabel('ch')).toBe('UID');
+    expect(vatIdLabel('Ireland')).toBe('VAT');
+    expect(vatIdLabel(undefined)).toBe('VAT');
+  });
+});
 
 describe('countryCodeOf', () => {
   it('takes names and codes alike', () => {
@@ -109,5 +120,19 @@ describe('saleTaxFor and vatBreakdown', () => {
     const tax = saleTaxFor(resolveEventVat(ev('Germany'), profile(['DE'])), ['standard']);
     expect(tax).toMatchObject({ exempt: true, rates: [null], note: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.' });
     expect(vatBreakdown({ items: [item(20)], total: 20, currency: 'EUR', discounts: [], tax })).toEqual([]);
+  });
+});
+
+describe('crossesCustomsBorder', () => {
+  it('is a border between the EU and outside it, not between two EU countries', () => {
+    expect(crossesCustomsBorder('Germany', 'Switzerland')).toBe(true);
+    expect(crossesCustomsBorder('CH', 'DE')).toBe(true);
+    expect(crossesCustomsBorder('Germany', 'Denmark')).toBe(false);
+    expect(crossesCustomsBorder('DE', 'Germany')).toBe(false);
+  });
+
+  it('says no when a country is unknown', () => {
+    expect(crossesCustomsBorder('', 'Switzerland')).toBe(false);
+    expect(crossesCustomsBorder('Germany', undefined)).toBe(false);
   });
 });

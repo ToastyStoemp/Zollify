@@ -376,6 +376,14 @@ export interface Transaction {
    */
   receiptToken?: string;
   /**
+   * The number printed on the receipt: `<series>-<count>`, where the series
+   * is the till that made the sale and the count runs on without gaps on that
+   * till. Invoice rules (DK momsbekendtgørelsen § 64, DE GoBD, BE) want a
+   * sequential number per series; a random id does not pass. Absent on sales
+   * made before numbering - those show the end of the id instead.
+   */
+  receiptNumber?: string;
+  /**
    * What the till showed, in the charged currency - for receipts only.
    *
    * `items[].lineTotal` already has every discount spread into it (the books

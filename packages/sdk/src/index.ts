@@ -19,6 +19,7 @@ export type {
   NavItem,
   NavGroup,
   SettingsPanel,
+  SetupStep,
   SaleLine,
   SaleLineRef,
   TillAction,

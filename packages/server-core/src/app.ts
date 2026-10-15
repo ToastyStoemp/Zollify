@@ -22,6 +22,8 @@ import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
 import { registerLogRoutes } from './routes/logs';
+import { registerFeedbackRoutes } from './routes/feedback';
+import { createServerSettings, registerServerSettingsRoutes } from './server-settings';
 import { registerEventFileRoutes } from './routes/event-files';
 import { registerUploadErrors, uploadConfig } from './upload-limits';
 import { registerUpdateRoutes } from './routes/updates';
@@ -121,6 +123,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   });
 
   const db = openDb(opts.dataDir);
+  // Settings the owner saved in Server admin, before anything reads them - the mailer below, for one.
+  const serverSettings = createServerSettings(db, opts.jwtSecret);
+  serverSettings.apply();
   // Release SQLite after the other shutdown hooks have stopped.
   app.addHook('onClose', async () => { if (db.open) db.close(); });
   migrateEntitlements(db);
@@ -310,8 +315,10 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerWebhookRoutes(app, db, webhooks, problems);
   registerProblemRoutes(app, db, problems);
   registerFxRoutes(app);
-  registerAdminRoutes(app, db, opts.deployDir, opts.dataDir);
+  registerAdminRoutes(app, db, opts.deployDir, opts.dataDir, opts.serverModules);
   registerLogRoutes(app, db, opts.dataDir);
+  registerFeedbackRoutes(app, db);
+  registerServerSettingsRoutes(app, serverSettings);
   registerEventFileRoutes(app, db, opts.dataDir);
   if (opts.apkDir) registerUpdateRoutes(app, opts.apkDir);
   if (opts.shellStoreDir) registerShellUpdateRoutes(app, opts.shellStoreDir);

@@ -98,7 +98,12 @@ async function submitReport(l: PoolListing): Promise<void> {
 <template>
   <section class="find">
     <header>
-      <h1>Find events</h1>
+      <div class="title-row">
+        <h1>Find events</h1>
+        <router-link v-slot="{ navigate }" :to="{ name: 'events', query: { new: '1', ...(filters.q.trim() ? { name: filters.q.trim() } : {}) } }" custom>
+          <button type="button" class="primary" @click="navigate">+ Add your own event</button>
+        </router-link>
+      </div>
       <p class="lede">
         Events other booths have shared. Nobody can see who goes to which event. Quick add copies the dates, address and link into your own events;
         you can change anything afterwards.
@@ -129,6 +134,7 @@ async function submitReport(l: PoolListing): Promise<void> {
 
         <p v-if="!loading && !listings.length" class="hint">
           Nothing to add right now. Events you already have, share or added are left out.
+          <router-link :to="{ name: 'events', query: { new: '1', ...(filters.q.trim() ? { name: filters.q.trim() } : {}) } }">Add it yourself</router-link>
         </p>
         <article v-for="l in listings" :key="l.id" class="card listing">
           <div class="head">
@@ -168,6 +174,7 @@ async function submitReport(l: PoolListing): Promise<void> {
 <style scoped>
 .find { display: flex; flex-direction: column; gap: 1rem; }
 h1 { margin: 0; font-size: 1.35rem; }
+.title-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; margin-bottom: .4rem; }
 h2 { margin: 0; font-size: 1.05rem; }
 .lede, .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; max-width: 60ch; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }

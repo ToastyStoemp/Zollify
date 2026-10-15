@@ -10,7 +10,7 @@ import { openProblemErrors } from '../lib/problems';
 interface Panel {
   id: string;
   label: string;
-  group: 'Core' | 'Modules';
+  group: string;
   minRole?: Role;
   component: () => Promise<Component | { default: Component }>;
 }
@@ -23,75 +23,81 @@ const account = currentAccount;
  * Core is not a module, so it has nothing to register through the SDK - but its
  * settings belong in the same index, not a separate screen.
  */
-const corePanels: Panel[] = [
+const corePanels: Omit<Panel, 'group'>[] = [
   {
     id: 'core.profile',
     label: 'Business profile',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./ProfileSettings.vue'),
   },
   {
     id: 'core.vat',
     label: 'VAT',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./VatSettings.vue'),
   },
   {
     id: 'core.data',
     label: 'Backup & restore',
-    group: 'Core',
     component: () => import('./DataSettings.vue'),
   },
   {
     id: 'core.security',
     label: 'Account & security',
-    group: 'Core',
     component: () => import('./SecuritySettings.vue'),
   },
   {
     id: 'core.team',
     label: 'Team',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./TeamSettings.vue'),
   },
   {
     id: 'core.webhooks',
     label: 'Webhooks',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./WebhooksSettings.vue'),
   },
   {
     id: 'core.problems',
     label: 'Problems',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./ProblemsSettings.vue'),
   },
   {
     id: 'core.modules',
     label: 'Modules',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./ModulesView.vue'),
   },
   {
     id: 'core.admin',
     label: 'Server admin',
-    group: 'Core',
     minRole: 'owner',
     component: () => import('./AdminSettings.vue'),
   },
   {
     id: 'core.device',
     label: 'This device',
-    group: 'Core',
     component: () => import('./DeviceSettings.vue'),
   },
 ];
+
+/**
+ * Settings in the groups a seller looks for them in, not core-versus-module.
+ * A module panel lands by its module; one this list does not know goes under
+ * More, so a new module never disappears.
+ */
+const GROUPS = ['Business', 'Selling', 'Books & paperwork', 'Connections', 'Data & devices', 'Advanced', 'More'];
+const GROUP_OF: [RegExp, string][] = [
+  [/^core\.(profile|team|security)$/, 'Business'],
+  [/^core\.vat$|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
+  [/^(customs-[a-z]+|peppol-be|economic|tax|consignment|costs)\./, 'Books & paperwork'],
+  [/^core\.webhooks$|^shopify-sync\./, 'Connections'],
+  [/^core\.(data|device)$/, 'Data & devices'],
+  [/^core\.(problems|modules|admin)$/, 'Advanced'],
+];
+const groupOf = (id: string): string => GROUP_OF.find(([re]) => re.test(id))?.[1] ?? 'More';
 
 /** Below the sidebar breakpoint (900, see styles.css): the list and a panel are two screens, not two columns. */
 const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 900px)') : null;
@@ -106,11 +112,11 @@ const panels = computed<Panel[]>(() => {
   const role = account.value?.role;
   if (!role) return [];
 
-  const core = corePanels.filter((p) => !p.minRole || roleAtLeast(role, p.minRole));
+  const core = corePanels.filter((p) => !p.minRole || roleAtLeast(role, p.minRole)).map((p) => ({ ...p, group: groupOf(p.id) }));
   const fromModules: Panel[] = contributions.settingsFor(role).map((p) => ({
     id: p.id,
     label: p.label,
-    group: 'Modules',
+    group: groupOf(p.id),
     component: p.component,
   }));
 
@@ -152,8 +158,7 @@ watch(
 );
 
 const groups = computed(() => [
-  { name: 'Core', items: panels.value.filter((p) => p.group === 'Core') },
-  { name: 'Modules', items: panels.value.filter((p) => p.group === 'Modules') },
+  ...GROUPS.map((name) => ({ name, items: panels.value.filter((p) => p.group === name) })),
 ]);
 </script>
 

@@ -61,6 +61,9 @@ export const ICON_PATHS: Record<string, string> = {
   scan: 'M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10',
   'trending-up': 'm22 7-8.5 8.5-5-5L2 17M16 7h6v6',
   filter: 'M22 3H2l8 9.46V19l4 2v-8.54L22 3z',
+  'message-square': 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  /** The Discord mark, drawn in outline to sit with the rest. */
+  discord: 'M8.5 17.5c-1.5.5-3 .7-4.5.5-.8-3.3-.6-7 .9-10.3A16 16 0 0 1 9 6.3l.6 1.2a15 15 0 0 1 4.8 0l.6-1.2c1.5.3 2.9.8 4.1 1.4 1.5 3.3 1.7 7 .9 10.3-1.5.2-3 0-4.5-.5l-.9-1.6M8.5 17.5l.9-1.6M7.5 15c2.9 1.3 6.1 1.3 9 0M9.5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM14.5 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
 };
 
 /**

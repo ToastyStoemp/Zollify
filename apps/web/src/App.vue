@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
+  authFetch,
   currentAccount,
   getDeviceAccount,
   visibleEvents,
@@ -27,6 +28,7 @@ import { booted, contributions, events, signOutAndReload } from './boot';
 import { openProblemErrors, refreshProblemCount } from './lib/problems';
 import ConfirmDialog from './views/ConfirmDialog.vue';
 import LockScreen from './views/LockScreen.vue';
+import FeedbackDialog from './components/FeedbackDialog.vue';
 import { Icon, ModalShell } from '@zollify/ui';
 import { isStore, sellsAt, type AppNotification } from '@zollify/shared';
 
@@ -35,6 +37,17 @@ const route = useRoute();
 
 /** First-run setup gets the whole screen; the nav would only bounce back to it. */
 const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
+
+// Send feedback, and the server's Discord (only when DISCORD_INVITE_URL is set there).
+const feedbackOpen = ref(false);
+const discordUrl = ref<string | null>(null);
+onMounted(async () => {
+  try {
+    discordUrl.value = ((await authFetch('/support')) as { discordUrl: string | null }).discordUrl;
+  } catch {
+    /* no link offline - the button just stays away */
+  }
+});
 const settingUp = computed(() => route.name === 'welcome' || route.meta.bare === true);
 
 function runToastAction(toast: Toast) {
@@ -273,6 +286,10 @@ const fmtAgo = (ms: number): string => {
                 <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
               </button>
             </div>
+            <div class="row">
+              <button type="button" class="item top grow feedback" @click="feedbackOpen = true"><Icon name="message-square" /><span>Send feedback</span></button>
+              <a v-if="discordUrl" :href="discordUrl" target="_blank" rel="noopener noreferrer" class="quiet discord" title="Zollify on Discord" aria-label="Join Zollify on Discord"><Icon name="discord" /></a>
+            </div>
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
@@ -358,6 +375,7 @@ const fmtAgo = (ms: number): string => {
     </div>
 
     <ConfirmDialog />
+    <FeedbackDialog v-if="feedbackOpen" :app-version="build" :discord-url="discordUrl" @close="feedbackOpen = false" />
   </div>
 </template>
 
@@ -409,6 +427,9 @@ nav { flex: 1; }
 /* Sync is an icon with a status dot; the words live in its tooltip and label. */
 .sync, .burger, .bell { position: relative; padding: .4rem .5rem; min-height: 0; }
 .bell .zfy-icon { color: var(--zfy-muted); }
+.feedback { border: 0; background: none; font-family: inherit; font-weight: inherit; text-align: left; cursor: pointer; min-height: 0; }
+.discord { display: grid; place-items: center; padding: .4rem .5rem; border-radius: 8px; color: var(--zfy-muted); }
+.discord:hover { background: var(--zfy-surface-2); color: #5865f2; }
 .count { position: absolute; top: .05rem; right: .05rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; border-radius: 999px; background: var(--zfy-accent); color: #fff; font-size: .62rem; line-height: 1rem; font-weight: 700; text-align: center; }
 .bell-empty { margin: 0; color: var(--zfy-muted); font-size: .9rem; }
 .bell-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }

@@ -4,9 +4,11 @@ export type PaymentProviderId =
   | 'mypos-carbon'
   | 'mypos-carbon-remote'
   | 'mypos-glass'
-  | 'bridge'
   | 'sumup'
-  | 'nexi-smartpos';
+  | 'sumup-cloud'
+  | 'nexi-smartpos'
+  /** The built-in test terminal, only while the till is in test mode - never picked as a provider. */
+  | 'test';
 
 export interface ProviderStatus {
   connected: boolean;

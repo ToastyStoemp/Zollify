@@ -155,6 +155,8 @@ export interface Planner {
   spaces: ConsignmentSpace[];
   rentals: ConsignmentRental[];
   setups: SetupMoment[];
+  /** Rent paid at the till, per rental id. */
+  rentPaid: Record<string, number>;
   /** Whether this server can send email at all. */
   emailEnabled: boolean;
 }
@@ -252,6 +254,21 @@ export const addSignup = (workshopId: string, input: { name: string; email: stri
   sdk().http.post(`workshops/${encodeURIComponent(workshopId)}/signups`, input);
 export const tillWorkshops = async (storeId: string): Promise<(Workshop & { booked: number; unpaid: Signup[] })[]> =>
   (await sdk().http.get<{ workshops: (Workshop & { booked: number; unpaid: Signup[] })[] }>(`till/workshops?storeId=${encodeURIComponent(storeId)}`)).workshops;
+/** A rental the till can take rent for. */
+export interface TillRental {
+  id: string;
+  consignorName: string;
+  spaceName: string;
+  monthlyFee: number;
+  currency: string;
+  deductFromSales: boolean;
+  endsOn: string;
+  charged: number;
+  paidAtTill: number;
+}
+/** Rentals at a store, and the sales the server already counted in `paidAtTill`. */
+export const tillRent = (storeId: string): Promise<{ rentals: TillRental[]; counted: string[] }> =>
+  sdk().http.get(`till/rent?storeId=${encodeURIComponent(storeId)}`);
 export const updateSignup = (id: string, patch: { paid?: boolean; status?: 'booked' | 'cancelled' }): Promise<{ signup: Signup; promoted: number }> =>
   sdk().http.put(`signups/${encodeURIComponent(id)}`, patch);
 

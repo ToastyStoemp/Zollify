@@ -30,6 +30,7 @@ import {
   pendingCount,
   sendDiagnosticLog,
   setDeviceName,
+  shellConfirm,
   setTheme,
   syncNow,
   syncState,
@@ -164,6 +165,28 @@ async function save(): Promise<void> {
 function when(ts: number): string {
   return ts ? new Date(ts).toLocaleString() : 'never';
 }
+
+// ── Devices on the account ──────────────────────────────────────────────────
+const isAdmin = (): boolean => account.value?.role === 'owner' || account.value?.role === 'admin';
+/** Admins may remove any device; a member only one they signed in themselves. Never the one in hand. */
+const canRemove = (d: DeviceSummary): boolean => d.id !== id.value && (isAdmin() || d.userId === account.value?.userId);
+const describe = (d: DeviceSummary): string => [d.device ?? (d.flavor && d.flavor !== 'web' ? `${d.flavor} app` : 'web'), d.userEmail].filter(Boolean).join(' · ');
+const removing = ref<string | null>(null);
+async function removeDevice(d: DeviceSummary): Promise<void> {
+  const label = d.name || d.device || 'this device';
+  const live = d.sessions ? ` It is signed out at once${d.sessions > 1 ? ` (${d.sessions} sessions)` : ''}.` : '';
+  if (!(await shellConfirm(`${label} is removed from the account.${live} Signing in again from it adds it back.`, 'Remove device?'))) return;
+  removing.value = d.id;
+  error.value = null;
+  try {
+    await authFetch(`/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+    devices.value = (await authFetch('/devices')) as DeviceSummary[];
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not remove the device.';
+  } finally {
+    removing.value = null;
+  }
+}
 import SharedTillSettings from './SharedTillSettings.vue';
 </script>
 
@@ -254,10 +277,15 @@ import SharedTillSettings from './SharedTillSettings.vue';
     </dl>
 
     <h3>Devices on this account</h3>
-    <p class="hint">Every register and display that has signed in. Names are set on each device.</p>
+    <p class="hint">Every register and display that has signed in. Names are set on each device. One that reinstalled the app or cleared its browser data comes back as a new entry - remove the old one, which also signs it out.</p>
     <ul class="devices">
       <li v-for="d in devices" :key="d.id" :class="{ me: d.id === id }">
-        <span class="main"><span>{{ d.name || 'Unnamed device' }}<em v-if="d.id === id">this device</em></span><small>{{ d.flavor || 'web' }} · seen {{ when(d.lastSeenAt) }}</small></span>
+        <span class="main">
+          <span>{{ d.name || 'Unnamed device' }}<em v-if="d.id === id">this device</em><em v-if="!d.sessions" class="off">signed out</em></span>
+          <small>{{ describe(d) }}</small>
+          <small>seen {{ when(d.lastSeenAt) }}</small>
+        </span>
+        <button v-if="canRemove(d)" type="button" class="quiet danger" :disabled="removing === d.id" @click="removeDevice(d)">{{ removing === d.id ? 'Removing…' : 'Remove' }}</button>
       </li>
     </ul>
 
@@ -312,7 +340,10 @@ h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: .75rem 0 0; font-size: .95rem; }
 .devices { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: .3rem; }
 .devices li { display: flex; align-items: center; gap: .5rem; padding: .4rem .6rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .875rem; }
-.devices .main { display: flex; flex-direction: column; }
+.devices .main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.devices .off { background: var(--zfy-surface-2, #e9edf1); color: var(--zfy-muted, #5a6472); }
+.devices .quiet { min-height: 2rem; padding: .3rem .7rem; font-size: .8rem; border-radius: 6px; border: 1px solid var(--zfy-line, #d6dde4); background: transparent; color: inherit; }
+.devices .quiet.danger { color: var(--zfy-danger, #c6512f); border-color: color-mix(in srgb, var(--zfy-danger, #c6512f) 40%, transparent); }
 .devices em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); vertical-align: middle; }
 .devices small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .8rem; }

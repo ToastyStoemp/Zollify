@@ -75,6 +75,8 @@ function wsUrl(token: string, id: string): string {
 
 async function connect(): Promise<void> {
   if (!wanted || socket || typeof WebSocket === 'undefined') return;
+  // Started offline from a remembered sign-in: there is no token until the server is reached once.
+  if (!getAccessToken() && getAccount()) await refreshAccessToken();
   const token = getAccessToken();
   if (!token || !getAccount()) {
     scheduleReconnect();

@@ -62,7 +62,7 @@ beforeAll(async () => {
     sale('t1', 'p1', 'ana', 100),
     sale('t2', 'p2', 'bo', 50),
   ]);
-  await call('PUT', '/consignors/ana', { name: 'Ana Ærø', commissionPct: 40, storeIds: ['zh'], iban: 'DK50 0040 0440 1162 43' });
+  await call('PUT', '/consignors/ana', { name: 'Ana Ærø', commissionPct: 40, storeIds: ['zh'], iban: 'DK50 0040 0440 1162 43', vatId: 'DK12345678', vatRegistered: true, selfBillingAgreedOn: '2026-01-15' });
   await call('PUT', '/consignors/bo', { name: 'Bo', commissionPct: 50, storeIds: ['zh'] });
 });
 
@@ -93,6 +93,11 @@ describe('invoices', () => {
     const ana = first.find((i: { consignorId: string }) => i.consignorId === 'ana');
     expect(ana).toMatchObject({ total: 60, currency: 'EUR', date: closed.to });
     expect(ana.lines.map((l: { kind: string; amount: number }) => [l.kind, l.amount])).toEqual([['sales', 100], ['commission', -40]]);
+    // The statement says who it is for and on what footing: tax number, VAT status, the self-billing agreement.
+    expect(ana).toMatchObject({ consignorVatId: 'DK12345678', vatRegistered: true, selfBillingAgreedOn: '2026-01-15' });
+    const bo = first.find((i: { consignorId: string }) => i.consignorId === 'bo');
+    expect(bo).toMatchObject({ vatRegistered: false, selfBillingAgreedOn: null });
+    expect(bo.consignorVatId).toBeUndefined();
     const again = (await call('POST', `/reports/${closed.from}/invoices`)).json().invoices;
     expect(again).toEqual(first);
   });

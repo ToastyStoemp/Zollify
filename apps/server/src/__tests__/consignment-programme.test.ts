@@ -261,4 +261,34 @@ describe('paying for a workshop at the till', () => {
     const list = (await call(store, 'GET', '/workshops/w2/signups')).json().signups as Signup[];
     expect(list[0]?.paidAtTill).toBe(false);
   });
+
+  it('takes rent for a space, which comes off what the artist owes for it', async () => {
+    await call(store, 'PUT', '/spaces/shelf', { storeId: 'zh', name: 'Small shelf', monthlyFee: 40, currency: 'CHF' });
+    const booked = await call(store, 'POST', '/rentals', { consignorId: 'ana', spaceId: 'shelf', storeId: 'zh', startDate: new Date().toISOString().slice(0, 10), months: 3, monthlyFee: 40, currency: 'CHF' });
+    expect(booked.statusCode).toBe(201);
+    const rentalId = booked.json().rental.id as string;
+    const rentOf = async () => ((await call(store, 'GET', '/statement')).json().statements.find((s: { consignorId: string }) => s.consignorId === 'ana').totals[0]?.rent ?? 0) as number;
+    expect(await rentOf()).toBe(40);
+    const before = (await call(store, 'GET', '/till/rent?storeId=zh')).json();
+    expect(before.rentals).toMatchObject([{ id: rentalId, consignorName: expect.any(String), spaceName: 'Small shelf', charged: 40, paidAtTill: 0 }]);
+    expect((await call(store, 'GET', '/till/rent?storeId=fair')).json().rentals).toEqual([]);
+
+    await sale('op-till-rent-000000001', 'tx.create', {
+      id: 'tr1',
+      eventId: 'zh',
+      deviceId: 'till',
+      timestamp: Date.now(),
+      method: 'cash',
+      payments: [],
+      items: [{ pid: 'module:rent:x', vid: null, title: 'Rent', qty: 1, unitPrice: 40, lineTotal: 40, ref: { moduleId: 'consignment', kind: 'space-rent', id: rentalId } }],
+      discounts: [],
+      total: 40,
+      currency: 'CHF',
+    });
+    const after = (await call(store, 'GET', '/till/rent?storeId=zh')).json();
+    expect(after.rentals[0]).toMatchObject({ paidAtTill: 40 });
+    expect(after.counted).toEqual(['tr1']);
+    expect(await rentOf()).toBe(0);
+    expect((await call(store, 'GET', '/planner')).json().rentPaid).toEqual({ [rentalId]: 40 });
+  });
 });

@@ -369,3 +369,38 @@ describe('carrying unsold stock to the next event', () => {
     expect(b.localPriceOverrides).not.toBe(events.getSalesEvent('ev-a')!.localPriceOverrides);
   });
 });
+
+describe('what is physically left', () => {
+  it('is the count minus every sale since, claimed or not', async () => {
+    await inv.setOnHand(PRINT, null, 50);
+    await inv.setClaim('ev-a', PRINT, null, 20);
+    await sell('ev-a', 5);
+    await sell('ev-b', 3);
+
+    // Free leaves the claim out; what is left still includes it.
+    expect(inv.freeFor(PRINT)).toBe(27);
+    expect(inv.remainingFor(PRINT)).toBe(42);
+  });
+
+  it('starts again from a new count', async () => {
+    await inv.setOnHand(PRINT, null, 50);
+    await sell('ev-a', 5, 'old-sale');
+    // A recount after the sale already reflects it.
+    await new Promise((r) => setTimeout(r, 2));
+    await inv.setOnHand(PRINT, null, 45);
+
+    expect(inv.remainingFor(PRINT)).toBe(45);
+  });
+});
+
+describe('synced settings by prefix', () => {
+  it('lists only the keys under the prefix', async () => {
+    const settings = await import('../core/synced-settings');
+    await settings.setSyncedSetting('mod.row.a', { qty: 1 });
+    await settings.setSyncedSetting('mod.row.b', { qty: 2 });
+    await settings.setSyncedSetting('mod.other', true);
+
+    expect(await settings.listSyncedSettings('mod.row.')).toEqual({ 'mod.row.a': { qty: 1 }, 'mod.row.b': { qty: 2 } });
+    await expect(settings.listSyncedSettings('')).rejects.toThrow();
+  });
+});

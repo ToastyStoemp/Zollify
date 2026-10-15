@@ -37,6 +37,16 @@ export const ConsignorInputSchema = z.object({
   /** Where the store pays them; needed for the payout file. */
   iban: IbanSchema,
   bic: BicSchema,
+  /** The artist's own tax number (CVR, USt-IdNr., UID…), printed on the self-billed statement. */
+  vatId: z.string().trim().max(40).default(''),
+  /** VAT-registered artists get VAT on their statement; the rest none - a Danish artist under DKK 300,000 is not. */
+  vatRegistered: z.boolean().default(false),
+  /**
+   * The day the artist agreed in writing that the store writes their sales
+   * statements (self-billing / afregningsbilag). Without it the statement is
+   * not a valid invoice for either side; the store is told so before issuing.
+   */
+  selfBillingAgreedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null),
 });
 export type ConsignorInput = z.infer<typeof ConsignorInputSchema>;
 
@@ -51,6 +61,9 @@ export interface Consignor {
   archived: boolean;
   iban: string;
   bic: string;
+  vatId: string;
+  vatRegistered: boolean;
+  selfBillingAgreedOn: string | null;
   /** Name of the artist's own Zollify account, once they have linked it. */
   linkedAccountName: string | null;
   linked: boolean;
@@ -495,12 +508,34 @@ export function nextPeriodStart(r: Pick<ConsignmentRental, 'startDate' | 'months
   return rentalPeriods(r).find((p) => p > today) ?? rentalEnd(r);
 }
 
-/** Rent to take off each artist's balance, from the rentals that deduct it. */
-export function rentDue(rentals: ConsignmentRental[], today: string): { consignorId: string; amount: number; currency: string }[] {
+/** What a till sale line paying a rental refers to: `ref: { kind: RENT_REF_KIND, id: rentalId }`. */
+export const RENT_REF_KIND = 'space-rent';
+
+/**
+ * Rent paid at the till, per rental: sale lines that refer to it, from sales
+ * not reverted. Read back from the sales themselves, so a refund un-pays it.
+ */
+export function rentPaidAtTill(transactions: Pick<Transaction, 'items' | 'revertedAt' | 'revertedBy'>[]): Map<string, number> {
+  const paid = new Map<string, number>();
+  for (const tx of transactions) {
+    if (tx.revertedAt || tx.revertedBy) continue;
+    for (const item of tx.items) {
+      if (item.ref?.moduleId === 'consignment' && item.ref.kind === RENT_REF_KIND) paid.set(item.ref.id, (paid.get(item.ref.id) ?? 0) + toMinor(item.lineTotal));
+    }
+  }
+  for (const [id, minor] of paid) paid.set(id, minor / 100);
+  return paid;
+}
+
+/**
+ * Rent to take off each artist's balance, from the rentals that deduct it,
+ * less what they paid for it at the till - paid ahead, it is a credit.
+ */
+export function rentDue(rentals: ConsignmentRental[], today: string, paidAtTill: Map<string, number> = new Map()): { consignorId: string; amount: number; currency: string }[] {
   return rentals
     .filter((r) => r.deductFromSales)
-    .map((r) => ({ consignorId: r.consignorId, amount: rentCharged(r, today), currency: r.currency }))
-    .filter((r) => r.amount > 0);
+    .map((r) => ({ consignorId: r.consignorId, amount: (toMinor(rentCharged(r, today)) - toMinor(paidAtTill.get(r.id) ?? 0)) / 100, currency: r.currency }))
+    .filter((r) => r.amount !== 0);
 }
 
 /** How many of each space are rented on a day. */

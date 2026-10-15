@@ -14,6 +14,7 @@ import type {
 } from '@zollify/shared';
 import { checkClaims, type JwtClaims } from './auth';
 import { touchDevice } from './db';
+import { parseDevice } from './session-info';
 
 type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
 
@@ -190,7 +191,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       // a Carbon in customer-display mode) may rarely push its own ops, so a
       // WS connection is often the only signal that it's still around.
       try {
-        touchDevice(db, deviceId, claims.accountId, claims.sub, null, flavor || null, Date.now());
+        touchDevice(db, deviceId, claims.accountId, claims.sub, null, flavor || null, Date.now(), parseDevice(req.headers['user-agent']));
       } catch {
         /* devices row requires an existing account/user FK - skip on any edge case */
       }

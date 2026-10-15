@@ -432,9 +432,8 @@ ${POW_SOLVER_JS}
   function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function row(left, right, cls) { var r = el('div', 'row' + (cls ? ' ' + cls : '')); r.appendChild(el('span', '', left)); r.appendChild(el('span', '', right)); return r; }
 
+  // The token stays in the address: refreshing or bookmarking the page keeps the receipt.
   var token = (location.hash || '').slice(1);
-  // Drop the token from the address bar and history once read.
-  try { history.replaceState(null, '', location.pathname); } catch (e) {}
   if (!/^[A-Za-z0-9_-]{22}$/.test(token)) { say('This receipt link is incomplete. Please scan the code again.'); return; }
 
   function money(n, cur) {

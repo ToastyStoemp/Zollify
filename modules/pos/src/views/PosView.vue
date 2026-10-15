@@ -1375,7 +1375,9 @@ function lockTill(): void {
 .tools { display: flex; gap: .4rem; flex-wrap: wrap; }
 .tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
-.pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }
+/* A fixed dark grey, not the ink token: ink turns light in dark mode and the white label vanished. */
+.pay .custom { grid-column: 1 / -1; background: #3a4352; }
+.pay .mobilepay, .confirm.MobilePay { background: #5a78ff; }
 .pay button, .confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
 .pay .cash, .confirm.cash { background: #0e7c66; }
 .pay .card, .confirm.card { background: #2f6fb8; }

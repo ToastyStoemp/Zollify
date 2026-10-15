@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import type { DeviceSummary } from '@zollify/shared';
+import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
+import { GO2_HOST_SETTING, GO2_PORT_SETTING, GO2_TRANSPORT_SETTING, connectGo2, type Go2Transport } from '../payments/mypos-go2';
+import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-cloud';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
+import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
+import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
+import SumupSoloPairing from './SumupSoloPairing.vue';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
  * Connect / Pair reader / Log out where the provider supports it, the SumUp
- * affiliate key, the satellite Carbon to hand card payments to, and the
- * extra payment methods shown as buttons on the till.
+ * affiliate key, the satellite Carbon to hand card payments to, whether cards
+ * are charged in the base currency at a converted event, and the extra
+ * payment methods shown as buttons on the till.
  */
 interface Status {
   available: boolean;
@@ -30,8 +36,24 @@ async function refreshStatuses(): Promise<void> {
     const status = available ? await p.getStatus().catch((e) => ({ connected: false, detail: String(e) })) : { connected: false, detail: 'Not available on this device' };
     statuses.value[p.id] = { ...status, available };
   }
+  sumupCloud.value = active.value === 'sumup-cloud' ? await loadSumupCloudStatus().catch(() => null) : null;
 }
+const sumupCloud = ref<SumupCloudStatus | null>(null);
 
+const go2 = ref({ transport: 'bluetooth' as Go2Transport, host: '', port: '8080' });
+async function saveGo2(): Promise<void> {
+  await setSetting(GO2_TRANSPORT_SETTING, go2.value.transport);
+  await setSetting(GO2_HOST_SETTING, go2.value.host.trim());
+  await setSetting(GO2_PORT_SETTING, Number(go2.value.port) || 8080);
+  if (active.value === 'mypos-go2') {
+    try {
+      await connectGo2();
+    } catch (err) {
+      sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
+    }
+  }
+  void refreshStatuses();
+}
 const sumupKey = ref('');
 const editingKey = ref(false);
 const hasKey = computed(() => !!sumupKey.value.trim());
@@ -40,6 +62,8 @@ const remoteCarbonId = ref('');
 const carbons = ref<DeviceSummary[]>([]);
 const carbonsError = ref('');
 const customMethods = ref<string[]>([]);
+const cardInBase = ref(false);
+const baseCurrency = computed(() => sdk().data.events.active()?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'EUR');
 const newMethod = ref('');
 
 onMounted(async () => {
@@ -47,16 +71,109 @@ onMounted(async () => {
   pollTimer = setInterval(() => void refreshStatuses(), 5000);
   active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
+  cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
+  void loadTestMode();
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
+  go2.value = {
+    transport: ((await getSetting<string>(GO2_TRANSPORT_SETTING)) === 'wifi' ? 'wifi' : 'bluetooth') as Go2Transport,
+    host: (await getSetting<string>(GO2_HOST_SETTING)) ?? '',
+    port: String((await getSetting<number | string>(GO2_PORT_SETTING)) ?? 8080),
+  };
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
+  smartposTerminal.value = (await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING))?.deviceId ?? '';
+  if (active.value === 'nexi-smartpos') void refreshSmartpos();
+  // Back from Nexi/Poynt after connecting (or not).
+  const outcome = new URLSearchParams(location.hash.split('?')[1] ?? '').get('smartpos');
+  if (outcome) {
+    const text: Record<string, string> = {
+      connected: 'Nexi account connected - now pick this till’s terminal.',
+      declined: 'Connecting was cancelled on the Nexi page.',
+      expired: 'That link had expired - try Connect again.',
+      in_use: 'That Nexi account is already connected to another Zollify account.',
+      not_configured: 'Add your Poynt app under Nexi SmartPOS first.',
+      failed: 'Nexi did not confirm the connection - try again.',
+    };
+    sdk().ui.toast(text[outcome] ?? 'Back from Nexi.', { kind: outcome === 'connected' ? 'success' : 'warning', timeoutMs: 7000 });
+    if (outcome === 'connected') {
+      await select('nexi-smartpos');
+      void refreshSmartpos();
+    }
+  }
 });
+
+// ── Nexi SmartPOS: which terminal this till sends payments to ───────────────
+const smartposTerminals = ref<SmartposTerminal[]>([]);
+const smartposTerminal = ref('');
+const smartposError = ref('');
+const smartpos = ref<SmartposStatus | null>(null);
+const appForm = ref({ open: false, applicationId: '', region: 'eu' as 'eu' | 'us', privateKey: '', authPublicKey: '', saving: false });
+async function refreshSmartpos(): Promise<void> {
+  smartposError.value = '';
+  smartpos.value = await loadSmartposStatus().catch(() => null);
+  try {
+    smartposTerminals.value = await loadSmartposTerminals();
+  } catch (err) {
+    const body = (err as { body?: { error?: string; message?: string } } | null)?.body;
+    smartposTerminals.value = [];
+    // No app or not connected yet is what the hints already say.
+    smartposError.value = body?.error === 'not_connected' || body?.error === 'not_configured' ? '' : (body?.message ?? 'Could not load your terminals.');
+  }
+}
+async function saveSmartposTerminal(): Promise<void> {
+  const t = smartposTerminals.value.find((x) => x.deviceId === smartposTerminal.value) ?? null;
+  await setSetting(SMARTPOS_TERMINAL_SETTING, t);
+  sdk().ui.toast(t ? `Card payments go to ${t.name}.` : 'Terminal cleared.', { kind: 'success' });
+  void refreshStatuses();
+}
+/** The account's own Poynt app: id and region shown, the key only ever sent. */
+function editApp(): void {
+  const a = smartpos.value?.app;
+  appForm.value = { open: true, applicationId: a?.applicationId ?? '', region: a?.region ?? 'eu', privateKey: '', authPublicKey: '', saving: false };
+}
+async function readKeyFile(e: Event, field: 'privateKey' | 'authPublicKey'): Promise<void> {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (!file) return;
+  const problem = await checkPickedFile('keyFile', file);
+  if (problem) {
+    sdk().ui.toast(problem, { kind: 'error' });
+    return;
+  }
+  appForm.value[field] = (await file.text()).trim();
+}
+async function saveApp(): Promise<void> {
+  const f = appForm.value;
+  f.saving = true;
+  try {
+    await saveSmartposApp({ applicationId: f.applicationId.trim(), privateKey: f.privateKey, region: f.region, authPublicKey: f.authPublicKey.trim() || null });
+    appForm.value = { ...f, open: false, privateKey: '', authPublicKey: '', saving: false };
+    sdk().ui.toast('Poynt app saved - now tap Connect to allow it on your Nexi account.', { kind: 'success', timeoutMs: 6000 });
+  } catch (err) {
+    f.saving = false;
+    sdk().ui.toast((err as { body?: { message?: string } } | null)?.body?.message ?? 'Could not save the app.', { kind: 'error' });
+  }
+  void refreshSmartpos();
+  void refreshStatuses();
+}
+async function removeApp(): Promise<void> {
+  if (!(await sdk().ui.confirm('This account stops using its own Poynt app and its Nexi connection is removed.', 'Remove the Poynt app?', { confirm: 'Remove' }))) return;
+  await removeSmartposApp();
+  await setSetting(SMARTPOS_TERMINAL_SETTING, null);
+  smartposTerminal.value = '';
+  void refreshSmartpos();
+  void refreshStatuses();
+}
+async function copyRedirect(): Promise<void> {
+  await navigator.clipboard.writeText(smartpos.value?.redirectUrl ?? '').catch(() => undefined);
+  sdk().ui.toast('Copied.', { kind: 'info' });
+}
 onUnmounted(() => clearInterval(pollTimer));
 
 async function select(id: PaymentProviderId): Promise<void> {
   active.value = id;
   await sdk().config.set('activeProvider', id);
   onActiveProviderChanged(id);
+  if (id === 'nexi-smartpos') void refreshSmartpos();
   sdk().ui.toast('Payment provider updated.', { kind: 'success' });
   void refreshStatuses();
 }
@@ -99,6 +216,19 @@ const ago = (ts: number): string => {
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
+async function toggleTestMode(e: Event): Promise<void> {
+  const on = (e.target as HTMLInputElement).checked;
+  await setTestMode(on);
+  sdk().ui.toast(on ? 'Test mode on - nothing the till does now is recorded.' : 'Test mode off - sales are recorded again.', { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
+  void refreshStatuses();
+}
+
+async function saveCardInBase(): Promise<void> {
+  await setSetting(CARD_IN_BASE_KEY, cardInBase.value);
+  // The till may already be open: pick up the setting (and a rate) now.
+  void loadCardFx();
+}
+
 async function addMethod(): Promise<void> {
   const name = newMethod.value.trim();
   if (!name || customMethods.value.some((m) => m.toLowerCase() === name.toLowerCase())) return;
@@ -117,6 +247,15 @@ async function removeMethod(name: string): Promise<void> {
     <h2>Payments</h2>
     <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
 
+    <h3>Test mode</h3>
+    <label class="toggle">
+      <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
+      <span class="main">
+        <span>Try the till without recording anything</span>
+        <small>Every step runs as usual - cart, discounts, cash or card, the receipt screen - but no sale is recorded: no transaction, no stock movement, nothing in the books, nothing synced. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
+      </span>
+    </label>
+
     <h3>Card payment terminal</h3>
     <ul class="providers">
       <li v-for="p in providers" :key="p.id" :class="{ off: !statuses[p.id]?.available }">
@@ -129,13 +268,83 @@ async function removeMethod(name: string): Promise<void> {
       </li>
     </ul>
 
+    <template v-if="active === 'mypos-go2' && statuses['mypos-go2']?.available">
+      <div class="carbon">
+        <div class="row"><span class="label">How this device reaches the Go2</span></div>
+        <label class="inline"><input v-model="go2.transport" type="radio" value="bluetooth" @change="saveGo2" /> <span>Bluetooth</span></label>
+        <label class="inline"><input v-model="go2.transport" type="radio" value="wifi" @change="saveGo2" /> <span>Wi-Fi (same network)</span></label>
+        <template v-if="go2.transport === 'wifi'">
+          <div class="row">
+            <label class="field grow"><span>Terminal IP address</span><input v-model="go2.host" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.1.100" @change="saveGo2" /></label>
+            <label class="field port"><span>Port</span><input v-model="go2.port" type="number" inputmode="numeric" min="1" max="65535" @change="saveGo2" /></label>
+          </div>
+          <p class="hint">Put the Go2 in slave mode on the same Wi-Fi as this device. Its IP address is under the terminal’s connection settings. Port 8080 unless you changed it there. Then tap <strong>Connect</strong> above.</p>
+        </template>
+        <p v-else class="hint">Bluetooth only works on a Go2 ordered with the Bluetooth module - a plain Go2 has none, however long it scans. If pairing never finds the terminal, use Wi-Fi.</p>
+      </div>
+    </template>
+
     <template v-if="statuses['sumup']?.available">
-      <label class="field">
-        <span>SumUp affiliate key</span>
-        <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
-        <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="From the SumUp developer dashboard" @change="saveKey" />
-      </label>
-      <p class="hint">Save the key and tap <strong>Connect</strong> to log in once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
+      <details>
+        <summary>Your own app build</summary>
+        <label class="field">
+          <span>SumUp affiliate key</span>
+          <div v-if="hasKey && !editingKey" class="row"><code>{{ maskedKey }}</code><button type="button" class="quiet" @click="editingKey = true">Change</button></div>
+          <input v-else v-model="sumupKey" type="password" autocomplete="off" placeholder="Only for a build with its own app id" @change="saveKey" />
+        </label>
+        <p class="hint">Only needed when this app was built with its own app id. Leave empty to use this server's key.</p>
+      </details>
+    </template>
+
+    <div v-if="active === 'sumup-cloud' && sumupCloud?.configured" class="carbon">
+      <p v-if="sumupCloud.merchant" class="hint">Connected to SumUp account <strong>{{ sumupCloud.merchant.name || sumupCloud.merchant.code }}</strong>.</p>
+      <p class="hint">The Solo takes the card over Wi-Fi or its own SIM - this till can be any device, a browser too.{{ sumupCloud.connected ? '' : ' Tap Connect above once to sign in to your SumUp account.' }}</p>
+      <SumupSoloPairing v-if="sumupCloud.connected" @picked="refreshStatuses" />
+    </div>
+
+    <template v-if="active === 'nexi-smartpos' && statuses['nexi-smartpos']?.available">
+      <div v-if="smartpos?.canManage" class="carbon">
+        <div class="row"><span class="label">Poynt app</span>
+          <template v-if="!appForm.open">
+            <button type="button" class="quiet" @click="editApp">{{ smartpos.app ? 'Change' : 'Add your app' }}</button>
+            <button v-if="smartpos.app" type="button" class="quiet danger" @click="removeApp">Remove</button>
+          </template>
+        </div>
+        <p v-if="smartpos.app && !appForm.open" class="hint"><code>{{ smartpos.app.applicationId }}</code> ({{ smartpos.app.region.toUpperCase() }}){{ smartpos.app.hasAuthKey ? ' - code signatures checked' : '' }}</p>
+        <p v-else-if="!appForm.open" class="hint">{{ smartpos.serverApp ? 'Using the app this server provides. Add your own to use your own Poynt developer account.' : 'Create a cloud app in the Poynt developer portal (EU: poynt-eu.godaddy.com) and add its application id and private key here. Only this account uses it.' }}</p>
+        <form v-if="appForm.open" class="appform" @submit.prevent="saveApp">
+          <label class="field"><span>Application id</span><input v-model="appForm.applicationId" type="text" autocomplete="off" placeholder="urn:aid:…" required /></label>
+          <label class="field"><span>Region</span>
+            <select v-model="appForm.region"><option value="eu">Europe (Nexi, Nets)</option><option value="us">United States</option></select>
+          </label>
+          <label class="field"><span>Private key (.pem){{ smartpos.app ? ' - leave empty to keep the saved one' : '' }}</span>
+            <input type="file" accept=".pem,.key,.txt" @change="readKeyFile($event, 'privateKey')" />
+            <textarea v-model="appForm.privateKey" rows="3" autocomplete="off" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+          <details>
+            <summary>Poynt’s public key (optional)</summary>
+            <p class="hint">If Nexi or Poynt gives you the key they sign authorisation codes with, add it and Zollify checks every code against it.</p>
+            <textarea v-model="appForm.authPublicKey" rows="3" spellcheck="false" placeholder="-----BEGIN PUBLIC KEY-----"></textarea>
+          </details>
+          <div class="field"><span>OAuth callback URL - set this in the app’s OAuth settings</span>
+            <div class="row"><code class="grow">{{ smartpos.redirectUrl }}</code><button type="button" class="quiet" @click="copyRedirect">Copy</button></div>
+          </div>
+          <p v-if="!smartpos.https" class="error">Nexi can only reach this server over a public https address - open Zollify through it, or set PUBLIC_ORIGIN.</p>
+          <div class="row"><button type="submit" :disabled="appForm.saving || !appForm.applicationId.trim()">{{ appForm.saving ? 'Checking…' : 'Save' }}</button><button type="button" class="quiet" @click="appForm.open = false">Cancel</button></div>
+        </form>
+        <p class="hint">The key stays on the server, encrypted. Each account on this server has its own app, Nexi account and terminals.</p>
+      </div>
+      <div class="carbon">
+        <div class="row"><span class="label">This till’s Nexi terminal</span><button type="button" class="quiet" @click="refreshSmartpos">Refresh</button></div>
+        <select v-if="smartposTerminals.length" v-model="smartposTerminal" @change="saveSmartposTerminal">
+          <option value="" disabled>Choose a terminal…</option>
+          <option v-for="t in smartposTerminals" :key="t.deviceId" :value="t.deviceId">{{ t.name }}{{ t.storeName ? ` - ${t.storeName}` : '' }}{{ t.serial ? ` (${t.serial})` : '' }}</option>
+        </select>
+        <p v-else-if="smartposError" class="error">{{ smartposError }}</p>
+        <p v-else class="hint">{{ smartpos && !smartpos.configured ? 'Add a Poynt app first, then' : 'Tap' }} <strong>Connect</strong> above to allow it on your Nexi account, then <strong>Refresh</strong> to list its terminals.</p>
+        <p class="hint">The amount appears on the terminal when you charge a card; the customer pays there and the till hears back by itself. Each till can use its own terminal.</p>
+      </div>
     </template>
 
     <template v-if="active === 'mypos-carbon-remote'">
@@ -150,6 +359,15 @@ async function removeMethod(name: string): Promise<void> {
         <label class="field"><span>{{ carbons.length ? 'Or paste a device id' : 'Device id' }}</span><input v-model="remoteCarbonId" type="text" placeholder="Under This device on the Carbon" @change="saveRemoteCarbon" /></label>
       </div>
     </template>
+
+    <h3>Currency</h3>
+    <label class="toggle">
+      <input v-model="cardInBase" type="checkbox" @change="saveCardInBase" />
+      <span class="main">
+        <span>Charge cards in the base currency ({{ baseCurrency }})</span>
+        <small>At an event priced in a local currency, the card terminal is charged in {{ baseCurrency }} at today's market rate - a painting sold for 30 CHF is charged as about 32 EUR on the card. Cash is still taken in the local currency. Set your terminal to {{ baseCurrency }}.</small>
+      </span>
+    </label>
 
     <h3>Extra payment methods</h3>
     <p class="hint">Extra buttons on the till for payments taken outside the app - TWINT, a PayPal QR code. Sales made with them count as non-cash.</p>
@@ -183,9 +401,17 @@ h3 { font-size: .95rem; margin: .5rem 0 0; }
 .label { flex: 1; font-size: .875rem; font-weight: 600; }
 code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); }
 .carbon { display: flex; flex-direction: column; gap: .5rem; padding: .7rem .8rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; }
+.appform { display: flex; flex-direction: column; gap: .5rem; }
+.appform textarea { font-family: ui-monospace, monospace; font-size: .75rem; }
+.grow { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: .78rem; }
 .methods { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .methods li { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .35rem .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; font-size: .875rem; }
 .methods .quiet { min-height: 1.7rem; font-size: .78rem; }
+.toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
+.toggle input { margin-top: .2rem; }
 .add { display: flex; gap: .4rem; }
 .add input { flex: 1; min-width: 0; }
+.port { max-width: 7rem; }
+.grow { flex: 1; }
+label.inline { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 </style>

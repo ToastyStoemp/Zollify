@@ -1,7 +1,7 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 import { listenForRemotePayments } from './payments/satellite';
-import { onActiveProviderChanged } from './payments/registry';
+import { allProviders, onActiveProviderChanged } from './payments/registry';
 
 /**
  * POS - taking money at the booth.
@@ -17,7 +17,7 @@ import { onActiveProviderChanged } from './payments/registry';
  */
 export default defineModule({
   id: 'pos',
-  version: '0.1.6',
+  version: '0.1.14',
   sdk: '^0.1.0',
   title: 'POS',
   description: 'Cart, checkout and receipts, with pluggable payment terminals.',
@@ -47,6 +47,15 @@ export default defineModule({
       order: 101,
     });
 
+    // First-run setup asks how the seller takes card payments; the full list stays under Settings → Payments.
+    sdk.setup.step({
+      id: 'payments',
+      title: 'Card payments',
+      component: () => import('./views/PaymentSetup.vue'),
+      minRole: 'admin',
+      order: 100,
+    });
+
     sdk.settings.panel({
       id: 'payments',
       label: 'Payments',
@@ -60,7 +69,13 @@ export default defineModule({
     // A Carbon answers remote payment triggers from any screen; the subscription is released with the module.
     listenForRemotePayments();
 
-    void sdk.config.get<string>('activeProvider').then((id) => {
+    void sdk.config.get<string>('activeProvider').then(async (id) => {
+      // A terminal that no longer exists (ZollBridge) falls back to recording cards by hand, visibly.
+      if (id && !allProviders().some((p) => p.id === id)) {
+        await sdk.config.set('activeProvider', 'manual');
+        sdk.ui.toast('ZollBridge is no longer supported - pick a card terminal under Settings → Payments.', { kind: 'warning', timeoutMs: 8000 });
+        return;
+      }
       if (id) onActiveProviderChanged(id as never);
     });
 

@@ -1,11 +1,15 @@
-import { computed, reactive, watch } from 'vue';
-import type { SaleEvent, SaleLine } from '@zollify/sdk';
-import type { TseHandle } from '@zollify/shared';
+import { computed, reactive, ref, watch } from 'vue';
+import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
+import type { CardSettlement, TseHandle } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
+import { testTerminalProvider } from './payments/test-terminal';
+import type { PaymentProvider, PaymentResult } from './payments/provider';
+import { logDiagnostic } from './lib/diagnostics';
 import { sdk } from './runtime';
 import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
+  allocateDiscounts,
   computeCartTotals,
   distributeTotal,
   type CartLine as DiscountCartLine,
@@ -19,6 +23,10 @@ export interface CartLine extends SaleLine {
   variantLabel: string | null;
   /** Product.type - some discount rules target a whole type rather than ids. */
   type?: string;
+  /** Added by another module (a workshop place, say): its quantity is not the seller's to change. */
+  fixed?: boolean;
+  /** That module's key for the line, so the same thing is never added twice. */
+  key?: string;
 }
 
 interface CartState {
@@ -58,6 +66,56 @@ export const isConverting = computed(
 );
 
 /**
+ * "Charge cards in the base currency" (Settings → Payments). At an event that
+ * prices in a local currency, cards are still taken in the base currency, at
+ * today's market rate - a German booth in Switzerland sells a 30 € painting
+ * for 30 CHF, and the card is charged 32.15 EUR. Cash stays in the local
+ * currency. `rate` is the market rate, 1 base = rate local - never the
+ * event's own pricing rate, which can be a deliberate round 1:1.
+ */
+export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
+
+/**
+ * Test mode: the till runs every step of a sale - cart, discounts, the card
+ * on a pretend terminal, the receipt screen - and records nothing. No
+ * transaction, no stock movement, no books, nothing synced. For trying the
+ * till out, training a helper, or checking a receipt layout, without a
+ * refund to make afterwards. Device-local and switched on by hand, with a
+ * banner on the till for as long as it is on.
+ */
+export const TEST_MODE_KEY = 'testMode';
+export const testMode = ref(false);
+export async function loadTestMode(): Promise<boolean> {
+  testMode.value = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  return testMode.value;
+}
+export async function setTestMode(on: boolean): Promise<void> {
+  testMode.value = on;
+  await sdk().config.set(TEST_MODE_KEY, on);
+}
+export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
+export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
+
+/** Reads the setting and, when it applies, today's rate (or the last one this device saw, offline). */
+export async function loadCardFx(): Promise<void> {
+  cardFx.enabled = (await sdk().config.get<boolean>(CARD_IN_BASE_KEY)) ?? false;
+  if (!cardInBase.value) return;
+  try {
+    // Optional chaining: a shell older than this module has no fx.
+    const latest = await sdk().fx?.latest(cart.baseCurrency, cart.currency);
+    if (latest) Object.assign(cardFx, latest);
+  } catch {
+    /* no rate - a card checkout says so */
+  }
+}
+
+/** What a local-currency amount comes to on the card, in the base currency. Null when not charging cards in base. */
+export function cardSettlement(localAmount: number): CardSettlement | null {
+  if (!cardInBase.value || !cardFx.rate) return null;
+  return { amount: round2(localAmount / cardFx.rate), currency: cart.baseCurrency, rate: cardFx.rate };
+}
+
+/**
  * Converts a base amount into what the customer is actually charged.
  *
  * Rounding happens on the converted figure, not the base one - a booth in
@@ -95,6 +153,9 @@ const discountLines = computed<DiscountCartLine[]>(() =>
     title: line.name,
     variantLabel: line.variantLabel,
     type: line.type,
+    // Read live from the catalogue, so a cart started before an artist's
+    // discount began still gets it.
+    consignorId: sdk().data.products.get(line.productId)?.consignorId,
     qty: line.qty,
     unitPrice: line.unitPrice,
     lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
@@ -189,6 +250,7 @@ export function addLine(
 export function setQty(lineId: string, qty: number): void {
   const line = cart.lines.find((l) => l.lineId === lineId);
   if (!line) return;
+  if (line.fixed && qty > 0) return;
   if (qty <= 0) {
     removeLine(lineId);
     return;
@@ -241,17 +303,35 @@ export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
   sale?: SaleEvent;
+  /** Test mode: the sale went through the motions and was not recorded anywhere. */
+  test?: boolean;
+  /** The seller abandoned this attempt (cancelCheckout) - nothing was recorded, whatever the terminal answered. */
+  cancelled?: boolean;
 }
 
 export interface CheckoutPayment {
   /** cash · card · split · or a custom method name (TWINT, PayPal QR…). */
   method: string;
   /** Present for a split; otherwise one leg for the whole amount is implied. */
-  legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
+  legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
   /** Cash handed over, when counted. */
   cashReceived?: number;
-  /** Take the card on the configured terminal rather than recording it by hand. */
-  terminal?: { providerId: string };
+  /** Take the card on the configured terminal rather than recording it by hand. `amount` is a split's card leg; absent, the whole sale goes on the card. */
+  terminal?: { providerId: string; amount?: number };
+}
+
+// Each checkout is one attempt; cancelCheckout() bumps the counter so an
+// attempt whose terminal answers after the seller gave up on it (Cancel,
+// "Complete by hand", retry) can no longer record the sale.
+let attempt = 0;
+let activeProvider: PaymentProvider | null = null;
+
+/** Abandons the terminal request in flight, if any. Safe to call when nothing is pending. */
+export async function cancelCheckout(): Promise<void> {
+  attempt++;
+  const provider = activeProvider;
+  activeProvider = null;
+  if (provider) await provider.cancel().catch(() => {});
 }
 
 /** Units of an item already on the ticket. */
@@ -276,6 +356,51 @@ export function addMisc(title: string, unitPrice: number, qty: number): void {
 }
 
 /**
+ * A line another module put on the till - a workshop place, a booking. Not a
+ * catalogue item: no stock, and no rule discounts reach it (they match
+ * catalogue products only), though a manual discount still spreads over it.
+ * The same key twice keeps one line.
+ */
+export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }): boolean {
+  if (cart.lines.some((l) => l.key === line.key)) return true;
+  cart.lines.push({
+    lineId: `l${++lineSeq}`,
+    productId: `module:${line.key}`,
+    variantId: null,
+    variantLabel: null,
+    sku: null,
+    name: line.name,
+    qty: line.qty,
+    unitPrice: line.unitPrice,
+    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+    taxRate: null,
+    fixed: true,
+    key: line.key,
+    ...(line.consignorId ? { consignorId: line.consignorId } : {}),
+    ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
+    ...(line.ref ? { ref: line.ref } : {}),
+  });
+  return true;
+}
+
+/** The line a module added under `key`, for that module to read back. */
+export function findModuleLine(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null {
+  const l = cart.lines.find((x) => x.key === key);
+  return l ? { key, name: l.name, qty: l.qty, unitPrice: l.unitPrice, ...(l.ref ? { ref: l.ref } : {}) } : null;
+}
+
+/** Changes what a module's line charges, in place. False when the cart has no line under that key. */
+export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
+  const l = cart.lines.find((x) => x.key === line.key);
+  if (!l) return false;
+  l.name = line.name;
+  l.qty = line.qty;
+  l.unitPrice = line.unitPrice;
+  l.lineTotal = (Math.round(line.unitPrice * 100) * line.qty) / 100;
+  return true;
+}
+
+/**
  * Records the sale and, on approval, announces it.
  *
  * Cash, split and custom methods are the seller's word - confirmed on screen,
@@ -296,26 +421,55 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
   if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
 
   cart.busy = true;
+  const thisAttempt = ++attempt;
   try {
     let providerName = 'manual';
     let txRef: string | undefined;
     let cardBrand: string | undefined;
+    if ((pay.method === 'card' || pay.terminal) && cardInBase.value && !cardFx.rate) await loadCardFx();
+    const settled = pay.method === 'card' ? cardSettlement(charged) : null;
     if (pay.terminal) {
-      const provider = getProvider(pay.terminal.providerId as never);
-      const result = await provider.startPayment({ amount: charged, currency: cart.currency, reference: saleId });
+      // A split only puts its card leg on the terminal; that leg's own
+      // settlement figure travels in pay.legs, so the sale record stays as is.
+      const onCard = pay.terminal.amount ?? charged;
+      const onCardSettled = cardSettlement(onCard);
+      if (cardInBase.value && !onCardSettled) {
+        return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Payments.` };
+      }
+      // In test mode every card goes to the pretend terminal, whatever is configured.
+      const provider = testMode.value ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
+      activeProvider = provider;
+      const result = await provider
+        .startPayment(
+          onCardSettled
+            ? { amount: onCardSettled.amount, currency: onCardSettled.currency, reference: saleId }
+            : { amount: onCard, currency: cart.currency, reference: saleId },
+        )
+        .catch((err: unknown): PaymentResult => ({ approved: false, provider: provider.id, error: err instanceof Error ? err.message : String(err) }));
+      if (thisAttempt !== attempt) {
+        if (result.approved) logDiagnostic(`Terminal approved sale ${saleId} after the seller cancelled it - not recorded (txRef=${result.txRef ?? '-'})`);
+        return { approved: false, cancelled: true, error: 'Cancelled' };
+      }
       if (!result.approved) return { approved: false, error: result.error ?? 'The payment was declined.' };
       providerName = result.provider;
       txRef = result.txRef;
       cardBrand = result.cardBrand;
     }
 
-    // Discounts are spread proportionally across the lines so the recorded
-    // line totals add up to what was actually paid. Distributed against the
-    // base total: line figures stay in the currency the books are kept in.
-    const priced = distributeTotal(
-      cart.lines.map((line) => ({ ...line, lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100 })),
-      base,
-    );
+    // Each discount lands on the lines it belongs to - a rule's on the lines
+    // it matched, a one-off one on the whole sale - in whole units where the
+    // amounts are whole (allocateDiscounts). Line totals stay in the currency
+    // the books are kept in; the charged currency's split goes on asCharged.
+    const baseShares = allocateDiscounts(discountLines.value, totals.value);
+    const chargeShares = allocateDiscounts(chargeLines.value, chargeTotals.value);
+    let priced = cart.lines.map((line, i) => ({
+      ...line,
+      lineTotal: round2((Math.round(line.unitPrice * 100) * line.qty) / 100 - baseShares[i]!),
+    }));
+    // Safety net: if the split ever disagrees with the total (a discount
+    // capped at a line's value, the total floored at zero), fall back to
+    // spreading the difference so the lines still add up to what was paid.
+    if (Math.abs(priced.reduce((sum, l) => sum + l.lineTotal, 0) - base) > 0.001) priced = distributeTotal(priced, base);
 
     const tax = saleTaxFor(cart.eventId, priced.map((l) => l.productId));
     const tseHandle = await takeTse();
@@ -329,7 +483,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
-      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),
       ...(tseHandle ? { tseHandle } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
@@ -339,9 +493,14 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // discount by name, in the charged currency.
       asCharged: {
         listTotals: chargeLines.value.map((l) => l.lineTotal),
+        lineDiscounts: chargeShares,
         discounts: [
-          ...chargeTotals.value.ruleDiscounts.filter((r) => r.amount > 0).map((r) => ({ name: r.rule.name, amount: r.amount })),
-          ...(cart.custom && chargeTotals.value.customDiscountAmount > 0 ? [{ name: cart.custom.name || 'Discount', amount: chargeTotals.value.customDiscountAmount }] : []),
+          ...chargeTotals.value.ruleDiscounts
+            .filter((r) => r.amount > 0)
+            .map((r) => ({ name: r.rule.name, amount: r.amount, ruleId: r.rule.id, lines: [...r.lines] })),
+          ...(cart.custom && chargeTotals.value.customDiscountAmount > 0
+            ? [{ name: cart.custom.name || 'Discount', amount: chargeTotals.value.customDiscountAmount, lines: cart.lines.map((_, i) => i) }]
+            : []),
         ],
       },
       payment: {
@@ -352,15 +511,23 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
         cashReceived: pay.cashReceived,
         txRef,
         cardBrand,
+        ...(settled ? { settled } : {}),
       },
     };
 
+    // Test mode: the sale is handed back for the screen and never announced,
+    // so nothing records, books, restocks or syncs it.
+    if (testMode.value) {
+      clear();
+      return { approved: true, sale, test: true };
+    }
     sdk().events.emit('sale', sale);
     clear();
     return { approved: true, sale };
   } catch (err) {
     return { approved: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
+    activeProvider = null;
     cart.busy = false;
   }
 }

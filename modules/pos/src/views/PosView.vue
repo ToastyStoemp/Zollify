@@ -1,32 +1,43 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
-import type { SaleEvent } from '@zollify/sdk';
+import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
+import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
   addLine,
   addMisc,
+  addModuleLine,
+  findModuleLine,
+  replaceModuleLine,
   appliedDiscounts,
   chargeTotals,
   customDiscountCharged,
   localPrice,
   baseTotal,
+  cardFx,
+  cardInBase,
+  cardSettlement,
   cart,
+  cancelCheckout,
   checkout,
   clear,
   inCart,
   isConverting,
   itemCount,
+  loadCardFx,
   setCustomDiscount,
   setQty,
   subtotal,
   toCharged,
   total,
+  loadTestMode,
+  testMode,
 } from '../cart';
 import { getProvider } from '../payments/registry';
-import { findSearchMatch, typeColor } from '../search';
+import { testTerminalProvider } from '../payments/test-terminal';
+import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
@@ -55,10 +66,17 @@ function toast(text: string, kind: 'ok' | 'bad' = 'ok'): void {
 }
 
 const activeEvent = computed(() => sdk().data.events.active());
+/** The till still on a convention that already ended: sales would land in its books, currency and VAT. */
+const tillCheck = computed(() => tillEventCheck(activeEvent.value, sdk().data.events.list()));
+const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
+async function sellAtToday(): Promise<void> {
+  const e = tillCheck.value.runningToday;
+  if (e) await sdk().data.events.setActive(e.id);
+}
 const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
-const provider = computed(() => getProvider(providerId.value as never));
-const hasTerminal = computed(() => providerId.value !== 'manual');
+const provider = computed(() => (testMode.value ? testTerminalProvider : getProvider(providerId.value as never)));
+const hasTerminal = computed(() => testMode.value || providerId.value !== 'manual');
 const customMethods = ref<string[]>([]);
 
 // ── Terminal connection indicator: polled while the till is open ────────────
@@ -85,6 +103,7 @@ function tapTerminalState(): void {
 onMounted(async () => {
   void backfillBranding();
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  void loadTestMode();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
   const event = activeEvent.value;
@@ -97,6 +116,7 @@ onMounted(async () => {
   cart.roundingIncrement = event?.roundingIncrement ?? 0;
   cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
   cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
+  void loadCardFx();
   void refreshTerminalStatus();
   statusTimer = setInterval(() => void refreshTerminalStatus(), 5000);
 });
@@ -109,6 +129,17 @@ onUnmounted(() => {
 const currency = computed(() => cart.currency);
 const money = (n: number): string => fmtPrice(n, currency.value);
 const price = (pid: string, vid: string | null, base: number): string => money(localPrice(pid, vid, base));
+
+/** "32.15 EUR on the card" for a local amount, when cards are charged in the base currency. */
+function onCard(localAmount: number): string {
+  const s = cardSettlement(localAmount);
+  return s ? fmtPrice(s.amount, s.currency) : '';
+}
+const cardRateLabel = computed(() => {
+  if (!cardFx.rate) return '';
+  const age = Date.now() - cardFx.at > 86_400_000 ? ` · rate from ${new Date(cardFx.at).toLocaleDateString()}` : '';
+  return `1 ${cart.baseCurrency} = ${cardFx.rate.toFixed(4)} ${cart.currency}${age}`;
+});
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const availability = computed(() => {
@@ -137,22 +168,68 @@ function productLeft(p: Product): number | null {
   return keys.reduce((s, vid) => s + Math.max(0, remaining(p.id, vid) ?? 0), 0);
 }
 
-// ── Browsing: by type, or flat ──────────────────────────────────────────────
+// ── Browsing: by artist, by type, or flat ───────────────────────────────────
+// A store's till sells many artists' work, so it opens by artist; a booth's
+// till sells one artist's and opens by type. Each remembers its own choice.
+type ViewMode = 'flat' | 'grouped' | 'artists';
 const VIEW_KEY = 'zollify.pos.view';
-const viewMode = ref<'flat' | 'grouped'>('grouped');
-try {
-  if (localStorage.getItem(VIEW_KEY) === 'flat') viewMode.value = 'flat';
-} catch {
-  /* no storage */
-}
-function setViewMode(mode: 'flat' | 'grouped'): void {
-  viewMode.value = mode;
+const STORE_VIEW_KEY = 'zollify.pos.view.store';
+const readMode = (key: string): ViewMode | null => {
   try {
-    localStorage.setItem(VIEW_KEY, mode);
+    const v = localStorage.getItem(key);
+    return v === 'flat' || v === 'grouped' || v === 'artists' ? v : null;
+  } catch {
+    return null;
+  }
+};
+const boothMode = ref<ViewMode>(readMode(VIEW_KEY) === 'flat' ? 'flat' : 'grouped');
+const storeMode = ref<ViewMode>(readMode(STORE_VIEW_KEY) ?? 'artists');
+const atStore = computed(() => isStore(activeEvent.value));
+/** Artists only mean something when the catalogue has their work in it. */
+const hasArtists = computed(() => products.value.some((p) => p.consignorId));
+const viewMode = computed<ViewMode>(() => {
+  const mode = atStore.value ? storeMode.value : boothMode.value;
+  return mode === 'artists' && !hasArtists.value ? 'grouped' : mode;
+});
+function setViewMode(mode: ViewMode): void {
+  if (atStore.value) storeMode.value = mode;
+  else boothMode.value = mode;
+  openArtist.value = null;
+  try {
+    localStorage.setItem(atStore.value ? STORE_VIEW_KEY : VIEW_KEY, mode);
   } catch {
     /* no storage */
   }
 }
+
+/** The artist being browsed, by consignor id; '' = the store's own items. */
+const openArtist = ref<string | null>(null);
+watch(() => activeEvent.value?.id, () => (openArtist.value = null));
+const artistKey = (p: Product): string => p.consignorId ?? '';
+interface ArtistGroup {
+  key: string;
+  name: string;
+  products: Product[];
+  stock: number | null;
+  inCart: number;
+}
+const artistGroups = computed<ArtistGroup[]>(() => {
+  const map = new Map<string, Product[]>();
+  for (const p of products.value) (map.get(artistKey(p)) ?? map.set(artistKey(p), []).get(artistKey(p))!).push(p);
+  const own = sdk().account()?.accountName || 'Our own';
+  return [...map.entries()]
+    .map(([key, list]) => ({
+      key,
+      name: key ? (list.find((p) => p.consignorName)?.consignorName ?? 'Artist') : own,
+      products: list,
+      stock: activeEvent.value ? list.reduce((s, p) => s + (productLeft(p) ?? 0), 0) : null,
+      inCart: list.reduce((s, p) => s + productInCart(p), 0),
+    }))
+    .sort((a, b) => Number(!a.key) - Number(!b.key) || a.name.localeCompare(b.name));
+});
+const openArtistName = computed(() => artistGroups.value.find((g) => g.key === openArtist.value)?.name ?? '');
+/** What the type grouping works on: one artist's items while browsing by artist. */
+const scoped = computed(() => (viewMode.value === 'artists' && openArtist.value !== null ? products.value.filter((p) => artistKey(p) === openArtist.value) : products.value));
 
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -162,7 +239,7 @@ const filtered = computed(() => {
   );
 });
 /** Searching always shows flat results; grouping is for browsing. */
-const grouped = computed(() => viewMode.value === 'grouped' && !search.value.trim());
+const grouped = computed(() => viewMode.value !== 'flat' && !search.value.trim());
 
 interface TypeGroup {
   type: string;
@@ -172,7 +249,7 @@ interface TypeGroup {
 }
 const typeGroups = computed<TypeGroup[]>(() => {
   const map = new Map<string, Product[]>();
-  for (const p of products.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
+  for (const p of scoped.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
   return [...map.entries()].map(([type, list]) => ({
     type,
     products: list,
@@ -180,13 +257,16 @@ const typeGroups = computed<TypeGroup[]>(() => {
     inCart: list.reduce((s, p) => s + productInCart(p), 0),
   }));
 });
-type Entry = { key: string; product: Product } | { key: string; group: TypeGroup };
+type Entry = { key: string; product: Product } | { key: string; group: TypeGroup } | { key: string; artist: ArtistGroup };
 const entries = computed<Entry[]>(() => {
   if (!grouped.value) return filtered.value.map((p) => ({ key: p.id, product: p }));
+  if (viewMode.value === 'artists' && openArtist.value === null && artistGroups.value.length > 1) {
+    return artistGroups.value.map((g) => ({ key: `a:${g.key}`, artist: g }));
+  }
   return typeGroups.value.map((g) => (g.products.length === 1 ? { key: g.products[0]!.id, product: g.products[0]! } : { key: `t:${g.type}`, group: g }));
 });
 const openType = ref<string | null>(null);
-const typeProducts = computed(() => (openType.value === null ? [] : products.value.filter((p) => (p.type || '(no type)') === openType.value)));
+const typeProducts = computed(() => (openType.value === null ? [] : scoped.value.filter((p) => (p.type || '(no type)') === openType.value)));
 
 // A short beep via WebAudio rather than an audio file - no asset to ship,
 // and it needs no user gesture beyond the one already opening the search/scan
@@ -215,17 +295,51 @@ const justAddedId = ref<string | null>(null);
 let justAddedTimer: ReturnType<typeof setTimeout> | undefined;
 
 function submitSearch(): void {
+  // A staff badge, from a handheld scanner or the camera: hand the till over.
+  if (isStaffBadge(search.value) && canLock.value) {
+    const code = search.value.trim();
+    search.value = '';
+    void sdk()
+      .lock.badge(code)
+      .then(() => toast(`Selling as ${seller.value}.`, 'ok'))
+      .catch((err: unknown) => toast(err instanceof Error ? err.message : 'That badge was not accepted.', 'bad'));
+    return;
+  }
   const match = findSearchMatch(products.value, search.value);
-  if (!match) return toast('No product found for that search.', 'bad');
+  if (!match) {
+    const code = search.value.trim();
+    // A code-like miss may be an item another module can make available
+    // (an artist's label scanned at a store); words are just a failed search.
+    if (!code || /\s/.test(code)) return toast('No product found for that search.', 'bad');
+    void lookupUnknown(code);
+    return;
+  }
   if ('ambiguous' in match) return toast(`${match.count} matches - keep typing to narrow it down.`, 'bad');
-  add(match.productId, match.variantId);
-  toast(`Added ${match.label}`);
+  added(match.productId, match.variantId, `Added ${match.label}`);
+}
+
+function added(productId: string, variantId: string | null, message: string): void {
+  add(productId, variantId);
+  toast(message);
   search.value = '';
   navigator.vibrate?.(80);
   beep();
-  justAddedId.value = match.productId;
+  justAddedId.value = productId;
   clearTimeout(justAddedTimer);
   justAddedTimer = setTimeout(() => (justAddedId.value = null), 1500);
+}
+
+/**
+ * Asks the modules about a code the catalogue does not know. What one makes
+ * available reaches this device with the next sync (the server rings it), so
+ * wait a few seconds for it before adding.
+ */
+async function lookupUnknown(code: string): Promise<void> {
+  const found = await sdk().till.lookup(code);
+  if (!found) return toast('No product found for that code.', 'bad');
+  for (let i = 0; i < 40 && !products.value.some((p) => p.id === found.productId); i++) await new Promise((r) => setTimeout(r, 250));
+  if (!products.value.some((p) => p.id === found.productId)) return toast(`${found.message ?? 'Found it.'} It is not on this till yet - try again in a moment.`, 'bad');
+  added(found.productId, found.variantId, found.message ?? 'Added');
 }
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
@@ -454,6 +568,27 @@ function applyDiscount(): void {
   showDiscount.value = false;
 }
 
+// ── What other modules add to the till (a workshop place, say) ─────────────
+const tillActions = computed(() => sdk().till.actions());
+const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
+const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
+const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
+function runAction(action: TillAction): void {
+  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
+}
+const offTill = sdk().till.onAddLine((line) => {
+  if (!activeEvent.value) {
+    toast('Pick an active event first (Events).', 'bad');
+    return false;
+  }
+  return addModuleLine(line);
+});
+const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
+onUnmounted(() => {
+  offTill();
+  offTillLines();
+});
+
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });
 function openMisc(): void {
@@ -563,6 +698,8 @@ function startPayment(method: string): void {
   payment.splitCard = '';
   payment.error = '';
   logSent.value = false;
+  // Keep the card rate current through a long day; a stale one still works offline.
+  if (method === 'card' && cardInBase.value && Date.now() - cardFx.at > 3_600_000) void loadCardFx();
   if (method === 'card' && hasTerminal.value) {
     void beginCardPayment();
     return;
@@ -614,12 +751,25 @@ async function sendLog(): Promise<void> {
 
 async function runTerminal(): Promise<void> {
   const outcome = await checkout(crypto.randomUUID(), { method: 'card', terminal: { providerId: providerId.value } });
-  if (payment.phase !== 'terminal') return;
-  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`);
+  if (outcome.cancelled || payment.phase !== 'terminal') return;
+  if (outcome.approved) finish(outcome.sale!, `Card approved${outcome.sale?.payment.cardBrand ? ` · ${outcome.sale.payment.cardBrand}` : ''}`, outcome.test);
   else {
     payment.error = outcome.error ?? 'Card payment declined';
     payment.phase = 'failed';
   }
+}
+
+// Leaving a live terminal request behind - for a retry or to record the card
+// by hand - cancels it first, so a late approval can't record a second sale.
+async function retryCard(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'terminal';
+  void runTerminal();
+}
+async function completeByHand(): Promise<void> {
+  await cancelCheckout();
+  payment.phase = 'confirm';
+  payment.method = 'card';
 }
 
 async function confirmPayment(): Promise<void> {
@@ -628,21 +778,39 @@ async function confirmPayment(): Promise<void> {
     legs = [
       { kind: 'cash' as const, amount: Math.max(0, Number(payment.splitCash) || 0) },
       { kind: 'card' as const, amount: Math.max(0, Number(payment.splitCard) || 0) },
-    ].filter((l) => l.amount > 0);
+    ]
+      .filter((l) => l.amount > 0)
+      .map((l) => {
+        const settled = l.kind === 'card' ? cardSettlement(l.amount) : null;
+        return settled ? { ...l, settled } : l;
+      });
   }
+  // A split's card leg goes on the terminal when there is one; the Confirm
+  // button is disabled while the terminal works (cart.busy) and Cancel aborts it.
+  const cardLeg = legs?.find((l) => l.kind === 'card');
   const outcome = await checkout(crypto.randomUUID(), {
     method: payment.method,
     legs,
     cashReceived: payment.method === 'cash' ? Number(payment.cashReceived) || undefined : undefined,
+    terminal: hasTerminal.value && cardLeg ? { providerId: providerId.value, amount: cardLeg.amount } : undefined,
   });
+  if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
-  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`);
+  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
 }
 
-function finish(sale: SaleEvent, message: string): void {
+function finish(sale: SaleEvent, message: string, test = false): void {
   payment.phase = 'idle';
   showCartSheet.value = false;
+  if (test) {
+    // Nothing was recorded: no sale bar, no receipt link (the sale is not on the server), no paper.
+    toast(`${message} - TEST, not recorded`);
+    thankYouUntil = Date.now() + 6000;
+    publish({ total: sale.total });
+    void showAfterSale(sale, undefined);
+    return;
+  }
   // The transaction row lands a tick later; the sale itself has all the bar needs.
   lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
   // The bar answers "did that go through?"; after that it is in the way of
@@ -740,8 +908,20 @@ async function printSale(saleId: string): Promise<void> {
 }
 
 async function cancelPayment(): Promise<void> {
-  if (payment.phase === 'terminal') await provider.value.cancel().catch(() => {});
+  await cancelCheckout();
   payment.phase = 'idle';
+}
+
+// ── Shared till: who is selling, and handing the till on ──────────────────
+const sellerAccount = ref(sdk().account());
+const offSeller = sdk().onAccountChange((a) => (sellerAccount.value = a));
+onUnmounted(offSeller);
+const canLock = computed(() => sdk().lock?.available() ?? false);
+/** Staff see the day's takings only when the owner allows it. */
+const showTotals = computed(() => seesSalesTotals(sellerAccount.value));
+const seller = computed(() => (sellerAccount.value?.email ?? '').split('@')[0] ?? '');
+function lockTill(): void {
+  void sdk().lock?.lock();
 }
 </script>
 
@@ -753,10 +933,12 @@ async function cancelPayment(): Promise<void> {
         <div class="event">
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
-          <small v-if="activeEvent">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
+          <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
           <small v-else>Open one under Events - sales are filed against an event.</small>
         </div>
+        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Payments.">TEST MODE - nothing is recorded</router-link>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
+        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
@@ -765,10 +947,18 @@ async function cancelPayment(): Promise<void> {
           <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
         </div>
         <div class="modes">
+          <button v-if="atStore && hasArtists" type="button" :class="['pill', { active: viewMode === 'artists' }]" @click="setViewMode('artists')">Artists</button>
           <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
           <button type="button" :class="['pill', { active: viewMode === 'grouped' }]" @click="setViewMode('grouped')">Types</button>
         </div>
       </header>
+
+      <div v-if="tillCheck.ended" class="stale" role="alert">
+        <Icon name="alert-triangle" :size="16" />
+        <span><strong>{{ activeEvent?.name }} {{ activeEvent?.status === 'closed' ? 'is closed' : `ended ${fmtDay(tillCheck.endedOn)}` }}.</strong> Sales you ring up now still go to it.</span>
+        <button v-if="tillCheck.runningToday" type="button" class="primary" @click="sellAtToday">Sell at {{ tillCheck.runningToday.name }}</button>
+        <router-link v-else :to="{ name: 'events' }" class="btn">Pick an event</router-link>
+      </div>
 
       <p v-if="notice" :class="['notice', notice.kind]" role="status">{{ notice.text }}</p>
 
@@ -781,10 +971,27 @@ async function cancelPayment(): Promise<void> {
         <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
       </div>
 
-      <p v-if="!entries.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
+      <div v-if="grouped && viewMode === 'artists' && openArtist !== null" class="crumb">
+        <button type="button" class="quiet" @click="openArtist = null"><Icon name="arrow-left" :size="14" /> All artists</button>
+        <strong>{{ openArtistName }}</strong>
+      </div>
+
+      <p v-if="!entries.length && !tillTiles.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
       <div v-else class="grid">
         <template v-for="e in entries" :key="e.key">
-          <button v-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
+          <button v-if="'artist' in e" type="button" class="tile type artist" :aria-label="`${e.artist.name}, ${e.artist.products.length} products`" :class="{ dim: e.artist.stock === 0, added: e.artist.products.some((p) => p.id === justAddedId) }" @click="openArtist = e.artist.key">
+            <span v-if="e.artist.inCart" class="count">{{ e.artist.inCart }}</span>
+            <span class="head">
+              <ProductThumb v-if="e.artist.products.find((p) => p.imageId)" :image-id="e.artist.products.find((p) => p.imageId)!.imageId!" :alt="''" :size="36" />
+              <span class="title">{{ e.artist.name }}</span>
+            </span>
+            <small>{{ e.artist.products.length }} product{{ e.artist.products.length === 1 ? '' : 's' }}</small>
+            <span class="foot">
+              <span :class="e.artist.stock === 0 ? 'bad' : 'muted'">{{ e.artist.stock === null ? '' : e.artist.stock === 0 ? 'Out of stock' : `${e.artist.stock} in stock` }}</span>
+              <Icon name="chevron-right" :size="14" />
+            </span>
+          </button>
+          <button v-else-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
             <span v-if="e.group.inCart" class="count">{{ e.group.inCart }}</span>
             <span class="title" :style="{ color: typeColor(e.group.type) }">{{ e.group.type }}</span>
             <small>{{ e.group.products.length }} products</small>
@@ -809,6 +1016,12 @@ async function cancelPayment(): Promise<void> {
             </span>
           </button>
         </template>
+        <button v-for="a in tillTiles" :key="`action:${a.id}`" type="button" class="tile" :aria-label="a.label" @click="runAction(a)">
+          <span class="head">
+            <Icon :name="a.icon ?? 'plus'" :size="36" />
+            <span class="title">{{ a.label }}</span>
+          </span>
+        </button>
       </div>
 
       <button v-if="itemCount" type="button" class="primary cartbar" @click="showCartSheet = true">
@@ -830,7 +1043,12 @@ async function cancelPayment(): Promise<void> {
         <ul v-else>
           <li v-for="l in lines" :key="l.lineId">
             <div class="row"><span class="name">{{ l.name }}</span><strong>{{ money(l.chargedTotal) }}</strong></div>
-            <div class="row qty">
+            <div v-if="l.fixed" class="row qty">
+              <span>× {{ l.qty }}</span>
+              <small>à {{ money(l.chargedUnit) }}</small>
+              <button type="button" class="quiet" :aria-label="`Remove ${l.name}`" @click="setQty(l.lineId, 0)">Remove</button>
+            </div>
+            <div v-else class="row qty">
               <button type="button" :aria-label="`One fewer ${l.name}`" @click="setQty(l.lineId, l.qty - 1)">−</button>
               <span>{{ l.qty }}</span>
               <button type="button" :aria-label="`One more ${l.name}`" @click="setQty(l.lineId, l.qty + 1)">+</button>
@@ -847,10 +1065,12 @@ async function cancelPayment(): Promise<void> {
           <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(customDiscountCharged) }}</span></div>
           <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
           <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
+          <div v-if="cardInBase" class="row muted small"><span>Card charges</span><span>{{ onCard(total) || 'no rate yet' }}</span></div>
         </div>
         <div class="tools">
           <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
           <button type="button" @click="openMisc">+ Misc item</button>
+          <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
           <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
@@ -917,6 +1137,11 @@ async function cancelPayment(): Promise<void> {
       <p v-if="scannerInfo" class="hint mono">{{ scannerInfo }}</p>
     </ModalShell>
 
+    <!-- ── A screen another module put on the till ───────────────────────── -->
+    <ModalShell v-if="openAction" :title="openAction.action.label" @close="openAction = null">
+      <component :is="openAction.view" @close="openAction = null" />
+    </ModalShell>
+
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
     <ModalShell v-if="showMisc" title="Misc item" @close="showMisc = false">
       <p class="hint">Sell something that isn't in the catalogue - a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
@@ -956,6 +1181,10 @@ async function cancelPayment(): Promise<void> {
     <ModalShell v-if="payment.phase !== 'idle'" :title="title" @close="cancelPayment">
       <div class="paybody">
         <p class="amount">{{ money(payment.total) }}</p>
+        <p v-if="cardInBase && payment.method === 'card'" class="oncard">
+          <template v-if="onCard(payment.total)"><span>Card: <strong>{{ onCard(payment.total) }}</strong></span><small>{{ cardRateLabel }}</small></template>
+          <template v-else>No {{ cart.baseCurrency }}/{{ cart.currency }} rate on this device yet</template>
+        </p>
 
         <template v-if="payment.phase === 'needsLogin'">
           <p class="warn strong">{{ provider.label }} isn't signed in</p>
@@ -994,6 +1223,8 @@ async function cancelPayment(): Promise<void> {
             <button type="button" class="chip cardc" @click="payment.splitCard = Math.max(0, payment.total - (Number(payment.splitCash) || 0)).toFixed(2)">Card remainder</button>
           </div>
           <p>{{ splitState.label }}: <strong :class="splitState.cls">{{ money(splitState.amount) }}</strong></p>
+          <p v-if="cart.busy && hasTerminal" class="pulse">Present card to terminal…</p>
+          <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
         <template v-else>
@@ -1004,8 +1235,8 @@ async function cancelPayment(): Promise<void> {
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
           <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
-          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="payment.phase = 'terminal'; runTerminal()">Retry card</button>
-          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="payment.phase = 'confirm'; payment.method = 'card'">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
+          <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
+          <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
         </div>
       </template>
@@ -1030,6 +1261,10 @@ async function cancelPayment(): Promise<void> {
 <style scoped>
 .pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
+.testmode { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: var(--zfy-danger, #c6512f); border-radius: 999px; padding: .25rem .7rem; text-decoration: none; white-space: nowrap; }
+.stale { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .6rem 1rem 0; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #d99a2b); color: var(--zfy-warning-ink, #8a5a00); font-size: .875rem; }
+.stale span { flex: 1; min-width: 12rem; }
+.stale .btn { text-decoration: none; font-weight: 600; color: inherit; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }
 .iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }
@@ -1042,6 +1277,9 @@ async function cancelPayment(): Promise<void> {
 .event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
+.seller { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: .1rem .55rem; font-size: .8rem; font-weight: 600; max-width: 9rem; }
+.seller .lock-label { font-weight: 700; }
+.seller span.seller-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
 .search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
 .search { width: 14rem; max-width: 100%; }
 .scanner-wrap { position: relative; }
@@ -1075,6 +1313,9 @@ async function cancelPayment(): Promise<void> {
 .tile .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: .25rem; font-size: .75rem; gap: .5rem; }
 .tile .foot strong { font-variant-numeric: tabular-nums; }
 .tile.type .foot { color: var(--zfy-muted, #5a6472); }
+.tile.artist { border-left-color: var(--zfy-ink, #1a2230); }
+.crumb { display: flex; align-items: center; gap: .6rem; margin: 0 0 .5rem; }
+.crumb button { min-height: 2rem; display: inline-flex; align-items: center; gap: .3rem; font-size: .82rem; }
 .count { position: absolute; top: -.4rem; right: -.4rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .78rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); }
 .bundles { display: flex; gap: .3rem; flex-wrap: wrap; padding-top: .1rem; }
 .bundle { font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
@@ -1104,7 +1345,7 @@ async function cancelPayment(): Promise<void> {
 .sums { display: flex; flex-direction: column; gap: .15rem; font-variant-numeric: tabular-nums; }
 .row.total { font-size: 1.05rem; font-weight: 700; }
 .row.small { font-size: .78rem; }
-.tools { display: flex; gap: .4rem; }
+.tools { display: flex; gap: .4rem; flex-wrap: wrap; }
 .tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
 .pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
 .pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }
@@ -1125,6 +1366,8 @@ async function cancelPayment(): Promise<void> {
 .paybody { display: flex; flex-direction: column; gap: .8rem; text-align: center; }
 .paybody p { margin: 0; }
 .amount { font-size: 2rem; font-weight: 800; letter-spacing: -.01em; }
+.oncard { display: flex; flex-direction: column; margin: -.25rem 0 0; font-size: 1rem; }
+.oncard small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .pulse, .dot.checking, .tile.added { animation: none; } }
@@ -1134,6 +1377,8 @@ async function cancelPayment(): Promise<void> {
 .chip.cardc { color: #2f6fb8; border-color: #2f6fb8; }
 
 @media (max-width: 860px) {
+  /* Narrow: the lock icon alone; the seller stays in the title and label. */
+  .seller .lock-label, .seller .seller-name { display: none; }
   /* Cancels .content's own padding (a bleed-to-edges trick, not new) - the
      bottom value now also cancels the --zfy-bottom-nav clearance .content
      added for pages that don't otherwise account for the fixed tab bar.

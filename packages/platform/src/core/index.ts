@@ -96,12 +96,23 @@ export {
   blobToBase64,
   base64ToBlob,
 } from './images';
+export {
+  setEventNotes,
+  addEventFile,
+  removeEventFile,
+  removeAllEventFiles,
+  eventFileBlob,
+  eventFileCached,
+  retryEventFileUploads,
+} from './event-files';
+export { setEventBoothLayout, copyEventBoothLayout, importEventBoothLayout, getConfiguratorUrl, setConfiguratorUrl } from './booth-layout';
 export { transactionsToCsv, csvFilename } from './csv';
 export {
   loadInventory,
   inventoryLoaded,
   stockKey,
   onHandFor,
+  remainingFor,
   claimFor,
   claimsForEvent,
   unsoldFrom,
@@ -123,11 +134,25 @@ export {
   type Availability,
   type InventoryRow,
 } from './inventory';
+export {
+  editionsOf,
+  createNextEdition,
+  linkToSeries,
+  unlinkFromSeries,
+  setEditionLabel,
+  planEditionsFor,
+  prepPlanFor,
+  grantsFor,
+  applyPrepPlan,
+  type NextEditionInput,
+  type PlannerRow,
+} from './editions';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
+export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead } from './notifications';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
-export { getSyncedSetting, setSyncedSetting } from './synced-settings';
+export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced-settings';
 export {
   tseState,
   loadTseSettings,

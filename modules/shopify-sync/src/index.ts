@@ -13,7 +13,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Shopify sync',
-  description: 'Match the booth catalogue against a Shopify storefront.',
+  description: 'Match your catalogue against a Shopify storefront.',
   requires: ['catalog'],
   // Connecting a storefront and rewriting its prices is an owner's decision.
   minRole: 'owner',

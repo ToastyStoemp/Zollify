@@ -5,11 +5,12 @@ import { currentAccount, kassensichvVisible } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 import { contributions } from '../boot';
 import { Icon } from '@zollify/ui';
+import { openProblemErrors } from '../lib/problems';
 
 interface Panel {
   id: string;
   label: string;
-  group: 'Core' | 'Modules';
+  group: string;
   minRole?: Role;
   /** Shown only while this holds - a feature switched off on the account. */
   when?: () => boolean;
@@ -24,31 +25,27 @@ const account = currentAccount;
  * Core is not a module, so it has nothing to register through the SDK - but its
  * settings belong in the same index, not a separate screen.
  */
-const corePanels: Panel[] = [
+const corePanels: Omit<Panel, 'group'>[] = [
   {
     id: 'core.profile',
-    label: 'Booth profile',
-    group: 'Core',
+    label: 'Business profile',
     minRole: 'admin',
     component: () => import('./ProfileSettings.vue'),
   },
   {
     id: 'core.vat',
     label: 'VAT',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./VatSettings.vue'),
   },
   {
     id: 'core.data',
     label: 'Backup & restore',
-    group: 'Core',
     component: () => import('./DataSettings.vue'),
   },
   {
     id: 'core.fiskaly',
     label: 'TSE (fiskaly cloud)',
-    group: 'Core',
     minRole: 'admin',
     when: kassensichvVisible,
     component: () => import('./FiskalySettings.vue'),
@@ -56,7 +53,6 @@ const corePanels: Panel[] = [
   {
     id: 'core.taxexport',
     label: 'Tax export (Germany)',
-    group: 'Core',
     minRole: 'admin',
     when: kassensichvVisible,
     component: () => import('./TaxExportSettings.vue'),
@@ -64,40 +60,63 @@ const corePanels: Panel[] = [
   {
     id: 'core.security',
     label: 'Account & security',
-    group: 'Core',
     component: () => import('./SecuritySettings.vue'),
   },
   {
     id: 'core.team',
     label: 'Team',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./TeamSettings.vue'),
   },
   {
+    id: 'core.webhooks',
+    label: 'Webhooks',
+    minRole: 'admin',
+    component: () => import('./WebhooksSettings.vue'),
+  },
+  {
+    id: 'core.problems',
+    label: 'Problems',
+    minRole: 'admin',
+    component: () => import('./ProblemsSettings.vue'),
+  },
+  {
     id: 'core.modules',
     label: 'Modules',
-    group: 'Core',
     minRole: 'admin',
     component: () => import('./ModulesView.vue'),
   },
   {
     id: 'core.admin',
     label: 'Server admin',
-    group: 'Core',
     minRole: 'owner',
     component: () => import('./AdminSettings.vue'),
   },
   {
     id: 'core.device',
     label: 'This device',
-    group: 'Core',
     component: () => import('./DeviceSettings.vue'),
   },
 ];
 
-/** Phone: the list and a panel are two screens, not two columns. */
-const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 720px)') : null;
+/**
+ * Settings in the groups a seller looks for them in, not core-versus-module.
+ * A module panel lands by its module; one this list does not know goes under
+ * More, so a new module never disappears.
+ */
+const GROUPS = ['Business', 'Selling', 'Books & paperwork', 'Connections', 'Data & devices', 'Advanced', 'More'];
+const GROUP_OF: [RegExp, string][] = [
+  [/^core\.(profile|team|security)$/, 'Business'],
+  [/^core\.vat$|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
+  [/^(customs-[a-z]+|peppol-be|economic|tax|consignment|costs)\.|^core\.(fiskaly|taxexport)$/, 'Books & paperwork'],
+  [/^core\.webhooks$|^shopify-sync\./, 'Connections'],
+  [/^core\.(data|device)$/, 'Data & devices'],
+  [/^core\.(problems|modules|admin)$/, 'Advanced'],
+];
+const groupOf = (id: string): string => GROUP_OF.find(([re]) => re.test(id))?.[1] ?? 'More';
+
+/** Below the sidebar breakpoint (900, see styles.css): the list and a panel are two screens, not two columns. */
+const phoneQuery = typeof matchMedia === 'function' ? matchMedia('(max-width: 900px)') : null;
 const phone = ref(phoneQuery?.matches ?? false);
 const onPhoneChange = (e: MediaQueryListEvent): void => {
   phone.value = e.matches;
@@ -109,11 +128,11 @@ const panels = computed<Panel[]>(() => {
   const role = account.value?.role;
   if (!role) return [];
 
-  const core = corePanels.filter((p) => (!p.minRole || roleAtLeast(role, p.minRole)) && (!p.when || p.when()));
+  const core = corePanels.filter((p) => (!p.minRole || roleAtLeast(role, p.minRole)) && (!p.when || p.when())).map((p) => ({ ...p, group: groupOf(p.id) }));
   const fromModules: Panel[] = contributions.settingsFor(role).map((p) => ({
     id: p.id,
     label: p.label,
-    group: 'Modules',
+    group: groupOf(p.id),
     component: p.component,
   }));
 
@@ -155,8 +174,7 @@ watch(
 );
 
 const groups = computed(() => [
-  { name: 'Core', items: panels.value.filter((p) => p.group === 'Core') },
-  { name: 'Modules', items: panels.value.filter((p) => p.group === 'Modules') },
+  ...GROUPS.map((name) => ({ name, items: panels.value.filter((p) => p.group === name) })),
 ]);
 </script>
 
@@ -177,7 +195,7 @@ const groups = computed(() => [
             :aria-current="panel.id === selected ? 'page' : undefined"
             @click="select(panel.id)"
           >
-            {{ panel.label }}
+            {{ panel.label }}<i v-if="panel.id === 'core.problems' && openProblemErrors" class="pdot" aria-label="has open errors"></i>
           </button>
         </template>
       </nav>
@@ -197,6 +215,7 @@ nav { display: flex; flex-direction: column; gap: .2rem; }
 .group { margin: .6rem 0 .1rem; font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--zfy-faint, #8a94a2); }
 .group:first-child { margin-top: 0; }
 nav button { text-align: left; border-color: transparent; background: transparent; justify-content: flex-start; }
+nav .pdot { display: inline-block; width: .45rem; height: .45rem; margin-left: .4rem; border-radius: 50%; background: var(--zfy-danger, #c6512f); vertical-align: middle; }
 nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-weight: 600; }
 /* Each panel is a different component (SecuritySettings, ProfileSettings, …)
    loaded into .panel via <component :is>, so this can't reach its own root
@@ -205,7 +224,7 @@ nav button.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zf
    component, not this one. Centers whatever max-width a panel sets for
    itself; a panel with no opinion (fills 100%) is unaffected either way. */
 .panel > :deep(*) { margin-inline: auto; }
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   .layout { grid-template-columns: 1fr; }
   nav { gap: .35rem; }
   nav button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 2.8rem; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); }

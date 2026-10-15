@@ -38,7 +38,7 @@ async function save(): Promise<void> {
 <template>
   <DeclarantForm
     title="Customs declarant (Germany)"
-    hint="Who is declaring the goods, on the packing lists and proforma invoice this module prepares for your customs broker. Your booth profile is used by default - fill in a field here only when the declarant differs from it."
+    hint="Who is declaring the goods, on the packing lists and proforma invoice this module prepares for your customs broker. Your business profile is used by default - fill in a field here only when the declarant differs from it."
     :model="form"
     :profile="profile"
     country-placeholder="Germany"

@@ -1,5 +1,6 @@
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+// Type-only: the runtime libraries (~900 KB together) load on first export,
+// not before login - see renderInto.
+import type { jsPDF } from 'jspdf';
 
 /**
  * Renders one of the app's print-ready HTML documents (customs forms, goods
@@ -20,6 +21,23 @@ import html2canvas from 'html2canvas';
  * one-page content and several for anything taller, e.g. a long goods list.
  */
 export async function htmlToPdf(html: string): Promise<Blob> {
+  return htmlDocsToPdf([html]);
+}
+
+/**
+ * Several documents in one PDF, each starting on a fresh page in its own
+ * orientation - "export all documents" hands over one file per country
+ * instead of one per document.
+ */
+export async function htmlDocsToPdf(htmls: string[]): Promise<Blob> {
+  if (!htmls.length) throw new Error('Nothing to put in the PDF.');
+  let pdf: jsPDF | null = null;
+  for (const html of htmls) pdf = await renderInto(pdf, html);
+  return pdf!.output('blob');
+}
+
+async function renderInto(existing: jsPDF | null, html: string): Promise<jsPDF> {
+  const [{ jsPDF }, { default: html2canvas }] = await Promise.all([import('jspdf'), import('html2canvas')]);
   const landscape = /@page\s*\{[^}]*\blandscape\b/i.test(html);
   const pageWidthMm = landscape ? 297 : 210;
   const pageHeightMm = landscape ? 210 : 297;
@@ -38,6 +56,7 @@ export async function htmlToPdf(html: string): Promise<Blob> {
     doc.open();
     doc.write(html);
     doc.close();
+    applyPrintStyles(doc);
 
     await new Promise<void>((resolve) => {
       if (doc.readyState === 'complete') resolve();
@@ -58,14 +77,17 @@ export async function htmlToPdf(html: string): Promise<Blob> {
     const pxPerMm = canvas.width / pageWidthMm;
     const pageHeightPx = Math.round(pageHeightMm * pxPerMm);
 
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait' });
+    const pdf = existing ?? new jsPDF({ unit: 'mm', format: 'a4', orientation: landscape ? 'landscape' : 'portrait' });
     const slice = document.createElement('canvas');
     slice.width = canvas.width;
     const sliceCtx = slice.getContext('2d');
     if (!sliceCtx) throw new Error('Could not prepare the PDF image.');
 
-    for (let y = 0, first = true; y < canvas.height; y += pageHeightPx, first = false) {
+    // A new document always starts a new page; only the very first page of a fresh PDF is already there.
+    for (let y = 0, first = !existing; y < canvas.height; y += pageHeightPx, first = false) {
       const sliceHeightPx = Math.min(pageHeightPx, canvas.height - y);
+      // A page-tall sheet can round a pixel or two over A4 - not worth a blank page.
+      if (!first && sliceHeightPx < pxPerMm * 2) break;
       slice.height = sliceHeightPx;
       sliceCtx.clearRect(0, 0, slice.width, slice.height);
       sliceCtx.drawImage(canvas, 0, y, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
@@ -73,8 +95,46 @@ export async function htmlToPdf(html: string): Promise<Blob> {
       pdf.addImage(slice.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, pageWidthMm, sliceHeightPx / pxPerMm);
     }
 
-    return pdf.output('blob');
+    return pdf;
   } finally {
     document.body.removeChild(iframe);
   }
+}
+
+/**
+ * Renders the document the way it prints, not the way it shows on screen.
+ *
+ * html2canvas has no print media, so the screen-only parts of a document -
+ * the "Print / Save PDF" bar, the grey backdrop, the margin around the sheet
+ * - used to land in the PDF too, and pushed a full-height form onto a second
+ * page. A document that sets `data-pdf-media="print"` on its <html> has its
+ * own `@media print` rules copied into a plain stylesheet, so they apply here
+ * exactly as they would on paper.
+ */
+function applyPrintStyles(doc: Document): void {
+  // Opt-in: most documents' print rules lean on the printer's page margins
+  // (@page), which a PDF rendered here doesn't have.
+  if (doc.documentElement.getAttribute('data-pdf-media') !== 'print') return;
+  const rules: string[] = [];
+  const collect = (list: CSSRuleList): void => {
+    for (const rule of Array.from(list)) {
+      if (rule instanceof doc.defaultView!.CSSMediaRule) {
+        if (/\bprint\b/.test(rule.conditionText ?? rule.media.mediaText)) {
+          for (const inner of Array.from(rule.cssRules)) {
+            // @page has no meaning outside a print pipeline.
+            if (!/^@page/i.test(inner.cssText)) rules.push(inner.cssText);
+          }
+        }
+      }
+    }
+  };
+  try {
+    for (const sheet of Array.from(doc.styleSheets)) collect(sheet.cssRules);
+  } catch {
+    return; // a stylesheet we may not read - render as on screen
+  }
+  if (!rules.length) return;
+  const style = doc.createElement('style');
+  style.textContent = rules.join('\n');
+  doc.head.appendChild(style);
 }

@@ -68,6 +68,7 @@ beforeAll(async () => {
             currency: 'CHF',
             status: 'planned',
             updatedAt: 1,
+            booth: { hall: '3', number: 'B-12' },
           },
         },
         {
@@ -138,7 +139,7 @@ describe('public events', () => {
       method: 'PUT',
       url: '/api/m/public-events/overlay/ev-far',
       headers: auth(),
-      payload: { hall: '3', booth: 'B-12', igHandle: '@farcon' },
+      payload: { igHandle: '@farcon' },
     });
     expect(overlay.statusCode).toBe(200);
   });

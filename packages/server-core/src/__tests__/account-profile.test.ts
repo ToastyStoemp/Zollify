@@ -18,6 +18,7 @@ beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-profile-'));
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.OWNER_PASSWORD = OWNER_PASSWORD;
+  process.env.REQUIRE_CAPTCHA = '0';
 
   app = await buildGateway({
     dataDir,
@@ -55,6 +56,7 @@ afterAll(async () => {
   }
   delete process.env.OWNER_EMAIL;
   delete process.env.OWNER_PASSWORD;
+  delete process.env.REQUIRE_CAPTCHA;
 });
 
 const auth = () => ({ authorization: `Bearer ${token}` });
@@ -131,6 +133,79 @@ describe('account profile', () => {
     expect(profile.artist).toMatchObject({ companyName: 'Harbour Prints', street: 'Seestrasse 2' });
   });
 
+  it('keeps sales totals from staff until an admin allows it, and only an admin can', async () => {
+    const get = async (t: string) => (await app.inject({ method: 'GET', url: '/api/account/profile', headers: { authorization: `Bearer ${t}` } })).json() as { staffSeesTotals: boolean };
+    expect((await get(token)).staffSeesTotals).toBe(false);
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(), payload: { role: 'member' } });
+    const staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'staff-totals@example.test', password: 'correct horse battery staple', inviteCode: invite.json().code } })).json().accessToken as string;
+    expect((await app.inject({ method: 'PUT', url: '/api/account/profile', headers: { authorization: `Bearer ${staff}` }, payload: { staffSeesTotals: true } })).statusCode).toBe(403);
+    const res = await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { staffSeesTotals: true } });
+    expect(res.json().user.profile.staffSeesTotals).toBe(true);
+    expect((await get(staff)).staffSeesTotals).toBe(true);
+    // Other settings leave it alone.
+    await app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { defaultCurrency: 'EUR' } });
+    expect((await get(token)).staffSeesTotals).toBe(true);
+  });
+
+  it('remembers what the account runs, and needs at least one', async () => {
+    const put = (payload: Record<string, unknown>) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload });
+    // Not asked yet: unset, so the app falls back to what the account has.
+    const before = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(before.sells).toBeUndefined();
+    expect((await put({ sells: { events: false, stores: true } })).json().user.profile.sells).toEqual({ events: false, stores: true });
+    expect((await put({ sells: { events: false, stores: false } })).statusCode).toBe(400);
+    // Other settings leave it alone.
+    expect((await put({ defaultCurrency: 'CHF' })).json().user.profile.sells).toEqual({ events: false, stores: true });
+  });
+
+  it('keeps webstore and social links clean, merged field by field, and refuses anything but https', async () => {
+    const put = (links: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { links } });
+    const get = async () => (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect((await get()).links).toBeUndefined();
+
+    const res = await put({ webstore: ' https://shop.example.com ', instagram: '@harbourprints', otherUrl: 'https://news.example.com', otherLabel: 'News' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().user.profile.links).toMatchObject({ webstore: 'https://shop.example.com/', instagram: 'https://www.instagram.com/harbourprints', otherLabel: 'News' });
+    // Naming one link leaves the others alone.
+    await put({ tiktok: 'harbour.prints' });
+    expect((await get()).links).toMatchObject({ webstore: 'https://shop.example.com/', tiktok: 'https://www.tiktok.com/@harbour.prints' });
+
+    for (const bad of ['javascript:alert(1)', 'http://shop.example.com', 'https://user:pw@shop.example.com', 'shop.example.com', `https://shop.example.com/${'a'.repeat(200)}`]) {
+      const refused = await put({ webstore: bad });
+      expect(refused.statusCode, bad).toBe(400);
+      expect(refused.json().message).toMatch(/Webstore/);
+    }
+    expect((await put({ youtube: '@booth' })).statusCode).toBe(400);
+    expect((await put({ otherUrl: 'https://x.example.com', otherLabel: 'x'.repeat(31) })).statusCode).toBe(400);
+    // A refusal keeps what was saved, and clearing is a change like any other.
+    expect((await get()).links.webstore).toBe('https://shop.example.com/');
+    expect((await put({ webstore: '', instagram: '', tiktok: '', otherUrl: '' })).json().user.profile.links).toMatchObject({ webstore: '', instagram: '', otherLabel: '' });
+  });
+
+  it('stores a Belgian enterprise number in its dotted form, and refuses one that is not valid', async () => {
+    const put = (enterpriseNumber: string) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { artist: { enterpriseNumber } } });
+    const res = await put('BE 0403 170 701');
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json().user.profile.artist.enterpriseNumber).toBe('0403.170.701');
+    const bad = await put('0403170702');
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().message).toMatch(/enterprise number/);
+    expect((await put('')).json().user.profile.artist.enterpriseNumber).toBe('');
+  });
+
+  it('loads a profile saved before links and the enterprise number existed, unchanged', async () => {
+    const db = app.zollify.db;
+    const accountId = (db.prepare('SELECT accountId FROM users LIMIT 1').get() as { accountId: string }).accountId;
+    db.prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(
+      JSON.stringify({ setupCompletedAt: 5, artist: { companyName: 'Old Booth', fullName: '', street: '', postCodeCity: '', countryOfOrigin: '', phone: '', email: '', vatId: '', eori: '' }, defaultCurrency: 'EUR' }),
+      accountId,
+    );
+    const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(profile.artist.companyName).toBe('Old Booth');
+    expect(profile.links).toBeUndefined();
+    expect(profile.artist.enterpriseNumber ?? '').toBe('');
+  });
+
   it('rejects a profile that fails validation', async () => {
     const res = await app.inject({
       method: 'PUT',
@@ -157,5 +232,34 @@ describe('account profile', () => {
       payload: {},
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('erasing the account data', () => {
+  const push = (ops: { opId: string; type: string; payload: unknown }[]) =>
+    app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'till', ops: ops.map((o, i) => ({ ...o, deviceId: 'till', ts: i + 1 })) } });
+  const sale = (id: string, timestamp: number) => ({
+    opId: `op-wipe-${id.padStart(12, '0')}`,
+    type: 'tx.create',
+    payload: { id, eventId: 'e', deviceId: 'till', timestamp, method: 'cash', payments: [], items: [], discounts: [], total: 1, currency: 'EUR' },
+  });
+
+  it('keeps sales inside their retention period until a backup was saved', async () => {
+    expect((await push([sale('s1', Date.now()), sale('s2', Date.UTC(2001, 5, 1))])).statusCode).toBe(200);
+    const refused = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: {} });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toMatchObject({ error: 'retention', sales: 1 });
+    const pull = await app.inject({ method: 'GET', url: '/api/sync/pull?since=0', headers: auth() });
+    expect(pull.json().ops).toHaveLength(2);
+
+    const ok = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: { archived: true } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().removedOps).toBe(2);
+  });
+
+  it('erases at once when every sale is past its retention', async () => {
+    await push([sale('s3', Date.UTC(2001, 5, 1))]);
+    const ok = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: {} });
+    expect(ok.statusCode).toBe(200);
   });
 });

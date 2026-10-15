@@ -128,3 +128,25 @@ export async function openDocument(filename: string, content: string, mimeType =
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return Boolean(win);
 }
+
+/**
+ * Opens a binary file (a PDF ticket, a photo) in the device's own viewer: a
+ * new tab on the web, the Android viewer in the app. Falls back to saving it
+ * when nothing can show it, and returns false only if a web tab was blocked.
+ */
+export async function openFileBlob(filename: string, blob: Blob, mimeType: string): Promise<boolean> {
+  const share = nativePlugin('FileShare');
+  if (share?.openFile) {
+    const body = { filename, content: await toBase64(blob), mimeType, encoding: 'base64' };
+    try {
+      await share.openFile(body);
+    } catch {
+      await share.shareFile?.(body);
+    }
+    return true;
+  }
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return Boolean(win);
+}

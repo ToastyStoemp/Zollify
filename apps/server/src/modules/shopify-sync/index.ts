@@ -75,6 +75,9 @@ export function shopifyServerModule(jwtSecret: string): ServerModule {
     // Connecting a storefront and rewriting its prices is an owner's decision.
     minRole: 'owner',
     migrate,
+    onAccountDeleted: (db, accountId) => {
+      for (const t of ['shopify_connections', 'shopify_matches']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    },
 
     routes: (ctx: ModuleContext) => async (app) => {
       const connectionFor = (accountId: string): { client: ShopifyClient; shop: string } | null => {

@@ -6,9 +6,13 @@ import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-cor
 import { shopifyServerModule } from './modules/shopify-sync';
 import { sourcingServerModule } from './modules/sourcing';
 import { publicEventsServerModule } from './modules/public-events';
+import { commissionsServerModule } from './modules/commissions';
 import { priceCardsServerModule } from './modules/price-cards';
 import { taxServerModule } from './modules/tax/index';
 import { posServerModule } from './modules/receipts';
+import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
+import { peppolServerModule } from './modules/peppol-be';
+import { economicServerModule } from './modules/economic';
 
 loadDotEnv();
 
@@ -23,8 +27,11 @@ loadDotEnv();
  */
 
 
-/** What a brand-new account starts with, so it isn't an empty shell. */
-const DEFAULT_MODULES = ['pos', 'customs-ch'];
+/**
+ * What a brand-new account starts with, so it isn't an empty shell. Public
+ * events is in so setup can offer the shared event pool for the first event.
+ */
+const DEFAULT_MODULES = ['pos', 'customs-hub', 'customs-ch', 'public-events'];
 
 /**
  * The signing secret, minted once and kept in the data volume when the
@@ -69,6 +76,11 @@ async function main(): Promise<void> {
     priceCardsServerModule,
     shopifyServerModule(jwtSecret),
     posServerModule(jwtSecret),
+    consignmentServerModule,
+    consignmentArtistServerModule,
+    commissionsServerModule,
+    peppolServerModule(jwtSecret),
+    economicServerModule(jwtSecret),
   ];
 
   const app = await buildGateway({
@@ -86,7 +98,7 @@ async function main(): Promise<void> {
       .map((s) => s.trim())
       .filter(Boolean),
     requireHttps: flag('ZOLLIFY_REQUIRE_HTTPS', true),
-    trustProxy: flag('ZOLLIFY_TRUST_PROXY', true),
+    trustProxy: /^\d+$/.test(process.env.ZOLLIFY_TRUST_PROXY ?? '') ? Number(process.env.ZOLLIFY_TRUST_PROXY) : flag('ZOLLIFY_TRUST_PROXY', true),
     logLevel: process.env.LOG_LEVEL ?? 'info',
   });
 

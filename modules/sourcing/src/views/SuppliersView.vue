@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { safeHttpUrl } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import { SHIP_MODES, leadTimeDays, type Rep, type ShipMode, type Supplier } from '../engine';
 import { loaded, refresh, remove, save, snap } from '../api';
@@ -89,7 +90,7 @@ async function saveRep(): Promise<void> {
             {{ snap.dossiers.filter((d) => d.supplierId === s.id).length }} products
           </small>
         </div>
-        <a v-if="s.alibabaStoreUrl" :href="s.alibabaStoreUrl" target="_blank" rel="noopener" class="quiet link"><Icon name="external-link" :size="14" /> Store</a>
+        <a v-if="s.alibabaStoreUrl" :href="safeHttpUrl(s.alibabaStoreUrl)" target="_blank" rel="noopener" class="quiet link"><Icon name="external-link" :size="14" /> Store</a>
         <button type="button" class="quiet" @click="editing = { ...s, shipModes: [...(s.shipModes ?? [])] }">Edit</button>
         <button type="button" class="quiet danger" @click="removeSupplier(s)">Remove</button>
       </div>
@@ -98,7 +99,7 @@ async function saveRep(): Promise<void> {
         <li v-for="r in repsFor(s.id)" :key="r.id">
           <span class="main"><span>{{ r.name }}</span><small>{{ r.channel === 'chat' ? 'Alibaba chat' : 'Email' }}<template v-if="r.email"> · {{ r.email }}</template></small></span>
           <a v-if="r.email" :href="`mailto:${r.email}`" class="quiet link">Email</a>
-          <a v-if="r.chatUrl" :href="r.chatUrl" target="_blank" rel="noopener" class="quiet link">Chat</a>
+          <a v-if="r.chatUrl" :href="safeHttpUrl(r.chatUrl)" target="_blank" rel="noopener" class="quiet link">Chat</a>
           <button type="button" class="quiet" @click="editingRep = { ...r }">Edit</button>
           <button type="button" class="quiet danger" @click="remove('reps', r.id)">Remove</button>
         </li>

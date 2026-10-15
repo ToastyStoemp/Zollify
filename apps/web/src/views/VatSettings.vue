@@ -68,7 +68,7 @@ async function save(): Promise<void> {
     <h2>VAT</h2>
     <p class="hint">
       Each event charges the VAT of its country - standard rate, or the reduced rate for products set to
-      "Reduced" in the catalogue. Where the booth is exempt under a small-business scheme, its receipts carry
+      "Reduced" in the catalogue. Where your business is exempt under a small-business scheme, its receipts carry
       the exemption instead of VAT. Rates and exemption can also be set on each event.
     </p>
     <p v-if="!canEdit" class="hint">Only an owner or admin can change these.</p>
@@ -76,7 +76,7 @@ async function save(): Promise<void> {
 
     <fieldset :disabled="!canEdit">
       <legend>Small-business exemption</legend>
-      <p class="hint">Tick every country where the booth is exempt - at home, and abroad under the EU SME scheme.</p>
+      <p class="hint">Tick every country where you are exempt - at home, and abroad under the EU SME scheme.</p>
       <h3>EU</h3>
       <div class="countries">
         <label v-for="c in eu" :key="c">

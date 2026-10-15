@@ -175,9 +175,31 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         }
     }
 
-    /** Re-enter connectable state (e.g. after the user taps Connect in the setup screen). */
+    /**
+     * Connect to the terminal over the transport the till picked.
+     * Params: { transport?: 'bluetooth' | 'wifi', host?: string, port?: number }
+     *
+     * Wi-Fi: the Go2 in slave mode on the same network listens on TCP (port
+     * 8080 unless changed on the terminal); the SDK's TCP_IP connection type
+     * needs no Bluetooth hardware, no pairing and no location permission -
+     * just the terminal's address. A Go2 without the optional Bluetooth
+     * module can only be reached this way or over USB.
+     */
     @PluginMethod
     fun connectTerminal(call: PluginCall) {
+        if (call.getString("transport") == "wifi") {
+            val host = call.getString("host")?.trim().orEmpty()
+            if (host.isEmpty()) { call.reject("Enter the terminal's IP address"); return }
+            val port = call.getInt("port") ?: 8080
+            termReady = false
+            termConnected = false
+            POSHandler.setConnectionType(ConnectionType.TCP_IP)
+            POSHandler.setTcpIpConnectivity(host, port)
+            connectSafely()
+            call.resolve(JSObject().apply { put("granted", true) })
+            return
+        }
+        POSHandler.setConnectionType(ConnectionType.BLUETOOTH)
         if (hasBtPermissions()) {
             connectSafely()
             call.resolve(JSObject().apply { put("granted", true) })

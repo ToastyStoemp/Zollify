@@ -51,6 +51,12 @@ describe('printed receipt amounts', () => {
     expect(lines.join('\n')).not.toContain('CHF');
   });
 
+  it('prints what the card was charged when it settled in another currency', () => {
+    const lines = text(sale({ method: 'card', total: 30, payments: [{ kind: 'card', amount: 30, settled: { amount: 32.15, currency: 'EUR', rate: 0.9331 } }] }));
+    expect(amountOn(lines, 'Card')).toBe('CHF 30.00');
+    expect(amountOn(lines, 'charged')).toBe('EUR 32.15');
+  });
+
   it('prints a discounted sale as the till showed it: list prices, each discount, the total', () => {
     const lines = text(
       sale({
@@ -217,5 +223,24 @@ describe('printed receipt amounts', () => {
     expect(amountOn(lines, 'Cash refunded')).toBe('EUR -45.00');
     expect(amountOn(lines, 'TSE-Transaktion')).toBe('14');
     expect(amountOn(lines, 'Start')).toBe('2026-10-03 12:00:01');
+  });
+});
+
+describe('printed footer links', () => {
+  const lines = (linkLines?: string[]): string[] =>
+    buildReceiptLines(sale(), 'Con', { artist: {}, logoB64: '', footerText: 'Thanks!', linkLines })
+      .filter((l) => l.kind === 'text')
+      .map((l) => l.text ?? '');
+
+  it('prints nothing extra by default', () => {
+    expect(lines()).toEqual(lines([]));
+    expect(lines().join('\n')).not.toContain('Webstore');
+  });
+
+  it('prints each link as centred plain text within the paper width', () => {
+    const out = lines(['Webstore: shop.example.com', 'Instagram: www.instagram.com/harbourprints']);
+    expect(out.some((l) => l.includes('Webstore: shop.example.com'))).toBe(true);
+    expect(out.every((l) => l.length <= 32)).toBe(true);
+    expect(out.indexOf('Thanks!')).toBeLessThan(out.findIndex((l) => l.includes('Webstore')));
   });
 });

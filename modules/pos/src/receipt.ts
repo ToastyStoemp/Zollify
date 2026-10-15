@@ -1,10 +1,10 @@
 import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { qrPng, receiptQrPng } from './lib/after-sale';
-import { serverBranding } from './lib/branding';
+import { serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
 
 /**
@@ -54,6 +54,13 @@ export function resolveVatNumber(artist: ArtistInfo, country?: string): string {
     if (hit) return hit.vatNumber.trim();
   }
   return artist.vatNumber?.trim() ?? '';
+}
+
+/** The country whose registration `resolveVatNumber` prints: the event's when it has one of its own, else home. */
+function vatCountry(artist: ArtistInfo, eventCountry?: string): string | undefined {
+  const c = eventCountry?.trim().toLowerCase();
+  const own = !!c && !!artist.vatNumbers?.some((v) => v.country.trim().toLowerCase() === c && v.vatNumber.trim());
+  return own ? eventCountry : artist.countryOfOrigin;
 }
 
 export const RECEIPT_KEYS = {
@@ -219,6 +226,8 @@ export function buildReceiptLines(
     /** KassenSichV: the TSE signature as a QR (DSFinV-K V0), and the cancellation's when reverted. */
     tseQrB64?: string;
     revertTseQrB64?: string;
+    /** Plain-text link lines (webstore, socials), when the account prints them. */
+    linkLines?: string[];
   },
   eventCountry?: string,
   /**
@@ -248,7 +257,7 @@ export function buildReceiptLines(
   if (artist.email) lines.push(center(artist.email));
   // An exempt sale prints its exemption instead (see the VAT block below).
   const vat = tx.tax?.exempt ? '' : resolveVatNumber(artist, eventCountry);
-  if (vat) lines.push(center(`VAT: ${vat}`));
+  if (vat) lines.push(center(`${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}`));
 
   lines.push({ kind: 'text', text: DIVIDER });
   if (cancellation) {
@@ -314,6 +323,8 @@ export function buildReceiptLines(
     const label =
       leg.kind === 'cash' ? 'Cash' : leg.provider && leg.provider !== 'card' ? leg.provider : 'Card';
     lines.push({ kind: 'text', text: row(cancellation ? `${label} refunded` : label, money(leg.amount)) });
+    // Charged on the card in another currency (cards in the base currency).
+    if (leg.settled) lines.push({ kind: 'text', text: row('  charged', fmtPrice(sign * leg.settled.amount || 0, leg.settled.currency)) });
     if (leg.cardBrand || leg.authCode) {
       lines.push({
         kind: 'text',
@@ -338,17 +349,34 @@ export function buildReceiptLines(
   if (footerText) {
     for (const part of footerText.split('\n')) lines.push(center(part));
   }
+  if (config.linkLines?.length && !cancellation) {
+    lines.push({ kind: 'space' });
+    for (const text of config.linkLines) for (const part of wrap(text, WIDTH)) lines.push(center(part));
+  }
   if (config.qrB64 && !cancellation) {
     lines.push({ kind: 'image', imageB64: config.qrB64 });
     lines.push(center('Scan for your receipt online'));
     lines.push({ kind: 'space' });
   }
-  // Sales from before receipts were numbered keep their old reference.
-  if (!number) lines.push(center(`Receipt ${tx.id.slice(-8)}`));
+  // Sales numbered the earlier way keep that number; older ones their old reference.
+  if (!number) lines.push(center(`Receipt ${tx.receiptNumber ?? tx.id.slice(-8)}`));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 
   return lines;
+}
+
+/**
+ * The webstore and social links (kept in the business profile) as plain lines
+ * for paper, when the account switched printing them on (off by default).
+ * Never blocks or fails a print.
+ */
+async function printedLinkLines(): Promise<string[]> {
+  const socials = await serverSocials();
+  if (!socials?.showOnPrint) return [];
+  // The links are the business profile's, which this device already holds; the server's copy covers a profile it has not synced yet.
+  const links = sdk().account()?.profile.links ?? socials;
+  return receiptFooterLinks(links).map((l) => `${l.label}: ${printableLink(l.url)}`);
 }
 
 /**
@@ -357,15 +385,16 @@ export function buildReceiptLines(
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
-  const [qrB64, logoB64, branding, tseQrB64, revertTseQrB64] = await Promise.all([
+  const [qrB64, logoB64, branding, tseQrB64, revertTseQrB64, linkLines] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
     config.footerText ? Promise.resolve(null) : serverBranding(),
     tseQr(tx.tse),
     tseQr(tx.revertTse),
+    printedLinkLines(),
   ]);
-  const full = { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || branding?.footer || '', qrB64, tseQrB64, revertTseQrB64 };
+  const full = { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || branding?.footer || '', qrB64, tseQrB64, revertTseQrB64, linkLines };
   const lines = buildReceiptLines(tx, eventName, full, eventCountry);
   // A reverted sale prints with its cancellation receipt after it.
   return hasCancellationReceipt(tx) ? [...lines, ...buildReceiptLines(tx, eventName, full, eventCountry, true)] : lines;
@@ -378,11 +407,11 @@ export function hasCancellationReceipt(tx: Transaction): boolean {
 
 /**
  * A device that was never set up under Receipts still prints a branded
- * receipt: blank artist fields fall back to the booth profile (as the
+ * receipt: blank artist fields fall back to the business profile (as the
  * settings form already promises), and a missing logo or footer to the ones
  * shared through the server.
  */
-function withProfileFallback(artist: ArtistInfo): ArtistInfo {
+export function withProfileFallback(artist: ArtistInfo): ArtistInfo {
   const profile = sdk().account()?.profile.artist;
   if (!profile) return artist;
   const out: ArtistInfo = { ...artist };

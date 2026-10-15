@@ -19,7 +19,7 @@ onMounted(async () => {
   form.value = { ...defaultCustomsArtist(), ...(stored ?? {}) };
 });
 
-/** The booth profile's value, shown as the placeholder so a blank field reads as "same as profile". */
+/** The business profile's value, shown as the placeholder so a blank field reads as "same as profile". */
 const profile = sdk().account()?.profile.artist ?? defaultCustomsArtist();
 
 async function save(): Promise<void> {
@@ -37,7 +37,7 @@ async function save(): Promise<void> {
 <template>
   <DeclarantForm
     title="Customs declarant"
-    hint="Who is declaring the goods, on the EDEC declaration, the proforma invoice and the printed forms. Your booth profile is used by default - fill in a field here only when the declarant differs from it."
+    hint="Who is declaring the goods, on the EDEC declaration, the proforma invoice and the printed forms. Your business profile is used by default - fill in a field here only when the declarant differs from it."
     :model="form"
     :profile="profile"
     country-placeholder="Switzerland"

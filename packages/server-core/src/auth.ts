@@ -7,11 +7,14 @@ import { join } from 'node:path';
 import {
   ArtistDetailsSchema,
   VatProfileSchema,
+  SellsAtSchema,
   LoginRequestSchema,
   RefreshRequestSchema,
   RegisterRequestSchema,
   emptyProfile,
   type AccountProfile,
+  type ProfileLinks,
+  cleanProfileLinks,
   type AuthUser,
   type TokenResponse,
   type UserRole,
@@ -21,6 +24,8 @@ import { generateSecret, otpauthUri, verifyToken, generateRecoveryCodes, hashRec
 import { issueChallenge, verifyChallenge } from './captcha';
 import { makeSecretBox } from './secretbox';
 import { parseDevice, lookupGeo, geoEnabled } from './session-info';
+import { touchDevice as touchDeviceRow } from './db';
+import { registerGoogleAuthRoutes } from './google-auth';
 
 const ACCESS_TTL = '15m';
 const DAY = 24 * 3600 * 1000;
@@ -32,7 +37,7 @@ const refreshTtl = (flavor?: string | null): number => (flavor === 'carbon' ? RE
 // After a 2FA login on a device, that device can skip the code for this long.
 const TRUST_TTL = Number(process.env.DEVICE_TRUST_DAYS || 60) * DAY;
 
-interface SessionInfo {
+export interface SessionInfo {
   deviceId?: string | null;
   deviceName?: string | null;
   flavor?: string | null;
@@ -44,12 +49,59 @@ interface SessionInfo {
 // A valid argon2id hash of a throwaway value. Verified against on login when the
 // email is unknown, so a missing user costs the same time as a wrong password -
 // closing the timing side-channel that would otherwise reveal which emails exist.
-const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
+export const DUMMY_HASH = '$argon2id$v=19$m=65536,t=3,p=4$LNyRVyktowy+Cb4nmWxqVg$RYqS8odpvRgQmClUelVQI2+sTXtVDEmp7/ejvWlyryA';
 
 export interface JwtClaims {
   sub: string;
   accountId: string;
   role: UserRole;
+  /** Set on a person's token from a shared till: the device it was unlocked on. */
+  till?: string;
+  /** The device the token was issued to, when the sign-in named one - so removing the device can end its tokens. */
+  dev?: string;
+  /** Issued at, seconds - set by the JWT library. */
+  iat?: number;
+}
+
+/**
+ * What a person unlocked at a shared till may not do with that token. The
+ * till is a shared device: whoever walks up to an unlocked one must not be
+ * able to make the access last (API tokens, invites, sessions, devices,
+ * badges), send data out (webhooks), or lock the person out (2FA, deletion).
+ * Those need the person's own sign-in.
+ */
+const TILL_DENIED: [RegExp, RegExp][] = [
+  [/./, /^\/api\/(invites|tokens|webhooks|problems|admin|link|2fa\/(setup|enable|disable)|account\/(delete|wipe)|users\/me\/delete|auth\/(unlock|unlock-badge|link)(\/|$))/],
+  [/^(?!GET)/, /^\/api\/(device-users|sessions|devices|users\/[^/]+\/events)(\/|$)/],
+  [/./, /^\/api\/modules\/(toggle|reload)$/],
+  [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point|economic\/grant)(\/|$|\?)/],
+  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
+];
+
+/**
+ * Checks a verified token against the database on every request: the person
+ * must still exist in the token's account (a removed person's token stops at
+ * once, not after 15 minutes), the role is the current one rather than the
+ * one at sign-in, and a till token only works while that person is unlocked
+ * on that device. Returns an error, or null with `claims.role` refreshed.
+ */
+export function checkClaims(db: Database.Database, claims: JwtClaims, method: string, url: string): { code: number; error: string } | null {
+  const row = db.prepare('SELECT accountId, role FROM users WHERE id = ?').get(claims.sub) as { accountId: string; role: UserRole } | undefined;
+  if (!row || row.accountId !== claims.accountId) return { code: 401, error: 'Not authenticated' };
+  claims.role = row.role;
+  if (claims.dev) {
+    // The device was removed from the account after this token was issued.
+    const gone = db.prepare('SELECT revokedAt FROM device_revocations WHERE accountId = ? AND deviceId = ?').get(claims.accountId, claims.dev) as { revokedAt: number } | undefined;
+    if (gone && (claims.iat ?? 0) * 1000 < gone.revokedAt) return { code: 401, error: 'This device was removed from the account - sign in again.' };
+  }
+  if (claims.till !== undefined) {
+    const b = db.prepare('SELECT unlockedUntil FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(claims.accountId, claims.till, claims.sub) as { unlockedUntil: number } | undefined;
+    if (!b || b.unlockedUntil <= Date.now()) return { code: 401, error: 'Not authenticated' };
+    const path = url.split('?')[0]!;
+    if (TILL_DENIED.some(([m, p]) => m.test(method) && p.test(path)))
+      return { code: 403, error: 'Not from a shared till - sign in with your own account for this.' };
+  }
+  return null;
 }
 
 export interface UserRow {
@@ -63,7 +115,14 @@ export interface UserRow {
   recoveryCodes?: string | null;
 }
 
-function sha256(s: string): string {
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newInviteCode(): string {
+  return [...randomBytes(16)].map((b) => INVITE_ALPHABET[b % 32]).join('');
+}
+/** Codes are typed by hand: case, spaces and dashes are forgiven. */
+export const normaliseInviteCode = (raw: string): string => raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
@@ -87,6 +146,20 @@ export function toAuthUser(db: Database.Database, user: UserRow): AuthUser {
   };
 }
 
+/**
+ * Links are cleaned again on the way out, so a stored row is never more
+ * trusted than a request. A row that no longer passes is dropped. Links
+ * cleared on purpose stay as an empty set: absent means "never set".
+ */
+function storedLinks(raw: unknown): { links?: ProfileLinks } {
+  if (!raw || typeof raw !== 'object') return {};
+  try {
+    return { links: cleanProfileLinks(raw) };
+  } catch {
+    return {};
+  }
+}
+
 /** A missing or unreadable profile is an empty one - never a crash on login. */
 export function parseProfile(raw: string | null | undefined): AccountProfile {
   if (!raw) return emptyProfile();
@@ -97,19 +170,28 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       artist: ArtistDetailsSchema.parse(parsed.artist ?? {}),
       defaultCurrency: typeof parsed.defaultCurrency === 'string' && /^[A-Z]{3}$/.test(parsed.defaultCurrency) ? parsed.defaultCurrency : 'CHF',
       vat: VatProfileSchema.catch(VatProfileSchema.parse({})).parse(parsed.vat ?? {}),
+      staffSeesTotals: parsed.staffSeesTotals === true,
+      ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
+      ...storedLinks(parsed.links),
     };
   } catch {
     return emptyProfile();
   }
 }
 
-async function issueTokens(
+/** A bare access token, for a person unlocking a shared till: no refresh token, see device-users.ts. */
+export function issueAccessToken(app: FastifyInstance, user: Pick<UserRow, 'id' | 'accountId' | 'role'>, tillDeviceId: string): string {
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role, till: tillDeviceId };
+  return app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
+}
+
+export async function issueTokens(
   app: FastifyInstance,
   db: Database.Database,
   user: UserRow,
   session: SessionInfo = {},
 ): Promise<TokenResponse> {
-  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role };
+  const claims: JwtClaims = { sub: user.id, accountId: user.accountId, role: user.role, ...(session.deviceId ? { dev: session.deviceId } : {}) };
   const accessToken = app.jwt.sign(claims, { expiresIn: ACCESS_TTL });
   const refreshToken = randomBytes(32).toString('hex');
   const now = Date.now();
@@ -134,7 +216,7 @@ async function issueTokens(
 }
 
 // ── Device trust: a 2FA'd device can skip the code on later logins ───────────
-function issueDeviceTrust(db: Database.Database, userId: string, deviceId: string): string {
+export function issueDeviceTrust(db: Database.Database, userId: string, deviceId: string): string {
   const token = randomBytes(32).toString('hex');
   db.prepare('INSERT INTO trusted_devices (id, userId, deviceId, tokenHash, expiresAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(
     randomUUID(),
@@ -146,7 +228,7 @@ function issueDeviceTrust(db: Database.Database, userId: string, deviceId: strin
   );
   return token;
 }
-function deviceTrusted(db: Database.Database, userId: string, deviceId: string | undefined, token: string | undefined): boolean {
+export function deviceTrusted(db: Database.Database, userId: string, deviceId: string | undefined, token: string | undefined): boolean {
   if (!deviceId || !token) return false;
   const row = db
     .prepare('SELECT id FROM trusted_devices WHERE userId = ? AND deviceId = ? AND tokenHash = ? AND expiresAt > ?')
@@ -157,12 +239,32 @@ function clearDeviceTrust(db: Database.Database, userId: string): void {
   db.prepare('DELETE FROM trusted_devices WHERE userId = ?').run(userId);
 }
 
-function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string): void {
+/**
+ * A user's second factor: an authenticator code, or one of their single-use
+ * recovery codes (which is spent). Only call it for users with 2FA on.
+ */
+export function checkSecondFactor(
+  db: Database.Database,
+  box: { decrypt<T>(s: string): T },
+  user: UserRow,
+  rawCode: unknown,
+): 'ok' | 'recovery' | 'missing' | 'invalid' {
+  const code = String(rawCode ?? '').trim();
+  if (!code) return 'missing';
+  if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) return 'ok';
+  // Read fresh and write only if unchanged: two sign-ins racing with one code must not both pass.
+  const stored = (db.prepare('SELECT recoveryCodes FROM users WHERE id = ?').get(user.id) as { recoveryCodes: string | null } | undefined)?.recoveryCodes ?? '[]';
+  const codes: string[] = JSON.parse(stored);
+  const idx = codes.indexOf(hashRecovery(code));
+  if (idx < 0) return 'invalid';
+  codes.splice(idx, 1); // recovery codes are single-use
+  const used = db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ? AND recoveryCodes = ?').run(JSON.stringify(codes), user.id, stored);
+  return used.changes === 1 ? 'recovery' : 'invalid';
+}
+
+export function touchDevice(db: Database.Database, accountId: string, userId: string, deviceId?: string, name?: string, device?: string, flavor?: string | null): void {
   if (!deviceId) return;
-  db.prepare(
-    `INSERT INTO devices (id, accountId, userId, name, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET lastSeenAt = excluded.lastSeenAt, name = COALESCE(excluded.name, name)`,
-  ).run(deviceId, accountId, userId, name ?? null, Date.now(), Date.now());
+  touchDeviceRow(db, deviceId, accountId, userId, name ?? null, flavor ?? null, Date.now(), device ?? null);
 }
 
 /** Seed the server owner from env on first boot (OWNER_EMAIL / OWNER_PASSWORD). */
@@ -184,7 +286,14 @@ export async function seedOwner(db: Database.Database): Promise<void> {
   );
 }
 
-export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string): void {
+export interface AuthHooks {
+  /** A new account was created with an invite code (not on joining an existing one). */
+  accountCreated?(e: { accountId: string; userId: string; inviteCode: string }): void;
+  /** An account is being deleted; runs inside the deleting transaction so modules drop their rows with it. */
+  accountDeleted?(accountId: string): void;
+}
+
+export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string, hooks: AuthHooks = {}): void {
   const box = makeSecretBox(jwtSecret); // encrypts TOTP secrets at rest
   const requireCaptcha = process.env.REQUIRE_CAPTCHA !== '0';
   const has2fa = (u: UserRow): boolean => !!u.totpEnabled;
@@ -218,8 +327,95 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
    * owner without an invite. The sign-in screen asks this to decide whether to
    * show "Set up this server" instead of the usual invite-gated form.
    */
-  const userCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  // Once anyone has signed up, the server stays set up: deleting the last account must not
+  // reopen "first visitor becomes owner" to whoever finds the page next.
+  db.exec('CREATE TABLE IF NOT EXISTS server_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  const markInitialised = () => db.prepare("INSERT OR IGNORE INTO server_meta (key, value) VALUES ('initialised', ?)").run(String(Date.now()));
+  const realUserCount = (): number => (db.prepare('SELECT COUNT(*) AS n FROM users').get() as { n: number }).n;
+  if (realUserCount() > 0) markInitialised();
+  const initialised = (): boolean => !!db.prepare("SELECT 1 FROM server_meta WHERE key = 'initialised'").get();
+  const userCount = (): number => (initialised() ? Math.max(1, realUserCount()) : realUserCount());
   app.get('/api/setup', async () => ({ needsOwner: userCount() === 0 }));
+
+  /**
+   * The one way a user comes to exist, for a password registration and a
+   * Google sign-up alike: an invite says which account they join (or that a
+   * new one is made), the first user ever becomes the server owner. All in
+   * one synchronous transaction, so an invite code can never be spent twice -
+   * not even by two registrations racing on the same code - and no await sits
+   * between checking it and claiming it.
+   */
+  type SignUpInput = { email: string; passwordHash: string; inviteCode?: string; accountName?: string; googleSub?: string };
+  type SignUpResult = { ok: true; user: UserRow } | { ok: false; code: number; error: string };
+  const signUp = (req: FastifyRequest, input: SignUpInput): SignUpResult => {
+    const { email: emailLc, passwordHash, inviteCode, accountName, googleSub } = input;
+    const open = process.env.REGISTRATION_OPEN === '1';
+    // The very first user becomes the server owner; re-checked inside the
+    // transaction below so two racing first registrations cannot both win.
+    const firstUser = userCount() === 0;
+    let invite: { code: string; accountId: string | null; role: UserRole; allowedEventIds: string | null } | undefined;
+    if (inviteCode) {
+      invite = db
+        .prepare('SELECT code, accountId, role, allowedEventIds FROM invites WHERE code = ? AND usedBy IS NULL AND expiresAt > ?')
+        .get(normaliseInviteCode(inviteCode), Date.now()) as typeof invite;
+      if (!invite && !open) return { ok: false, code: 403, error: 'Invalid or expired invite code' };
+    } else if (!open && !firstUser) {
+      return { ok: false, code: 403, error: 'An invite code is required' };
+    }
+
+    const userId = randomUUID();
+    const role: UserRole = invite ? (invite.accountId ? invite.role : 'admin') : firstUser ? 'owner' : 'admin';
+    let accountId = invite?.accountId ?? null;
+
+    try {
+      db.transaction(() => {
+        if (firstUser && userCount() !== 0) throw new Error('NOT_FIRST');
+        if (firstUser) markInitialised();
+        if (!accountId) {
+          accountId = randomUUID();
+          db.prepare('INSERT INTO accounts (id, name, createdAt) VALUES (?, ?, ?)').run(
+            accountId,
+            accountName?.trim() || emailLc.split('@')[0],
+            Date.now(),
+          );
+        }
+        db.prepare('INSERT INTO users (id, accountId, email, passwordHash, role, createdAt, googleSub) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          userId,
+          accountId,
+          emailLc,
+          passwordHash,
+          role,
+          Date.now(),
+          googleSub ?? null,
+        );
+        if (invite) {
+          // Single-use: the UPDATE only matches while the code is still unspent.
+          // 0 rows changed means a concurrent registration just claimed it, so
+          // throw to roll the whole transaction back (no user/account created).
+          const claimed = db.prepare('UPDATE invites SET usedBy = ? WHERE code = ? AND usedBy IS NULL').run(userId, invite.code);
+          if (claimed.changes !== 1) throw new Error('INVITE_USED');
+          // A helper invite binds the new member to specific events (server-enforced isolation).
+          if (invite.allowedEventIds && invite.accountId) {
+            db.prepare('UPDATE users SET allowedEventIds = ? WHERE id = ?').run(invite.allowedEventIds, userId);
+          }
+        }
+      })();
+    } catch (e) {
+      if (e instanceof Error && e.message === 'INVITE_USED') return { ok: false, code: 409, error: 'This invite code has already been used' };
+      if (e instanceof Error && e.message === 'NOT_FIRST') return { ok: false, code: 403, error: 'This server already has an owner - ask them for an invite code.' };
+      throw e;
+    }
+
+    const user: UserRow = { id: userId, accountId: accountId!, email: emailLc, passwordHash, role };
+    if (invite && !invite.accountId) {
+      try {
+        hooks.accountCreated?.({ accountId: accountId!, userId, inviteCode: invite.code });
+      } catch (err) {
+        req.log.error({ err }, 'setting up a new account from its invite failed');
+      }
+    }
+    return { ok: true, user };
+  };
 
   app.post('/api/auth/register', AUTH_RATE_LIMIT, async (req, reply) => {
     const parsed = RegisterRequestSchema.safeParse(req.body);
@@ -239,72 +435,11 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       return reply.code(409).send({ error: 'Email already registered' });
     }
 
-    const open = process.env.REGISTRATION_OPEN === '1';
-    // The very first user becomes the server owner; re-checked inside the
-    // transaction below so two racing first registrations cannot both win.
-    const firstUser = userCount() === 0;
-    let invite: { code: string; accountId: string | null; role: UserRole; allowedEventIds: string | null } | undefined;
-    if (inviteCode) {
-      invite = db
-        .prepare('SELECT code, accountId, role, allowedEventIds FROM invites WHERE code = ? AND usedBy IS NULL AND expiresAt > ?')
-        .get(inviteCode.trim().toUpperCase(), Date.now()) as typeof invite;
-      if (!invite && !open) return reply.code(403).send({ error: 'Invalid or expired invite code' });
-    } else if (!open && !firstUser) {
-      return reply.code(403).send({ error: 'An invite code is required' });
-    }
-
-    // Hash before any DB write so invite consumption and user creation are one
-    // synchronous, atomic step (no `await` in between). Combined with the
-    // conditional UPDATE below, an invite code can never be spent twice - not
-    // even by two registrations racing on the same code.
     const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
-    const userId = randomUUID();
-    const role: UserRole = invite ? (invite.accountId ? invite.role : 'admin') : firstUser ? 'owner' : 'admin';
-    let accountId = invite?.accountId ?? null;
-
-    try {
-      db.transaction(() => {
-        if (firstUser && userCount() !== 0) throw new Error('NOT_FIRST');
-        if (!accountId) {
-          accountId = randomUUID();
-          db.prepare('INSERT INTO accounts (id, name, createdAt) VALUES (?, ?, ?)').run(
-            accountId,
-            accountName?.trim() || emailLc.split('@')[0],
-            Date.now(),
-          );
-        }
-        db.prepare('INSERT INTO users (id, accountId, email, passwordHash, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)').run(
-          userId,
-          accountId,
-          emailLc,
-          passwordHash,
-          role,
-          Date.now(),
-        );
-        if (invite) {
-          // Single-use: the UPDATE only matches while the code is still unspent.
-          // 0 rows changed means a concurrent registration just claimed it, so
-          // throw to roll the whole transaction back (no user/account created).
-          const claimed = db.prepare('UPDATE invites SET usedBy = ? WHERE code = ? AND usedBy IS NULL').run(userId, invite.code);
-          if (claimed.changes !== 1) throw new Error('INVITE_USED');
-          // A helper invite binds the new member to specific events (server-enforced isolation).
-          if (invite.allowedEventIds && invite.accountId) {
-            db.prepare('UPDATE users SET allowedEventIds = ? WHERE id = ?').run(invite.allowedEventIds, userId);
-          }
-        }
-      })();
-    } catch (e) {
-      if (e instanceof Error && e.message === 'INVITE_USED') {
-        return reply.code(409).send({ error: 'This invite code has already been used' });
-      }
-      if (e instanceof Error && e.message === 'NOT_FIRST') {
-        return reply.code(403).send({ error: 'This server already has an owner - ask them for an invite code.' });
-      }
-      throw e;
-    }
-
-    const user: UserRow = { id: userId, accountId: accountId!, email: emailLc, passwordHash, role };
-    bumpMetric(db, accountId!, 'logins');
+    const made = signUp(req, { email: emailLc, passwordHash, inviteCode, accountName });
+    if (!made.ok) return reply.code(made.code).send({ error: made.error });
+    const { user } = made;
+    bumpMetric(db, user.accountId, 'logins');
     const b = (req.body ?? {}) as { flavor?: string };
     return issueTokens(app, db, user, {
       flavor: b.flavor ?? null,
@@ -312,6 +447,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       device: parseDevice(req.headers['user-agent']),
       geo: await lookupGeo(req.ip),
     });
+  });
+
+  registerGoogleAuthRoutes(app, db, {
+    signUp,
+    has2fa,
+    secondFactor: (user, code) => checkSecondFactor(db, box, user, code),
+    rateLimit: AUTH_RATE_LIMIT,
   });
 
   app.post('/api/auth/login', AUTH_RATE_LIMIT, async (req, reply) => {
@@ -331,22 +473,14 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // Second factor, unless this device is already trusted from a prior 2FA login.
     let usedRecovery = false;
     if (has2fa(user) && !deviceTrusted(db, user.id, deviceId, b.trustToken)) {
-      const code = String(b.code ?? '').trim();
-      if (!code) return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
-      if (verifyToken(box.decrypt<string>(user.totpSecret as string), code)) {
-        /* valid TOTP */
-      } else {
-        const codes: string[] = JSON.parse(user.recoveryCodes ?? '[]');
-        const idx = codes.indexOf(hashRecovery(code));
-        if (idx < 0) return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
-        codes.splice(idx, 1); // recovery codes are single-use
-        db.prepare('UPDATE users SET recoveryCodes = ? WHERE id = ?').run(JSON.stringify(codes), user.id);
-        usedRecovery = true;
-      }
+      const second = checkSecondFactor(db, box, user, b.code);
+      if (second === 'missing') return reply.code(401).send({ error: 'Authenticator code required.', needs2fa: true });
+      if (second === 'invalid') return reply.code(401).send({ error: 'Invalid authenticator code.', needs2fa: true });
+      usedRecovery = second === 'recovery';
     }
 
     db.prepare('UPDATE users SET lastLoginAt = ? WHERE id = ?').run(Date.now(), user.id);
-    touchDevice(db, user.accountId, user.id, deviceId, deviceName);
+    touchDevice(db, user.accountId, user.id, deviceId, deviceName, parseDevice(req.headers['user-agent']), b.flavor ?? null);
     bumpMetric(db, user.accountId, 'logins');
     const tokens = await issueTokens(app, db, user, {
       deviceId,
@@ -428,9 +562,15 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     const u = db.prepare('SELECT totpEnabled FROM users WHERE id = ?').get(claims.sub) as { totpEnabled: number } | undefined;
     return { enabled: !!u?.totpEnabled };
   });
-  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req) => {
+  app.post('/api/2fa/setup', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
-    const u = db.prepare('SELECT email FROM users WHERE id = ?').get(claims.sub) as { email: string };
+    const u = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    // Starting over switches the current 2FA off: with it on, that takes the current code,
+    // or a stolen session could swap in the thief's authenticator.
+    if (u.totpEnabled) {
+      const second = checkSecondFactor(db, box, u, (req.body as { code?: string } | undefined)?.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Enter your current authenticator code to set up a new one.', needs2fa: true });
+    }
     const secret = generateSecret();
     db.prepare('UPDATE users SET totpSecret = ?, totpEnabled = 0 WHERE id = ?').run(box.encrypt(secret), claims.sub);
     return { secret, otpauth: otpauthUri({ secret, account: u.email, issuer: 'Zollify' }) };
@@ -516,7 +656,8 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     // A restricted "helper" invite: a member bound to one or more events.
     const events = Array.isArray(body.allowedEventIds) ? body.allowedEventIds.filter((e) => typeof e === 'string' && e) : [];
     const allowedEventIds = !body.newAccount && events.length ? JSON.stringify(events) : null;
-    const code = randomBytes(4).toString('hex').toUpperCase();
+    // 16 characters without look-alikes, about 80 bits: not guessable in an invite's 14 days.
+    const code = newInviteCode();
     db.prepare('INSERT INTO invites (code, accountId, role, allowedEventIds, createdBy, createdAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       code,
       body.newAccount ? null : claims.accountId,
@@ -640,8 +781,16 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
   app.post('/api/account/delete', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
     if (claims.role === 'member') return reply.code(403).send({ error: 'Only an account admin can delete the account' });
-    const body = (req.body ?? {}) as { password?: string };
+    // The server owner's own account goes only by the owner's hand.
+    const hasOwner = db.prepare("SELECT 1 FROM users WHERE accountId = ? AND role = 'owner'").get(claims.accountId);
+    if (hasOwner && claims.role !== 'owner') return reply.code(403).send({ error: 'Only the server owner can delete this account' });
+    const body = (req.body ?? {}) as { password?: string; code?: string };
     if (!(await passwordOk(claims.sub, body.password))) return reply.code(401).send({ error: 'Password is incorrect' });
+    const me = db.prepare('SELECT * FROM users WHERE id = ?').get(claims.sub) as UserRow;
+    if (me.totpEnabled) {
+      const second = checkSecondFactor(db, box, me, body.code);
+      if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Authenticator code required.', needs2fa: true });
+    }
     const accountId = claims.accountId;
     db.transaction(() => {
       const userIds = (db.prepare('SELECT id FROM users WHERE accountId = ?').all(accountId) as { id: string }[]).map((u) => u.id);
@@ -656,15 +805,17 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       db.prepare(
         'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
       ).run(accountId, accountId, accountId);
-      for (const table of ['ops', 'images', 'metrics', 'logs', 'api_tokens', 'devices']) {
+      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'feedback', 'api_tokens', 'devices', 'notifications', 'webhooks']) {
         db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
       }
+      hooks.accountDeleted?.(accountId);
       db.prepare('DELETE FROM users WHERE accountId = ?').run(accountId);
       db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
     })();
     // Full-size images live on disk per account - remove that tree too.
     try {
       rmSync(join(dataDir, 'images', accountId), { recursive: true, force: true });
+      rmSync(join(dataDir, 'event-files', accountId), { recursive: true, force: true });
     } catch {
       /* best-effort: the DB rows are already gone */
     }
@@ -727,8 +878,10 @@ export async function authenticate(this: FastifyInstance, req: FastifyRequest, r
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -756,8 +909,10 @@ export async function authenticateApiOrJwt(
   try {
     await req.jwtVerify();
   } catch {
-    reply.code(401).send({ error: 'Not authenticated' });
+    return reply.code(401).send({ error: 'Not authenticated' });
   }
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
 /**
@@ -790,6 +945,8 @@ export async function authenticateApiWrite(
     return reply.code(401).send({ error: 'Not authenticated' });
   }
   const claims = req.user as JwtClaims;
+  const bad = checkClaims(this.db, claims, req.method, req.url);
+  if (bad) return reply.code(bad.code).send({ error: bad.error });
   if (claims.role === 'member') {
     return reply.code(403).send({ error: 'Catalog writes require an owner/admin or a data:write token' });
   }

@@ -35,10 +35,17 @@ export function fmtWeightKg(kg: NumLike): string {
 
 // ── Country / code helpers ──────────────────────────────────────────────────
 
-/** "4911.91.00" → "4911.9100" */
+/**
+ * e-dec's commodity code, cut to the 6-digit HS subheading and padded:
+ * "4202.22.10" → "4202.2200", "4911.91.00" → "4911.9100". The national
+ * digits past the subheading are more detail than the export declaration
+ * should carry. Anything with fewer than 6 digits is passed through as typed.
+ */
 export function toEdecHsCode(code: string | undefined): string {
   if (!code) return '';
-  return code.replace(/^(\d{4})\.(\d{2})\.(\d{2})$/, '$1.$2$3');
+  const digits = code.replace(/\D/g, '');
+  if (digits.length < 6) return code.trim();
+  return `${digits.slice(0, 4)}.${digits.slice(4, 6)}00`;
 }
 
 export function getPermitObligation(tariffNo: string | undefined): number {
@@ -47,6 +54,14 @@ export function getPermitObligation(tariffNo: string | undefined): number {
   if (hsEntry) return hsEntry.permit || 0;
   if (tariffNo.startsWith('7117')) return 2;
   return 0;
+}
+
+/** e-dec nonCustomsLawObligation for a tariff number - the permit's value unless the HS table says otherwise. */
+export function getNonCustomsLawObligation(tariffNo: string | undefined): number {
+  if (!tariffNo) return 0;
+  const hsEntry = HS_CODES.find((h) => h.code === tariffNo);
+  if (hsEntry) return hsEntry.nonCustomsLaw ?? (hsEntry.permit || 0);
+  return getPermitObligation(tariffNo);
 }
 
 export function getVatCode(vatRate: NumLike): number {
@@ -247,10 +262,18 @@ export function compute1174Groups(state: CustomsState): Form1174Groups {
       g.qty += c.amount || 0;
       g.weightKg += c.totalWeightKg;
       if (c.totalValue != null) g.value += c.totalValue;
-      const retQty = Math.max(0, (c.amount || 0) - (c.soldQty || 0));
-      g.retQty += retQty;
-      g.retWeightKg += Math.round(retQty * ((p.weightG as number) || 0)) / 1000;
-      if (c.effectiveUnitPrice != null) g.retValue += Math.round(c.effectiveUnitPrice * retQty);
+      // The return goods list's own figures (calcReturnStats), so 11.74/11.87
+      // match it: each listed variant at its own price and weight. The
+      // product-wide average price used before undervalued a product whose
+      // cheap variants sold and dear ones came home (A 5x10 sold out, B 5x20
+      // returned: list 100, form 75), and weighed variants at the parent's
+      // weight.
+      const r = calcReturnStats(p);
+      if (r.retQty > 0) {
+        g.retQty += r.retQty;
+        g.retWeightKg += r.retWkg;
+        if (r.retVal != null) g.retValue += r.retVal;
+      }
       if (c.totalValue != null && c.totalValue > maxVal && p.tariffNo) {
         maxVal = c.totalValue;
         tariffNo = p.tariffNo;

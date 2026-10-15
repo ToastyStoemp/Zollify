@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { NavItem, Role, RouteDef, SettingsPanel } from '@zollify/sdk';
+import type { CalendarSource, HomeCard, NavItem, Role, RouteDef, SettingsPanel, SetupStep, TillAction } from '@zollify/sdk';
 import { roleAtLeast } from '@zollify/sdk';
 
 export interface OwnedRoute extends RouteDef {
@@ -11,6 +11,9 @@ export interface OwnedNavItem extends NavItem {
   moduleId: string;
 }
 export interface OwnedSettingsPanel extends SettingsPanel {
+  moduleId: string;
+}
+export interface OwnedSetupStep extends SetupStep {
   moduleId: string;
 }
 
@@ -29,6 +32,10 @@ export class ContributionRegistry {
   readonly routes = reactive<OwnedRoute[]>([]);
   readonly nav = reactive<OwnedNavItem[]>([]);
   readonly settingsPanels = reactive<OwnedSettingsPanel[]>([]);
+  readonly setupSteps = reactive<OwnedSetupStep[]>([]);
+  readonly tillActions = reactive<(TillAction & { moduleId: string })[]>([]);
+  readonly calendarSources = reactive<{ moduleId: string; source: CalendarSource }[]>([]);
+  readonly homeCards = reactive<(HomeCard & { moduleId: string })[]>([]);
 
   private sink: RouteSink | null = null;
 
@@ -72,8 +79,29 @@ export class ContributionRegistry {
     this.nav.push({ ...item, moduleId, routeName: qualifiedName(moduleId, item.routeName) });
   }
 
+  addTillAction(moduleId: string, action: TillAction): void {
+    this.tillActions.push({ ...action, moduleId, id: `${moduleId}.${action.id}` });
+  }
+
+  addHomeCard(moduleId: string, card: HomeCard): void {
+    this.homeCards.push({ ...card, moduleId, id: `${moduleId}.${card.id}` });
+  }
+
+  /** Home cards visible to a role, in order. */
+  homeCardsFor(role: Role): (HomeCard & { moduleId: string })[] {
+    return this.homeCards.filter((c) => !c.minRole || roleAtLeast(role, c.minRole)).sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+  }
+
+  addCalendarSource(moduleId: string, source: CalendarSource): void {
+    this.calendarSources.push({ moduleId, source });
+  }
+
   addSettingsPanel(moduleId: string, panel: SettingsPanel): void {
     this.settingsPanels.push({ ...panel, moduleId, id: `${moduleId}.${panel.id}` });
+  }
+
+  addSetupStep(moduleId: string, step: SetupStep): void {
+    this.setupSteps.push({ ...step, moduleId, id: `${moduleId}.${step.id}` });
   }
 
   /** Removes every contribution a module made. */
@@ -84,6 +112,10 @@ export class ContributionRegistry {
     spliceWhere(this.routes, (r) => r.moduleId === moduleId);
     spliceWhere(this.nav, (n) => n.moduleId === moduleId);
     spliceWhere(this.settingsPanels, (p) => p.moduleId === moduleId);
+    spliceWhere(this.setupSteps, (s) => s.moduleId === moduleId);
+    spliceWhere(this.tillActions, (a) => a.moduleId === moduleId);
+    spliceWhere(this.calendarSources, (c) => c.moduleId === moduleId);
+    spliceWhere(this.homeCards, (c) => c.moduleId === moduleId);
   }
 
   /**
@@ -96,6 +128,14 @@ export class ContributionRegistry {
       .filter((item) => !item.minRole || roleAtLeast(role, item.minRole))
       .slice()
       .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label));
+  }
+
+  /** The steps a role sees in first-run setup, in order. */
+  setupStepsFor(role: Role): OwnedSetupStep[] {
+    return this.setupSteps
+      .filter((s) => !s.minRole || roleAtLeast(role, s.minRole))
+      .slice()
+      .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.title.localeCompare(b.title));
   }
 
   settingsFor(role: Role): OwnedSettingsPanel[] {

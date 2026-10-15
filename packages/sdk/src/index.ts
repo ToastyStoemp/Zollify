@@ -9,6 +9,9 @@
 export const SDK_VERSION = '0.1.0';
 
 export type {
+  CalendarEntry,
+  CalendarSource,
+  HomeCard,
   Role,
   AccountSnapshot,
   ComponentLoader,
@@ -16,9 +19,17 @@ export type {
   NavItem,
   NavGroup,
   SettingsPanel,
+  SetupStep,
   SaleLine,
+  SaleLineRef,
+  TillAction,
+  TillLine,
+  TillLineAccess,
+  TillLineInfo,
+  TillLookup,
   SaleEvent,
   CoreEvents,
+  LabelPrintJob,
   EventName,
   EventPayload,
   Unsubscribe,

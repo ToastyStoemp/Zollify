@@ -16,6 +16,7 @@ import { buildAllVersionsHtml } from '../all-versions';
 import { buildProformaHtml } from '../proforma';
 import { build1174Html } from '../form1174';
 import { build1187Html } from '../form1187';
+import { PURPOSE } from '../form-layout';
 
 const appJsPath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../legacy/app.js');
 
@@ -334,6 +335,33 @@ const normalizeByTypeGroupName = (html: string): string => html.replace(/<strong
  */
 const normalizeGroupNumbers = (html: string): string => html.replace(/<span class="gfv">.*?<\/span>/g, '<span class="gfv"></span>');
 
+/**
+ * Legacy rounded e-dec weights to the nearest 100 g (minimum 0.1 kg) and
+ * floored the statistical value to whole units. The port now declares both
+ * as they are - weight to the gram, value as summed (whole units for sales,
+ * since discounts are split in whole units) - a deliberate, permanent
+ * divergence. Only these tags' contents (the value also feeds vatValue) are set aside; everything else
+ * in the XML must still match byte for byte. edec-xml.test.ts checks the new
+ * values themselves.
+ */
+const normalizeEdecAmounts = (xml: string): string =>
+  xml.replace(/<(grossMass|netMass|statisticalValue|vatValue)>[^<]*<\/\1>/g, '<$1></$1>');
+
+/**
+ * Forms 11.74 and 11.87 no longer copy legacy's markup: they are drawn box
+ * for box after BAZG's published forms (form-layout.ts), so the HTML can't
+ * match. What must not change is what they say - every pre-filled value
+ * (the `fv` spans/divs both versions use) is compared instead, as a sorted
+ * list. Group figures (`gfv`) were already a deliberate divergence - see
+ * normalizeGroupNumbers above - and are covered by form1187.test.ts.
+ */
+/** The purpose field (11.74 box 13, 11.87 box 10) now reads PURPOSE; legacy had a generic exhibition text. */
+const LEGACY_PURPOSE = 'Verkauf an Ausstellungen / Messen · Vente aux expositions / foires';
+const withNewPurpose = (values: string[]): string[] => values.map((v) => (v === LEGACY_PURPOSE ? PURPOSE : v)).sort();
+
+const filledValues = (html: string): string[] =>
+  [...html.matchAll(/class="fv[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div)>/g)].map((m) => m[1]!.trim().replace(/&quot;/g, '"')).sort();
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 const FIXED_NOW = new Date('2026-07-07T09:15:30Z');
@@ -362,7 +390,7 @@ describe('customs port vs legacy (golden diff)', () => {
       const ported = buildEdecXml(clone(make()), new Date());
       expect(ported).not.toBeNull();
       expect(captured.blobs).toHaveLength(1);
-      expect(ported!.xml).toBe(captured.blobs[0]);
+      expect(normalizeEdecAmounts(ported!.xml)).toBe(normalizeEdecAmounts(captured.blobs[0]!));
     }
   });
 
@@ -415,7 +443,7 @@ describe('customs port vs legacy (golden diff)', () => {
     expect(stripMaterialColumn(ported)).toBe(captured.html[0]);
   });
 
-  it('produces an identical form 11.74', () => {
+  it('fills form 11.74 with the same values', () => {
     for (const [, make] of fixtures) {
       const captured: Captured = { html: [], blobs: [] };
       const legacy = loadLegacy(captured);
@@ -423,11 +451,24 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1174();
       const ported = build1174Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
+      // Deliberate change: box 3 names the booth "c/o" the event instead of
+      // the event alone, and box 28 (user of the goods) names the booth -
+      // legacy left it empty. Everything else must match value for value.
+      const event = make().meta.event;
+      const legacyValues = withNewPurpose(filledValues(captured.html[0]!)).filter((v) => !v.startsWith(event));
+      const values = filledValues(ported);
+      const added = [...values];
+      for (const v of legacyValues) {
+        const i = added.indexOf(v);
+        expect(i, `legacy value missing: ${v}`).toBeGreaterThanOrEqual(0);
+        added.splice(i, 1);
+      }
+      expect(added).toHaveLength(2);
+      expect(added.some((v) => v.includes(`c/o ${event}`))).toBe(true);
     }
   });
 
-  it('produces an identical form 11.87', () => {
+  it('fills form 11.87 with the same values', () => {
     for (const [, make] of fixtures) {
       const captured: Captured = { html: [], blobs: [] };
       const legacy = loadLegacy(captured);
@@ -435,7 +476,9 @@ describe('customs port vs legacy (golden diff)', () => {
       legacy.print1187();
       const ported = build1187Html(clone(make()), new Date());
       expect(captured.html).toHaveLength(1);
-      expect(normalizeGroupNumbers(ported)).toBe(normalizeGroupNumbers(captured.html[0]!));
+      const values = filledValues(ported);
+      expect(values.length).toBeGreaterThan(5);
+      expect(values).toEqual(withNewPurpose(filledValues(captured.html[0]!)));
     }
   });
 });

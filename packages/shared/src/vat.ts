@@ -60,6 +60,50 @@ export function countryCodeOf(country: string | undefined | null): string {
   return COUNTRY_CODES[(country ?? '').trim().toLowerCase()] ?? '';
 }
 
+/**
+ * What a country calls the tax number a receipt must carry. Denmark's
+ * rules say "CVR", Germany's "USt-IdNr.", Switzerland's "UID"; a customer or
+ * an inspector looks for that word. Unknown countries get "VAT".
+ */
+const VAT_ID_LABELS: Record<string, string> = {
+  DK: 'CVR',
+  DE: 'USt-IdNr.',
+  AT: 'UID',
+  CH: 'UID',
+  LI: 'UID',
+  BE: 'BTW',
+  NL: 'BTW',
+  LU: 'TVA',
+  FR: 'TVA',
+  IT: 'P.IVA',
+  ES: 'NIF',
+  PT: 'NIF',
+  SE: 'Momsreg.nr',
+  FI: 'ALV',
+  NO: 'MVA',
+  PL: 'NIP',
+  CZ: 'DIČ',
+};
+
+/** The label for a VAT/tax number in a country, by name or code. */
+export function vatIdLabel(country: string | undefined | null): string {
+  const code = /^[A-Za-z]{2}$/.test((country ?? '').trim()) ? (country ?? '').trim().toUpperCase() : countryCodeOf(country);
+  return VAT_ID_LABELS[code] ?? 'VAT';
+}
+
+/**
+ * Whether taking stock from one country to the other means customs papers:
+ * two known countries, not the same, and not both inside the EU's customs
+ * union. Countries by name or code.
+ */
+// ponytail: the EU's union only; Switzerland-Liechtenstein and Monaco-France count as borders here.
+export function crossesCustomsBorder(from: string | undefined | null, to: string | undefined | null): boolean {
+  const a = countryCodeOf(from) || (from ?? '').trim().toUpperCase();
+  const b = countryCodeOf(to) || (to ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(a) || !/^[A-Z]{2}$/.test(b) || a === b) return false;
+  return !(EU_COUNTRIES.includes(a) && EU_COUNTRIES.includes(b));
+}
+
 /** Which rate a product takes: the country's standard rate, or its reduced rate (books, some art). */
 export type TaxClass = 'standard' | 'reduced';
 
@@ -89,7 +133,7 @@ export type VatProfile = z.infer<typeof VatProfileSchema>;
 /** A change to some fields - no defaults, so fields left out stay as they are. */
 export const VatProfileUpdateSchema = z.object(vatProfileFields).partial();
 
-/** Per-event VAT, set on the event form. Absent fields fall back to the country and the booth profile. */
+/** Per-event VAT, set on the event form. Absent fields fall back to the country and the business profile. */
 export interface EventVat {
   /** 'auto' (default) = exempt if the profile lists the country, else charge the country's rates. */
   mode?: 'auto' | 'charge' | 'exempt';

@@ -1,4 +1,5 @@
 import type { Transaction } from '@zollify/shared';
+import { localIsoDay } from '@zollify/shared';
 
 /**
  * CSV export of recorded sales, for handing to an accountant or a spreadsheet.
@@ -18,7 +19,7 @@ import type { Transaction } from '@zollify/shared';
 function escape(value: unknown): string {
   if (value === null || value === undefined) return '';
   let text = String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  if (/^[=+\-@\t\r]/.test(text)) text = `'${text}`;
   if (/[",\n\r]/.test(text)) text = `"${text.replace(/"/g, '""')}"`;
   return text;
 }
@@ -89,7 +90,7 @@ export function transactionsToCsv(transactions: Transaction[]): string {
 
 /** Filename that sorts chronologically and says what it covers. */
 export function csvFilename(eventName: string | null): string {
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = localIsoDay();
   const scope = (eventName ?? 'all-events').replace(/[^A-Za-z0-9-]+/g, '-').toLowerCase();
   return `zollify-sales-${scope}-${stamp}.csv`;
 }

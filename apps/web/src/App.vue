@@ -1,25 +1,53 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { roleAtLeast, type NavGroup, type Role } from '@zollify/sdk';
 import {
+  authFetch,
   currentAccount,
+  getDeviceAccount,
+  visibleEvents,
+  loadNotifications,
+  lockTill,
+  tillLocked,
+  canLockTill,
+  markNotificationsRead,
+  notifications,
   pendingCount,
+  realtimeConnected,
+  unreadNotifications,
+  urgentNotifications,
+  anyUnreadNotifications,
   syncNow,
   syncProgress,
   syncState,
   toasts,
   type Toast,
 } from '@zollify/platform';
-import { booted, contributions, signOutAndReload } from './boot';
+import { booted, contributions, events, signOutAndReload } from './boot';
+import { openProblemErrors, refreshProblemCount } from './lib/problems';
 import ConfirmDialog from './views/ConfirmDialog.vue';
-import { Icon } from '@zollify/ui';
+import LockScreen from './views/LockScreen.vue';
+import FeedbackDialog from './components/FeedbackDialog.vue';
+import { Icon, ModalShell } from '@zollify/ui';
+import { isStore, sellsAt, type AppNotification } from '@zollify/shared';
 
 const account = currentAccount;
 const route = useRoute();
 
 /** First-run setup gets the whole screen; the nav would only bounce back to it. */
 const build = typeof __ZOLLIFY_VERSION__ === 'string' ? __ZOLLIFY_VERSION__ : 'dev';
+
+// Send feedback, and the server's Discord (only when DISCORD_INVITE_URL is set there).
+const feedbackOpen = ref(false);
+const discordUrl = ref<string | null>(null);
+onMounted(async () => {
+  try {
+    discordUrl.value = ((await authFetch('/support')) as { discordUrl: string | null }).discordUrl;
+  } catch {
+    /* no link offline - the button just stays away */
+  }
+});
 const settingUp = computed(() => route.name === 'welcome' || route.meta.bare === true);
 
 function runToastAction(toast: Toast) {
@@ -41,6 +69,7 @@ const SECTIONS: { id: Group; icon: string }[] = [
   { id: 'selling', icon: 'shopping-cart' },
   { id: 'stock', icon: 'package' },
   { id: 'events', icon: 'calendar' },
+  { id: 'stores', icon: 'store' },
   { id: 'books', icon: 'book' },
   { id: 'suppliers', icon: 'truck' },
   { id: 'addons', icon: 'puzzle' },
@@ -48,11 +77,13 @@ const SECTIONS: { id: Group; icon: string }[] = [
 
 const coreNav: Entry[] = [
   { routeName: 'history', label: 'History', icon: 'clock', group: 'selling', order: 110 },
-  { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115, minRole: 'admin' },
+  { routeName: 'cashup', label: 'Cash up', icon: 'banknote', group: 'selling', order: 115 },
   { routeName: 'catalog', label: 'Products', icon: 'package', group: 'stock', order: 20 },
   { routeName: 'stock', label: 'Inventory', icon: 'layers', group: 'stock', order: 25 },
   { routeName: 'discounts', label: 'Discounts', icon: 'tag', group: 'stock', order: 30, minRole: 'admin' },
   { routeName: 'events', label: 'Events', icon: 'calendar', group: 'events', order: 10 },
+  // Heads the Stores section, above the consignment pages (200+).
+  { routeName: 'stores', label: 'Stores', icon: 'store', group: 'stores', order: 10 },
 ];
 
 interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
@@ -65,7 +96,11 @@ interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
 const allNav = computed<Entry[]>(() => {
   const acct = account.value;
   if (!acct) return [];
-  const mine = coreNav.filter((e) => !e.minRole || roleAtLeast(acct.role, e.minRole));
+  // Events and Stores show for what the account runs (asked at setup).
+  const runs = sellsAt(acct.profile, visibleEvents.value.some((e) => isStore(e) && !e.deletedAt));
+  const mine = coreNav.filter(
+    (e) => (!e.minRole || roleAtLeast(acct.role, e.minRole)) && (e.routeName !== 'events' || runs.events) && (e.routeName !== 'stores' || runs.stores),
+  );
   const theirs: Entry[] = contributions.navFor(acct.role).map((item) => ({
     routeName: item.routeName,
     label: item.label,
@@ -153,12 +188,48 @@ const syncLabel = computed(() => {
   return pendingCount.value ? `${pendingCount.value} to sync` : 'Synced';
 });
 
+
+// ── Notifications ──────────────────────────────────────────────────────────
+// The live channel rings when one arrives; without it, look every few minutes.
+const router = useRouter();
+const bellOpen = ref(false);
+let bellPoll: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  bellPoll = setInterval(() => {
+    if (account.value && !realtimeConnected.value) void loadNotifications(true);
+    void refreshProblemCount();
+  }, 5 * 60_000);
+  void refreshProblemCount();
+});
+// A new problem arrives as a note under the bell: look again when the list changes.
+watch(() => notifications.value.length, () => void refreshProblemCount());
+onUnmounted(() => {
+  if (bellPoll) clearInterval(bellPoll);
+});
+function openBell(): void {
+  bellOpen.value = true;
+  menuOpen.value = false;
+  void loadNotifications();
+}
+async function openNotification(n: AppNotification): Promise<void> {
+  bellOpen.value = false;
+  if (n.readAt == null) void markNotificationsRead([n.id]);
+  if (n.link) await router.push(n.link);
+  events.emit('notification:opened', { moduleId: n.moduleId, link: n.link });
+}
+const fmtAgo = (ms: number): string => {
+  const min = Math.round((Date.now() - ms) / 60_000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  if (min < 24 * 60) return `${Math.round(min / 60)} h ago`;
+  return new Date(ms).toLocaleDateString();
+};
 </script>
 
 <template>
   <!-- Signed out there is no sidebar, so the shell must not keep reserving its
        column - otherwise the login card is squeezed into a 15rem track. -->
-  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening the booth…</small></div>
+  <div v-if="!booted" class="splash" aria-busy="true"><span class="brand"><img src="/favicon.svg" alt="" class="mark" />Zollify<span>.</span></span><small>Opening Zollify…</small></div>
   <div v-else :class="['shell', { 'shell--bare': !account || settingUp, 'shell--full': route.name === 'pos:index' }]">
     <!-- The till hides this element's nav (brand/menu/links) - it already has
          its own back arrow, so that's space the product grid and cart get
@@ -193,7 +264,16 @@ const syncLabel = computed(() => {
 
           <footer class="tail">
             <div class="row">
-              <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span></router-link>
+              <router-link :to="{ name: 'settings' }" class="item top grow"><Icon name="settings" /><span>Settings</span><i v-if="openProblemErrors" class="pdot" title="Open errors in Settings, Problems"></i></router-link>
+              <button
+                type="button"
+                class="quiet bell"
+                :title="unreadNotifications ? `${unreadNotifications} unread` : 'Notifications'"
+                :aria-label="unreadNotifications ? `Notifications, ${unreadNotifications} unread` : 'Notifications'"
+                @click="openBell"
+              >
+                <Icon name="bell" /><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b>
+              </button>
               <button
                 type="button"
                 class="quiet sync"
@@ -206,10 +286,18 @@ const syncLabel = computed(() => {
                 <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
               </button>
             </div>
+            <div class="row">
+              <button type="button" class="item top grow feedback" @click="feedbackOpen = true"><Icon name="message-square" /><span>Send feedback</span></button>
+              <a v-if="discordUrl" :href="discordUrl" target="_blank" rel="noopener noreferrer" class="quiet discord" title="Zollify on Discord" aria-label="Join Zollify on Discord"><Icon name="discord" /></a>
+            </div>
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
               <div class="role">{{ account.email }} · {{ account.role }}</div>
-              <button type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
+              <div v-if="canLockTill()" class="till-row">
+                <button type="button" class="quiet switch" @click="lockTill()"><Icon name="lock" :size="13" /> Lock till</button>
+                <span v-if="account.userId !== getDeviceAccount()?.userId" class="hint">on {{ getDeviceAccount()?.email }}'s device</span>
+              </div>
+              <button v-else type="button" class="quiet switch" @click="signOutAndReload()">Switch account</button>
               <div class="build">build {{ build }}</div>
             </div>
           </footer>
@@ -218,7 +306,7 @@ const syncLabel = computed(() => {
         <!-- Only shown when the bottom tab bar has no "More" tab of its own
              (few enough sections that they all fit as tabs) - otherwise this
              and the bottom tab would be two buttons opening the same drawer. -->
-        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i></button>
+        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b></button>
       </template>
     </aside>
 
@@ -251,10 +339,32 @@ const syncLabel = computed(() => {
       <div class="tabs">
         <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
         <router-link v-for="sec in tabSections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
-        <button v-if="tabOverflow" type="button" class="tab" :class="{ 'router-link-active': overflowActive }" @click="menuOpen = !menuOpen"><Icon name="menu" :size="20" /><span>More</span><i v-if="pendingCount" class="badge"></i></button>
-        <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount" class="badge"></i></router-link>
+        <button v-if="tabOverflow" type="button" class="tab" :class="{ 'router-link-active': overflowActive }" @click="menuOpen = !menuOpen"><Icon name="menu" :size="20" /><span>More</span><i v-if="pendingCount || unreadNotifications" class="badge"></i></button>
+        <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount || unreadNotifications || openProblemErrors" class="badge"></i></router-link>
       </div>
     </nav>
+
+    <!-- A shared till: nobody uses it until they say who they are. -->
+    <LockScreen v-if="account && tillLocked && !settingUp" />
+
+    <ModalShell v-if="bellOpen" title="Notifications" @close="bellOpen = false">
+      <p v-if="!notifications.length" class="bell-empty">Nothing yet. Notes from stores and artists you work with land here.</p>
+      <ul v-else class="bell-list">
+        <li v-for="n in notifications" :key="n.id">
+          <button type="button" :class="['bell-item', n.level, { unread: n.readAt == null }]" @click="openNotification(n)">
+            <strong><em v-if="n.level === 'urgent' && n.readAt == null" class="lvl">Needs an answer</em>{{ n.title }}</strong>
+            <span v-if="n.body">{{ n.body }}</span>
+            <small>{{ fmtAgo(n.createdAt) }}</small>
+          </button>
+        </li>
+      </ul>
+      <template #footer>
+        <div class="bell-foot">
+          <button type="button" class="quiet" :disabled="!anyUnreadNotifications" @click="markNotificationsRead()">Mark all read</button>
+          <button type="button" class="primary" @click="bellOpen = false">Close</button>
+        </div>
+      </template>
+    </ModalShell>
 
     <!-- Toast text is bound, never injected as markup: a module controls this string. -->
     <div class="toasts" aria-live="polite">
@@ -265,6 +375,7 @@ const syncLabel = computed(() => {
     </div>
 
     <ConfirmDialog />
+    <FeedbackDialog v-if="feedbackOpen" :app-version="build" :discord-url="discordUrl" @close="feedbackOpen = false" />
   </div>
 </template>
 
@@ -314,9 +425,28 @@ nav { flex: 1; }
 .row { display: flex; align-items: center; gap: .25rem; }
 .grow { flex: 1; }
 /* Sync is an icon with a status dot; the words live in its tooltip and label. */
-.sync, .burger { position: relative; padding: .4rem .5rem; min-height: 0; }
+.sync, .burger, .bell { position: relative; padding: .4rem .5rem; min-height: 0; }
+.bell .zfy-icon { color: var(--zfy-muted); }
+.feedback { border: 0; background: none; font-family: inherit; font-weight: inherit; text-align: left; cursor: pointer; min-height: 0; }
+.discord { display: grid; place-items: center; padding: .4rem .5rem; border-radius: 8px; color: var(--zfy-muted); }
+.discord:hover { background: var(--zfy-surface-2); color: #5865f2; }
+.count { position: absolute; top: .05rem; right: .05rem; min-width: 1rem; height: 1rem; padding: 0 .2rem; border-radius: 999px; background: var(--zfy-accent); color: #fff; font-size: .62rem; line-height: 1rem; font-weight: 700; text-align: center; }
+.bell-empty { margin: 0; color: var(--zfy-muted); font-size: .9rem; }
+.bell-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+.bell-item { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: .15rem; text-align: left; padding: .6rem .75rem; border: 1px solid var(--zfy-line); border-radius: 10px; background: var(--zfy-surface); font-weight: 400; min-height: 0; }
+.bell-item strong { font-size: .9rem; }
+.bell-item span { font-size: .84rem; color: var(--zfy-ink); }
+.bell-item small { font-size: .72rem; color: var(--zfy-muted); }
+.bell-item.unread { border-color: var(--zfy-accent); background: var(--zfy-accent-soft); }
+.count.urgent { background: var(--zfy-danger); }
+.bell-item.urgent.unread { border-color: var(--zfy-danger); background: var(--zfy-signal-soft); }
+.bell-item.low:not(.unread) { opacity: .75; }
+.bell-item.low.unread { border-color: var(--zfy-line); background: var(--zfy-surface); }
+.lvl { font-style: normal; font-size: .64rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-danger); margin-right: .4rem; }
+.bell-foot { display: flex; justify-content: space-between; gap: .5rem; }
 .sync .zfy-icon { color: var(--zfy-muted); }
 .sync.syncing .zfy-icon { animation: spin 1s linear infinite; }
+.pdot { display: inline-block; width: .5rem; height: .5rem; margin-left: .4rem; border-radius: 50%; background: var(--zfy-danger); flex: none; }
 .dot { position: absolute; top: .3rem; right: .3rem; width: .45rem; height: .45rem; border-radius: 50%; background: var(--zfy-accent); border: 1.5px solid var(--zfy-surface); }
 .offline .dot { background: var(--zfy-muted); }
 .error .dot { background: var(--zfy-danger); }
@@ -325,6 +455,9 @@ nav { flex: 1; }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }
 .who .role { overflow-wrap: anywhere; }
+.who .till-row { display: flex; flex-direction: column; gap: .1rem; }
+.who .till-row .switch { display: inline-flex; align-items: center; gap: .3rem; }
+.who .till-row .hint { font-size: .72rem; }
 .who .switch { align-self: flex-start; padding: 0; min-height: 0; border: 0; color: var(--zfy-accent-ink); font-size: .78rem; font-weight: 600; margin-top: .15rem; }
 .build { font-size: .68rem; color: var(--zfy-faint); font-family: ui-monospace, monospace; margin-top: .3rem; }
 /* Capped and centered so a page with no width opinion of its own doesn't

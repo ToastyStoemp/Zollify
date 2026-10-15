@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, shallowRef } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import { BackupParseError, planImport, unpackZip, type ImportPlan } from '../import';
 import { sdk } from '../runtime';
 
@@ -28,6 +29,8 @@ async function choose(event: Event): Promise<void> {
   fileName.value = file.name;
 
   try {
+    const problem = await checkPickedFile('backupImport', file);
+    if (problem) throw new BackupParseError(problem);
     if (/\.zip$/i.test(file.name)) {
       // The zip backup carries the photos beside the JSON. fflate is loaded on
       // demand: the JSON-only path never pays for it.

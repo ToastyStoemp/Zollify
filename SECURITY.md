@@ -159,7 +159,7 @@ new entitlements and Tax code.
 
 ## 14. Validate all input - Done (new code) / ongoing
 
-zod schemas guard new route boundaries. `bodyLimit` is 2 MB. Module ids are
+zod schemas guard new route boundaries. The default `bodyLimit` is 8 MB (`ZOLLIFY_MAX_BODY_MB`); routes that take files set their own, see §16. Module ids are
 constrained by pattern (`/^[a-z][a-z0-9-]*$/`) both in `defineModule` and at the
 toggle route.
 
@@ -176,21 +176,57 @@ toggle route.
 
 ## 16. Restrict file uploads - Done
 
-Two upload paths exist, both authenticated and account-scoped:
+One mechanism, used by every path that takes file content. What a purpose may
+be is defined once in `packages/shared/src/upload-limits.ts` (`UPLOAD_PURPOSES`:
+allowed types, a size cap per type), so the app and the server refuse the same
+files; the server half is `packages/server-core/src/upload-limits.ts`.
 
-- **Ledger invoices** (`POST /api/m/tax/ledger/expenses/:id/invoice`, Tax
-  module): base64 in JSON, capped at 10 MB, stored as a BLOB in SQLite keyed by
-  account and expense - never on the served static root, never by a caller-
-  chosen filename. Served back as base64 JSON to the authenticated caller only.
-- **Product photos** never reach the server as files. The device re-encodes any
-  picked image to a bounded JPEG + WebP thumbnail; only the thumbnail (~20 KB)
-  travels, as an `image.meta` sync op, and it is stored as bytes, never
-  executed or served with a caller-chosen type.
+- **The type comes from the bytes.** `sniffFileKind()` reads magic bytes (PNG,
+  JPEG, WebP, GIF, HEIC, PDF, zip, old Excel, PSD, TIFF, EPS, and text). The
+  client's Content-Type and the filename are never believed: a claim the bytes
+  contradict is a `415 type_mismatch`, and the stored type is the proven one.
+- **No markup, ever.** HTML, SVG and XML (anything that opens with a tag) are
+  refused for every purpose, even labelled `image/png`; names ending `.html`,
+  `.svg`, `.js`, `.exe` and similar are refused over any bytes. Files are not
+  served raw today (they come back as base64 JSON for the app to open as a
+  blob); `downloadHeaders()` gives any future raw route `Content-Disposition:
+  attachment`, `nosniff` and a sandboxing CSP.
+- **Clear errors.** `400` empty or unreadable, `413` too large (names the
+  limit), `415` wrong type (names what is allowed), each with a `message` the
+  UI shows as it stands. A body over its route limit gets the same shape.
+- **Caps** (defaults): pictures 5 MB, PDFs 10 MB, the invoice scanner 5 MB,
+  design files 25 MB, receipt logo 256 KB; event text files 2 MB.
+- **Body limits match, and bite early.** Every route that takes a file sets its
+  Fastify `bodyLimit` from the file cap (`base64BodyLimit`); Fastify refuses a
+  larger `Content-Length` before reading any of it, and counts streamed bytes
+  otherwise. The default for everything else is 8 MB (`ZOLLIFY_MAX_BODY_MB`),
+  the sync push is 8 MB (devices batch under 4 MB), and unauthenticated
+  requests stay capped at 256 KB. There is no multipart parser registered, so
+  there is no multipart surface (`fileSize`, `files`, `fields` limits would
+  need setting if one is ever added).
+- **Account quota.** `checkQuota()` counts event files, ledger invoices and
+  sourcing files together against `ZOLLIFY_ACCOUNT_STORAGE_MB` (default 500);
+  a replaced file frees its own bytes first. A module that stores files adds
+  its table with `addStorageSource()`. Events hold at most
+  `ZOLLIFY_EVENT_FILES_MAX` files (default 20).
+- **Enforced at:** event files `packages/server-core/src/routes/event-files.ts`;
+  ledger invoices, invoice scanning and voucher PDFs `apps/server/src/modules/tax/index.ts`;
+  design files and proofs `apps/server/src/modules/sourcing.ts`; receipt logo
+  `apps/server/src/modules/receipts.ts`. A new upload route calls
+  `decodeUpload()` and `checkQuota()` and sets its `bodyLimit`.
+- **In the browser** the same rules run before anything is read or sent
+  (`checkPickedFile()`): event attachments, ledger invoices and scans, the
+  logo, product photos, design files, the backup restore, the ZollTool zip
+  import, payments exports, booth layouts and key files. Imports are parsed on
+  the device and never uploaded as files; their caps bound memory, not storage.
+- Stored files are kept as BLOBs or under the data directory by account and
+  generated id, never on the served static root and never by a caller-chosen
+  filename. Product photos reach the server only as small re-encoded thumbnails
+  in sync ops.
 
-The gateway body limit is 32 MB - deliberately generous for a single-operator
-deployment (a backup restore pushes hundreds of thumbnails); the client splits
-pushes into batches under 4 MB. Authentication and the per-IP rate limit bound
-who can send that much, not the size itself.
+> **Known limits:** zip-based types (docx, xlsx, pkpass) are verified as zip
+> archives, not opened to confirm their inner structure. Event files stored
+> before this change keep the type the client claimed then.
 
 ## 17. Trim API responses - Partial
 

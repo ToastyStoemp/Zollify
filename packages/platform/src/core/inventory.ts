@@ -1,5 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import type { EventStock, InventoryItem, SalesEvent } from '@zollify/shared';
+import { eventHasEnded, localIsoDay } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -219,17 +220,32 @@ export function soldTotal(productId: string, variantId: string | null = ''): num
   return soldTotalByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
+const soldSinceCountByKey = computed(() => {
+  const out = new Map<string, number>();
+  for (const forEvent of soldSinceCountByEventAndKey.value.values()) {
+    for (const [key, qty] of forEvent) out.set(key, (out.get(key) ?? 0) + qty);
+  }
+  return out;
+});
+
+/**
+ * What is physically left of the pile: the last count minus every sale made
+ * since, claimed or not. Unlike Free, claims are not subtracted - claimed
+ * stock still exists, it is only promised.
+ */
+export function remainingFor(productId: string, variantId: string | null = ''): number {
+  return onHandFor(productId, variantId) - (soldSinceCountByKey.value.get(stockKey(productId, variantId)) ?? 0);
+}
+
 /**
  * A claim only reserves stock while its event is still to come or under way.
  * Once the event is over (closed, or its last day has passed) whatever it
  * took is either sold - and counted as such - or back in the pile.
  */
-export function eventIsOver(event: SalesEvent | undefined, today = new Date().toISOString().slice(0, 10)): boolean {
+export function eventIsOver(event: SalesEvent | undefined, today = localIsoDay()): boolean {
   // No event (deleted, or never synced here): nothing to reserve for.
   if (!event) return true;
-  if (event.status === 'closed') return true;
-  const end = event.dateEnd || event.dateStart;
-  return Boolean(end && end < today);
+  return eventHasEnded(event, today);
 }
 
 /** The claim as far as reservations go: a past event's claim no longer holds anything. */

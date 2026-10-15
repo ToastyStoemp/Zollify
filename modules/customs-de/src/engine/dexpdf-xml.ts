@@ -23,6 +23,7 @@
  * flagged in `warnings`. Review those before this ever reaches IAA-Plus's
  * upload screen for real.
  */
+import { localIsoDay } from '@zollify/shared';
 import { calcDeProduct, countryToCode, escapeXml, parsePostCodeCity } from './calc';
 import type { CustomsDeState } from './model';
 
@@ -190,7 +191,7 @@ export function buildDexpdfXml(state: CustomsDeState, now: Date = new Date()): D
   push(`</DEXPDF>`);
 
   const eventName = m.event || 'event';
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = localIsoDay(now);
   const filename = `${eventName}_DEXPDF_${dateStr}`.replace(/[^a-zA-Z0-9_\-.]/g, '_') + '.xml';
 
   return { xml: L.join('\n'), filename, warnings };

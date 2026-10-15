@@ -34,6 +34,19 @@ describe('clustering', () => {
     expect(cs.map((c) => c.clusterID).sort()).toEqual(['PN_2026_03_001', 'PN_2026_03_ONL']);
   });
 
+  it('a cluster keeps its id when an earlier one is imported later', () => {
+    const first = eng.mergeIn([], [pay('2026-03-14', 30)]);
+    expect(first[0]!.clusterID).toBe('PN_2026_03_001');
+    const both = eng.mergeIn(first, [pay('2026-03-06', 10)]);
+    expect(both.map((c) => [c.clusterID, c.totalPay])).toEqual([
+      ['PN_2026_03_001', 30],
+      ['PN_2026_03_002', 10],
+    ]);
+    // A freed number is not handed to the next new cluster either.
+    const later = eng.mergeIn(eng.remove(both, both[0]!.uid), [pay('2026-03-20', 5)]);
+    expect(later.map((c) => c.clusterID)).toEqual(['PN_2026_03_003', 'PN_2026_03_002']);
+  });
+
   it('re-importing the same file adds nothing twice', () => {
     const rows = [pay('2026-03-06', 10), pay('2026-03-07', 20)];
     const once = eng.mergeIn([], rows);

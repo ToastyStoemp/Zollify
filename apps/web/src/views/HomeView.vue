@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, defineAsyncComponent, markRaw, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { CalendarEntry } from '@zollify/sdk';
+import { contributions } from '../boot';
 import { useRouter } from 'vue-router';
 import {
   activeEvent,
@@ -9,11 +11,13 @@ import {
   inventoryRows,
   lastSyncAt,
   recentTransactions,
+  setActiveEvent,
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtPrice } from '@zollify/shared';
+import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
+import GettingStarted from '../components/GettingStarted.vue';
 
 /**
  * Home is the booth's morning glance: where you are selling, how today is
@@ -27,17 +31,27 @@ const account = currentAccount;
 const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Events, stores or both - what the account runs decides the shortcuts here. */
+const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
+/** Where the active event or store is managed. */
+const placesRoute = computed(() => ({ name: event.value && isStore(event.value) ? 'stores' : runs.value.events ? 'events' : 'stores' }));
+/** Staff see takings only when the owner allows it (Settings → Team). */
+const showTotals = computed(() => seesSalesTotals(account.value));
 
-// NOT toISOString().slice(0, 10) - that converts to UTC first, which shifts
-// the date by the timezone offset (e.g. a UTC+2 local midnight becomes
-// 22:00 the PREVIOUS day in UTC). Reading the local getters instead keeps
-// this matching the calendar day the user actually sees.
-function isoOf(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-const today = isoOf(new Date());
-const startOfDay = new Date();
-startOfDay.setHours(0, 0, 0, 0);
+// Ticked every minute so a tab left open overnight rolls over to the new day
+// instead of keeping yesterday's "today" until the next reload.
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => {
+  clock = setInterval(() => (now.value = Date.now()), 60_000);
+});
+onUnmounted(() => clearInterval(clock));
+const today = computed(() => localIsoDay(now.value));
+const startOfDay = computed(() => {
+  const d = new Date(now.value);
+  d.setHours(0, 0, 0, 0);
+  return d;
+});
 
 const greeting = computed(() => {
   const h = new Date().getHours();
@@ -46,9 +60,12 @@ const greeting = computed(() => {
 
 // ── Today at the active event ───────────────────────────────────────────────
 const event = activeEvent;
+/** Still on a convention that ended: say so, and offer the one running today. */
+const tillCheck = computed(() => tillEventCheck(event.value, visibleEvents.value));
+const endedOn = computed(() => (tillCheck.value.endedOn ? new Date(`${tillCheck.value.endedOn}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''));
 
 const todaysSales = computed(() =>
-  recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.getTime() && (!event.value || t.eventId === event.value.id)),
+  recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.value.getTime() && (!event.value || t.eventId === event.value.id)),
 );
 const eventSales = computed(() => (event.value ? recentTransactions.value.filter((t) => !t.revertedAt && t.eventId === event.value!.id) : []));
 
@@ -82,13 +99,13 @@ const bestToday = computed(() => {
 // ── Coming up ───────────────────────────────────────────────────────────────
 const upcoming = computed(() =>
   visibleEvents.value
-    .filter((e) => e.dateStart && (e.dateEnd ?? e.dateStart)! >= today)
+    .filter((e) => e.dateStart && (e.dateEnd ?? e.dateStart)! >= today.value)
     .sort((a, b) => a.dateStart!.localeCompare(b.dateStart!))
     .slice(0, 4),
 );
 
 function daysUntil(iso: string): string {
-  const d = Math.round((new Date(`${iso}T00:00:00`).getTime() - startOfDay.getTime()) / 86_400_000);
+  const d = Math.round((new Date(`${iso}T00:00:00`).getTime() - startOfDay.value.getTime()) / 86_400_000);
   if (d < 0) return 'now';
   if (d === 0) return 'today';
   if (d === 1) return 'tomorrow';
@@ -96,14 +113,10 @@ function daysUntil(iso: string): string {
   return `in ${Math.round(d / 7)} weeks`;
 }
 
-function range(e: { dateStart?: string; dateEnd?: string }): string {
-  const f = (s: string): string => new Date(`${s}T00:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  if (!e.dateStart) return '';
-  return e.dateEnd && e.dateEnd !== e.dateStart ? `${f(e.dateStart)} - ${f(e.dateEnd)}` : f(e.dateStart);
-}
+const range = (e: { dateStart?: string; dateEnd?: string }): string => (e.dateStart ? fmtDayRange(e.dateStart, e.dateEnd) : '');
 
 // ── Calendar ─────────────────────────────────────────────────────────────────
-const calMonth = ref(new Date(startOfDay.getFullYear(), startOfDay.getMonth(), 1));
+const calMonth = ref(new Date(startOfDay.value.getFullYear(), startOfDay.value.getMonth(), 1));
 function shiftMonth(delta: number): void {
   calMonth.value = new Date(calMonth.value.getFullYear(), calMonth.value.getMonth() + delta, 1);
 }
@@ -127,7 +140,7 @@ const sortedEvents = computed(() => [...visibleEvents.value].sort((a, b) => (a.d
 function addDays(iso: string, n: number): string {
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + n);
-  return isoOf(d);
+  return localIsoDay(d);
 }
 
 interface CalEventSpan {
@@ -142,6 +155,39 @@ interface CalDay {
   inMonth: boolean;
   isToday: boolean;
   events: CalEventSpan[];
+  /** What modules put on this day - an artist's setup at a store, say. */
+  entries: CalendarEntry[];
+}
+
+/**
+ * Entries from modules for the days on screen. Asked again when the month
+ * changes or a module comes or goes; a source that fails is just left out.
+ */
+const moduleEntries = ref<CalendarEntry[]>([]);
+function gridRange(): { from: string; to: string } {
+  const first = calMonth.value;
+  const start = new Date(first);
+  start.setDate(1 - ((first.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 41);
+  return { from: localIsoDay(start), to: localIsoDay(end) };
+}
+let asked = 0;
+async function loadEntries(): Promise<void> {
+  const mine = ++asked;
+  const range = gridRange();
+  const results = await Promise.all(contributions.calendarSources.map((c) => c.source(range).catch(() => [] as CalendarEntry[])));
+  if (mine === asked) moduleEntries.value = results.flat();
+}
+watch([calMonth, () => contributions.calendarSources.length], () => void loadEntries(), { immediate: true });
+/** Cards modules add (low stock at the stores an artist consigns with…), for this role. */
+const moduleCards = computed(() =>
+  account.value
+    ? contributions.homeCardsFor(account.value.role).map((c) => ({ id: c.id, comp: markRaw(defineAsyncComponent(c.component as () => Promise<never>)) }))
+    : [],
+);
+function openEntry(e: CalendarEntry): void {
+  if (e.link) void router.push(e.link);
 }
 const calendarWeeks = computed<CalDay[][]>(() => {
   const first = calMonth.value;
@@ -152,7 +198,7 @@ const calendarWeeks = computed<CalDay[][]>(() => {
   for (let w = 0; w < 6; w++) {
     const days: CalDay[] = [];
     for (let i = 0; i < 7; i++) {
-      const iso = isoOf(cursor);
+      const iso = localIsoDay(cursor);
       const prevIso = addDays(iso, -1);
       const nextIso = addDays(iso, 1);
       const events = sortedEvents.value
@@ -164,7 +210,8 @@ const calendarWeeks = computed<CalDay[][]>(() => {
           continuesLeft: i > 0 && e.dateStart! <= prevIso && (e.dateEnd ?? e.dateStart)! >= prevIso,
           continuesRight: i < 6 && e.dateStart! <= nextIso && (e.dateEnd ?? e.dateStart)! >= nextIso,
         }));
-      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today, events });
+      const entries = moduleEntries.value.filter((x) => x.date === iso).sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
+      days.push({ iso, day: cursor.getDate(), inMonth: cursor.getMonth() === first.getMonth(), isToday: iso === today.value, events, entries });
       cursor.setDate(cursor.getDate() + 1);
     }
     weeks.push(days);
@@ -206,19 +253,28 @@ const syncLine = computed(() => {
       <div class="actions">
         <router-link v-if="canSell" :to="{ name: 'pos:index' }" class="btn primary"><Icon name="shopping-cart" :size="16" /> Open the till</router-link>
         <router-link v-if="isAdmin" :to="{ name: 'catalog' }" class="btn"><Icon name="plus" :size="16" /> Product</router-link>
-        <router-link v-if="isAdmin" :to="{ name: 'events' }" class="btn"><Icon name="calendar" :size="16" /> Event</router-link>
+        <router-link v-if="isAdmin && runs.events" :to="{ name: 'events' }" class="btn"><Icon name="calendar" :size="16" /> Event</router-link>
+        <router-link v-if="isAdmin && runs.stores && !runs.events" :to="{ name: 'stores' }" class="btn"><Icon name="store" :size="16" /> Store</router-link>
       </div>
     </header>
 
     <div class="grid">
+      <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
-      <article class="card wide">
+      <article class="card wide today-card">
         <header class="chead">
           <h2>Today</h2>
-          <router-link v-if="event" :to="{ name: 'events' }" class="sub">at {{ event.name }}</router-link>
-          <router-link v-else :to="{ name: 'events' }" class="sub warn"><Icon name="alert-triangle" :size="14" /> No active event - sales won't be filed against one</router-link>
+          <router-link v-if="event" :to="placesRoute" class="sub">at {{ event.name }}</router-link>
+          <router-link v-else :to="placesRoute" class="sub warn"><Icon name="alert-triangle" :size="14" /> {{ runs.events ? "No active event - sales won't be filed against one" : "No store open - sales won't be filed against one" }}</router-link>
         </header>
-        <div class="figures">
+        <p v-if="tillCheck.ended" class="stale" role="alert">
+          <Icon name="alert-triangle" :size="14" />
+          <span>{{ event?.name }} {{ event?.status === 'closed' ? 'is closed' : `ended ${endedOn}` }} - sales still go to it.</span>
+          <button v-if="tillCheck.runningToday" type="button" class="link" @click="setActiveEvent(tillCheck.runningToday.id)">Switch to {{ tillCheck.runningToday.name }}</button>
+          <router-link :to="placesRoute" class="link">{{ tillCheck.runningToday ? 'Events' : 'Close it or pick another' }}</router-link>
+        </p>
+        <p v-if="!showTotals" class="hint">Sales totals are kept for the owner. Ring up sales in the till; your own sales are under History.</p>
+        <div v-if="showTotals" class="figures">
           <div class="figure big">
             <span class="label">Taken today</span>
             <strong>{{ fmtPrice(todayTotal, currency) }}</strong>
@@ -226,9 +282,9 @@ const syncLine = computed(() => {
           </div>
           <div class="figure"><span class="label">Cash</span><strong>{{ fmtPrice(todayCash, currency) }}</strong></div>
           <div class="figure"><span class="label">Card</span><strong>{{ fmtPrice(todayCard, currency) }}</strong></div>
-          <div v-if="event" class="figure"><span class="label">Whole event</span><strong>{{ fmtPrice(eventTotal, currency) }}</strong><small>{{ eventSales.length }} sales</small></div>
+          <div v-if="event" class="figure"><span class="label">{{ isStore(event) ? "Since it opened" : "Whole event" }}</span><strong>{{ fmtPrice(eventTotal, currency) }}</strong><small>{{ eventSales.length }} sales</small></div>
         </div>
-        <div v-if="bestToday.length" class="best">
+        <div v-if="showTotals && bestToday.length" class="best">
           <span class="label">Selling best</span>
           <ol>
             <li v-for="b in bestToday" :key="b.title"><span>{{ b.title }}</span><strong>{{ b.qty }}</strong></li>
@@ -263,19 +319,32 @@ const syncLine = computed(() => {
               :key="d.iso"
               :to="d.events.length ? { name: 'events' } : undefined"
               class="cal-day"
-              :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length }"
+              :class="{ 'out-month': !d.inMonth, today: d.isToday, 'has-events': d.events.length || d.entries.length }"
             >
               <span class="cal-date">{{ d.day }}</span>
-              <span v-if="d.events.length" class="cal-names">
+              <span v-if="d.events.length || d.entries.length" class="cal-names">
                 <span
                   v-for="e in d.events.slice(0, 2)"
                   :key="e.event.id"
                   class="cal-name"
                   :class="[e.event.status, { left: e.continuesLeft, right: e.continuesRight }]"
                   :title="`${e.event.name} · ${e.event.status}`"
-                  >{{ e.event.name }}</span
+                  ><Icon v-if="!e.continuesLeft" name="calendar" :size="10" class="cal-ico" />{{ e.event.name }}</span
                 >
-                <span v-if="d.events.length > 2" class="cal-more">+{{ d.events.length - 2 }} more</span>
+                <!-- Module entries (setups…) share the two visible lines with events. -->
+                <span
+                  v-for="x in d.entries.slice(0, Math.max(0, 2 - d.events.length))"
+                  :key="x.id"
+                  class="cal-entry"
+                  :class="x.tone ?? 'normal'"
+                  :title="x.time ? `${x.time} · ${x.title}` : x.title"
+                  role="link"
+                  tabindex="0"
+                  @click.stop.prevent="openEntry(x)"
+                  @keydown.enter.stop.prevent="openEntry(x)"
+                  ><Icon :name="x.icon ?? 'clock'" :size="10" class="cal-ico" /><b v-if="x.time" class="cal-time">{{ x.time }}</b>{{ x.title }}</span
+                >
+                <span v-if="d.events.length + d.entries.length > 2" class="cal-more">+{{ d.events.length + d.entries.length - 2 }} more</span>
               </span>
             </component>
           </template>
@@ -283,7 +352,7 @@ const syncLine = computed(() => {
       </article>
 
       <!-- ── Coming up ───────────────────────────────────────────────────── -->
-      <article class="card">
+      <article v-if="runs.events" class="card">
         <header class="chead"><h2>Coming up</h2></header>
         <p v-if="!upcoming.length" class="empty">No upcoming events. <router-link :to="{ name: 'events' }">Plan one</router-link>.</p>
         <ul v-else class="list">
@@ -297,8 +366,7 @@ const syncLine = computed(() => {
         </ul>
         <footer class="cfoot">
           <router-link :to="{ name: 'events' }">All events <Icon name="chevron-right" :size="14" /></router-link>
-          <router-link v-if="hasRoute('customs-ch:index')" :to="{ name: 'customs-ch:index' }">Customs papers (CH) <Icon name="chevron-right" :size="14" /></router-link>
-          <router-link v-if="hasRoute('customs-de:index')" :to="{ name: 'customs-de:index' }">Customs papers (DE) <Icon name="chevron-right" :size="14" /></router-link>
+          <router-link v-if="hasRoute('customs-hub:index') && (hasRoute('customs-ch:index') || hasRoute('customs-de:index'))" :to="{ name: 'customs-hub:index' }">Customs papers <Icon name="chevron-right" :size="14" /></router-link>
         </footer>
       </article>
 
@@ -321,11 +389,15 @@ const syncLine = computed(() => {
           <router-link v-if="isAdmin" :to="{ name: 'catalog' }">Products <Icon name="chevron-right" :size="14" /></router-link>
         </footer>
       </article>
+
+      <!-- ── Cards from modules ──────────────────────────────────────────── -->
+      <article v-for="c in moduleCards" :key="c.id" class="card"><component :is="c.comp" /></article>
     </div>
   </section>
 </template>
 
 <style scoped>
+.card .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .86rem; }
 .home { display: flex; flex-direction: column; gap: 1.25rem; }
 .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.01em; }
@@ -336,11 +408,20 @@ h2 { margin: 0; font-size: 1rem; }
 .btn:hover { background: var(--zfy-surface-2); }
 .btn.primary { background: var(--zfy-accent); border-color: var(--zfy-accent); color: var(--zfy-on-accent); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+/* On a phone the month calendar would fill the first screen: what is coming up and what runs low come first. */
+@media (max-width: 640px) {
+  .grid > .card.wide:not(.today-card):not(.getting-started) { order: 1; }
+  .today-card .figures { grid-template-columns: 1fr 1fr; gap: .5rem; }
+  .today-card .figure { max-width: none; }
+  .today-card .figure.big strong { font-size: 1.4rem; }
+}
 .card { border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 .card.wide { grid-column: 1 / -1; }
 .chead { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .sub { color: var(--zfy-muted); font-size: .85rem; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; }
 .sub.warn { color: var(--zfy-warning-ink); }
+.stale { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .7rem; margin: 0 0 .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-warning); border-radius: 10px; color: var(--zfy-warning-ink); font-size: .85rem; }
+.stale .link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted); }
 .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
 .figure { display: flex; flex-direction: column; gap: .1rem; padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-bg); max-width: 16rem; }
@@ -363,6 +444,11 @@ h2 { margin: 0; font-size: 1rem; }
 .cal-nav { display: flex; align-items: center; gap: .3rem; }
 .icon-btn { display: inline-flex; align-items: center; gap: .25rem; border: 1px solid var(--zfy-line); background: var(--zfy-bg); color: inherit; border-radius: 8px; padding: .3rem .55rem; font-size: .78rem; cursor: pointer; }
 .icon-btn:hover { background: var(--zfy-surface-2); }
+.cal-entry { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .68rem; line-height: 1.35; padding: 0 .3rem; border-radius: 4px; border-left: 3px solid var(--zfy-warning); background: var(--zfy-bg); color: var(--zfy-ink); cursor: pointer; }
+.cal-ico { display: inline-block; vertical-align: -1px; margin-right: .25em; opacity: .8; }
+.cal-time { font-weight: 600; margin-right: .3em; }
+.cal-entry.attention { border-left-color: var(--zfy-danger); background: var(--zfy-signal-soft); font-weight: 600; }
+.cal-entry.muted { color: var(--zfy-muted); text-decoration: line-through; }
 .calendar { display: grid; grid-template-columns: repeat(7, 1fr); gap: .25rem; }
 .cal-weekday { text-align: center; font-size: .72rem; letter-spacing: .04em; text-transform: uppercase; color: var(--zfy-muted); padding-bottom: .25rem; }
 .cal-day {

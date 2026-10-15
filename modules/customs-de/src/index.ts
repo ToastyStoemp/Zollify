@@ -1,4 +1,6 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
+import { CUSTOMS_BUNDLE_REQUEST, type CustomsBundleRequest } from '@zollify/customs-core';
+import { germanBundleProvider } from './bundle';
 import { clearSdk, setSdk } from './runtime';
 
 /**
@@ -15,11 +17,11 @@ import { clearSdk, setSdk } from './runtime';
  */
 export default defineModule({
   id: 'customs-de',
-  version: '0.1.10',
+  version: '0.1.15',
   sdk: '^0.1.0',
   title: 'Customs (Germany)',
   description: 'ATLAS export/re-import preparation: packing lists and a filing checklist.',
-  requires: ['catalog'],
+  requires: ['catalog', 'customs-hub'],
   minRole: 'admin',
 
   setup(sdk: Sdk) {
@@ -45,6 +47,9 @@ export default defineModule({
       component: () => import('./views/DeclarantSettings.vue'),
       order: 121,
     });
+
+    // The customs hub's "export all documents" buttons ask each country module for its documents.
+    sdk.events.on(CUSTOMS_BUNDLE_REQUEST, (req) => (req as CustomsBundleRequest).providers.push(germanBundleProvider));
 
     sdk.log.info('customs-de module ready');
   },

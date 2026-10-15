@@ -13,7 +13,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Price Cards',
-  description: 'Printable price cards for the booth, straight from the catalogue.',
+  description: 'Printable price cards, straight from the catalogue.',
   requires: ['catalog'],
   minRole: 'member',
 

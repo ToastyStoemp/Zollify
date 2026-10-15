@@ -3,11 +3,13 @@ import {
   calcProductByMaterial,
   countryToCode,
   escapeXml,
+  getNonCustomsLawObligation,
   getPermitObligation,
   getVatCode,
   parsePostCodeCity,
   toEdecHsCode,
 } from './calc';
+import { localIsoDay } from '@zollify/shared';
 import type { CustomsProduct, CustomsState } from './model';
 
 export interface EdecResult {
@@ -111,7 +113,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
    * a product whose own variants use different materials still gets one
    * position per material rather than folding them together.
    *
-   * permit/vatCode/origin/packaging are taken from whichever product reaches
+   * vatCode/origin/packaging are taken from whichever product reaches
    * a given (HS code, material) key first - real catalogs practically always
    * agree on these for the same code and material (permit/vatCode already
    * both derive from the HS code by default), so this is a rounding
@@ -126,6 +128,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
     weightKg: number;
     titles: string[];
     permit: number;
+    nonCustomsLaw: number;
     vatCode: number;
     originCc: string;
     packagingType: string;
@@ -143,7 +146,13 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
   for (const p of soldProducts) {
     for (const mc of calcProductByMaterial(p)) {
       if (!(mc.soldQty > 0)) continue;
-      const key = `${p.tariffNo || ''}\x00${mc.material}`;
+      // Keyed by the exported code, so 4202.22.10 and 4202.22.90 - the same
+      // line once cut to the subheading - become one position, not two.
+      const key = `${toEdecHsCode(p.tariffNo)}\x00${mc.material}`;
+      // A product's own override sets both, as before; otherwise each comes
+      // from the HS table on its own (they can differ - see HsCode).
+      const permit = p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo);
+      const nonCustomsLaw = p.permitOverride != null ? p.permitOverride : getNonCustomsLawObligation(p.tariffNo);
       let g = groups.get(key);
       if (!g) {
         g = {
@@ -153,13 +162,17 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
           statValue: 0,
           weightKg: 0,
           titles: [],
-          permit: p.permitOverride != null ? p.permitOverride : getPermitObligation(p.tariffNo),
+          permit,
+          nonCustomsLaw,
           vatCode: getVatCode(p.vatRate),
           originCc: p.originCountry && p.originCountry.trim() ? p.originCountry.trim().toUpperCase() : dispatchCountry,
           packagingType: p.packagingType || 'CT',
         };
         groups.set(key, g);
       }
+      // A merged line needs a permit if any product in it does.
+      g.permit = Math.max(g.permit, permit);
+      g.nonCustomsLaw = Math.max(g.nonCustomsLaw, nonCustomsLaw);
       g.soldQty += mc.soldQty;
       g.statValue += statValueFor(p, mc.soldQty, mc.soldValue);
       g.weightKg += mc.soldWeightKg;
@@ -170,18 +183,24 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
   [...groups.values()].forEach((g, idx) => {
     const hsCode = toEdecHsCode(g.tariffNo);
-    // Round to nearest 100 g (0.1 kg), minimum 0.1 kg.
-    const weightKg = Math.max(0.1, Math.round(g.weightKg * 10) / 10);
-    const statValue = Math.floor(g.statValue);
+    // Declared as they are - no rounding to 100 g or down to whole units.
+    // Sold values are already whole units (declaredLineValues); these only
+    // trim floating-point noise: weight to the gram, value to the cent.
+    const weightKg = Math.round(g.weightKg * 1000) / 1000;
+    const statValue = Math.round(g.statValue * 100) / 100;
 
     lines.push(`      <GoodsItemType>`);
     lines.push(`        <traderItemID>${idx}</traderItemID>`);
-    lines.push(`        <description>${escapeXml(g.soldQty + ' ' + g.titles.join(', '))}</description>`);
+    // Material is part of what makes a position (see the grouping above), so
+    // it goes in the description too: "14 Dragon Pin, Wolf Pin (Zinc alloy)".
+    const material = g.material.trim();
+    const description = `${g.soldQty} ${g.titles.join(', ')}${material ? ` (${material})` : ''}`;
+    lines.push(`        <description>${escapeXml(description)}</description>`);
     lines.push(`        <commodityCode>${escapeXml(hsCode)}</commodityCode>`);
     lines.push(`        <grossMass>${weightKg}</grossMass>`);
     lines.push(`        <netMass>${weightKg}</netMass>`);
     lines.push(`        <permitObligation>${g.permit}</permitObligation>`);
-    lines.push(`        <nonCustomsLawObligation>${g.permit}</nonCustomsLawObligation>`);
+    lines.push(`        <nonCustomsLawObligation>${g.nonCustomsLaw}</nonCustomsLawObligation>`);
     lines.push(`        <statistic>`);
     lines.push(`          <customsClearanceType>1</customsClearanceType>`);
     lines.push(`          <commercialGood>1</commercialGood>`);
@@ -224,7 +243,7 @@ export function buildEdecXml(state: CustomsState, now: Date = new Date()): EdecR
 
   const eventName = state.meta.event || 'ZollTool';
   const artist = state.artist.companyName || state.artist.fullName || '';
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = localIsoDay(now);
   const filename =
     [eventName, artist, 'edec', dateStr]
       .filter(Boolean)

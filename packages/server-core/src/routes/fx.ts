@@ -46,6 +46,10 @@ export function registerFxRoutes(app: FastifyInstance): void {
     if (!from || !to || !dates.length) {
       return reply.code(400).send({ error: 'invalid_params', message: 'from, to and dates are required.' });
     }
+    // These go into the upstream URL and the cache key: strict shapes and a bounded count.
+    if (!/^[A-Z]{3}$/.test(from) || !/^[A-Z]{3}$/.test(to) || dates.length > 400 || dates.some((d) => !/^\d{4}-\d{2}-\d{2}$/.test(d))) {
+      return reply.code(400).send({ error: 'invalid_params', message: 'Use three-letter currency codes and YYYY-MM-DD dates (at most 400).' });
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     const unique = [...new Set(dates)];

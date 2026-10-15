@@ -124,6 +124,16 @@ export async function createBackup(options?: BackupOptions): Promise<ZollifyBack
     inventory = inventory.filter((i) => claimed.has(`${i.productId}\x00${i.variantId}`));
   }
 
+  // Only images a live product or variant still points at; a photo replaced
+  // or removed before this code cleaned them up is dead weight in the file.
+  const referenced = new Set<string>();
+  for (const p of products) {
+    if (p.deletedAt) continue;
+    if (p.imageId) referenced.add(p.imageId);
+    for (const v of p.variants ?? []) if (v.imageId) referenced.add(v.imageId);
+  }
+  imageRecs = imageRecs.filter((rec) => referenced.has(rec.id));
+
   const images: BackupImage[] = await Promise.all(
     imageRecs.map(async (rec) => ({
       id: rec.id,
@@ -291,13 +301,14 @@ export function backupFilename(backup: ZollifyBackup): string {
  * discard their copy on their next sync (the server's epoch changed); their
  * unpushed sales are kept locally, as with any epoch change.
  */
-export async function wipeAccountData(): Promise<void> {
+export async function wipeAccountData(options: { archived?: boolean } = {}): Promise<void> {
   const account = getAccount();
   if (!account) throw new Error('Not signed in.');
   // The device identity lives in the same database; keep it so this stays the
   // same registered device (and its refresh token) after the reload.
   const keep = await openCoreDb(account.accountId).settings.where('key').startsWith('core.device').toArray();
-  await authFetch('/account/wipe', { method: 'POST' });
+  // `archived` says a backup with the sales in it was saved; the server keeps sales inside their retention period otherwise.
+  await authFetch('/account/wipe', { method: 'POST', body: JSON.stringify({ archived: options.archived === true }) });
   await deleteCoreDb(account.accountId);
   const mine = (await listZollifyDbs()).filter((n) => n.includes(account.accountId.replace(/[^A-Za-z0-9_-]/g, '_')));
   for (const name of mine) await Dexie.delete(name);

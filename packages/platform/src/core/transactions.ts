@@ -6,6 +6,7 @@ import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
+import { getProduct } from './catalog';
 import { getSalesEvent } from './sales-events';
 import { signCancellation, signSale, tseRequiredFor } from './tse';
 import { localDay, takeReceiptNumber } from './closings';
@@ -57,15 +58,32 @@ function toMinor(value: number): number {
   return Math.round(value * 100);
 }
 
+/** The till's snapshot, minus a per-line discount list that doesn't pair with the items. */
+function asChargedFor(snap: NonNullable<SaleEvent['asCharged']>, itemCount: number): NonNullable<Transaction['asCharged']> {
+  const { lineDiscounts, ...rest } = snap;
+  return lineDiscounts && lineDiscounts.length === itemCount ? { ...rest, lineDiscounts } : rest;
+}
+
 /**
  * Turns the SDK's cross-module `sale` announcement into a stored Transaction.
  *
  * The SDK event is deliberately a smaller shape than `Transaction` - it is the
  * contract other modules consume, and widening it would make every subscriber
  * depend on storage details. The mapping lives here instead.
+ *
+ * `consignorOf` names the consignment artist an item belongs to right now; it
+ * is copied onto the line so the sale stays theirs whatever happens to the
+ * product later.
  */
-export function saleToTransaction(sale: SaleEvent, device: string): Transaction {
+export function saleToTransaction(
+  sale: SaleEvent,
+  device: string,
+  consignorOf: (productId: string) => string | undefined = () => undefined,
+): Transaction {
   const items: TxItem[] = sale.lines.map((line) => ({
+    ...withConsignor(line.consignorId ?? consignorOf(line.productId)),
+    ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
+    ...(line.ref ? { ref: { moduleId: line.ref.moduleId, kind: line.ref.kind, id: line.ref.id } } : {}),
     pid: line.productId,
     vid: line.variantId ?? null,
     title: line.name,
@@ -82,7 +100,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
   // the cash box.
   const method = sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card');
   const legs: PaymentLeg[] = sale.payment.legs?.length
-    ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider }))
+    ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider, ...(l.settled ? { settled: l.settled } : {}) }))
     : [
         {
           kind: method === 'cash' ? 'cash' : 'card',
@@ -90,6 +108,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
           provider: sale.payment.provider,
           txRef: sale.payment.txRef,
           cardBrand: sale.payment.cardBrand,
+          ...(sale.payment.settled ? { settled: sale.payment.settled } : {}),
         },
       ];
 
@@ -107,7 +126,7 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
     total: sale.total,
     currency: sale.currency,
     ...(sale.receiptToken ? { receiptToken: sale.receiptToken } : {}),
-    ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: sale.asCharged } : {}),
+    ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: asChargedFor(sale.asCharged, items.length) } : {}),
     ...(sale.tax && sale.tax.rates.length === items.length ? { tax: sale.tax } : {}),
     // Only set when the sale was converted; an unconverted sale leaves these
     // absent rather than duplicating its own currency into them.
@@ -121,9 +140,22 @@ export function saleToTransaction(sale: SaleEvent, device: string): Transaction 
   };
 }
 
+const withConsignor = (consignorId: string | undefined): Pick<TxItem, 'consignorId'> => (consignorId ? { consignorId } : {});
+
+/**
+ * Receipt numbers are taken in receipt-numbers.ts: counted per till, gap-free,
+ * inside the write that records the sale (`tx.receipt`). Sales numbered before
+ * that keep their `receiptNumber` string; the till's count carries on from it.
+ */
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
-  const tx = toPlain(saleToTransaction(sale, await deviceId()));
+  const who = getAccount();
+  const device = await deviceId();
+  const tx = toPlain({
+    ...saleToTransaction(sale, device, (id) => getProduct(id)?.consignorId),
+    // The server stamps this too, from the signed-in user; this copy is so the till that made the sale knows without a round trip.
+    ...(who ? { soldBy: { userId: who.userId, email: who.email } } : {}),
+  });
   tx.receipt = await takeReceiptNumber({ day: localDay(tx.timestamp), eventId: tx.eventId, currency: tx.currency });
   // KassenSichV: a sale in Germany is signed by this device's TSE before it
   // is stored, over the same figures its receipt prints. A TSE failure is

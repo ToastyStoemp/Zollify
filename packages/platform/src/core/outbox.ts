@@ -45,14 +45,14 @@ export async function queueOp(op: PendingOp): Promise<void> {
     payload: toPlain(op.payload),
   };
 
-  await db.ops.add({ ...wire, synced: 0 } as OutboxOp);
+  await db.ops.add({ ...wire, synced: 0, userId: getAccount()?.userId } as OutboxOp);
   await refreshPendingCount();
 }
 
-export async function unsyncedOps(limit = 500): Promise<OutboxOp[]> {
+export async function unsyncedOps(limit = 2000): Promise<OutboxOp[]> {
   const db = openCoreDb(requireAccountId());
-  // The protocol caps a push at 500 ops; ordering by insertion keeps a device's
-  // own changes applied in the order they were made.
+  // Ordering by insertion keeps a device's own changes applied in the order
+  // they were made; push() splits this into batches the protocol accepts.
   return db.ops.where('synced').equals(0).limit(limit).toArray();
 }
 

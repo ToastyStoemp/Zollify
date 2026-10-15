@@ -19,11 +19,13 @@ const store = new Map<string, string>();
 
 let current = '1.0.0';
 const download = vi.fn(async (o: { version: string }) => ({ id: `b-${o.version}`, version: o.version }));
-const next = vi.fn(async () => ({}));
+let queued: { id: string; version: string } | null = null;
+const next = vi.fn(async (o: { id: string }) => ((queued = { id: o.id, version: o.id.replace(/^b-/, '') }), queued));
+const reload = vi.fn(async () => {});
 (globalThis as { Capacitor?: unknown }).Capacitor = {
   isNativePlatform: () => true,
   isPluginAvailable: () => true,
-  Plugins: { CapacitorUpdater: { current: async () => ({ bundle: { id: 'x', version: current }, native: false }), download, next, notifyAppReady: async () => ({}), reload: async () => {} } },
+  Plugins: { CapacitorUpdater: { current: async () => ({ bundle: { id: 'x', version: current }, native: false }), download, next, notifyAppReady: async () => ({}), reload, getNextBundle: async () => queued } },
 };
 globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ version: '1.1.0', url: '/api/shell/1.1.0/bundle.zip', integrity: 'abc', sizeBytes: 900_000 }))) as typeof fetch;
 
@@ -31,6 +33,8 @@ beforeEach(() => {
   vi.resetModules();
   store.clear();
   download.mockClear();
+  reload.mockClear();
+  queued = null;
   current = '1.0.0';
 });
 
@@ -63,9 +67,28 @@ describe('background content updates', () => {
   it('forgets the queued version once the restart has activated it', async () => {
     const { checkShellUpdate, queueShellUpdate, shellUpdateQueued } = await import('../shell-updates');
     await queueShellUpdate((await checkShellUpdate())!);
-    expect(shellUpdateQueued('1.1.0')).toBe(true);
+    expect(await shellUpdateQueued('1.1.0')).toBe(true);
     current = '1.1.0';
+    queued = null;
     await checkShellUpdate();
-    expect(shellUpdateQueued('1.1.0')).toBe(false);
+    expect(await shellUpdateQueued('1.1.0')).toBe(false);
+  });
+
+  it('downloads again when the plugin lost the queue (rolled back) but our note remains', async () => {
+    const { checkAndQueueShellUpdate, shellUpdateQueued } = await import('../shell-updates');
+    expect(await checkAndQueueShellUpdate()).toBe('1.1.0');
+    queued = null; // the new bundle never reported ready; the plugin rolled back and forgot it
+    expect(await shellUpdateQueued('1.1.0')).toBe(false);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.now() + 31 * 60_000);
+    expect(await checkAndQueueShellUpdate()).toBe('1.1.0');
+    expect(download).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('refuses to "reload" when nothing is queued instead of restarting the old bundle', async () => {
+    const { reloadShellNow } = await import('../shell-updates');
+    await expect(reloadShellNow()).rejects.toThrow(/no longer queued/);
+    expect(reload).not.toHaveBeenCalled();
   });
 });

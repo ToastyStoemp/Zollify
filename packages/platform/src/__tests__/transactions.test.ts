@@ -24,6 +24,7 @@ const backup = await import('../core/backup');
 const catalog = await import('../core/catalog');
 const events = await import('../core/sales-events');
 const device = await import('../core/device');
+const tse = await import('../core/tse');
 const images = await import('../core/images');
 
 function sale(over: Partial<SaleEvent> = {}): SaleEvent {
@@ -56,6 +57,32 @@ describe('recording sales', () => {
 
     expect(tx.recentTransactions.value).toHaveLength(1);
     expect(tx.getTransaction('s1')?.total).toBe(35);
+  });
+
+  it('keeps what a line added by a module paid for, and its own split', () => {
+    const t = tx.saleToTransaction(
+      sale({
+        lines: [
+          { productId: 'workshop:w1', sku: null, name: 'Linocut · Alex', qty: 2, unitPrice: 45, lineTotal: 90, taxRate: null, consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } },
+        ],
+      }),
+      'dev',
+      () => 'someone-else',
+    );
+    expect(t.items[0]).toMatchObject({ consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } });
+  });
+
+  it('keeps the consignment artist a line belonged to when it sold', async () => {
+    const product = { id: 'p1', title: 'Anchor print', forSale: true, unlisted: false, price: 35, variants: [], sortOrder: 0, updatedAt: 1 };
+    await catalog.upsertProduct({ ...product, consignorId: 'artist-1' });
+    const recorded = await tx.recordSale(sale({ saleId: 'c1' }));
+    expect(recorded.items[0]?.consignorId).toBe('artist-1');
+
+    // Moving the product to someone else later does not move the sale.
+    await catalog.upsertProduct({ ...product, updatedAt: 2 });
+    expect(tx.getTransaction('c1')?.items[0]?.consignorId).toBe('artist-1');
+    const own = await tx.recordSale(sale({ saleId: 'c2' }));
+    expect(own.items[0]).not.toHaveProperty('consignorId');
   });
 
   it('maps a manual payment to cash and a terminal to card', async () => {
@@ -135,12 +162,60 @@ describe('recording sales', () => {
     expect(stored?.exchangeRate).toBe(10.77);
   });
 
+  it('keeps what the card was charged when it settled in the base currency', async () => {
+    // A German booth in Switzerland: 30 CHF on the till, 32.15 EUR on the card.
+    const settled = { amount: 32.15, currency: 'EUR', rate: 0.9331 };
+    const single = tx.saleToTransaction(
+      sale({ currency: 'CHF', total: 30, baseCurrency: 'EUR', baseTotal: 30, exchangeRate: 1, payment: { provider: 'mypos-carbon', approved: true, method: 'card', settled } }),
+      'dev',
+    );
+    expect(single.payments).toEqual([expect.objectContaining({ kind: 'card', amount: 30, settled })]);
+
+    const split = tx.saleToTransaction(
+      sale({
+        currency: 'CHF',
+        total: 30,
+        payment: {
+          provider: 'split',
+          approved: true,
+          method: 'split',
+          legs: [{ kind: 'cash', amount: 10 }, { kind: 'card', amount: 20, settled: { amount: 21.43, currency: 'EUR', rate: 0.9331 } }],
+        },
+      }),
+      'dev',
+    );
+    expect(split.payments[0]).not.toHaveProperty('settled');
+    expect(split.payments[1]?.settled?.amount).toBe(21.43);
+  });
+
   it('leaves the conversion fields off an unconverted sale', async () => {
     await tx.recordSale(sale({ saleId: 'home', currency: 'CHF', baseCurrency: 'CHF' }));
 
     const stored = tx.getTransaction('home');
     expect(stored?.baseCurrency).toBeUndefined();
     expect(stored?.exchangeRate).toBeUndefined();
+  });
+});
+
+describe('receipt numbers', () => {
+  it('run on without gaps on the till, and a refund is numbered as a receipt of its own', async () => {
+    const till = await tse.tillId();
+    const a = await tx.recordSale(sale({ saleId: 'n-1' }));
+    const b = await tx.recordSale(sale({ saleId: 'n-2' }));
+    expect(a.receipt).toEqual({ till, number: 1 });
+    expect(b.receipt).toEqual({ till, number: 2 });
+    await tx.revertTransaction('n-1');
+    const c = await tx.recordSale(sale({ saleId: 'n-3' }));
+    expect(c.receipt).toEqual({ till, number: 4 });
+    expect(tx.getTransaction('n-1')?.receipt).toEqual({ till, number: 1 });
+    expect(tx.getTransaction('n-1')?.revertReceipt).toEqual({ till, number: 3 });
+  });
+
+  it('carry on from the count of the earlier <series>-<count> numbering', async () => {
+    const db = openCoreDb(account.accountId);
+    await db.settings.put({ key: 'core.receiptSeq', value: 41 });
+    const a = await tx.recordSale(sale({ saleId: 'n-legacy' }));
+    expect(a.receipt?.number).toBe(42);
   });
 });
 
@@ -202,7 +277,8 @@ describe('totals', () => {
 
 describe('backup', () => {
   it('round-trips everything core owns, including photos', async () => {
-    await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false } as never);
+    // The product must point at the image: a backup only carries photos something still uses.
+    await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false, imageId: 'img-1' } as never);
     await events.upsertSalesEvent({ id: 'ev-1', name: 'Fair', venue: {}, currency: 'CHF', status: 'planned' } as never);
     await tx.recordSale(sale({ saleId: 's1' }));
     await images.importProductImage({

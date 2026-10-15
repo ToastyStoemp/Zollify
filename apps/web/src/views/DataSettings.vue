@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import {
   RestoreError,
   backupFilename,
@@ -38,19 +39,28 @@ const eventIdsForExport = computed<string[] | undefined>(() =>
   eventScope.value === 'selected' ? [...selectedEventIds.value] : undefined,
 );
 
+/**
+ * Set once a backup that includes every sale was saved from this page. Sales
+ * are accounting records with a retention period, so the server refuses to
+ * erase them until the app says they were saved elsewhere.
+ */
+const salesArchived = ref(false);
+
 /** Owner only: server-side erase plus a local reset; the page reloads into an empty booth. */
 async function wipe(): Promise<void> {
   const ok = await shellConfirm(
-    'Erase every product, event, sale and photo in this booth, on the server and on this device? Export a backup first - this cannot be undone.',
+    salesArchived.value
+      ? 'Erase every product, event, sale and photo in this account, on the server and on this device? Keep the backup you saved - this cannot be undone.'
+      : 'Erase every product, event, sale and photo in this account, on the server and on this device? Sales still inside their retention period are refused until a backup with all sales was saved from this page.',
     'Erase everything',
   );
   if (!ok) return;
   busy.value = 'wipe';
   error.value = null;
   try {
-    await wipeAccountData();
+    await wipeAccountData({ archived: salesArchived.value });
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not erase the booth data.';
+    error.value = err instanceof Error ? err.message : 'Could not erase the data.';
     busy.value = null;
   }
 }
@@ -75,6 +85,7 @@ async function exportBackup(): Promise<void> {
     status.value =
       `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events and ` +
       `${backup.transactions.length} sales.`;
+    if (include.value.transactions && !eventIdsForExport.value) salesArchived.value = true;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create a backup.';
   } finally {
@@ -92,6 +103,8 @@ async function choose(event: Event): Promise<void> {
   pending.value = null;
 
   try {
+    const problem = await checkPickedFile('backupJson', file);
+    if (problem) throw new Error(problem);
     const raw = JSON.parse(await file.text()) as unknown;
     pending.value = { summary: inspectBackup(raw), raw, name: file.name };
   } catch (err) {
@@ -142,7 +155,7 @@ async function confirmRestore(): Promise<void> {
   <section class="data">
     <h2>Backup &amp; restore</h2>
     <p class="hint">
-      Your booth's data lives on this device. Sync copies it to your other devices, but an exported
+      Your business's data lives on this device. Sync copies it to your other devices, but an exported
       file is the only thing that survives losing them all - export before every convention.
     </p>
 
@@ -156,7 +169,7 @@ async function confirmRestore(): Promise<void> {
         <button type="button" :class="{ active: eventScope === 'selected' }" @click="eventScope = 'selected'">Choose events</button>
       </div>
       <p v-if="eventScope === 'selected'" class="hint">
-        Only the picked events' own event info, stock claims and sales come along - not the rest of the booth.
+        Only the picked events' own event info, stock claims and sales come along - not the rest of your data.
       </p>
       <div v-if="eventScope === 'selected'" class="toggles">
         <label v-for="ev in visibleEvents" :key="ev.id" class="inline">
@@ -218,8 +231,9 @@ async function confirmRestore(): Promise<void> {
     <template v-if="currentAccount?.role === 'owner'">
       <h2 class="danger-h">Start from scratch</h2>
       <p class="hint">
-        Erases every product, event, sale and photo in this booth - on the server and on this device.
-        Other devices empty themselves at their next sync. Users, invites and the booth profile stay.
+        Erases every product, event, sale and photo in this account - on the server and on this device.
+        Sales are kept for their retention period until a backup with every sale has been saved from this page{{ salesArchived ? ' - done' : '' }}.
+        Other devices empty themselves at their next sync. Users, invites and the business profile stay.
       </p>
       <div class="actions">
         <button type="button" class="danger" :disabled="busy !== null" @click="wipe">

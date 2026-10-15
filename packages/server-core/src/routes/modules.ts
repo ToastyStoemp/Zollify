@@ -95,8 +95,20 @@ export function registerModuleRoutes(
       return reply.code(404).send({ error: 'unknown_module', message: 'No such module is published.' });
     }
 
-    setEnabled(db, who.accountId, parsed.data.moduleId, parsed.data.enabled);
-    return { ok: true, moduleId: parsed.data.moduleId, enabled: parsed.data.enabled };
+    const { moduleId, enabled } = parsed.data;
+    const visible = (m: PublishedModule): boolean => !m.minRole || RANK[who.role] >= RANK[m.minRole];
+    // Switching a module on also switches on the published modules it
+    // requires (e.g. a customs country module brings the Customs hub along);
+    // switching one off also switches off whatever requires it, so nothing
+    // is left enabled that the client loader would only skip.
+    const affected = enabled ? requiredBy(store, moduleId) : dependentsOf(store, moduleId);
+    const changed = [moduleId, ...[...affected].filter((id) => visible(store.get(id)!))];
+
+    const tx = db.transaction(() => {
+      for (const id of changed) setEnabled(db, who.accountId, id, enabled);
+    });
+    tx();
+    return { ok: true, moduleId, enabled, changed };
   });
 
   /**
@@ -126,4 +138,32 @@ export function registerModuleRoutes(
         .send(createReadStream(published.filePath));
     },
   );
+}
+
+/** Every published module `moduleId` transitively requires (core capabilities like `catalog` aren't in the store and drop out). */
+export function requiredBy(store: Map<string, PublishedModule>, moduleId: string): Set<string> {
+  const found = new Set<string>();
+  const visit = (id: string): void => {
+    for (const dep of store.get(id)?.requires ?? []) {
+      if (dep === moduleId || found.has(dep) || !store.has(dep)) continue;
+      found.add(dep);
+      visit(dep);
+    }
+  };
+  visit(moduleId);
+  return found;
+}
+
+/** Every published module that transitively requires `moduleId`. */
+export function dependentsOf(store: Map<string, PublishedModule>, moduleId: string): Set<string> {
+  const found = new Set<string>();
+  const visit = (id: string): void => {
+    for (const m of store.values()) {
+      if (m.moduleId === moduleId || found.has(m.moduleId) || !(m.requires ?? []).includes(id)) continue;
+      found.add(m.moduleId);
+      visit(m.moduleId);
+    }
+  };
+  visit(moduleId);
+  return found;
 }

@@ -61,9 +61,13 @@ export interface Cluster {
   end: number;
 }
 
+import { localIsoDay } from '@zollify/shared';
+
 export const rid = (): string => Math.random().toString(36).slice(2);
+// Not the shared round2: this one nudges by EPSILON so 1.005 rounds up, which the booking totals rely on.
 export const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
-export const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+/** The calendar day in local time - toISOString() would shift an evening sale to the next UTC day. */
+export const isoDay = localIsoDay;
 export const monthKey = (ms: number): string => {
   const d = new Date(ms);
   return `${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, '0')}`;

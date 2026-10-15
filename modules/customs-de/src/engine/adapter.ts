@@ -5,7 +5,7 @@
  * the Swiss customs module (see customs-ch/src/engine/adapter.ts).
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
-import { discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, declaredLineValues, tripSpan } from '@zollify/customs-core';
 import type { CustomsDeDeclarant, CustomsDeMeta, CustomsDeProduct, CustomsDeState, CustomsDeVariant } from './model';
 import { defaultCustomsDeDeclarant, defaultCustomsDeMeta } from './model';
 
@@ -35,6 +35,8 @@ export function buildCustomsDeState(
   stock: EventStock[],
   transactions: Transaction[],
   combinedEventIds: string[] = [],
+  /** The events behind combinedEventIds, so the documents can name the whole trip. */
+  combinedEvents: SalesEvent[] = [],
 ): CustomsDeState {
   const blob = readCustomsDeBlob(event);
   const eventIds = new Set([event.id, ...combinedEventIds]);
@@ -48,18 +50,20 @@ export function buildCustomsDeState(
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
     if (!eventIds.has(tx.eventId) || tx.revertedBy) continue;
-    // A bundle price or custom discount reduces the whole sale, not one line
-    // item - spread proportionally across this transaction's own lines so a
-    // discounted item's declared value isn't its full, undiscounted price.
-    const keep = 1 - discountFraction(tx);
-    for (const item of tx.items) {
+    // Each line at what it actually cost, discounts included, in the book
+    // currency, whole units adding up to what was paid - see declaredLineValues.
+    const lineValues = declaredLineValues(tx, 'book');
+    tx.items.forEach((item, i) => {
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
       cur.qty += item.qty;
-      cur.value += (item.baseLineTotal ?? item.lineTotal) * keep;
+      cur.value += lineValues[i]!;
       soldByKey.set(key, cur);
-    }
+    });
   }
+  // Sold more than was claimed for this event? The excess never crossed the
+  // border on this declaration, so it's ignored - see capSoldToBrought.
+  const soldFor = (key: string) => capSoldToBrought(soldByKey.get(key) ?? { qty: 0, value: 0 }, broughtByKey.get(key) ?? 0);
 
   // Documents read best with items of one type together: group by type
   // (catalogue order within), same as customs-ch's adapter - a customs
@@ -80,10 +84,10 @@ export function buildCustomsDeState(
       // justify the extra detail. The packing list wants that detail though
       // (same level as the Swiss import list), so variants are carried too.
       let amount = broughtByKey.get(`${p.id}:`) ?? 0;
-      let sold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
+      let sold = soldFor(`${p.id}:`);
       const variants: CustomsDeVariant[] = p.variants.map((v) => {
         const vAmount = broughtByKey.get(`${p.id}:${v.id}`) ?? 0;
-        const vSold = soldByKey.get(`${p.id}:${v.id}`) ?? { qty: 0, value: 0 };
+        const vSold = soldFor(`${p.id}:${v.id}`);
         // Unlisted variants never count toward the rolled-up total - same rule
         // as an unlisted product, otherwise this total and calcDeProduct's own
         // variant-aware total (which does skip them) disagree.
@@ -124,12 +128,14 @@ export function buildCustomsDeState(
     });
 
   const bm = blob.meta ?? {};
+  const trip = tripSpan(event, combinedEvents.filter((e) => combinedEventIds.includes(e.id)));
   const meta: CustomsDeMeta = {
     ...defaultCustomsDeMeta(),
     ...bm,
-    event: event.name,
-    eventDateStart: event.dateStart || bm.eventDateStart || '',
-    eventDateEnd: event.dateEnd || bm.eventDateEnd || '',
+    // Linked events: every name, and the first start to the last end.
+    event: trip.name,
+    eventDateStart: trip.dateStart || bm.eventDateStart || '',
+    eventDateEnd: trip.dateEnd || bm.eventDateEnd || '',
     eventLocation: bm.eventLocation || event.venue.city || '',
     destinationCountry: bm.destinationCountry || event.venue.country || '',
     // Consignee address defaults to the event's own venue address (Events → venue) -

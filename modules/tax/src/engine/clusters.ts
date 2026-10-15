@@ -71,13 +71,29 @@ export function clusterOnlineByMonth(txns: Txn[]): Cluster[] {
   return [...byMonth.entries()].map(([key, rows]) => makeCluster('Shopify Online', rows, { isOnlineCluster: true, monthKey: key }));
 }
 
-/** PN_YYYY_MM_NNN per month in date order; online clusters are PN_YYYY_MM_ONL. */
+const NUMBERED_ID = /^PN_(\d{4}_\d{2})_(\d{3})$/;
+
+/**
+ * PN_YYYY_MM_NNN per month, new clusters numbered in date order after the
+ * ones that already have an id; online clusters are PN_YYYY_MM_ONL.
+ *
+ * An id is a voucher number once booked (`${clusterID}_P` in Lexware) and the
+ * name of a PDF already handed to the accountant, so a cluster keeps the id
+ * it has: importing an earlier month's file must not shift every later
+ * cluster's number. A freed number is never reused.
+ */
 export function assignIds(clusters: Cluster[]): Cluster[] {
   const sorted = [...clusters].sort((a, b) => b.start - a.start);
-  const asc = [...sorted].reverse();
   const counter = new Map<string, number>();
   const ids = new Map<string, string>();
-  for (const c of asc) {
+  for (const c of sorted) {
+    const m = c.isOnlineCluster ? null : NUMBERED_ID.exec(c.clusterID);
+    if (!m) continue;
+    ids.set(c.uid, c.clusterID);
+    counter.set(m[1]!, Math.max(counter.get(m[1]!) ?? 0, Number(m[2])));
+  }
+  for (const c of [...sorted].reverse()) {
+    if (ids.has(c.uid)) continue;
     const key = monthKey(c.start);
     if (c.isOnlineCluster) ids.set(c.uid, `PN_${key}_ONL`);
     else {

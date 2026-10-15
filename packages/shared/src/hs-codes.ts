@@ -9,7 +9,14 @@ export interface HsCode {
   desc: string;
   rate: number;
   vatRate: number;
+  /** e-dec permitObligation (Bewilligungspflicht): 0 none, 2 as e-dec expects for these goods. */
   permit: number;
+  /**
+   * e-dec nonCustomsLawObligation (NZE). Separate from the permit: e-dec
+   * accepted keychains (3926.90) with a permit obligation of 2 but none
+   * here, while enamel pins (7117.19) carry 2 in both. Defaults to `permit`.
+   */
+  nonCustomsLaw?: number;
 }
 
 export const HS_CODES: HsCode[] = [
@@ -25,7 +32,7 @@ export const HS_CODES: HsCode[] = [
   { code: '4202.32.00', desc: 'Wallets, purses, key pouches', rate: 8.1, vatRate: 8.1, permit: 0 },
   { code: '4202.92.00', desc: 'Other bags and cases', rate: 8.1, vatRate: 8.1, permit: 0 },
   { code: '7117.19.00', desc: 'Imitation jewellery, enamel pins, badges', rate: 8.1, vatRate: 8.1, permit: 2 },
-  { code: '3926.90.00', desc: 'Other plastic articles, keychains, figures', rate: 8.1, vatRate: 8.1, permit: 0 },
+  { code: '3926.90.00', desc: 'Other plastic articles, keychains, figures', rate: 8.1, vatRate: 8.1, permit: 2, nonCustomsLaw: 0 },
   { code: '3926.40.00', desc: 'Statuettes, decorative articles of plastic', rate: 8.1, vatRate: 8.1, permit: 0 },
   { code: '4016.92.00', desc: 'Floor coverings and mats of rubber, desk mats', rate: 8.1, vatRate: 8.1, permit: 0 },
   { code: '6109.10.00', desc: 'T-shirts, singlets of cotton', rate: 8.1, vatRate: 8.1, permit: 0 },

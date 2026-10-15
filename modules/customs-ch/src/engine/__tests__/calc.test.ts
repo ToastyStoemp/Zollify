@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomsProduct, CustomsState } from '../model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsMeta } from '../model';
-import { calcProduct, compute1174Groups, hasCustomsInfo } from '../calc';
+import { calcProduct, compute1174Groups, hasCustomsInfo, toEdecHsCode } from '../calc';
 
 function product(over: Partial<CustomsProduct>): CustomsProduct {
   return {
@@ -92,5 +92,21 @@ describe('calcProduct - excludes an unlisted variant\'s stock', () => {
     expect(c.amount).toBe(30);
     expect(c.soldQty).toBe(10);
     expect(c.soldValue).toBe(120);
+  });
+});
+
+describe('toEdecHsCode', () => {
+  it.each([
+    ['4202.22.10', '4202.2200'],
+    ['4911.91.00', '4911.9100'],
+    ['42022210', '4202.2200'],
+    ['4202.2210', '4202.2200'],
+    ['4202.22', '4202.2200'],
+    [' 7117.19.00 ', '7117.1900'],
+    ['4202', '4202'],
+    ['', ''],
+    [undefined, ''],
+  ])('%s → %s', (input, expected) => {
+    expect(toEdecHsCode(input)).toBe(expected);
   });
 });

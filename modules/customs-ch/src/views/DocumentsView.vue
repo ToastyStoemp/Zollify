@@ -23,6 +23,8 @@ import {
 } from '../engine/model';
 import { DECLARANT_KEY } from './declarant';
 import { sdk } from '../runtime';
+import { setEventLink } from '@zollify/customs-core';
+import { EDEC_WEB_URL, autoCompanyCode as autoCodeFor } from '../bundle';
 
 /**
  * One event's customs paperwork - ZollTool's screen. Everything typed here is
@@ -48,7 +50,7 @@ function toast(text: string): void {
 // ── Editable customs settings (persisted into event.customs) ────────────────
 /** This event's own override only - blank means "inherit the account default", not "was blank when I last opened this page". */
 const artistOverride = ref<CustomsArtist>(defaultCustomsArtist());
-/** Booth profile layered under the declarant, for display only - shown as a placeholder so an untouched field keeps tracking it. */
+/** Business profile layered under the declarant, for display only - shown as a placeholder so an untouched field keeps tracking it. */
 const artistDefault = ref<CustomsArtist>(defaultCustomsArtist());
 /** What the generators actually use: the override wherever it's filled in, the account default everywhere else. */
 const artist = computed<CustomsArtist>(() => ({ ...artistDefault.value, ...stripEmpty<CustomsArtist>(artistOverride.value) }));
@@ -82,7 +84,7 @@ async function load(ev: SalesEvent): Promise<void> {
   loading = true;
   loadedEventId = ev.id;
   const blob = readCustomsBlob(ev);
-  // Layered, most specific last: booth profile, then the module's declarant.
+  // Layered, most specific last: business profile, then the module's declarant.
   const declarant = await sdk().config.get<Partial<CustomsArtist>>(DECLARANT_KEY);
   artistDefault.value = { ...defaultCustomsArtist(), ...stripEmpty<CustomsArtist>(sdk().account()?.profile.artist), ...stripEmpty<CustomsArtist>(declarant ?? undefined) };
   // This event's own record only - left blank wherever it never had its own value,
@@ -161,8 +163,20 @@ watch([artistOverride, edec, form1174, companyCode, documentNumber, venueName, e
 
 /** Other Swiss events this declaration can be combined with - everything but the one being viewed. */
 const otherEvents = computed(() => sdk().data.events.list().filter((e) => e.id !== eventId.value));
+/**
+ * Ticking joins the two events' groups (A-B plus C makes A, B and C all
+ * linked), unticking takes that one event out; both countries' records on
+ * every event in the group are written straight away. This page's list then
+ * shows the whole group, and its autosave writes back the same list.
+ */
 function toggleCombined(id: string): void {
-  combinedEventIds.value = combinedEventIds.value.includes(id) ? combinedEventIds.value.filter((x) => x !== id) : [...combinedEventIds.value, id];
+  const linked = !combinedEventIds.value.includes(id);
+  combinedEventIds.value = linked ? [...combinedEventIds.value, id] : combinedEventIds.value.filter((x) => x !== id);
+  setEventLink(sdk().data.events, eventId.value, id, linked)
+    .then((ids) => (combinedEventIds.value = ids))
+    .catch((err) => {
+      error.value = err instanceof Error ? err.message : 'Could not link the events.';
+    });
 }
 const combinedEventsSummary = computed(() =>
   otherEvents.value
@@ -172,16 +186,7 @@ const combinedEventsSummary = computed(() =>
 );
 
 /** Company code from the artist's initials - "Phuong Ninjin" → "PN". */
-const autoCompanyCode = computed(() => {
-  const name = (artist.value.companyName || artist.value.fullName || '').trim();
-  if (!name) return '';
-  const words = name.split(/\s+/).filter(Boolean);
-  const raw = words.length > 1 ? words.map((w) => w[0]).join('') : name.slice(0, 3);
-  return raw
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '')
-    .slice(0, 6);
-});
+const autoCompanyCode = computed(() => autoCodeFor(artist.value));
 const effectiveCompanyCode = computed(() => companyCode.value.trim() || autoCompanyCode.value);
 
 // ── Live state for the generators ───────────────────────────────────────────
@@ -205,7 +210,7 @@ const state = computed(() => {
     },
   };
   const api = sdk().data;
-  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value);
+  return buildCustomsState(withEdits, api.products.list(), stock.value, api.transactions.recent(), combinedEventIds.value, api.events.list());
 });
 const lrp = computed(() => (state.value ? computeLRP(state.value, documentNumber.value) : ''));
 /** Claimed for this event but without a tariff no. or VAT rate - the goods lists leave these out. */
@@ -381,7 +386,9 @@ const TRANSPORT_MODES = [
           <button type="button" :disabled="pdfBusy" @click="open1174"><Icon name="file-text" :size="14" /> Form 11.74</button>
           <button type="button" :disabled="pdfBusy" @click="open1187"><Icon name="file-text" :size="14" /> Form 11.87</button>
           <button type="button" class="primary" @click="exportEdec"><Icon name="download" :size="14" /> e-dec XML</button>
+          <a :href="EDEC_WEB_URL" target="_blank" rel="noopener" class="docs-link"><Icon name="external-link" :size="14" /> Open e-dec web</a>
         </div>
+        <p class="hint">File the export declaration in the customs office's e-dec web portal with the e-dec XML above.</p>
       </article>
 
       <article class="card">
@@ -396,7 +403,7 @@ const TRANSPORT_MODES = [
           <label><span>Email</span><input v-model="artistOverride.email" type="email" :placeholder="artistDefault.email" /></label>
           <label><span>VAT / tax ID</span><input v-model="artistOverride.vatId" type="text" class="mono" :placeholder="artistDefault.vatId || 'DE123456789'" /></label>
         </div>
-        <p class="hint">Linked to the booth profile and the declarant under Settings - shown here as the greyed-out default. Type over a field to override it for this event only; leave it blank to keep following whatever the account default is.</p>
+        <p class="hint">Linked to the business profile and the declarant under Settings - shown here as the greyed-out default. Type over a field to override it for this event only; leave it blank to keep following whatever the account default is.</p>
         <p class="hint">VAT/tax ID is only shown on the EU proforma invoice - required by German export brokers as a seller identifier.</p>
       </article>
 
@@ -422,7 +429,8 @@ const TRANSPORT_MODES = [
         <p class="hint">
           For the same stock taken across the border once and sold at several consecutive Swiss shows before
           returning - check an event below to fold its sales into this declaration. Brought/claimed quantity stays
-          this event's own; only sold quantities and values add up across the events you check.
+          this event's own; only sold quantities and values add up across the events you check. Linked events form one
+          group: linking to an event that is already linked to others links them all, for the German paperwork too.
         </p>
         <p v-if="otherEvents.length === 0" class="hint">No other Swiss events yet.</p>
         <ul v-else class="combine">
@@ -514,6 +522,8 @@ h2 { margin: 0; font-size: .95rem; }
 .seg.narrow button { min-width: 6rem; }
 .docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: .5rem; }
 .docs button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; }
+.docs-link { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; font-size: .85rem; font-weight: 500; min-height: 2.5rem; box-sizing: border-box; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; transition: background .12s, border-color .12s; }
+.docs-link:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label > span { font-size: .78rem; color: var(--zfy-muted, #5a6472); }

@@ -6,7 +6,7 @@
  */
 import type { EventStock, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { toLocalPrice } from '@zollify/shared';
-import { discountFraction } from '@zollify/customs-core';
+import { capSoldToBrought, declaredLineValues, tripSpan } from '@zollify/customs-core';
 import type { CustomsArtist, CustomsEdec, CustomsForm1174, CustomsMeta, CustomsProduct, CustomsState } from './model';
 import { defaultCustomsArtist, defaultCustomsEdec, defaultCustomsForm1174, defaultCustomsMeta } from './model';
 import { HS_CODES } from './data';
@@ -41,6 +41,8 @@ export function buildCustomsState(
   stock: EventStock[],
   transactions: Transaction[],
   combinedEventIds: string[] = [],
+  /** The events behind combinedEventIds, so the documents can name the whole trip. */
+  combinedEvents: SalesEvent[] = [],
 ): CustomsState {
   const blob = readCustomsBlob(event);
   const eventIds = new Set([event.id, ...combinedEventIds]);
@@ -51,6 +53,7 @@ export function buildCustomsState(
   // documents use whenever it's configured. Falls back to the base currency
   // untouched for an event with no local pricing set up.
   const hasLocal = !!(event.localCurrency && event.exchangeRate);
+  const declaredCurrency = hasLocal ? event.localCurrency! : event.currency;
   const localRate = event.exchangeRate ?? 1;
   const localIncrement = event.roundingIncrement ?? 0;
   const localOverrides = event.localPriceOverrides ?? {};
@@ -73,21 +76,22 @@ export function buildCustomsState(
   const soldByKey = new Map<string, { qty: number; value: number }>();
   for (const tx of transactions) {
     if (!eventIds.has(tx.eventId) || tx.revertedBy) continue;
-    // A bundle price or custom discount reduces the whole sale, not one line
-    // item - spread proportionally across this transaction's own lines so a
-    // discounted item's declared value isn't its full, undiscounted price.
-    const keep = 1 - discountFraction(tx);
-    for (const item of tx.items) {
+    // Each line at what it actually cost, discounts included, in whole units
+    // adding up to what was paid - see declaredLineValues. In the currency the
+    // customer paid when that is the one declared in (the event's local
+    // currency), otherwise in the book currency.
+    const lineValues = declaredLineValues(tx, tx.currency === declaredCurrency ? 'charged' : 'book');
+    tx.items.forEach((item, i) => {
       const key = `${item.pid}:${item.vid ?? ''}`;
       const cur = soldByKey.get(key) ?? { qty: 0, value: 0 };
       cur.qty += item.qty;
-      // The amount actually charged - already in the event's local currency
-      // when one is configured (equal to the base amount otherwise), so this
-      // stays consistent with the localized brought-stock prices below.
-      cur.value += item.lineTotal * keep;
+      cur.value += lineValues[i]!;
       soldByKey.set(key, cur);
-    }
+    });
   }
+  // Sold more than was claimed for this event? The excess never crossed the
+  // border on this declaration, so it's ignored - see capSoldToBrought.
+  const soldFor = (key: string) => capSoldToBrought(soldByKey.get(key) ?? { qty: 0, value: 0 }, broughtByKey.get(key) ?? 0);
 
   // Documents read best with items of one type together: group by type
   // (catalogue order within), so a customs officer sees all prints, then all
@@ -101,7 +105,7 @@ export function buildCustomsState(
     .filter((p) => !p.deletedAt)
     .sort((a, b) => (typeRank.get(a.type?.trim() || '￿') ?? 0) - (typeRank.get(b.type?.trim() || '￿') ?? 0))
     .map((p) => {
-      const plainSold = soldByKey.get(`${p.id}:`) ?? { qty: 0, value: 0 };
+      const plainSold = soldFor(`${p.id}:`);
       // Duty + VAT rate follow the HS code (customs tariff table) unless the
       // product carries an explicit override - mirrors how permit is derived,
       // so setting a Tariff no. is enough to fill the rates on every document.
@@ -128,7 +132,7 @@ export function buildCustomsState(
         soldQty: plainSold.qty,
         soldValue: plainSold.value,
         variants: p.variants.map((v) => {
-          const sold = soldByKey.get(`${p.id}:${v.id}`) ?? { qty: 0, value: 0 };
+          const sold = soldFor(`${p.id}:${v.id}`);
           return {
             name: v.name,
             sku: v.sku,
@@ -153,13 +157,15 @@ export function buildCustomsState(
     });
 
   const bm = blob.meta ?? {};
+  const trip = tripSpan(event, combinedEvents.filter((e) => combinedEventIds.includes(e.id)));
   const meta: CustomsMeta = {
     ...defaultCustomsMeta(),
     ...bm,
     // The event record is the source of truth for everything it owns
-    event: event.name,
-    eventDateStart: event.dateStart || bm.eventDateStart || '',
-    eventDateEnd: event.dateEnd || bm.eventDateEnd || '',
+    // Linked events: every name, and the first start to the last end.
+    event: trip.name,
+    eventDateStart: trip.dateStart || bm.eventDateStart || '',
+    eventDateEnd: trip.dateEnd || bm.eventDateEnd || '',
     eventLocation: bm.eventLocation || event.venue.city || '',
     venueStreet: event.venue.street || bm.venueStreet || '',
     venuePostcode: event.venue.postcode || bm.venuePostcode || '',

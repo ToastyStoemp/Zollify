@@ -25,20 +25,38 @@ function fnv1a(str: string): number {
   return h >>> 0;
 }
 
+// Normalized here, once, rather than trusting every caller to apply the
+// same "Other" fallback before calling in - two call sites (the label
+// printer, the POS scan-to-product lookup) disagreeing on that would
+// silently break the lookup for any product with no type set.
+const prefixFor = (type: string | undefined): string => (type?.trim() || 'Other').charAt(0).toUpperCase();
+const suffixFor = (input: string): string => fnv1a(input).toString(36).toUpperCase().padStart(6, '0');
+
 /**
  * `type`'s first letter as a human-glanceable prefix (purely cosmetic - two
  * products of the same type still get different codes from the hash), then
- * 6 base36 digits from a hash of type+productId+variantId. ~2.2 billion
- * possible suffixes is comfortably collision-free at any real shop's catalog
- * size.
+ * 6 base36 digits from a hash of productId+variantId. ~2.2 billion possible
+ * suffixes is comfortably collision-free at any real shop's catalog size.
+ * The type is deliberately not hashed: renaming a type must not invalidate
+ * labels already printed.
  */
 export function shortBarcode(type: string | undefined, productId: string, variantId?: string): string {
-  // Normalized here, once, rather than trusting every caller to apply the
-  // same "Other" fallback before calling in - two call sites (the label
-  // printer, the POS scan-to-product lookup) disagreeing on that would
-  // silently break the lookup for any product with no type set.
+  return `${prefixFor(type)}${suffixFor(`${productId}:${variantId ?? ''}`)}`;
+}
+
+/** The original formula, which hashed the type as well. Only for matching labels printed before the change. */
+export function legacyShortBarcode(type: string | undefined, productId: string, variantId?: string): string {
   const normalizedType = type?.trim() || 'Other';
-  const prefix = normalizedType.charAt(0).toUpperCase();
-  const hash = fnv1a(`${normalizedType}:${productId}:${variantId ?? ''}`);
-  return `${prefix}${hash.toString(36).toUpperCase().padStart(6, '0')}`;
+  return `${prefixFor(normalizedType)}${suffixFor(`${normalizedType}:${productId}:${variantId ?? ''}`)}`;
+}
+
+/**
+ * Whether a scanned code is this product's label: the current code with any
+ * prefix letter (the type may have been renamed since printing), or the
+ * legacy code. Case-insensitive, since scanners and search boxes vary.
+ */
+export function matchesShortBarcode(code: string, type: string | undefined, productId: string, variantId?: string): boolean {
+  const scanned = code.trim().toUpperCase();
+  if (!scanned) return false;
+  return scanned.slice(1) === shortBarcode(type, productId, variantId).slice(1) || scanned === legacyShortBarcode(type, productId, variantId);
 }

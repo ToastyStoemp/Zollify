@@ -120,6 +120,34 @@ export interface TaxConfig {
   enabled: Record<string, boolean>;
 }
 
+/**
+ * Where the clients may connect. These fields are typed by the account, and
+ * the server fetches them with the account's keys and shows what comes back:
+ * left open, they would let anyone with the module reach the server's own
+ * network (cloud metadata, internal services). Only the providers' own hosts.
+ */
+const ENDPOINT_RULES: Record<string, (v: string) => boolean> = {
+  LEXWARE_API_URL: (v) => httpsHost(v, (h) => h === 'api.lexoffice.io' || h === 'api.lexware.io'),
+  MYPOS_GATEWAY_URL: (v) => httpsHost(v, (h) => h === 'api-gateway.mypos.com' || h === 'demo-api-gateway.mypos.com'),
+  SUMUP_API_URL: (v) => httpsHost(v, (h) => h === 'api.sumup.com'),
+  SHOPIFY_SHOP: (v) => /^[a-z0-9][a-z0-9-]{0,62}\.myshopify\.com$/i.test(v.replace(/^https:\/\//i, '').replace(/\/+$/, '')),
+  SHOPIFY_API_VERSION: (v) => /^\d{4}-\d{2}$|^unstable$/.test(v),
+};
+function httpsHost(v: string, ok: (host: string) => boolean): boolean {
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' && !u.username && !u.password && !u.port && ok(u.hostname.toLowerCase()) && !u.search && !u.hash;
+  } catch {
+    return false;
+  }
+}
+/** Why a value cannot be saved, or null. */
+export function endpointProblem(key: string, value: string): string | null {
+  const rule = ENDPOINT_RULES[key];
+  if (!rule || !value) return null;
+  return rule(value) ? null : `${key}: only the provider's own address is accepted.`;
+}
+
 export function emptyConfig(): TaxConfig {
   return { values: {}, enabled: {} };
 }
@@ -133,7 +161,8 @@ export function effectiveValues(cfg: TaxConfig): Record<string, string> {
   const out: Record<string, string> = {};
   for (const id of GROUP_IDS) {
     if (!groupEnabled(cfg, id)) continue;
-    for (const key of GROUP_KEYS[id] ?? []) if (cfg.values[key]) out[key] = cfg.values[key]!;
+    // A disallowed address saved before the check existed falls back to the default.
+    for (const key of GROUP_KEYS[id] ?? []) if (cfg.values[key] && !endpointProblem(key, cfg.values[key]!)) out[key] = cfg.values[key]!;
   }
   return out;
 }

@@ -83,6 +83,10 @@ export function paidLineTotals(
 ): number[] {
   const snap = tx.asCharged;
   if (snap && snap.listTotals.length === tx.items.length) {
+    // The till recorded which line carried how much discount: use exactly that.
+    if (snap.lineDiscounts?.length === tx.items.length) {
+      return snap.listTotals.map((t, i) => Math.round(toMinor(t) - toMinor(snap.lineDiscounts![i]!)) / 100);
+    }
     return spreadTo(snap.listTotals.map(toMinor), toMinor(tx.total)).map((m) => m / 100);
   }
   return chargedLineTotals(tx);

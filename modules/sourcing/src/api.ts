@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue';
+import { checkPickedFile } from '@zollify/shared';
 import type { Dossier, Issue, Material, Reorder, Rep, Snapshot, SourcingFile, Supplier } from './engine';
 import { sdk } from './runtime';
 
@@ -38,6 +39,9 @@ export async function remove(coll: Coll, id: string): Promise<void> {
 }
 
 export async function uploadFile(dossierId: string, file: File, kind: 'design' | 'proof' = 'design'): Promise<SourcingFile> {
+  // The same check the server makes, so a wrong or oversized file never leaves the device.
+  const problem = await checkPickedFile('designFile', file);
+  if (problem) throw new Error(problem);
   const dataB64 = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result).split(',')[1] ?? '');

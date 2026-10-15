@@ -4,6 +4,7 @@ import type {
   DisplayCartMessage,
   DisplayListenersMessage,
   DisplaySubscribeMessage,
+  NotificationMessage,
   NudgeMessage,
   PaymentResultMessage,
   PaymentTriggerMessage,
@@ -16,6 +17,7 @@ import { announceShellUpdate } from '../shell-updates';
 import { deviceFlavor, deviceId } from './device';
 import { setLiveChannelProbe, syncNow } from './sync';
 import { setTseTransport } from './tse';
+import { loadNotifications, resetNotifications } from './notifications';
 
 /**
  * The account's live channel. Sync data never travels here - the socket is a
@@ -26,7 +28,7 @@ import { setTseTransport } from './tse';
 
 export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
 type TseMessage = TseRequestMessage | TseResultMessage;
-type Incoming = NudgeMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage | TseMessage | DisplayListenersMessage;
+type Incoming = NudgeMessage | NotificationMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage | TseMessage | DisplayListenersMessage;
 
 // Signing through a main TSE device travels this channel: tse.ts sends and
 // listens through what is handed over here, so it needs no import of this
@@ -89,6 +91,8 @@ function wsUrl(token: string, id: string): string {
 
 async function connect(): Promise<void> {
   if (!wanted || socket || typeof WebSocket === 'undefined') return;
+  // Started offline from a remembered sign-in: there is no token until the server is reached once.
+  if (!getAccessToken() && getAccount()) await refreshAccessToken();
   const token = getAccessToken();
   if (!token || !getAccount()) {
     scheduleReconnect();
@@ -120,6 +124,7 @@ async function connect(): Promise<void> {
       attempts = 0;
       // Nudges sent while we were away are lost; catch up once now.
       void syncNow();
+      void loadNotifications();
     }
     if (msg?.type === 'display.listeners' && typeof msg.count === 'number') {
       const before = displayListeners ?? 0;
@@ -127,6 +132,7 @@ async function connect(): Promise<void> {
       if (msg.count > 0 && before === 0 && lastCart) sendCart(lastCart);
     } else if (msg?.type === 'nudge') void syncNow();
     else if (msg?.type === 'shell.update') void announceShellUpdate();
+    else if (msg?.type === 'notification') void loadNotifications(true);
     else if (msg?.type === 'display.cart' && msg.from && msg.cart && typeof msg.cart === 'object') {
       displayCarts[msg.from] = { ...msg.cart, deviceId: msg.from, receivedAt: Date.now() };
     } else if ((msg?.type === 'payment.trigger' || msg?.type === 'payment.result') && typeof msg.requestId === 'string') {
@@ -180,6 +186,7 @@ export function stopRealtime(): void {
   for (const key of Object.keys(displayCarts)) delete displayCarts[key];
   displayListeners = null;
   lastCart = null;
+  resetNotifications();
 }
 
 /** Tells the server this device is (or stops) showing a customer display, so carts are sent to it. */

@@ -12,6 +12,14 @@ import { getAccount } from '../session';
 
 const DEVICE_ID_KEY = 'core.deviceId';
 const DEVICE_NAME_KEY = 'core.deviceName';
+/**
+ * The id a signed-out device already uses, so its first sign-in names it and
+ * that session reads as "this device" rather than as a stray one with no
+ * device at all. Taken into the account's database on the first signed-in
+ * use and then forgotten, so a second account on the same device still gets
+ * an id of its own (the devices table keys on id per account).
+ */
+const PENDING_ID_KEY = 'core.deviceId.pending';
 
 let cachedId: string | null = null;
 /** The first lookup in flight: callers racing it must not each make up an id of their own. */
@@ -23,8 +31,21 @@ function requireAccountId(): string {
   return account.accountId;
 }
 
+function pendingId(): string {
+  try {
+    const have = localStorage.getItem(PENDING_ID_KEY);
+    if (have) return have;
+    const made = crypto.randomUUID();
+    localStorage.setItem(PENDING_ID_KEY, made);
+    return made;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
 export async function deviceId(): Promise<string> {
   if (cachedId) return cachedId;
+  if (!getAccount()) return pendingId();
   pending ??= readOrCreateId().finally(() => (pending = null));
   return pending;
 }
@@ -37,8 +58,13 @@ async function readOrCreateId(): Promise<string> {
     cachedId = existing;
     return existing;
   }
-  const created = crypto.randomUUID();
+  const created = pendingId();
   await db.settings.put({ key: DEVICE_ID_KEY, value: created });
+  try {
+    localStorage.removeItem(PENDING_ID_KEY);
+  } catch {
+    /* no storage */
+  }
   cachedId = created;
   return created;
 }

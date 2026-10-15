@@ -12,6 +12,7 @@ export {
   type OwnedRoute,
   type OwnedNavItem,
   type OwnedSettingsPanel,
+  type OwnedSetupStep,
   type RouteSink,
 } from './contributions';
 export {
@@ -51,6 +52,9 @@ export {
   clearSession,
   signOut,
   authFetch,
+  deviceFetch,
+  getDeviceAccount,
+  activePersonId,
   refreshAccessToken,
   configureApiBase,
   getApiBase,
@@ -58,12 +62,38 @@ export {
   onAccountChange,
   currentAccount,
   isAuthenticated,
+  resumeOffline,
+  signedInOffline,
   type LoginResult,
 } from './session';
 export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';
 export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';
-export { isNative, getServerUrl, setServerUrl, saveFile, openDocument } from './native';
+export { isNative, getServerUrl, setServerUrl, saveFile, openDocument, openFileBlob } from './native';
 export { nativeHeaders } from './session';
 export { selfUpdates, currentAppVersion, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
 export { notifyShellUpdateReady, checkAndQueueShellUpdate, announceShellUpdate, currentShellVersion, checkShellUpdate, queueShellUpdate, shellUpdateQueued, reloadShellNow, type ShellUpdateCheck } from './shell-updates';
+export {
+  tillSettings,
+  canLockTill,
+  tillLocked,
+  tillPeople,
+  refreshTillPeople,
+  addTillPerson,
+  removeTillPerson,
+  setOwnPin,
+  unlockTill,
+  lockTill,
+  saveTillSettings,
+  startTillLock,
+  noteSale,
+  pendingBadge,
+  unlockWithBadge,
+  switchByBadge,
+  loadBadge,
+  issueBadge,
+  revokeBadge,
+  type StaffBadge,
+  type TillPerson,
+  type TillSettings,
+} from './till-lock';

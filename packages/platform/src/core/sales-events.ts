@@ -1,5 +1,5 @@
 import { computed, reactive, ref } from 'vue';
-import type { EventStock, SalesEvent } from '@zollify/shared';
+import { sortEvents, type EventStock, type SalesEvent } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -66,7 +66,7 @@ export async function loadSalesEvents(): Promise<void> {
  */
 export const visibleEvents = computed(() => {
   const account = getAccount();
-  const all = [...events.values()].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const all = sortEvents(events.values());
   const allowed = account?.allowedEventIds;
   if (!allowed || allowed.length === 0) return all;
   const set = new Set(allowed);

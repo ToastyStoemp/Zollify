@@ -6,6 +6,7 @@ import { DEFAULT_LABEL_SIZE, renderLabel, type LabelSize } from '../engine/label
 import { rasterizeCanvas } from '../engine/raster';
 import { PhomemoPrinter, type PrintMode } from '../engine/phomemo';
 import { sdk } from '../runtime';
+import { dropJob, pendingJobs } from '../jobs';
 
 /**
  * Prints SKU-barcode + product-name labels to a Phomemo M110 over Bluetooth.
@@ -34,6 +35,8 @@ interface Leaf {
   type: string;
   /** Product-level (not per-variant) - used by subLabelFor() for art prints. */
   year?: number;
+  /** Consignment artist the product belongs to, when it is not this account's own work. */
+  artist?: string;
 }
 interface ProductGroup {
   productId: string;
@@ -62,10 +65,10 @@ const typeGroups = computed<TypeGroup[]>(() => {
             .filter((v) => !v.unlisted)
             .map((v) => {
               const variantName = v.name?.trim() || '(unnamed)';
-              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type, year: p.year };
+              return { key: `${p.id}:${v.id}`, productId: p.id, variantId: v.id, sku: (v.sku?.trim() || p.sku?.trim() || ''), title: `${p.title || '(untitled)'} - ${variantName}`, variantName, type, year: p.year, artist: p.consignorName };
             })
             .filter((l) => l.sku || artPrint)
-        : (p.sku?.trim() || artPrint ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku?.trim() || '', title: p.title || '(untitled)', type, year: p.year }] : []);
+        : (p.sku?.trim() || artPrint ? [{ key: `${p.id}:`, productId: p.id, variantId: '', sku: p.sku?.trim() || '', title: p.title || '(untitled)', type, year: p.year, artist: p.consignorName }] : []);
     if (!leaves.length) continue;
     const group: ProductGroup = { productId: p.id, title: p.title || '(untitled)', leaves };
     (byType.get(type) ?? byType.set(type, []).get(type)!).push(group);
@@ -84,10 +87,17 @@ const skippedCount = computed(() => sdk().data.products.list().length - typeGrou
  */
 function subLabelFor(l: Leaf): string {
   if (l.sku) return l.sku;
-  const a = sdk().account()?.profile.artist;
-  const artist = (a?.companyName || a?.fullName || '').trim();
-  return [artist, l.year].filter(Boolean).join(' · ');
+  return [artistFor(l), l.year].filter(Boolean).join(' · ');
 }
+
+/** Who made it: the consignment artist in a store, otherwise this account's own artist name. */
+function artistFor(l: Leaf): string {
+  if (l.artist) return l.artist;
+  const a = sdk().account()?.profile.artist;
+  return (a?.companyName || a?.fullName || '').trim();
+}
+/** The artist line under the title - not when the SKU line already says it. */
+const artistLine = (l: Leaf): string | undefined => (showArtist.value && l.sku ? artistFor(l) || undefined : undefined);
 
 // ── Search ───────────────────────────────────────────────────────────────────
 const search = ref('');
@@ -191,6 +201,8 @@ const printMode = ref<PrintMode>('continuous');
 const titleScale = ref(1);
 /** See RenderLabelOptions.showSkuText in label.ts - defaults on, matching the previous unconditional behaviour. */
 const showSkuText = ref(true);
+/** The artist's name under the title - a store with many artists needs it on every label. */
+const showArtist = ref(true);
 
 onMounted(async () => {
   const stored = await sdk().config.get<LabelSize>('labelSize');
@@ -200,6 +212,7 @@ onMounted(async () => {
   printMode.value = (await sdk().config.get<PrintMode>('printMode')) ?? 'continuous';
   titleScale.value = (await sdk().config.get<number>('titleScale')) ?? 1;
   showSkuText.value = (await sdk().config.get<boolean>('showSkuText')) ?? true;
+  showArtist.value = (await sdk().config.get<boolean>('showArtist')) ?? true;
 });
 watch(labelSize, (v) => void sdk().config.set('labelSize', v), { deep: true });
 watch(speed, (v) => void sdk().config.set('speed', v));
@@ -207,6 +220,7 @@ watch(density, (v) => void sdk().config.set('density', v));
 watch(printMode, (v) => void sdk().config.set('printMode', v));
 watch(titleScale, (v) => void sdk().config.set('titleScale', v));
 watch(showSkuText, (v) => void sdk().config.set('showSkuText', v));
+watch(showArtist, (v) => void sdk().config.set('showArtist', v));
 
 // ── Test label: preview/print without picking a real product ────────────────
 const TEST_LEAF: Leaf = { key: '__test__', productId: '__test__', variantId: '', sku: 'TEST-0000001', title: 'Test Label', type: 'Test' };
@@ -227,9 +241,10 @@ function redrawPreview(): void {
     titleScale: titleScale.value,
     barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
     showSkuText: showSkuText.value,
+    artist: artistLine(l),
   });
 }
-watch([previewLeaf, labelSize, titleScale, showSkuText], redrawPreview, { flush: 'post' });
+watch([previewLeaf, labelSize, titleScale, showSkuText, showArtist], redrawPreview, { flush: 'post' });
 onMounted(redrawPreview);
 
 // ── Printer connection ───────────────────────────────────────────────────────
@@ -310,6 +325,7 @@ async function printAll(): Promise<void> {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
+        artist: artistLine(l),
       });
       const rows = rasterizeCanvas(workCanvas);
       for (let i = 0; i < copies; i++) {
@@ -339,6 +355,41 @@ function cancelPrint(): void {
   cancelRequested.value = true;
 }
 
+// ── Labels sent from elsewhere (a staff badge) ──────────────────────────────
+type Job = (typeof pendingJobs.value)[number];
+const jobCanvas = ref<HTMLCanvasElement | null>(null);
+function renderJob(canvas: HTMLCanvasElement, job: Job): void {
+  renderLabel(canvas, labelSize.value, job.caption ?? job.barcode, job.title, {
+    titleScale: titleScale.value,
+    barcodeValue: job.barcode,
+    showSkuText: !!job.caption,
+    ...(job.subtitle ? { artist: job.subtitle } : {}),
+  });
+}
+watch([() => pendingJobs.value[0], labelSize, titleScale, jobCanvas], () => {
+  const job = pendingJobs.value[0];
+  if (job && jobCanvas.value) renderJob(jobCanvas.value, job);
+}, { deep: true, flush: 'post' });
+
+async function printJob(job: Job): Promise<void> {
+  if (!printer.connected) {
+    error.value = 'Connect the printer first.';
+    return;
+  }
+  error.value = null;
+  busy.value = true;
+  try {
+    renderJob(workCanvas, job);
+    await printer.printRaster(rasterizeCanvas(workCanvas), { speed: speed.value, density: density.value, mode: printMode.value });
+    dropJob(job.id);
+    sdk().ui.toast(`Printed ${job.title}.`, { kind: 'success' });
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Printing failed.';
+  } finally {
+    busy.value = false;
+  }
+}
+
 // ── Export as images ─────────────────────────────────────────────────────────
 // A fallback path that needs no printer connection at all: one PNG per
 // selected label, pixel-for-pixel what would otherwise be sent to the
@@ -358,6 +409,7 @@ async function exportPngs(): Promise<void> {
         titleScale: titleScale.value,
         barcodeValue: shortBarcode(l.type, l.productId, l.variantId || undefined),
         showSkuText: showSkuText.value,
+        artist: artistLine(l),
       });
       const blob = await new Promise<Blob | null>((resolve) => workCanvas.toBlob(resolve, 'image/png'));
       if (blob) {
@@ -412,6 +464,17 @@ async function printTestLabel(): Promise<void> {
         <input v-model="search" type="search" placeholder="Search products…" aria-label="Search products" />
       </div>
     </header>
+
+    <article v-if="pendingJobs.length" class="card jobs">
+      <h2>Ready to print</h2>
+      <canvas ref="jobCanvas" class="job-preview" :aria-label="`Preview of ${pendingJobs[0]!.title}`" />
+      <div v-for="job in pendingJobs" :key="job.id" class="job">
+        <span><strong>{{ job.title }}</strong><template v-if="job.caption"> · {{ job.caption }}</template></span>
+        <button type="button" class="primary" :disabled="busy || !printerName" @click="printJob(job)">Print</button>
+        <button type="button" class="quiet" @click="dropJob(job.id)">Discard</button>
+      </div>
+      <p v-if="!printerName" class="hint">Connect the printer below, then print. It uses the label size set under Label size.</p>
+    </article>
 
     <p v-if="!bluetoothSupported" class="warn">
       This browser has no Web Bluetooth support. Use Chrome or Edge on desktop, Chrome on Android, or the Android app - not Safari or iOS.
@@ -542,6 +605,11 @@ async function printTestLabel(): Promise<void> {
             <input v-model="showSkuText" type="checkbox" />
             <span>Print SKU number under the barcode</span>
           </label>
+
+          <label class="field inline">
+            <input v-model="showArtist" type="checkbox" />
+            <span>Print the artist's name under the title</span>
+          </label>
         </details>
       </article>
     </div>
@@ -558,6 +626,9 @@ h2 { margin: 0; font-size: .95rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .8rem; }
 .grid { display: grid; grid-template-columns: minmax(20rem, 3fr) minmax(18rem, 2fr); gap: 1rem; align-items: start; }
+.jobs .job { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.jobs .job span { flex: 1; min-width: 10rem; }
+.job-preview { width: min(100%, 16rem); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 6px; image-rendering: pixelated; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .products { max-height: 40rem; }
 /* On desktop the product list is the thing actually worth scrolling

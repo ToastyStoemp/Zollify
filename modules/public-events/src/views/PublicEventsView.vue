@@ -8,6 +8,7 @@ import {
   type PublicEventsConfig,
 } from '@zollify/shared';
 import { api, type Preview } from '../api';
+import { migrateBoothToEvents } from '../migrate';
 import { sdk } from '../runtime';
 
 /**
@@ -25,9 +26,7 @@ const saved = ref<string | null>(null);
 const copied = ref<string | null>(null);
 const overlayBusy = ref<string | null>(null);
 
-const events = computed(() =>
-  [...sdk().data.events.list()].sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? '')),
-);
+const events = computed(() => sdk().data.events.list());
 const suggestedSlug = computed(() =>
   (sdk().account()?.accountName ?? 'booth')
     .toLowerCase()
@@ -54,7 +53,16 @@ async function load(): Promise<void> {
     error.value = err instanceof Error ? err.message : 'Could not load the public page settings.';
   }
 }
-onMounted(load);
+onMounted(async () => {
+  // Booth facts used to be kept here; copy any that are not on their event yet.
+  const moved = await migrateBoothToEvents({
+    overlays: async () => (await api.config()).overlays,
+    events: () => sdk().data.events.list(),
+    upsert: (event) => sdk().data.events.upsert(event),
+  });
+  await load();
+  if (moved) preview.value = await api.preview();
+});
 
 function flash(what: string): void {
   saved.value = what;
@@ -228,8 +236,8 @@ async function copy(text: string, what: string): Promise<void> {
         <div class="card">
           <h2>Event details for visitors</h2>
           <p class="hint">
-            Hall, booth and a link are not part of the event record, so they live here. An event
-            without dates never shows.
+            Hall, booth, link and note are part of the event itself: change them under Events, Edit,
+            Booth. Here you choose what is published. An event without dates never shows.
           </p>
           <p v-if="!events.length" class="hint">No events yet.</p>
           <details v-for="event in events" :key="event.id" class="event">
@@ -240,12 +248,8 @@ async function copy(text: string, what: string): Promise<void> {
             </summary>
             <form class="extras" @submit.prevent="saveOverlay(event.id)">
               <div class="grid">
-                <label><span>Hall</span><input v-model="overlayFor(event.id).hall" type="text" placeholder="3" /></label>
-                <label><span>Booth</span><input v-model="overlayFor(event.id).booth" type="text" placeholder="B-12" /></label>
                 <label><span>Instagram handle</span><input v-model="overlayFor(event.id).igHandle" type="text" placeholder="@animemesse" /></label>
-                <label><span>Link</span><input v-model="overlayFor(event.id).link" type="url" placeholder="https://…" /></label>
               </div>
-              <label><span>Blurb</span><input v-model="overlayFor(event.id).blurb" type="text" placeholder="New prints, limited pins." /></label>
               <div class="actions">
                 <label class="inline"><input v-model="overlayFor(event.id).hidden" type="checkbox" /> <span>Hide from the public</span></label>
                 <button type="submit" class="primary" :disabled="overlayBusy === event.id">{{ overlayBusy === event.id ? 'Saving…' : 'Save' }}</button>

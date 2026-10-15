@@ -103,10 +103,14 @@ export class ModuleLoader {
     const resolved = new Map<string, ModuleDefinition>();
 
     // Resolve everything first so dependency ordering can see the whole set.
-    for (const descriptor of descriptors) {
-      if (this.loaded.has(descriptor.moduleId)) continue;
+    // Bundles are fetched in parallel; outcomes are still recorded in descriptor
+    // order so the result stays deterministic.
+    const pending = descriptors.filter((d) => !this.loaded.has(d.moduleId));
+    const fetched = pending.map((d) => this.opts.resolver.resolve(d));
+    await Promise.allSettled(fetched);
+    for (const [i, descriptor] of pending.entries()) {
       try {
-        const definition = await this.opts.resolver.resolve(descriptor);
+        const definition = await fetched[i]!;
         const problem = this.validate(descriptor, definition, role);
         if (problem) {
           outcomes.push({ ...descriptorRef(descriptor), status: 'skipped', reason: problem });
@@ -191,6 +195,18 @@ export class ModuleLoader {
     }
 
     this.loaded.set(definition.id, { definition, host, version });
+  }
+
+  /**
+   * Unloads every module the role may not use - when a shared till passes
+   * from someone senior to someone who is not. Returns the ids unloaded.
+   */
+  async unloadAbove(role: Role): Promise<string[]> {
+    const doomed = [...this.loaded.values()]
+      .filter((m) => m.definition.minRole && !roleAtLeast(role, m.definition.minRole))
+      .map((m) => m.definition.id);
+    for (const id of doomed) if (this.loaded.has(id)) await this.unload(id);
+    return doomed;
   }
 
   /** Unloads a module and everything it contributed. Dependents are unloaded first. */

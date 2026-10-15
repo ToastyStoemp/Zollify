@@ -7,16 +7,22 @@ import {
   type Logger,
   type NavItem,
   type RouteDef,
+  type SaleLineRef,
   type Sdk,
   type SettingsPanel,
+  type SetupStep,
   type ShellUi,
   type StoreSchema,
+  type TillLine,
+  type TillLineAccess,
+  type TillLookup,
   type Unsubscribe,
 } from '@zollify/sdk';
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
 import { authFetch, getAccount, onAccountChange } from './session';
+import { canLockTill, lockTill, switchByBadge } from './till-lock';
 import {
   allProducts,
   deleteProduct,
@@ -28,6 +34,7 @@ import { getTransaction, importTransactions, recentTransactions, revertTransacti
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
+import { fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { abortTse, beginTse, tseRequiredFor } from './core/tse';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
@@ -35,6 +42,7 @@ import {
   availabilityFor,
   clearClaim,
   onHandFor,
+  remainingFor,
   setClaim,
   setOnHand,
 } from './core/inventory';
@@ -55,7 +63,7 @@ import {
   upsertSalesEvent,
   visibleEvents,
 } from './core/sales-events';
-import { getSyncedSetting, setSyncedSetting } from './core/synced-settings';
+import { getSyncedSetting, listSyncedSettings, setSyncedSetting } from './core/synced-settings';
 
 export interface HostServices {
   contributions: ContributionRegistry;
@@ -148,6 +156,7 @@ const coreData: import('@zollify/sdk').DataApi = {
         (r) => r.productId === productId && r.variantId === (variantId ?? ''),
       )?.available ?? 0,
     onHand: (productId, variantId) => onHandFor(productId, variantId ?? ''),
+    remaining: (productId, variantId) => remainingFor(productId, variantId ?? ''),
     setOnHand: (productId, variantId, qty) => setOnHand(productId, variantId, qty),
     claim: (eventId, productId, variantId, qty) => setClaim(eventId, productId, variantId, qty),
     clearClaim: (eventId, productId, variantId) => clearClaim(eventId, productId, variantId),
@@ -173,11 +182,18 @@ const coreData: import('@zollify/sdk').DataApi = {
   settings: {
     get: (key) => getSyncedSetting(key),
     set: (key, value) => setSyncedSetting(key, value),
+    list: (prefix) => listSyncedSettings(prefix),
   },
 };
 
 const CONFIG_STORE = 'config';
 const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
+
+/** The open till, when there is one - the module that sells registers here. */
+let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
+/** Modules that can resolve a code the catalogue does not know. */
+let tillLines: TillLineAccess | null = null;
+const tillLookups = new Set<(code: string) => Promise<TillLookup | null>>();
 
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
   const subscriptions: Unsubscribe[] = [];
@@ -232,6 +248,27 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
 
+    setup: {
+      step(step: SetupStep) {
+        guard();
+        services.contributions.addSetupStep(moduleId, step);
+      },
+    },
+
+    calendar: {
+      source(source) {
+        guard();
+        services.contributions.addCalendarSource(moduleId, source);
+      },
+    },
+
+    home: {
+      card(card) {
+        guard();
+        services.contributions.addHomeCard(moduleId, card);
+      },
+    },
+
     events: {
       on(name, handler) {
         guard();
@@ -265,6 +302,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     data: coreData,
 
     account: () => getAccount(),
+    lock: { available: () => canLockTill(), lock: () => lockTill(), badge: (code) => switchByBadge(code) },
 
     onAccountChange(handler) {
       guard();
@@ -295,7 +333,70 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         return off;
       },
     },
+    till: {
+      action(action) {
+        guard();
+        services.contributions.addTillAction(moduleId, action);
+      },
+      actions: () => [...services.contributions.tillActions].sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label)),
+      addLine(line) {
+        guard();
+        if (!tillReceiver) return false;
+        // The ref names the module that added the line - never one it chose.
+        const { ref, ...rest } = line;
+        return tillReceiver({ ...rest, ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}) });
+      },
+      findLine(key) {
+        guard();
+        const found = tillLines?.find(key);
+        // A module sees and changes only the lines it added itself.
+        if (!found || found.ref?.moduleId !== moduleId) return null;
+        return { key: found.key, name: found.name, qty: found.qty, unitPrice: found.unitPrice };
+      },
+      replaceLine(line) {
+        guard();
+        if (!tillLines || tillLines.find(line.key)?.ref?.moduleId !== moduleId) return false;
+        return tillLines.replace(line);
+      },
+      onLineAccess(access) {
+        guard();
+        tillLines = access;
+        const off = () => {
+          if (tillLines === access) tillLines = null;
+        };
+        subscriptions.push(off);
+        return off;
+      },
+      onAddLine(handler) {
+        guard();
+        tillReceiver = handler;
+        const off = () => {
+          if (tillReceiver === handler) tillReceiver = null;
+        };
+        subscriptions.push(off);
+        return off;
+      },
+      onLookup(handler) {
+        guard();
+        tillLookups.add(handler);
+        const off = () => void tillLookups.delete(handler);
+        subscriptions.push(off);
+        return off;
+      },
+      async lookup(code) {
+        for (const handler of [...tillLookups]) {
+          try {
+            const found = await handler(code);
+            if (found) return found;
+          } catch {
+            /* one module failing must not stop the next one answering */
+          }
+        }
+        return null;
+      },
+    },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
+    fx: { latest: (from, to) => fetchLatestRate(from, to) },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

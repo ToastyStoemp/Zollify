@@ -33,6 +33,16 @@ export interface OutboxOp extends Op {
   seq?: number;
   /** 0 = not yet pushed, 1 = acknowledged. */
   synced: 0 | 1;
+  /** Who made the change, on a till several people share - pushed with their own token where possible. */
+  userId?: string;
+}
+
+/** A file attached to an event, cached on this device. `uploaded` 0 = still waiting to reach the server. */
+export interface EventFileRec {
+  id: string;
+  eventId: string;
+  blob: Blob;
+  uploaded: 0 | 1;
 }
 
 export interface SettingRow {
@@ -52,6 +62,7 @@ export type CoreDb = Dexie & {
   transactions: EntityTable<Transaction, 'id'>;
   discounts: EntityTable<DiscountRule, 'id'>;
   images: EntityTable<ImageRec, 'id'>;
+  eventFiles: EntityTable<EventFileRec, 'id'>;
   ops: Dexie.Table<OutboxOp, number>;
   settings: Dexie.Table<SettingRow, string>;
   closings: EntityTable<CashClosing, 'id'>;
@@ -116,8 +127,10 @@ export function openCoreDb(accountId: string): CoreDb {
       if (largest.size) await tx.table('inventory').bulkPut([...largest.values()]);
     });
 
-  /** v3: tills' closings (Kassenabschlüsse) - see closings.ts. */
-  db.version(3).stores({ closings: 'id, till, createdAt' });
+  /** v3: files attached to events (tickets, plans), cached for offline use. */
+  db.version(3).stores({ eventFiles: 'id, eventId' });
+  /** v4: tills' closings (Kassenabschlüsse) - see closings.ts. */
+  db.version(4).stores({ closings: 'id, till, createdAt' });
 
   open.set(name, db);
   return db;

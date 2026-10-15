@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction, TseHandle } from '@zollify/shared';
+import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction, TseHandle } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -57,7 +57,7 @@ export interface RouteDef {
  * doing, not by which package the screen came from - a seller looking for the
  * till should not need to know it is a module.
  */
-export type NavGroup = 'selling' | 'stock' | 'events' | 'books' | 'suppliers' | 'account';
+export type NavGroup = 'selling' | 'stock' | 'events' | 'stores' | 'books' | 'suppliers' | 'account';
 
 export interface NavItem {
   /** Route name registered via `routes.add`. */
@@ -75,6 +75,20 @@ export interface NavItem {
 export interface SettingsPanel {
   id: string;
   label: string;
+  component: ComponentLoader;
+  minRole?: Role;
+  order?: number;
+}
+
+/**
+ * A step a module adds to first-run setup, after the business and the first
+ * store or event. The shell owns the progress list and Back / Continue; the
+ * component is only the body, and every step can be skipped.
+ */
+export interface SetupStep {
+  id: string;
+  /** Names the step in the progress list. */
+  title: string;
   component: ComponentLoader;
   minRole?: Role;
   order?: number;
@@ -101,6 +115,68 @@ export interface SaleLine {
    */
   lineTotal: number;
   taxRate: number | null;
+  /** Consignment artist this line's money is shared with; absent = read from the product. */
+  consignorId?: string;
+  /** Percent of the line the store keeps when `consignorId` is set; absent = the artist's usual commission. */
+  commissionPct?: number;
+  /** What the line pays for, when a module added it to the till - see TillApi. */
+  ref?: SaleLineRef;
+}
+
+/** Ties a sale line back to the module record it settles, e.g. a workshop booking. */
+export interface SaleLineRef {
+  /** Stamped by the host with the module that added the line; a module cannot claim another's. */
+  moduleId: string;
+  kind: string;
+  id: string;
+}
+
+/** A button (or, with `tile`, a tile in the product grid) a module adds to the till, opening one of its own screens over it. */
+export interface TillAction {
+  id: string;
+  label: string;
+  icon?: string;
+  /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
+  component: ComponentLoader;
+  order?: number;
+  /** Show it as a tile beside the products instead of a button under the cart. */
+  tile?: boolean;
+}
+
+/** What a module found for a code the till did not know. */
+export interface TillLookup {
+  productId: string;
+  variantId: string | null;
+  /** Shown to the seller, e.g. "Shared from Ana's catalogue - Ana has been told." */
+  message?: string;
+}
+
+/** Something a module puts in the till's cart that is not a catalogue product - a workshop place, say. */
+export interface TillLine {
+  /** Unique per thing being paid for; adding the same key twice keeps one line. */
+  key: string;
+  name: string;
+  /** Fixed: the seller cannot change it at the till. */
+  qty: number;
+  unitPrice: number;
+  consignorId?: string;
+  commissionPct?: number;
+  ref?: { kind: string; id: string };
+}
+
+/** A line a module put in the cart, as it stands now. */
+export interface TillLineInfo {
+  key: string;
+  name: string;
+  qty: number;
+  unitPrice: number;
+}
+
+/** The till's side of reading and changing the lines modules added. */
+export interface TillLineAccess {
+  find(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null;
+  /** Swaps name, quantity and price of the line with `line.key`, in place. False when there is none. */
+  replace(line: Omit<TillLine, 'ref'>): boolean;
 }
 
 /**
@@ -135,7 +211,12 @@ export interface SaleEvent {
    * (paired with `lines` by index) and each named discount, in `currency`.
    * The line totals above already include the discounts.
    */
-  asCharged?: { listTotals: number[]; discounts: { name: string; amount: number }[] };
+  asCharged?: {
+    listTotals: number[];
+    /** Each line's share of the discounts, paired with `lines` - see @zollify/shared AsCharged. */
+    lineDiscounts?: number[];
+    discounts: { name: string; amount: number; ruleId?: string; lines?: number[] }[];
+  };
   /** VAT as applied: rates per line (paired with `lines`) or the exemption. */
   tax?: SaleTax;
   /** KassenSichV: the TSE transaction started at the sale's first item, finished by core when it records the sale. */
@@ -150,9 +231,11 @@ export interface SaleEvent {
      */
     method?: 'cash' | 'card' | 'split' | (string & {});
     /** How the total was made up when more than one way paid (a split). */
-    legs?: { kind: 'cash' | 'card'; amount: number; provider?: string }[];
+    legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
     txRef?: string;
     cardBrand?: string;
+    /** The card was charged in another currency than `currency` - see PaymentLeg.settled. */
+    settled?: CardSettlement;
     /** Cash handed over, when the seller counted it; change follows from it. */
     cashReceived?: number;
   };
@@ -163,6 +246,26 @@ export interface CoreEvents {
   'catalog:changed': { productIds: string[] };
   'event:activated': { eventId: string | null };
   'sync:completed': { at: number; pulled: number; pushed: number };
+  /**
+   * Someone opened a notification under the bell. Announced after the shell
+   * has navigated to its link, so a module whose screen was already open can
+   * show what the notification was about.
+   */
+  'notification:opened': { moduleId: string | null; link: string | null };
+  /**
+   * Something to print on a label - a staff badge, say - handed to whichever
+   * module prints labels. The shell opens that module's screen right after.
+   */
+  'label:print': LabelPrintJob;
+}
+
+/** A label to print: a title, a smaller line under it, a barcode and the text under the bars. */
+export interface LabelPrintJob {
+  title: string;
+  subtitle?: string;
+  caption?: string;
+  /** Encoded as Code 128. */
+  barcode: string;
 }
 
 export type EventName = keyof CoreEvents | (string & {});
@@ -267,6 +370,8 @@ export interface InventoryApi {
   /** What this event can still sell of one item. */
   availableFor(eventId: string, productId: string, variantId?: string | null): number;
   onHand(productId: string, variantId?: string | null): number;
+  /** What is physically left: the last count minus every sale since. Claimed stock is still counted - it exists, it is only promised. */
+  remaining(productId: string, variantId?: string | null): number;
   setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
   /** Reserve stock for an event. */
   claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;
@@ -335,10 +440,16 @@ export interface ImageApi {
  * colliding with another one. Not for anything large or high-frequency;
  * this is for the odd shared list or flag a module wants every device to
  * agree on.
+ *
+ * Only admins' writes reach other devices, except under `team.` (e.g.
+ * 'team.my-module.row'): those staff may write too, so keep there what
+ * colleagues change day to day, and configuration outside it.
  */
 export interface SyncedSettingsApi {
   get<T = unknown>(key: string): Promise<T | undefined>;
   set(key: string, value: unknown): Promise<void>;
+  /** Every setting whose key starts with `prefix`, keyed by full key - for one key per row, read back in one go. */
+  list<T = unknown>(prefix: string): Promise<Record<string, T>>;
 }
 
 export interface DataApi {
@@ -367,12 +478,42 @@ export interface ToastOptions {
 
 export interface ShellUi {
   toast(message: string, options?: ToastOptions): void;
-  confirm(message: string, title?: string): Promise<boolean>;
+  /** Yes or no. `labels` names the two buttons (defaults: Confirm / Cancel). */
+  confirm(message: string, title?: string, labels?: { confirm?: string; cancel?: string }): Promise<boolean>;
   /** Hands the user a file: a download on the web, the save dialog in the Android app. */
   saveFile(filename: string, content: string | Blob, mimeType: string): Promise<void>;
   /** Opens a document to read or print: a new tab on the web, the device viewer in the app. False if a pop-up was blocked. */
   openDocument(filename: string, content: string, mimeType?: string): Promise<boolean>;
 }
+
+// ── The home calendar ───────────────────────────────────────────────────────
+
+/** Something dated a module puts on the home screen's calendar, beside the sales events. */
+export interface CalendarEntry {
+  id: string;
+  /** Local calendar day, YYYY-MM-DD. */
+  date: string;
+  /** HH:mm, when it has one. */
+  time?: string;
+  title: string;
+  /** `attention` draws it as needing an answer (a setup to confirm). */
+  tone?: 'normal' | 'attention' | 'muted';
+  /** Icon name (as for nav items), drawn before the title. */
+  icon?: string;
+  /** In-app path to open when it is clicked, e.g. "/m/consignment/planner". */
+  link?: string;
+}
+/** A card a module puts on the home screen, below the shell's own. */
+export interface HomeCard {
+  id: string;
+  component: ComponentLoader;
+  /** Lower comes first. */
+  order?: number;
+  /** Hidden from users below this role. Defaults to the module's minRole. */
+  minRole?: Role;
+}
+/** Asked for the days on screen, `from` to `to` inclusive (YYYY-MM-DD). Throwing just leaves the source out. */
+export type CalendarSource = (range: { from: string; to: string }) => Promise<CalendarEntry[]>;
 
 // ── The SDK surface ─────────────────────────────────────────────────────────
 
@@ -389,6 +530,12 @@ export interface Sdk {
   routes: { add(route: RouteDef): void; addAll(routes: RouteDef[]): void };
   nav: { add(item: NavItem): void };
   settings: { panel(panel: SettingsPanel): void };
+  /** Adds a step to first-run setup (taking card payments, say). */
+  setup: { step(step: SetupStep): void };
+  /** Adds dated entries (setups, deliveries…) to the home screen's calendar. */
+  calendar: { source(source: CalendarSource): void };
+  /** Adds a card to the home screen (low stock at the stores you consign with, say). */
+  home: { card(card: HomeCard): void };
 
   events: EventBus;
   http: HttpClient;
@@ -409,6 +556,15 @@ export interface Sdk {
   /** Current account and user. Returns a snapshot; use `onAccountChange` to react. */
   account(): AccountSnapshot | null;
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
+
+  /**
+   * A shared till: several people unlock this device with their own PIN.
+   * `available()` is true when this device has it switched on; `lock()` hands
+   * the till back to the lock screen, where the next person says who they are;
+   * `badge(code)` hands the till to the owner of a scanned staff badge (see
+   * `isStaffBadge` in @zollify/shared) and throws when the badge is refused.
+   */
+  lock: { available(): boolean; lock(): Promise<void>; badge(code: string): Promise<void> };
 
   /**
    * Customer display: publish what this register's cart looks like right now.
@@ -448,8 +604,45 @@ export interface Sdk {
     onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;
   };
 
+  /**
+   * The till. A module contributes buttons to it and puts its own lines in
+   * the cart; the till (POS) registers itself as the receiver while open.
+   * The sale those lines end up in is recorded like any other, with each
+   * line's `ref` kept, so the module can tell later what was paid.
+   */
+  till: {
+    action(action: TillAction): void;
+    /** Actions every module contributed, in order - read by the till. */
+    actions(): (TillAction & { moduleId: string })[];
+    /** False when no till is open to take it (or it refused, e.g. no active event). */
+    addLine(line: TillLine): boolean;
+    /** The line this module already has in the cart under `key` (never another module's), or null. */
+    findLine(key: string): TillLineInfo | null;
+    /** Changes the amount of a line this module added, keeping its place in the cart. False when it has no such line or no till is open. */
+    replaceLine(line: Omit<TillLine, 'ref'>): boolean;
+    /** The till's side: read and change the lines modules added. Only one till listens at a time. */
+    onLineAccess(access: TillLineAccess): Unsubscribe;
+    /** The till's side: receive lines modules add. Only one till listens at a time. */
+    onAddLine(handler: (line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean): Unsubscribe;
+    /**
+     * A module that can resolve a code the catalogue does not know - an
+     * artist's label scanned at a store, say. Return the catalogue product it
+     * has made available, or null.
+     */
+    onLookup(handler: (code: string) => Promise<TillLookup | null>): Unsubscribe;
+    /** The till's side: ask the modules about an unknown code. First answer wins. */
+    lookup(code: string): Promise<TillLookup | null>;
+  };
+
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */
   diagnostics: { sendLog(reason?: string): Promise<void> };
+
+  /**
+   * Today's market exchange rate: 1 `from` = rate `to`. Falls back to the
+   * last rate this device fetched when offline (`at` says when that was);
+   * null when no rate was ever fetched. Never an event's own pricing rate.
+   */
+  fx: { latest(from: string, to: string): Promise<{ rate: number; at: number } | null> };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

@@ -15,6 +15,8 @@ import { tillId } from './tse';
  */
 
 const KEY = 'core.receiptCounters';
+/** The counter of the earlier `<series>-<count>` numbering (tx.receiptNumber): a till's count carries on from it rather than starting again. */
+const LEGACY_KEY = 'core.receiptSeq';
 
 function requireAccountId(): string {
   const account = getAccount();
@@ -32,6 +34,12 @@ function highestIn(rows: Transaction[], till: string): number {
   return max;
 }
 
+/** Where a till without a counter yet carries on from: its highest number used, or the count of the earlier numbering. */
+async function startingNumber(db: ReturnType<typeof openCoreDb>, till: string): Promise<number> {
+  const legacy = (await db.settings.get(LEGACY_KEY))?.value;
+  return Math.max(highestIn(await db.transactions.toArray(), till), typeof legacy === 'number' ? legacy : 0);
+}
+
 /** What a receipt was taken for: a till closes when the next one differs (see closings.ts). */
 export interface ReceiptContext {
   /** Local day, YYYY-MM-DD. */
@@ -47,7 +55,7 @@ export async function lastReceipt(till: string): Promise<{ number: number; conte
   const db = openCoreDb(requireAccountId());
   const counters = (await db.settings.get(KEY))?.value as Record<string, number> | undefined;
   const contexts = (await db.settings.get(CONTEXT_KEY))?.value as Record<string, ReceiptContext> | undefined;
-  const number = counters?.[till] ?? highestIn(await db.transactions.toArray(), till);
+  const number = counters?.[till] ?? (await startingNumber(db, till));
   return { number, context: contexts?.[till] ?? null };
 }
 
@@ -57,7 +65,7 @@ export async function nextReceiptNumber(context?: ReceiptContext): Promise<Recei
   const db = openCoreDb(requireAccountId());
   return db.transaction('rw', db.settings, db.transactions, async () => {
     const counters = { ...((await db.settings.get(KEY))?.value as Record<string, number> | undefined) };
-    const last = counters[till] ?? highestIn(await db.transactions.toArray(), till);
+    const last = counters[till] ?? (await startingNumber(db, till));
     const number = last + 1;
     counters[till] = number;
     await db.settings.put({ key: KEY, value: counters });

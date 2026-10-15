@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import type { Router } from 'vue-router';
+import { ROLE_RANK, roleAtLeast, type Role } from '@zollify/sdk';
 import {
   ContributionRegistry,
   ModuleLoader,
@@ -11,6 +12,8 @@ import {
   getAccount,
   getServerUrl,
   isNative,
+  noteSale,
+  onAccountChange,
   recordSale,
   signOut,
   stopAutoSync,
@@ -36,12 +39,18 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   'price-cards': () => import('@zollify/price-cards'),
   'label-printer': () => import('@zollify/label-printer'),
   'convention-checklist': () => import('@zollify/convention-checklist'),
+  'multi-storage': () => import('@zollify/multi-storage'),
   sourcing: () => import('@zollify/sourcing'),
   migration: () => import('@zollify/migration'),
   'shopify-sync': () => import('@zollify/shopify-sync'),
   'public-events': () => import('@zollify/public-events'),
   tax: () => import('@zollify/tax'),
   costs: () => import('@zollify/costs'),
+  consignment: () => import('@zollify/consignment'),
+  'consignment-artist': () => import('@zollify/consignment-artist'),
+  commissions: () => import('@zollify/commissions'),
+  'peppol-be': () => import('@zollify/peppol-be'),
+  economic: () => import('@zollify/economic'),
 };
 
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */
@@ -65,6 +74,7 @@ export const events = new PlatformEventBus();
  * something gets the same treatment for free.
  */
 events.on('sale', (sale) => {
+  noteSale();
   void recordSale(sale).catch((err) => {
     // Never rethrow into the emitter: the payment already happened, and the
     // till must not appear to fail after the customer has paid.
@@ -154,18 +164,38 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   const account = getAccount();
   if (!account) return [];
 
+  // Which modules are on comes from the server; the last answer is kept per
+  // account, so starting without the server (no signal at the venue) still
+  // brings up the till and the rest from the bundles already on the device.
+  const manifestKey = `zollify.manifest.${account.accountId}`;
   let manifest: ManifestResponse;
   try {
     manifest = (await authFetch('/modules/manifest')) as ManifestResponse;
+    try {
+      localStorage.setItem(manifestKey, JSON.stringify(manifest));
+    } catch {
+      /* no storage: the next offline start simply has no modules, as before */
+    }
   } catch (err) {
-    console.error('[zollify] could not fetch the module manifest', err);
-    return [];
+    let cached: ManifestResponse | null = null;
+    try {
+      cached = JSON.parse(localStorage.getItem(manifestKey) ?? 'null') as ManifestResponse | null;
+    } catch {
+      cached = null;
+    }
+    if (!cached?.modules) {
+      console.error('[zollify] could not fetch the module manifest', err);
+      return [];
+    }
+    console.warn('[zollify] server not reached - starting the modules this device last ran');
+    manifest = cached;
   }
 
   // Routes are registered through the sink as each module mounts; a module
   // whose setup throws has its contributions rolled back, so a failed module
   // never leaves a navigable but broken screen behind.
   const outcomes = await loader.loadAll(manifest.modules, account.role);
+  loadedFor = account.role;
   const seen = new Set(outcomes.map((o) => o.moduleId));
   loadOutcomes.value = [...outcomes, ...loadOutcomes.value.filter((o) => !seen.has(o.moduleId))];
 
@@ -177,6 +207,29 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   }
 
   return outcomes;
+}
+
+/** The role modules were last loaded for; a shared till can hand the app to someone with another. */
+let loadedFor: Role | null = null;
+
+/**
+ * Keeps modules and the open screen in step with whoever is using a shared
+ * till: someone senior gets the modules they may use loaded, someone junior
+ * loses the ones they may not, and nobody is left on a screen they cannot open.
+ */
+export function followTillPerson(router: Router): void {
+  onAccountChange((account) => {
+    if (!account || !loadedFor || account.role === loadedFor) return;
+    void (async () => {
+      if (ROLE_RANK[account.role] > ROLE_RANK[loadedFor!]) await loadEnabledModules(router);
+      else {
+        await loader.unloadAbove(account.role);
+        loadedFor = account.role;
+      }
+      const needed = router.currentRoute.value.meta.minRole as Role | undefined;
+      if (!router.currentRoute.value.name || (needed && !roleAtLeast(account.role, needed))) await router.replace({ name: 'home' });
+    })();
+  });
 }
 
 /** Unloads a module; the sink withdraws its routes as the registry drops them. */

@@ -6,6 +6,7 @@ import type {
   DisplayCartMessage,
   DisplayListenersMessage,
   DisplaySubscribeMessage,
+  NotificationMessage,
   NudgeMessage,
   PaymentResultMessage,
   TseRequestMessage,
@@ -13,8 +14,9 @@ import type {
   PaymentTriggerMessage,
   ShellUpdateMessage,
 } from '@zollify/shared';
-import type { JwtClaims } from './auth';
+import { checkClaims, type JwtClaims } from './auth';
 import { touchDevice } from './db';
+import { parseDevice } from './session-info';
 
 type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
 type TseMessage = TseRequestMessage | TseResultMessage;
@@ -33,8 +35,10 @@ interface Member {
 
 export class Rooms {
   private byAccount = new Map<string, Set<Member>>();
+  private authorized = new WeakMap<WebSocket, () => boolean>();
 
-  add(accountId: string, deviceId: string, socket: WebSocket): Member {
+  add(accountId: string, deviceId: string, socket: WebSocket, authorized: () => boolean = () => true): Member {
+    this.authorized.set(socket, authorized);
     let room = this.byAccount.get(accountId);
     if (!room) this.byAccount.set(accountId, (room = new Set()));
     const entry: Member = { socket, deviceId };
@@ -66,8 +70,21 @@ export class Rooms {
     for (const { socket } of this.byAccount.get(accountId) ?? []) this.send(socket, json);
   }
 
-  private send(socket: WebSocket, msg: unknown): void {
-    if (socket.readyState === socket.OPEN) socket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  /** Whether the socket was open (and still authorised) to take it. */
+  private send(socket: WebSocket, msg: unknown): boolean {
+    if (this.authorized.get(socket)?.() === false) {
+      socket.close(4001, 'invalid token');
+      return false;
+    }
+    if (socket.readyState !== socket.OPEN) return false;
+    socket.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    return true;
+  }
+
+  /** Doorbell: the account has a new notification; devices fetch it over HTTP. */
+  notify(accountId: string): void {
+    const msg: NotificationMessage = { type: 'notification' };
+    for (const { socket } of this.byAccount.get(accountId) ?? []) this.send(socket, msg);
   }
 
   nudge(accountId: string, latestSeq: number, exceptDeviceId?: string): void {
@@ -77,7 +94,7 @@ export class Rooms {
     const json = JSON.stringify(msg);
     for (const { socket, deviceId } of room) {
       if (deviceId === exceptDeviceId) continue;
-      if (socket.readyState === socket.OPEN) socket.send(json);
+      this.send(socket, json);
     }
   }
 
@@ -94,7 +111,7 @@ export class Rooms {
       // Only screens showing a customer display; tills and terminals have no
       // use for another register's cart every 15 seconds.
       if (deviceId === fromDeviceId || display === false) continue;
-      if (socket.readyState === socket.OPEN) socket.send(json);
+      this.send(socket, json);
     }
   }
 
@@ -111,10 +128,7 @@ export class Rooms {
     const json = JSON.stringify(stamped);
     let delivered = false;
     for (const { socket, deviceId } of room) {
-      if (deviceId === msg.to && socket.readyState === socket.OPEN) {
-        socket.send(json);
-        delivered = true;
-      }
+      if (deviceId === msg.to) delivered = this.send(socket, json) || delivered;
     }
     return delivered;
   }
@@ -157,11 +171,20 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
     let claims: JwtClaims;
     try {
       claims = app.jwt.verify<JwtClaims>(token ?? '');
+      if (checkClaims(db, claims, 'GET', '/api/sync/ws')) throw new Error('revoked');
     } catch {
       socket.close(4001, 'invalid token');
       return;
     }
-    const member = rooms.add(claims.accountId, deviceId ?? 'unknown', socket);
+    const authorized = () => {
+      try {
+        app.jwt.verify(token ?? ''); // Recheck expiration for each send and receive.
+        return checkClaims(db, claims, 'GET', '/api/sync/ws') === null;
+      } catch {
+        return false;
+      }
+    };
+    const member = rooms.add(claims.accountId, deviceId ?? 'unknown', socket, authorized);
     live.add(socket);
     alive.set(socket, true);
     socket.on('pong', () => alive.set(socket, true));
@@ -177,12 +200,16 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
       // a Carbon in customer-display mode) may rarely push its own ops, so a
       // WS connection is often the only signal that it's still around.
       try {
-        touchDevice(db, deviceId, claims.accountId, claims.sub, null, flavor || null, Date.now());
+        touchDevice(db, deviceId, claims.accountId, claims.sub, null, flavor || null, Date.now(), parseDevice(req.headers['user-agent']));
       } catch {
         /* devices row requires an existing account/user FK - skip on any edge case */
       }
     }
     socket.on('message', (raw) => {
+      if (!authorized()) {
+        socket.close(4001, 'invalid token');
+        return;
+      }
       // Registers push ephemeral customer-display cart snapshots, the
       // remote-payment trigger/result handshake and requests to a main TSE
       // device (and its answers); everything else is ignored

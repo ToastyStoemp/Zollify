@@ -26,6 +26,10 @@ interface CapacitorUpdaterPlugin {
   current(): Promise<{ bundle: BundleInfo; native: boolean }>;
   download(opts: { url: string; version: string; checksum: string }): Promise<BundleInfo>;
   next(opts: { id: string }): Promise<BundleInfo>;
+  /** The bundle next() queued, or null when none is - the plugin's own record, unlike our localStorage note. */
+  getNextBundle?(): Promise<BundleInfo | null>;
+  set(opts: { id: string }): Promise<void>;
+  list(): Promise<{ bundles: (BundleInfo & { status?: string })[] }>;
   /** Applies whatever next() queued right now instead of waiting for the app's own next cold start. */
   reload(): Promise<void>;
 }
@@ -135,9 +139,25 @@ export async function queueShellUpdate(check: ShellUpdateCheck): Promise<void> {
   rememberQueued(check.latestVersion);
 }
 
-/** True when this exact version is already downloaded and waiting for a restart. */
-export function shellUpdateQueued(version: string): boolean {
-  return queuedVersion() === version;
+/**
+ * True when this exact version is downloaded and the plugin really has it
+ * queued. Our localStorage note alone is not enough: if the app restarted into
+ * the bundle and it never reported ready the plugin rolls back and forgets the
+ * queue, but the note stays - every check then said "downloaded, ready" about
+ * an update that was gone, and "Reload now" reloaded the old bundle forever.
+ */
+export async function shellUpdateQueued(version: string): Promise<boolean> {
+  if (queuedVersion() !== version) return false;
+  const plugin = updater();
+  if (!plugin?.getNextBundle) return true;
+  try {
+    const next = await plugin.getNextBundle();
+    if (next?.version === version) return true;
+  } catch {
+    return true; // cannot tell - keep the old behaviour rather than re-download every time
+  }
+  rememberQueued(null);
+  return false;
 }
 
 /**
@@ -148,7 +168,26 @@ export function shellUpdateQueued(version: string): boolean {
  * be days). No-op outside the native app.
  */
 export async function reloadShellNow(): Promise<void> {
-  await updater()?.reload();
+  const plugin = updater();
+  if (!plugin) return;
+  const queued = queuedVersion();
+  // Nothing queued means reload() would just restart the bundle already running.
+  if (plugin.getNextBundle) {
+    const next = await plugin.getNextBundle();
+    if (!next) {
+      rememberQueued(null);
+      throw new Error('The update is no longer queued - check for updates again.');
+    }
+  }
+  const before = (await plugin.current()).bundle.version;
+  await plugin.reload();
+  // A successful reload tears this page down. Still here a moment later: it did not apply.
+  await new Promise((r) => setTimeout(r, 4000));
+  const after = (await plugin.current()).bundle.version;
+  if (after === before) {
+    rememberQueued(null);
+    throw new Error(`Could not switch to ${queued ?? 'the new content'}${after ? ` - still on ${after}` : ''}. Check for updates to download it again.`);
+  }
 }
 
 /**
@@ -171,7 +210,7 @@ export async function checkAndQueueShellUpdate(): Promise<string | null> {
   lastBackgroundCheck = Date.now();
   try {
     const check = await checkShellUpdate();
-    if (!check?.available || shellUpdateQueued(check.latestVersion)) return null;
+    if (!check?.available || (await shellUpdateQueued(check.latestVersion))) return null;
     await queueShellUpdate(check);
     return check.latestVersion;
   } catch {
@@ -193,6 +232,6 @@ export async function announceShellUpdate(): Promise<void> {
   if (!queuedVersion) return;
   createShellUi('shell').toast(`Update ${queuedVersion} downloaded - it'll be ready next time the app opens.`, {
     timeoutMs: 0,
-    action: { label: 'Reload now', onClick: () => void reloadShellNow() },
+    action: { label: 'Reload now', onClick: () => void reloadShellNow().catch((err) => createShellUi('shell').toast(err instanceof Error ? err.message : 'Could not reload.', { kind: 'error' })) },
   });
 }

@@ -7,6 +7,7 @@ import { join } from 'node:path';
  * All data lives under DATA_DIR (a Docker volume in production):
  *   DATA_DIR/zollify.db       the database
  *   DATA_DIR/images/<acct>/   full-size product images
+ *   DATA_DIR/event-files/<acct>/   files attached to events
  */
 
 const MIGRATIONS: string[] = [
@@ -157,12 +158,168 @@ const MIGRATIONS: string[] = [
   // present an already-rotated token and get rejected outright, logging the
   // device out for no reason a user could see or predict.
   `ALTER TABLE refresh_tokens ADD COLUMN rotatedAt INTEGER;`,
+  // v10 - sign in by QR: a signed-out device shows a rotating code, a
+  // signed-in device approves it. See device-link.ts.
+  `
+  CREATE TABLE device_links (
+    id            TEXT PRIMARY KEY,
+    pollHash      TEXT NOT NULL UNIQUE,
+    codeHash      TEXT UNIQUE,
+    prevCodeHash  TEXT UNIQUE,
+    codeIssuedAt  INTEGER NOT NULL,
+    status        TEXT NOT NULL CHECK (status IN ('pending','approved','denied','consumed')),
+    userId        TEXT REFERENCES users(id) ON DELETE CASCADE,
+    deviceId      TEXT,
+    deviceName    TEXT,
+    flavor        TEXT,
+    ip            TEXT,
+    device        TEXT,
+    geo           TEXT,
+    createdAt     INTEGER NOT NULL,
+    expiresAt     INTEGER NOT NULL
+  );
+  CREATE INDEX idx_device_links_expires ON device_links(expiresAt);
+  `,
+  // v11 - in-app notifications: a short note for an account, raised by the
+  // server (e.g. a store scheduling an artist's setup). See notifications.ts.
+  `
+  CREATE TABLE notifications (
+    id        TEXT PRIMARY KEY,
+    accountId TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    moduleId  TEXT,
+    minRole   TEXT NOT NULL DEFAULT 'member' CHECK (minRole IN ('owner','admin','member')),
+    title     TEXT NOT NULL,
+    body      TEXT NOT NULL DEFAULT '',
+    link      TEXT,
+    createdAt INTEGER NOT NULL,
+    readAt    INTEGER
+  );
+  CREATE INDEX idx_notifications_account ON notifications(accountId, createdAt);
+  `,
+  // v12 - shared tills: a personal PIN per user, and the people added to a
+  // device who unlock it with their PIN. See device-users.ts.
+  `
+  ALTER TABLE users ADD COLUMN pinHash TEXT;
+  CREATE TABLE device_users (
+    accountId     TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    deviceId      TEXT NOT NULL,
+    userId        TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    grantHash     TEXT NOT NULL,
+    failures      INTEGER NOT NULL DEFAULT 0,
+    lockedUntil   INTEGER NOT NULL DEFAULT 0,
+    unlockedUntil INTEGER NOT NULL DEFAULT 0,
+    lastUnlockAt  INTEGER,
+    createdAt     INTEGER NOT NULL,
+    PRIMARY KEY (deviceId, userId)
+  );
+  CREATE INDEX idx_device_users_account ON device_users(accountId);
+  `,
+  // v13 - staff badges: a barcode per user that unlocks a shared till they
+  // were added to. Looked up by hash; kept encrypted so it can be reprinted.
+  `
+  ALTER TABLE users ADD COLUMN badgeHash TEXT;
+  ALTER TABLE users ADD COLUMN badgeBox TEXT;
+  ALTER TABLE users ADD COLUMN badgeIssuedAt INTEGER;
+  CREATE UNIQUE INDEX idx_users_badge ON users(badgeHash) WHERE badgeHash IS NOT NULL;
+  `,
+  // v14 - files attached to events (tickets, plans). Bytes live on disk under
+  // DATA_DIR/event-files/<acct>/<id>; this table is the index and the quota.
+  `
+  CREATE TABLE event_files (
+    id        TEXT NOT NULL,
+    accountId TEXT NOT NULL REFERENCES accounts(id),
+    eventId   TEXT NOT NULL,
+    name      TEXT NOT NULL,
+    mime      TEXT NOT NULL,
+    size      INTEGER NOT NULL,
+    createdAt INTEGER NOT NULL,
+    PRIMARY KEY (id, accountId)
+  );
+  CREATE INDEX idx_event_files_event ON event_files(accountId, eventId);
+  `,
+  // v15 - notification levels (a setup to answer outranks an item shared),
+  // and a group key so a burst of the same news is one note, not twenty.
+  `
+  ALTER TABLE notifications ADD COLUMN level TEXT NOT NULL DEFAULT 'normal';
+  ALTER TABLE notifications ADD COLUMN groupKey TEXT;
+  `,
+  // v16 - the op log is read by type ("every event.upsert for this account")
+  // and by payload id ("the tx with this id"); until now both scanned the
+  // whole account's log. The expression index must be spelled exactly like
+  // the queries (json_extract(payload, '$.id')) for SQLite to use it.
+  `
+  CREATE INDEX idx_ops_account_type ON ops(accountId, type, seq);
+  CREATE INDEX idx_ops_payload_id ON ops(accountId, type, json_extract(payload, '$.id'));
+  `,
+  // v17 - devices get a description parsed from the user agent ("Zollify app
+  // on Android (SM-A536B)") so a list of unnamed ones can be told apart, and
+  // a removed device's not-yet-expired access tokens are refused: a token
+  // issued before the device's revokedAt is dead, one from a later sign-in
+  // is fine, so the row can stay.
+  `
+  ALTER TABLE devices ADD COLUMN device TEXT;
+  CREATE TABLE device_revocations (
+    accountId TEXT NOT NULL REFERENCES accounts(id),
+    deviceId  TEXT NOT NULL,
+    revokedAt INTEGER NOT NULL,
+    PRIMARY KEY (accountId, deviceId)
+  );
+  `,
+  // v18 - sign in with Google: the Google account id on a user, and the
+  // waiting sign-ins (the app polls them, as it does device_links) - see
+  // google-auth.ts.
+  `
+  ALTER TABLE users ADD COLUMN googleSub TEXT;
+  CREATE UNIQUE INDEX idx_users_google ON users(googleSub);
+  CREATE TABLE google_links (
+    id         TEXT PRIMARY KEY,
+    pollHash   TEXT NOT NULL UNIQUE,
+    stateHash  TEXT NOT NULL UNIQUE,
+    status     TEXT NOT NULL CHECK (status IN ('pending','verified','failed','consumed')),
+    googleSub  TEXT,
+    email      TEXT,
+    failure    TEXT,
+    deviceId   TEXT,
+    deviceName TEXT,
+    flavor     TEXT,
+    ip         TEXT,
+    device     TEXT,
+    geo        TEXT,
+    createdAt  INTEGER NOT NULL,
+    expiresAt  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_google_links_expires ON google_links(expiresAt);
+  `,
+  // v19 - feedback from the app: bug reports and ideas (see routes/feedback.ts)
+  `
+  CREATE TABLE feedback (
+    id         TEXT PRIMARY KEY,
+    accountId  TEXT NOT NULL REFERENCES accounts(id),
+    userId     TEXT NOT NULL,
+    kind       TEXT NOT NULL CHECK (kind IN ('bug','idea')),
+    message    TEXT NOT NULL,
+    page       TEXT,
+    appVersion TEXT,
+    createdAt  INTEGER NOT NULL
+  );
+  CREATE INDEX idx_feedback_created ON feedback(createdAt);
+  `,
+  // v20 - server settings the owner sets from Settings → Server admin instead
+  // of the .env file; values encrypted (see server-settings.ts)
+  `
+  CREATE TABLE server_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updatedAt  INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(join(dataDir, 'images'), { recursive: true });
   mkdirSync(join(dataDir, 'logs'), { recursive: true });
+  mkdirSync(join(dataDir, 'event-files'), { recursive: true });
   const db = new Database(join(dataDir, 'zollify.db'));
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
@@ -203,12 +360,16 @@ export function touchDevice(
   name: string | null,
   flavor: string | null,
   now: number,
+  device: string | null = null,
 ): void {
   db.prepare(
-    `INSERT INTO devices (id, accountId, userId, name, flavor, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO devices (id, accountId, userId, name, flavor, device, lastSeenAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (id) DO UPDATE SET
        lastSeenAt = excluded.lastSeenAt,
+       userId = excluded.userId,
        name = COALESCE(excluded.name, name),
-       flavor = COALESCE(excluded.flavor, flavor)`,
-  ).run(id, accountId, userId, name, flavor, now, now);
+       flavor = COALESCE(excluded.flavor, flavor),
+       device = COALESCE(excluded.device, device)
+     WHERE devices.accountId = excluded.accountId`,
+  ).run(id, accountId, userId, name, flavor, device, now, now);
 }

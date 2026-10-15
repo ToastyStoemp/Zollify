@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LINK_URL_KEYS, type ProfileLinks } from './receipt-socials';
 import { VatProfileSchema, VatProfileUpdateSchema, type VatProfile } from './vat';
 
 /** Wire protocol between app and sync server - validated with zod on both sides. */
@@ -54,7 +55,15 @@ export interface DeviceSummary {
   id: string;
   name: string | null;
   flavor: string | null;
+  /** What it is, from its user agent: "Zollify app on Android (SM-A536B)". */
+  device: string | null;
+  /** Whose sign-in it last used. */
+  userId: string;
+  userEmail: string | null;
+  /** Live sign-ins on it; 0 once every session was logged out or expired. */
+  sessions: number;
   lastSeenAt: number;
+  createdAt: number;
 }
 
 export interface PushResponse {
@@ -134,6 +143,8 @@ export const ArtistDetailsSchema = z.object({
   vatId: z.string().max(40).default(''),
   /** EORI number, required on EU export declarations. */
   eori: z.string().max(40).default(''),
+  /** Belgian enterprise number (KBO/BCE), kept as 0123.456.789. Peppol invoices and the VAT number follow from it. */
+  enterpriseNumber: z.string().max(20).optional(),
 });
 export type ArtistDetails = z.infer<typeof ArtistDetailsSchema>;
 /**
@@ -155,6 +166,33 @@ export interface AccountProfile {
   defaultCurrency: string;
   /** Small-business VAT exemptions, by country - see resolveEventVat. */
   vat?: VatProfile;
+  /** Staff see sales totals (takings, stats, expected cash). Off: they see single sales only, and cash up blind. */
+  staffSeesTotals?: boolean;
+  /** What the business runs, asked at setup: events (fairs, markets), stores, or both. Unset: see sellsAt. */
+  sells?: SellsAt;
+  /** Webstore and social links, cleaned on save. The receipt footer and the print path read them from here. */
+  links?: ProfileLinks;
+}
+
+/** What a business runs. Decides which of the Events and Stores pages it gets. */
+export interface SellsAt {
+  events: boolean;
+  stores: boolean;
+}
+export const SellsAtSchema = z.object({ events: z.boolean(), stores: z.boolean() }).refine((s) => s.events || s.stores, 'Pick events, stores or both.');
+
+/**
+ * What an account runs. Accounts from before the question was asked keep
+ * what they had: events, plus stores once they have one.
+ */
+export function sellsAt(profile: Pick<AccountProfile, 'sells'> | null | undefined, hasStores = false): SellsAt {
+  return profile?.sells ?? { events: true, stores: hasStores };
+}
+
+/** Whether this person may see sales totals: owners and admins always, staff when the account allows it. */
+export function seesSalesTotals(who: { role: string; profile?: Pick<AccountProfile, 'staffSeesTotals'> } | null | undefined): boolean {
+  if (!who) return false;
+  return who.role !== 'member' || who.profile?.staffSeesTotals === true;
 }
 
 export const CurrencyCodeSchema = z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/);
@@ -166,11 +204,15 @@ export const ProfileUpdateSchema = z.object({
   defaultCurrency: CurrencyCodeSchema.optional(),
   setupCompleted: z.boolean().optional(),
   vat: VatProfileUpdateSchema.optional(),
+  staffSeesTotals: z.boolean().optional(),
+  sells: SellsAtSchema.optional(),
+  /** Link fields are checked by `cleanProfileLinks` on the server, which says what is wrong in words. */
+  links: z.object(Object.fromEntries([...LINK_URL_KEYS, 'otherLabel'].map((k) => [k, z.string().max(400).optional()]))).optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export function emptyProfile(): AccountProfile {
-  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF', vat: VatProfileSchema.parse({}) };
+  return { setupCompletedAt: null, artist: ArtistDetailsSchema.parse({}), defaultCurrency: 'CHF', vat: VatProfileSchema.parse({}), staffSeesTotals: false };
 }
 
 export interface AuthUser {
@@ -194,6 +236,27 @@ export interface TokenResponse {
 export interface NudgeMessage {
   type: 'nudge';
   latestSeq: number;
+}
+
+/** WS doorbell: the account has a new notification. Carries nothing; devices fetch over HTTP. */
+export interface NotificationMessage {
+  type: 'notification';
+}
+
+/** How much a notification asks for attention: urgent needs an answer soon, low needs nothing. */
+export type NotificationLevel = 'urgent' | 'normal' | 'low';
+
+/** A short note for an account, shown under the shell's bell. */
+export interface AppNotification {
+  id: string;
+  moduleId: string | null;
+  title: string;
+  body: string;
+  /** In-app path to open, e.g. "/m/consignment/planner". */
+  link: string | null;
+  createdAt: number;
+  readAt: number | null;
+  level: NotificationLevel;
 }
 
 /**
@@ -348,6 +411,21 @@ export interface AdminAccount {
   txTotal: number;
   /** Most recent op received or device seen, whichever is later (0 = never). */
   lastActivityAt: number;
+  /** The account that holds the server owner's login. */
+  ownsServer: boolean;
+  /** The first admin's email, so an account can be told apart from one with the same name. */
+  adminEmail: string | null;
+}
+
+/** One way an account is tied to another - an invite that made it, an artist consigning to a store. */
+export interface AdminAccountRelation {
+  from: { id: string; name: string };
+  to: { id: string; name: string };
+  /** 'invited' (from invited to), 'consignment' (to consigns to from), 'consignment-offer' (from offered consignment to to), or a module's own. */
+  kind: string;
+  /** What ties them, as a module describes it: the artist's name on the store's books, say. */
+  label: string;
+  since: number | null;
 }
 
 export interface AdminAccountDetail {
@@ -364,6 +442,28 @@ export interface AdminMetricRow {
   syncPushes: number;
   opsReceived: number;
   txCount: number;
+}
+
+/** A bug report or an idea sent from the app (Send feedback). */
+export const FeedbackSchema = z.object({
+  kind: z.enum(['bug', 'idea']),
+  message: z.string().trim().min(3, 'Say a little more.').max(4000),
+  /** The screen it was sent from, e.g. "/m/pos". */
+  page: z.string().max(200).optional(),
+  appVersion: z.string().max(60).optional(),
+});
+export type FeedbackInput = z.infer<typeof FeedbackSchema>;
+
+export interface AdminFeedbackEntry {
+  id: string;
+  accountId: string;
+  accountName: string;
+  email: string | null;
+  kind: 'bug' | 'idea';
+  message: string;
+  page: string | null;
+  appVersion: string | null;
+  createdAt: number;
 }
 
 export interface AdminLogEntry {

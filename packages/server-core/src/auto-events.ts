@@ -13,7 +13,8 @@ import type { ServerOpInput } from './routes/sync';
  */
 
 const KEY = 'events.auto';
-const EVERY_MS = 15 * 60_000;
+/** Once an hour, on the hour: a day can only change at midnight, and an hour's delay is harmless at a convention. */
+const HOUR_MS = 60 * 60_000;
 
 /** One pass over every account that wants it. Returns what changed, for logs and tests. */
 export function runAutoEvents(
@@ -48,7 +49,7 @@ export function runAutoEvents(
   return out;
 }
 
-/** Runs a pass shortly after start, then every quarter of an hour; returns the stop. */
+/** Runs a pass shortly after start, then at the top of every hour; returns the stop. */
 export function startAutoEvents(db: Database.Database, write: (accountId: string, ops: ServerOpInput[]) => void, log: (err: unknown) => void): () => void {
   const pass = (): void => {
     try {
@@ -58,11 +59,18 @@ export function startAutoEvents(db: Database.Database, write: (accountId: string
     }
   };
   const first = setTimeout(pass, 30_000);
-  const timer = setInterval(pass, EVERY_MS);
+  // Each hour starts on the hour, not an hour after the server happened to boot.
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const align = setTimeout(() => {
+    pass();
+    timer = setInterval(pass, HOUR_MS);
+    timer.unref?.();
+  }, HOUR_MS - (Date.now() % HOUR_MS));
   first.unref?.();
-  timer.unref?.();
+  align.unref?.();
   return () => {
     clearTimeout(first);
-    clearInterval(timer);
+    clearTimeout(align);
+    if (timer) clearInterval(timer);
   };
 }

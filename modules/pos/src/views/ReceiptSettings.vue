@@ -39,6 +39,7 @@ const artist = reactive<Required<Pick<ArtistInfo, 'companyName' | 'fullName' | '
 const footerText = ref('');
 const autoPrint = ref(false);
 const printQr = ref(true);
+const compactPrint = ref(true);
 /** A sample QR for the preview; same size and placement as a real one. */
 const sampleQrB64 = ref('');
 const logoB64 = ref('');
@@ -58,6 +59,7 @@ onMounted(async () => {
     footerText.value = (await getSetting<string>(RECEIPT_KEYS.footerText)) ?? '';
     autoPrint.value = (await getSetting<boolean>(RECEIPT_KEYS.autoPrint)) ?? false;
     printQr.value = (await getSetting<boolean>(RECEIPT_KEYS.printQr)) ?? true;
+    compactPrint.value = (await getSetting<boolean>(RECEIPT_KEYS.compactPrint)) ?? true;
     sampleQrB64.value = (await receiptQrPng('SAMPLEsampleSAMPLE0000')) ?? '';
     logoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '';
     printLogoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoB64)) ?? '';
@@ -138,6 +140,7 @@ async function save(): Promise<void> {
     await setSetting(RECEIPT_KEYS.footerText, footerText.value);
     await setSetting(RECEIPT_KEYS.autoPrint, autoPrint.value);
     await setSetting(RECEIPT_KEYS.printQr, printQr.value);
+    await setSetting(RECEIPT_KEYS.compactPrint, compactPrint.value);
     await shareBranding({ footer: footerText.value });
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
@@ -207,6 +210,7 @@ const previewLines = computed<ReceiptLine[]>(() =>
         <label><span>Footer text</span><textarea v-model="footerText" rows="2" placeholder="Thanks for visiting! No returns on prints."></textarea></label>
         <label class="inline"><input v-model="autoPrint" type="checkbox" /><span>Print automatically after each sale</span></label>
         <label class="inline"><input v-model="printQr" type="checkbox" /><span>Print a QR code for the customer's online receipt</span></label>
+        <label class="inline"><input v-model="compactPrint" type="checkbox" /><span>Compact printing on the Carbon - rows close together, shorter receipts. Switch off if text prints faint.</span></label>
         <p class="hint">The footer text and logo also appear on the online receipt and customer displays.</p>
         <button type="submit" class="primary">Save</button>
         <p v-if="saved" class="ok" role="status">Saved.</p>

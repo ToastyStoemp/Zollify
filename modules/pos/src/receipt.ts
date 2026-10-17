@@ -3,6 +3,7 @@ import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
 import { fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
+import { rasterizeReceipt } from './lib/receipt-raster';
 import { receiptQrPng } from './lib/after-sale';
 import { serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
@@ -76,6 +77,8 @@ export const RECEIPT_KEYS = {
   /** MAC address + display name of a paired Bluetooth ESC/POS printer. */
   printerAddress: 'receipt.printerAddress',
   printerName: 'receipt.printerName',
+  /** Carbon: print the text as images at a normal line height (default on) - see lib/receipt-raster.ts. */
+  compactPrint: 'receipt.compactPrint',
 } as const;
 
 // ── Printing (routes to whichever printer this device has) ──────────────────
@@ -91,7 +94,9 @@ export async function printingAvailable(): Promise<boolean> {
 
 export async function printReceipt(lines: ReceiptLine[]): Promise<{ printed: boolean; error?: string }> {
   if (hasNativePlugin('CarbonPayment')) {
-    const r = await CarbonPayment.printReceipt({ lines });
+    // The Carbon's printer leaves a blank line's height between text rows; as images the rows sit close.
+    const compact = (await getSetting<boolean>(RECEIPT_KEYS.compactPrint)) ?? true;
+    const r = await CarbonPayment.printReceipt({ lines: compact ? rasterizeReceipt(lines) : lines });
     return { printed: r.printed, error: r.error };
   }
   if (hasNativePlugin('ThermalPrinter')) {

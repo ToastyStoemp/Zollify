@@ -51,6 +51,10 @@ export {
   lastSyncAt,
   lastSyncError,
   syncProgress,
+  refusedSales,
+  loadRefusedSales,
+  dismissRefusedSales,
+  type RefusedSale,
   type SyncState,
   type SyncResult,
 } from './sync';
@@ -70,6 +74,9 @@ export {
 export {
   BACKUP_VERSION,
   createBackup,
+  createBackupZip,
+  readBackupFile,
+  type LoadedBackup,
   inspectBackup,
   restoreBackup,
   backupFilename,

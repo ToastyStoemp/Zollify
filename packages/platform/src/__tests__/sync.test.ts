@@ -299,3 +299,40 @@ describe('sync', () => {
     expect(rec?.full).toBe(rec?.thumb);
   });
 });
+
+describe('sales the server refuses', () => {
+  it('are marked synced (no endless retry) but kept on record, and can be dismissed', async () => {
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'tx-ok', eventId: 'A', total: 10, currency: 'CHF', timestamp: 5 } });
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'tx-refused', eventId: 'B', total: 25, currency: 'EUR', timestamp: 6 } });
+    const pending = await outbox.unsyncedOps();
+    const refusedOp = pending.find((op) => (op.payload as { id: string }).id === 'tx-refused')!;
+    pushResponse = { accepted: 1, duplicates: 0, latestSeq: 1, refused: [refusedOp.opId] };
+    await sync.syncNow();
+    expect(await outbox.unsyncedOps()).toHaveLength(0);
+    expect(sync.refusedSales.value).toEqual([{ txId: 'tx-refused', eventId: 'B', total: 25, currency: 'EUR', at: 6 }]);
+    // Survives a restart.
+    sync.refusedSales.value = [];
+    await sync.loadRefusedSales();
+    expect(sync.refusedSales.value.map((r) => r.txId)).toEqual(['tx-refused']);
+    await sync.dismissRefusedSales();
+    await sync.loadRefusedSales();
+    expect(sync.refusedSales.value).toEqual([]);
+  });
+});
+
+describe('a helper whose event was taken away', () => {
+  it('is not put back on it at start-up, and the till has no event', async () => {
+    const db = openCoreDb(account.accountId);
+    for (const id of ['A', 'B']) await db.events.put({ id, name: id, venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } as never);
+    await db.settings.put({ key: 'core.activeEventId', value: 'A' });
+    account.allowedEventIds = ['B'];
+    try {
+      events.resetSalesEventCache();
+      await events.loadSalesEvents();
+      expect(events.activeEventId.value).not.toBe('A');
+      expect(events.activeEvent.value).toBeNull();
+    } finally {
+      account.allowedEventIds = null;
+    }
+  });
+});

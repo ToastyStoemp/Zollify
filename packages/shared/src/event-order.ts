@@ -48,3 +48,13 @@ export function tillEventCheck(
     events.find((e) => !e.deletedAt && !isStore(e) && e.status !== 'closed' && e.id !== active?.id && !!e.dateStart && e.dateStart <= today && (e.dateEnd || e.dateStart) >= today) ?? null;
   return { ended, endedOn: ended ? (active!.dateEnd || active!.dateStart || null) : null, runningToday };
 }
+
+/**
+ * What Close leaves an event as. One that has not started yet parks back to
+ * planned; one that has started - even mid-convention - is closed, or
+ * automatic opening would put it straight back on the till.
+ */
+export function statusOnClose(e: Pick<SalesEvent, 'dateStart' | 'dateEnd'>, today = localIsoDay()): 'planned' | 'closed' {
+  const start = e.dateStart || e.dateEnd;
+  return start && start > today ? 'planned' : 'closed';
+}

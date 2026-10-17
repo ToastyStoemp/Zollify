@@ -15,6 +15,7 @@ const empty = (): unknown => new Proxy(() => [], { get: (_t, k) => (k === 'then'
 const fake = new Proxy(
   {
     events: { emit: (_name: string, sale: SaleEvent) => emitted.push(sale), on: () => () => {} },
+    data: new Proxy({ events: { sellLock: () => null, get: () => undefined, list: () => [] } } as Record<string, unknown>, { get: (t, k: string) => (k in t ? t[k] : empty()) }),
     fx: { latest: async () => latest },
     config: { get: async () => undefined, set: async () => {} },
   } as Record<string, unknown>,

@@ -21,6 +21,7 @@ const events = await import('../core/sales-events');
 const catalog = await import('../core/catalog');
 const tx = await import('../core/transactions');
 const device = await import('../core/device');
+const lock = await import('../core/sell-lock');
 const P = 'p-print';
 
 const tick = () => new Promise((r) => setTimeout(r, 2));
@@ -101,5 +102,46 @@ describe('chained claims', () => {
     expect(inv.claimFor('B', P)).toBe(10);
     await inv.setClaim('B', P, '', 12); // two more, from the pile
     expect(state()).toEqual({ physical: 80, free: 68, A: 'claim:0', B: 'claim:12' });
+  });
+});
+
+describe('Sell 🔒', () => {
+  beforeEach(async () => {
+    await lock.setSellLockSettings({ allowForce: false });
+  });
+
+  it('locks A once B, holding its leftovers, is open - also after A is reopened', async () => {
+    await events.upsertSalesEvent({ ...events.getSalesEvent('B')!, status: 'planned' });
+    await sell('A', 20);
+    await inv.claimUnsoldFrom('A', 'B');
+    expect(lock.sellLocked('A')).toBe(false); // B has not opened yet
+    await setStatus('B', 'active');
+    expect(lock.sellLocked('A')).toBe(true);
+    expect(lock.sellLockFor('A')!.by.map((e) => e.id)).toEqual(['B']);
+    expect(lock.sellLocked('B')).toBe(false);
+    await setStatus('A', 'closed');
+    await setStatus('A', 'active');
+    expect(lock.sellLocked('A')).toBe(true);
+  });
+
+  it('no leftovers taken, no lock', async () => {
+    await sell('A', 30);
+    await inv.claimUnsoldFrom('A', 'B');
+    expect(lock.sellLockFor('A')).toBeNull();
+  });
+
+  it('forcing is refused by default, and only holds while the account allows it', async () => {
+    await sell('A', 20);
+    await inv.claimUnsoldFrom('A', 'B');
+    expect(lock.canForceSell()).toBe(false);
+    await expect(lock.forceSell('A', true)).rejects.toThrow();
+    await lock.setSellLockSettings({ allowForce: true });
+    await lock.forceSell('A', true);
+    expect(lock.sellLocked('A')).toBe(false);
+    await lock.setSellLockSettings({ allowForce: false });
+    expect(lock.sellLocked('A')).toBe(true);
+    await lock.setSellLockSettings({ allowForce: true });
+    await lock.forceSell('A', false);
+    expect(lock.sellLocked('A')).toBe(true);
   });
 });

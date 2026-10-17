@@ -22,6 +22,7 @@ import { loadTransactions } from './transactions';
 import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { loadInventory } from './inventory';
+import { loadSellLockSettings } from './sell-lock';
 import { base64ToBlob } from './images';
 
 /**
@@ -417,6 +418,7 @@ export async function syncNow(): Promise<SyncResult> {
           loadTransactions(),
           loadDiscounts(),
           loadInventory(),
+          loadSellLockSettings().catch(() => undefined),
         ]);
       }
       await refreshPendingCount();

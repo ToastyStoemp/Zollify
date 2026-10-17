@@ -88,6 +88,11 @@ export interface SalesEvent {
   edition?: string;
   /** Booth/cube layout imported from the configurator. See booth-layout.ts. */
   boothLayout?: BoothLayout;
+  /**
+   * Sell anyway although another open event took over this one's leftovers
+   * (see sell-lock.ts). Only honoured while the account allows forcing.
+   */
+  sellLockForced?: boolean;
   updatedAt: number;
   deletedAt?: number;
 }

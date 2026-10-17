@@ -83,6 +83,11 @@ export function claimFor(
   return row ? row.broughtQty : null;
 }
 
+/** Every claim, all events. Reactive. */
+export function allClaims(): EventStock[] {
+  return [...claims.values()];
+}
+
 export function claimsForEvent(eventId: string): EventStock[] {
   return [...claims.values()].filter((c) => c.eventId === eventId);
 }

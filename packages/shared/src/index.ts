@@ -40,3 +40,4 @@ export * from './economic';
 export * from './store-setup';
 export * from './locale-guess';
 export * from './event-auto';
+export * from './sell-lock';

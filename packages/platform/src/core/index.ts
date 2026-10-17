@@ -18,6 +18,7 @@ export {
   activeEvent,
   activeEventId,
   getSalesEvent,
+  allSalesEvents,
   setActiveEvent,
   upsertSalesEvent,
   deleteSalesEvent,
@@ -29,6 +30,7 @@ export {
   copyEventPricing,
   type EventPricing,
 } from './sales-events';
+export { sellLockSettings, loadSellLockSettings, setSellLockSettings, sellLockFor, sellLocked, canForceSell, forceSell } from './sell-lock';
 export { autoEventSettings, loadAutoEventSettings, setAutoEventSettings, runAutoEvents, startAutoEvents, stopAutoEvents } from './auto-events';
 export {
   queueOp,

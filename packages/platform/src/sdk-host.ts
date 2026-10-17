@@ -34,7 +34,7 @@ import { getTransaction, importTransactions, recentTransactions, revertTransacti
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
-import { fetchLatestRate } from './core/exchange-rate';
+import { fetchHistoricalRates, fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import { canForceSell, forceSell, sellLockFor } from './core/sell-lock';
@@ -399,7 +399,10 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
-    fx: { latest: (from, to) => fetchLatestRate(from, to) },
+    fx: {
+      latest: (from, to) => fetchLatestRate(from, to),
+      on: async (from, to, dates) => Object.fromEntries(await fetchHistoricalRates(from, to, dates)),
+    },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

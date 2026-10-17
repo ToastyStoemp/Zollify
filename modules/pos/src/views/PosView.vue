@@ -968,17 +968,17 @@ function lockTill(): void {
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
+        <!-- Narrow screens: the browse modes as one icon beside the terminal (the pills below are hidden there). A native
+             select under the icon, so the device's own picker opens on tap. -->
+        <label class="quiet iconbtn mode-pick" :title="`Showing: ${currentMode.label}`">
+          <Icon :name="currentMode.icon" :size="16" />
+          <select :value="viewMode" :aria-label="`Browse by (showing ${currentMode.label})`" @change="setViewMode(($event.target as HTMLSelectElement).value as ViewMode)">
+            <option v-for="m in viewModes" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+        </label>
         <div class="search-group">
           <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
           <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
-          <!-- Narrow screens: the browse modes as one icon (the pills below are hidden there). A native
-               select under the icon, so the device's own picker opens on tap. -->
-          <label class="quiet iconbtn mode-pick" :title="`Showing: ${currentMode.label}`">
-            <Icon :name="currentMode.icon" :size="16" />
-            <select :value="viewMode" :aria-label="`Browse by (showing ${currentMode.label})`" @change="setViewMode(($event.target as HTMLSelectElement).value as ViewMode)">
-              <option v-for="m in viewModes" :key="m.id" :value="m.id">{{ m.label }}</option>
-            </select>
-          </label>
         </div>
         <div class="modes">
           <button v-for="m in viewModes" :key="m.id" type="button" :class="['pill', { active: viewMode === m.id }]" @click="setViewMode(m.id)">{{ m.label }}</button>
@@ -1448,7 +1448,7 @@ function lockTill(): void {
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
   .search-group { margin-left: 0; width: 100%; order: 3; }
-  /* Pills fold into one icon beside the scan button: a row less above the products. */
+  /* Pills fold into one icon beside the terminal state: a row less above the products. */
   .modes { display: none; }
   .mode-pick { display: inline-flex; }
   .bar { padding: .5rem .75rem; gap: .5rem; }

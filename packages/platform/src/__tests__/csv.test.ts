@@ -99,3 +99,20 @@ describe('csvFilename', () => {
     expect(csvFilename(null)).toMatch(/^zollify-sales-all-events-/);
   });
 });
+
+describe('a converted sale in the CSV', () => {
+  it('puts line amounts in the currency it names, and the books’ figures at the end', () => {
+    // A EUR 10 print charged as SEK 115, the day's market rate 11.13.
+    const csv = transactionsToCsv([
+      tx({ currency: 'SEK', total: 115, baseCurrency: 'EUR', baseTotal: 10, exchangeRate: 11.5, marketRate: { rate: 11.13, at: 1 }, payments: [{ kind: 'cash', amount: 115, provider: 'manual' }] }),
+    ]);
+    const [head, row] = rows(csv).map((r) => r.split(','));
+    const col = (name: string) => row![head!.indexOf(name)];
+    expect(col('currency')).toBe('SEK');
+    expect(col('line_total')).toBe('115');
+    expect(col('unit_price')).toBe('115');
+    expect(col('base_line_total')).toBe('10');
+    expect(col('market_rate')).toBe('11.13');
+    expect(col('sale_total_at_market_rate')).toBe('10.33');
+  });
+});

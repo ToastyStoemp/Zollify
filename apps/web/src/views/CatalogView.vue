@@ -14,6 +14,7 @@ import {
   deleteProduct,
   freeFor,
   mergeProducts,
+  countedAt,
   inStockFor,
   saveProductImage,
   setOnHand,
@@ -44,7 +45,8 @@ const lowThreshold = ref('3');
 const availability = computed(() => (activeEventId.value ? availabilityFor(activeEventId.value) : []));
 function lowRows(p: Product): { variant: string; left: number }[] {
   const thr = Math.max(0, parseInt(lowThreshold.value) || 0);
-  return availability.value.filter((a) => a.productId === p.id && a.available <= thr).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
+  // Never counted and not claimed: its stock is unknown, not low.
+  return availability.value.filter((a) => a.productId === p.id && a.available <= thr && (a.source === 'claim' || countedAt(a.productId, a.variantId) > 0)).map((a) => ({ variant: a.variantId ? (p.variants.find((v) => v.id === a.variantId)?.name ?? a.variantId) : '', left: a.available }));
 }
 
 const isArtwork = (type: string): boolean => /print|art/i.test(type);
@@ -210,7 +212,11 @@ const groups = computed(() => {
 const types = computed(() => [...new Set(['Art Print', 'Purse', ...allProducts.value.map((p) => p.type).filter((t): t is string => !!t)])].sort());
 
 const onHandOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + inStockFor(p.id, v.id), 0) : inStockFor(p.id, ''));
-const freeOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + freeFor(p.id, v.id), 0) : freeFor(p.id, ''));
+/** Free stock of the counted sizes: an item nobody counted yet is unknown, never "oversold". */
+const freeOf = (p: Product): number => {
+  const keys = p.variants.length ? p.variants.map((v) => v.id) : [''];
+  return keys.filter((vid) => countedAt(p.id, vid) > 0).reduce((s, vid) => s + freeFor(p.id, vid), 0);
+};
 const soldOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + soldTotal(p.id, v.id), 0) : soldTotal(p.id, ''));
 
 // Customs wants title + year for art prints.

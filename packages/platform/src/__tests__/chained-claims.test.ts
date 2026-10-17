@@ -158,3 +158,15 @@ describe('the Stock page row', () => {
     expect(row()).toMatchObject({ onHand: 93, claimed: 0, free: 93 });
   });
 });
+
+describe('"held by other events"', () => {
+  it('is what the other events still hold, not their claims as written', async () => {
+    // A claimed 30 and sold 20: from B's side, 10 are held elsewhere, not 30.
+    await sell('A', 20);
+    expect(avail('B').reservedElsewhere).toBe(10);
+    // A hands its 10 leftovers to B: nothing is held by another event for A or B.
+    await inv.claimUnsoldFrom('A', 'B');
+    expect(avail('B').reservedElsewhere).toBe(0);
+    expect(avail('A').reservedElsewhere).toBe(10);
+  });
+});

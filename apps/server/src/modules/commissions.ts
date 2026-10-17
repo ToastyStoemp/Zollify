@@ -22,6 +22,7 @@ import {
   isClosedStatus,
   phoneDigits,
   totalOwed,
+  owedByCurrency,
   type Commission,
   type CommissionPayment,
   type CommissionSettings,
@@ -598,6 +599,7 @@ export const commissionsServerModule: ServerModule = {
       commissionCount: s.commissions.length,
       openCount: s.commissions.filter((c) => !isClosedStatus(c.status)).length,
       owed: totalOwed(s.commissions.map((c) => ({ status: c.status, balance: totals.get(c.id)!.balance }))),
+      owedBy: owedByCurrency(s.commissions.map((c) => ({ status: c.status, balance: totals.get(c.id)!.balance, currency: c.currency }))),
       /** When the details will be erased; null while a commission is still open. */
       erasesAt: s.decision.dueAt,
     });

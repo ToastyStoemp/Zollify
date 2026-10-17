@@ -1,5 +1,5 @@
 import type { Transaction } from '@zollify/shared';
-import { localIsoDay } from '@zollify/shared';
+import { chargedLineTotals, localIsoDay, receiptBreakdown, toBaseFactor } from '@zollify/shared';
 
 /**
  * CSV export of recorded sales, for handing to an accountant or a spreadsheet.
@@ -44,6 +44,13 @@ const HEADERS = [
   'tx_ref',
   'sale_total',
   'reverted_at',
+  // Added at the end so existing column positions stay. unit_price and
+  // line_total are in `currency` (what the customer paid); these are the
+  // books' figures, and the sale at the day's market rate.
+  'base_unit_price',
+  'base_line_total',
+  'market_rate',
+  'sale_total_at_market_rate',
 ] as const;
 
 export function transactionsToCsv(transactions: Transaction[]): string {
@@ -54,7 +61,10 @@ export function transactionsToCsv(transactions: Transaction[]): string {
 
   for (const tx of ordered) {
     const leg = tx.payments[0];
-    for (const item of tx.items) {
+    const charged = chargedLineTotals(tx);
+    const list = receiptBreakdown(tx).lines;
+    const book = tx.baseCurrency ?? tx.currency;
+    tx.items.forEach((item, i) => {
       rows.push(
         [
           tx.id,
@@ -65,8 +75,8 @@ export function transactionsToCsv(transactions: Transaction[]): string {
           item.vid ?? '',
           item.title,
           item.qty,
-          item.unitPrice,
-          item.lineTotal,
+          item.qty ? round2((list[i] ?? item.lineTotal) / item.qty) : item.unitPrice,
+          charged[i] ?? item.lineTotal,
           tx.currency,
           tx.baseCurrency ?? '',
           tx.baseTotal ?? '',
@@ -78,15 +88,21 @@ export function transactionsToCsv(transactions: Transaction[]): string {
           // Kept in the export rather than filtered out: an accountant needs to
           // see the refund, not a gap where a sale used to be.
           tx.revertedAt ? new Date(tx.revertedAt).toISOString() : '',
+          item.unitPrice,
+          item.lineTotal,
+          tx.marketRate?.rate ?? '',
+          tx.currency === book ? tx.total : tx.marketRate ? round2(tx.total * toBaseFactor(tx, book)) : '',
         ]
           .map(escape)
           .join(','),
       );
-    }
+    });
   }
 
   return rows.join('\r\n');
 }
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Filename that sorts chronologically and says what it covers. */
 export function csvFilename(eventName: string | null): string {

@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
+import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -27,6 +27,8 @@ import {
   isConverting,
   itemCount,
   loadCardFx,
+  loadMarketFx,
+  marketFx,
   setCartEvent,
   setCustomDiscount,
   setQty,
@@ -181,7 +183,15 @@ const cardRateLabel = computed(() => {
 const availability = computed(() => {
   const event = activeEvent.value;
   if (!event) return new Map<string, number>();
-  return new Map(sdk().data.inventory.availability(event.id).map((r) => [`${r.productId}:${r.variantId}`, r.available]));
+  const inv = sdk().data.inventory;
+  // An item never counted and not claimed has no known stock: no figure rather
+  // than "3 over stock" for every sale of it.
+  return new Map(
+    inv
+      .availability(event.id)
+      .filter((r) => r.source === 'claim' || inv.counted(r.productId, r.variantId))
+      .map((r) => [`${r.productId}:${r.variantId}`, r.available]),
+  );
 });
 function remaining(pid: string, vid: string | null): number | null {
   if (!activeEvent.value) return null;
@@ -691,7 +701,7 @@ const today = computed(() => {
   for (const tx of sdk().data.transactions.recent()) {
     if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
     count++;
-    revenue += tx.baseTotal ?? tx.total;
+    revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
   }
   return { count, revenue };
 });
@@ -753,6 +763,8 @@ function startPayment(method: string): void {
   logSent.value = false;
   // Keep the card rate current through a long day; a stale one still works offline.
   if (method === 'card' && cardInBase.value && Date.now() - cardFx.at > 3_600_000) void loadCardFx();
+  // The day's rate recorded with the sale: kept fresh through a long day too.
+  if (isConverting.value && Date.now() - marketFx.at > 3_600_000) void loadMarketFx();
   if (method === 'card' && hasTerminal.value) {
     void beginCardPayment();
     return;

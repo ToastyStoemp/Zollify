@@ -1,7 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { SalesEvent, Transaction } from '@zollify/shared';
-import { localIsoDay } from '@zollify/shared';
+import { localIsoDay, receiptBreakdown, toBaseFactor } from '@zollify/shared';
 
 /** End-of-event sales report, ported from ZollTool: summary, payment split, best sellers, daily revenue, full sales list. */
 export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction[]): { bytes: ArrayBuffer; filename: string } {
@@ -12,23 +12,26 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   const money = (n: number) => `${cur} ${n.toFixed(2)}`;
 
   // Everything in this report is shown in the base/tracking currency, even for
-  // sales charged in a converted local currency (SalesEvent.localCurrency) -
-  // it's the accounting-oriented document, so figures without a precomputed
-  // base value (payment legs, discounts) are converted back via the rate
-  // snapshotted on the transaction at checkout time.
-  const toBase = (amount: number, tx: Transaction): number => (tx.exchangeRate ? amount / tx.exchangeRate : amount);
+  // sales charged in a converted local currency (SalesEvent.localCurrency).
+  // Every figure starts from what was charged and goes through the same
+  // factor - the day's market rate the till recorded, else the booked figure
+  // (booked-base.ts) - so Revenue is exactly Cash + Card, rounding and local
+  // prices included.
+  const toBase = (amount: number, tx: Transaction): number => amount * toBaseFactor(tx, cur);
+  const baseOf = (tx: Transaction): number => toBase(tx.total, tx);
 
   const active = transactions.filter((t) => !t.revertedAt);
   const reverted = transactions.length - active.length;
-  const revenue = active.reduce((s, t) => s + (t.baseTotal ?? t.total), 0);
+  const revenue = active.reduce((s, t) => s + baseOf(t), 0);
   const items = active.reduce((s, t) => s + t.items.reduce((si, i) => si + i.qty, 0), 0);
   const legTotal = (kind: 'cash' | 'card') =>
     active.reduce(
       (s, t) => s + t.payments.filter((p) => p.kind === kind).reduce((sp, p) => sp + toBase(p.amount, t), 0),
       0,
     );
+  // The till keeps its discounts on the sale's receipt snapshot, not in `discounts` (imports do).
   const discountTotal = active.reduce(
-    (s, t) => s + t.discounts.reduce((sd, d) => sd + toBase(d.amount, t), 0),
+    (s, t) => s + receiptBreakdown(t).discounts.reduce((sd, d) => sd + toBase(d.amount, t), 0),
     0,
   );
 
@@ -100,7 +103,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
   const dayMap = new Map<string, number>();
   for (const tx of active) {
     const day = localIsoDay(tx.timestamp);
-    dayMap.set(day, (dayMap.get(day) ?? 0) + (tx.baseTotal ?? tx.total));
+    dayMap.set(day, (dayMap.get(day) ?? 0) + baseOf(tx));
   }
   const days = [...dayMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   if (days.length > 1) {
@@ -141,7 +144,7 @@ export function buildSalesReportPdf(event: SalesEvent, transactions: Transaction
           tx.items
             .map((i) => `${i.qty}× ${i.variantLabel ? `${i.title} · ${i.variantLabel}` : i.title}`)
             .join(', '),
-          money(tx.baseTotal ?? tx.total),
+          money(baseOf(tx)),
           tx.revertedAt ? 'REVERTED' : '',
         ]),
       styles: { fontSize: 8, cellPadding: 1.6 },

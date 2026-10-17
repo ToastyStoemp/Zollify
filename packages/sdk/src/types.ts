@@ -203,6 +203,8 @@ export interface SaleEvent {
   baseCurrency?: string;
   baseTotal?: number;
   exchangeRate?: number;
+  /** The day's market rate (base -> currency) the till had, so the sale's base value is what it was worth that day. */
+  marketRate?: { rate: number; at: number };
   lines: SaleLine[];
   /** Secret for the customer's online receipt; see @zollify/shared receipt-link. */
   receiptToken?: string;

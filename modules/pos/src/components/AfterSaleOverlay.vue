@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import { onMounted, ref } from 'vue';
 import { Icon } from '@zollify/ui';
 import { AfterSalePanel, type PrintState } from '../lib/after-sale';
+import { loadLogoSize, type LogoSize } from '../receipt';
 
 /**
  * The card a customer sees about their receipt: logo, amount, the QR to the
@@ -32,13 +34,16 @@ withDefaults(
   { thankYou: false, printLabel: 'Print receipt', closeLabel: 'Close', ariaLabel: 'Receipt' },
 );
 defineEmits<{ print: []; close: []; secondary: [] }>();
+/** The booth's chosen logo size (POS → Receipts), for the screen as for paper. */
+const logoSize = ref<LogoSize>('medium');
+onMounted(() => void loadLogoSize().then((s) => (logoSize.value = s)).catch(() => undefined));
 </script>
 
 <template>
   <div class="after-sale" role="dialog" aria-modal="true" :aria-label="ariaLabel" @click.self="$emit('close')">
     <div class="after-sale-card">
       <p v-if="caption" class="caption">{{ caption }}</p>
-      <component :is="AfterSalePanel" v-if="AfterSalePanel" :thank-you="thankYou" :total="total" :receipt-url="receiptUrl" :logo="logo" :qr-size="240" />
+      <component :is="AfterSalePanel" v-if="AfterSalePanel" :thank-you="thankYou" :total="total" :receipt-url="receiptUrl" :logo="logo" :logo-size="logoSize" :qr-size="240" />
       <p v-else class="fallback-total">{{ total }}</p>
       <p v-if="warning" class="warning" role="status">{{ warning }}</p>
       <p v-if="print === 'printed'" class="print-note" role="status"><Icon name="check" :size="14" /> Receipt printed</p>

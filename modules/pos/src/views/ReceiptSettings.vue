@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { EMPTY_RECEIPT_SOCIALS, checkPickedFile, receiptFooterLinks, type ReceiptSocials, type Transaction } from '@zollify/shared';
 import { CountryPicker } from '@zollify/ui';
-import { RECEIPT_FIELD_DEFAULTS, receiptFields, type ReceiptField, LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, withProfileFallback, type ArtistInfo, type ReceiptLine } from '../receipt';
+import { LOGO_SIZES, asLogoSize, sizePrintLogo, type LogoSize, RECEIPT_FIELD_DEFAULTS, receiptFields, type ReceiptField, LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, withProfileFallback, type ArtistInfo, type ReceiptLine } from '../receipt';
 import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
 import { pushBranding, pushReceiptToggles, serverSocials } from '../lib/branding';
@@ -46,6 +46,10 @@ const fields = reactive<Record<ReceiptField, boolean>>({ ...RECEIPT_FIELD_DEFAUL
 const sampleQrB64 = ref('');
 const logoB64 = ref('');
 const printLogoB64 = ref('');
+const logoSize = ref<LogoSize>('medium');
+/** The print logo at the chosen size, for the preview. */
+const sizedLogoB64 = ref('');
+watch([printLogoB64, logoSize], async ([b64, size]) => (sizedLogoB64.value = await sizePrintLogo(b64, size)), { immediate: true });
 const saved = ref(false);
 const socials = reactive<ReceiptSocials>({ ...EMPTY_RECEIPT_SOCIALS });
 const socialsSaved = ref(false);
@@ -66,6 +70,7 @@ onMounted(async () => {
     sampleQrB64.value = (await receiptQrPng('SAMPLEsampleSAMPLE0000')) ?? '';
     logoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '';
     printLogoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoB64)) ?? '';
+    logoSize.value = asLogoSize(await getSetting(RECEIPT_KEYS.logoSize));
     const remote = await serverSocials();
     if (remote) Object.assign(socials, remote);
   } catch (err) {
@@ -172,7 +177,7 @@ const sampleTx = computed<Transaction>(() => ({
   payments: [{ kind: 'card', amount: 47, provider: 'card', cardBrand: 'VISA', authCode: '004215', txRef: '304512780093' }],
 }));
 const previewLines = computed<ReceiptLine[]>(() =>
-  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: withProfileFallback({ ...artist }), logoB64: printLogoB64.value, footerText: footerText.value, qrB64: printQr.value ? sampleQrB64.value : undefined, fields: { ...fields } }, previewCountry.value || undefined),
+  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: withProfileFallback({ ...artist }), logoB64: sizedLogoB64.value, footerText: footerText.value, qrB64: printQr.value ? sampleQrB64.value : undefined, fields: { ...fields } }, previewCountry.value || undefined),
 );
 </script>
 
@@ -246,6 +251,13 @@ const previewLines = computed<ReceiptLine[]>(() =>
             <button v-if="logoB64" type="button" class="quiet danger" @click="clearLogo">Remove</button>
           </div>
         </div>
+        <label class="size">
+          <span>Logo size, on paper and on the after-sale screen</span>
+          <select v-model="logoSize" @change="setSetting(RECEIPT_KEYS.logoSize, logoSize)">
+            <option v-for="s in LOGO_SIZES" :key="s.id" :value="s.id">{{ s.label }}</option>
+          </select>
+        </label>
+        <p class="hint">A black logo on a transparent background shows white on a dark screen, so it stays visible.</p>
       </form>
 
       <aside class="preview">
@@ -281,6 +293,7 @@ legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .logo { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .logo img { max-width: 12rem; max-height: 6rem; background: #fff; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 6px; padding: .25rem; }
 .logo-actions { display: flex; align-items: center; gap: .5rem; }
+.size { max-width: 20rem; }
 .preview { display: flex; flex-direction: column; gap: .5rem; position: sticky; top: 1rem; }
 .preview h3 { margin: 0; }
 .preview label { width: 20rem; max-width: 100%; }

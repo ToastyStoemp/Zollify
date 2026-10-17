@@ -9,7 +9,9 @@ import {
   allProducts,
   countedAt,
   currentAccount,
+  dismissRefusedSales,
   inventoryRows,
+  refusedSales,
   lastSyncAt,
   recentTransactions,
   setActiveEvent,
@@ -239,6 +241,16 @@ const lowStock = computed(() => {
 const uncounted = computed(() => inventoryRows().filter((r) => !r.counted).length);
 const productCount = computed(() => allProducts.value.length);
 
+/** Sales the server refused: on this device only, so say so until someone deals with them. */
+const refusedLine = computed(() => {
+  const rows = refusedSales.value;
+  if (!rows.length) return '';
+  const byCurrency = new Map<string, number>();
+  for (const r of rows) byCurrency.set(r.currency, (byCurrency.get(r.currency) ?? 0) + r.total);
+  const sums = [...byCurrency].map(([c, n]) => fmtPrice(n, c)).join(' + ');
+  return `${rows.length} sale${rows.length === 1 ? '' : 's'} (${sums}) made on this device ${rows.length === 1 ? 'was' : 'were'} refused by the server: this account may no longer sell at that event. They are only in this device's history - export them there and send them to an admin.`;
+});
+
 const syncLine = computed(() => {
   if (syncState.value === 'offline') return 'Offline - sales are kept on this device and sent when the connection returns.';
   if (syncState.value === 'error') return 'Last sync failed - tap Sync in the sidebar to retry.';
@@ -260,6 +272,13 @@ const syncLine = computed(() => {
         <router-link v-if="isAdmin && runs.stores && !runs.events" :to="{ name: 'stores' }" class="btn"><Icon name="store" :size="16" /> Store</router-link>
       </div>
     </header>
+
+    <p v-if="refusedLine" class="stale refused" role="alert">
+      <Icon name="alert-triangle" :size="14" />
+      <span>{{ refusedLine }}</span>
+      <router-link :to="{ name: 'history' }" class="link">History</router-link>
+      <button type="button" class="link" @click="dismissRefusedSales">Dealt with</button>
+    </p>
 
     <div class="grid">
       <GettingStarted v-if="isAdmin" />
@@ -424,6 +443,7 @@ h2 { margin: 0; font-size: 1rem; }
 .sub { color: var(--zfy-muted); font-size: .85rem; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; }
 .sub.warn { color: var(--zfy-warning-ink); }
 .stale { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem .7rem; margin: 0 0 .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-warning); border-radius: 10px; color: var(--zfy-warning-ink); font-size: .85rem; }
+.stale.refused { border-color: var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); margin-bottom: 1rem; }
 .stale .link { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
 .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted); }
 .figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }

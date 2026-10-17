@@ -50,6 +50,51 @@ const BACKLOG_OPS = 300;
 export const lastSyncAt = ref(0);
 export const lastSyncError = ref<string | null>(null);
 
+/** A sale made on this device that the server refused (PushResponse.refused). */
+export interface RefusedSale {
+  txId: string;
+  eventId: string | null;
+  total: number;
+  currency: string;
+  at: number;
+}
+const REFUSED_KEY = 'sync.refusedSales';
+/**
+ * Sales the server would not take - a helper selling at an event they no
+ * longer have. They stay in this device's history, but nowhere else, so the
+ * device says so until someone deals with them (Home).
+ */
+export const refusedSales = ref<RefusedSale[]>([]);
+
+export async function loadRefusedSales(): Promise<void> {
+  if (!getAccount()) return;
+  const row = await openCoreDb(getAccount()!.accountId).settings.get(REFUSED_KEY);
+  refusedSales.value = Array.isArray(row?.value) ? (row.value as RefusedSale[]) : [];
+}
+
+async function recordRefused(batch: OutboxOp[], refused: string[]): Promise<void> {
+  const ids = new Set(refused);
+  const sales = batch
+    .filter((op) => op.type === 'tx.create' && ids.has(op.opId))
+    .map((op) => {
+      const tx = op.payload as Pick<Transaction, 'id' | 'eventId' | 'total' | 'currency' | 'timestamp'>;
+      return { txId: tx.id, eventId: tx.eventId ?? null, total: tx.total, currency: tx.currency, at: tx.timestamp ?? op.ts };
+    });
+  if (!sales.length) return;
+  await loadRefusedSales();
+  const known = new Set(refusedSales.value.map((r) => r.txId));
+  refusedSales.value = [...refusedSales.value, ...sales.filter((r) => !known.has(r.txId))];
+  await openCoreDb(getAccount()!.accountId).settings.put({ key: REFUSED_KEY, value: toPlainList(refusedSales.value) });
+}
+
+/** Dealt with (exported, re-entered by an admin): stop warning. The sales stay in this device's history. */
+export async function dismissRefusedSales(): Promise<void> {
+  refusedSales.value = [];
+  if (getAccount()) await openCoreDb(getAccount()!.accountId).settings.put({ key: REFUSED_KEY, value: [] });
+}
+
+const toPlainList = (rows: RefusedSale[]): RefusedSale[] => rows.map((r) => ({ ...r }));
+
 let inFlight: Promise<SyncResult> | null = null;
 
 export interface SyncResult {
@@ -319,6 +364,9 @@ async function push(): Promise<number> {
       throw err;
     }
 
+    // A refused op is marked synced too - retrying would only be refused
+    // again - but a refused sale is kept on record so the device can say so.
+    if (res.refused?.length) await recordRefused(batch, res.refused);
     // Marked synced whether accepted or duplicate: a duplicate means the server
     // already has it, which is exactly what we were trying to achieve.
     await markSynced(batch.map((op) => op.seq!).filter((seq) => typeof seq === 'number'));

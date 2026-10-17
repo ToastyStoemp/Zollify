@@ -94,9 +94,33 @@ async function toBase64(blob: Blob): Promise<string> {
   return btoa(bin);
 }
 
+/** Base64 per write: whole multiples of 3 bytes, so each piece decodes on its own. */
+const SAVE_CHUNK = 3 * 256 * 1024;
+
 /** Hands the user a file: a download on the web, the Android save dialog in the app. */
 export async function saveFile(filename: string, content: string | Blob, mimeType: string): Promise<void> {
   const share = nativePlugin('FileShare');
+  // A large file (a backup with every photo) goes to the device in pieces: as
+  // one base64 string it can take more memory than the app has.
+  if (share?.beginSave && typeof content !== 'string' && content.size > SAVE_CHUNK) {
+    let opened: { opened?: boolean } | null = null;
+    try {
+      opened = (await share.beginSave({ filename, mimeType })) as { opened?: boolean };
+    } catch {
+      opened = null; // an app without chunked saving: the one-piece save below
+    }
+    if (opened) {
+      if (!opened.opened) return; // cancelled in the save dialog
+      try {
+        for (let at = 0; at < content.size; at += SAVE_CHUNK) await share.writeChunk!({ data: await toBase64(content.slice(at, at + SAVE_CHUNK)) });
+        await share.endSave!();
+      } catch (err) {
+        await share.abortSave?.().catch(() => undefined);
+        throw err;
+      }
+      return;
+    }
+  }
   if (share?.saveToDevice) {
     const body = typeof content === 'string' ? { filename, content, mimeType } : { filename, content: await toBase64(content), mimeType, encoding: 'base64' };
     await share.saveToDevice(body);

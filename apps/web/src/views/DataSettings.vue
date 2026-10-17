@@ -3,9 +3,9 @@ import { computed, ref } from 'vue';
 import { checkPickedFile } from '@zollify/shared';
 import {
   RestoreError,
-  backupFilename,
-  createBackup,
+  createBackupZip,
   inspectBackup,
+  readBackupFile,
   restoreBackup,
   saveFile,
   shellConfirm,
@@ -14,6 +14,7 @@ import {
   currentAccount,
   visibleEvents,
   type BackupSummary,
+  type LoadedBackup,
 } from '@zollify/platform';
 
 const busy = ref<'export' | 'restore' | 'wipe' | null>(null);
@@ -66,7 +67,7 @@ async function wipe(): Promise<void> {
 }
 const error = ref<string | null>(null);
 const status = ref<string | null>(null);
-const pending = ref<{ summary: BackupSummary; raw: unknown; name: string } | null>(null);
+const pending = ref<{ summary: BackupSummary; loaded: LoadedBackup; name: string } | null>(null);
 
 /**
  * Writes the backup out as a downloaded file.
@@ -79,8 +80,9 @@ async function exportBackup(): Promise<void> {
   error.value = null;
   status.value = null;
   try {
-    const backup = await createBackup({ ...include.value, eventIds: eventIdsForExport.value });
-    await saveFile(backupFilename(backup), JSON.stringify(backup, null, 2), 'application/json');
+    // A zip: the data as JSON, every photo as a file of its own.
+    const { blob, backup, filename } = await createBackupZip({ ...include.value, eventIds: eventIdsForExport.value });
+    await saveFile(filename, blob, 'application/zip');
 
     status.value =
       `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events and ` +
@@ -105,8 +107,8 @@ async function choose(event: Event): Promise<void> {
   try {
     const problem = await checkPickedFile('backupJson', file);
     if (problem) throw new Error(problem);
-    const raw = JSON.parse(await file.text()) as unknown;
-    pending.value = { summary: inspectBackup(raw), raw, name: file.name };
+    const loaded = await readBackupFile(file);
+    pending.value = { summary: inspectBackup(loaded.raw), loaded, name: file.name };
   } catch (err) {
     error.value =
       err instanceof RestoreError
@@ -124,7 +126,7 @@ async function choose(event: Event): Promise<void> {
 
 async function confirmRestore(): Promise<void> {
   if (!pending.value) return;
-  const { summary, raw } = pending.value;
+  const { summary, loaded } = pending.value;
 
   const ok = await shellConfirm(
     summary.sameAccount
@@ -137,7 +139,7 @@ async function confirmRestore(): Promise<void> {
   busy.value = 'restore';
   error.value = null;
   try {
-    const result = await restoreBackup(raw);
+    const result = await restoreBackup(loaded.raw, loaded.files);
     pending.value = null;
     status.value =
       `Restored ${result.products} products (${result.images} photos), ${result.events} events and ` +
@@ -199,7 +201,7 @@ async function confirmRestore(): Promise<void> {
 
       <label class="picker">
         <span>Restore from a file</span>
-        <input type="file" accept="application/json,.json" :disabled="busy !== null" @change="choose" />
+        <input type="file" accept="application/zip,.zip,application/json,.json" :disabled="busy !== null" @change="choose" />
       </label>
     </div>
 

@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
-import type { CardSettlement } from '@zollify/shared';
+import type { CardSettlement, SalesEvent } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
@@ -119,6 +119,27 @@ const marketRateNow = (): { rate: number; at: number } | null =>
     ? { rate: marketFx.rate, at: marketFx.at }
     : null;
 export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
+
+/**
+ * Points the cart at the till's event: where its sales are recorded, in which
+ * currency, at which rate and local prices. Called when POS opens and again
+ * whenever the till moves to another event (Sell at …, the automatic switch),
+ * so a sale is never filed under the event the till just left.
+ */
+export function setCartEvent(event: SalesEvent | null, fallbackCurrency: string): void {
+  const base = event?.currency ?? fallbackCurrency;
+  const converting = Boolean(event?.localCurrency && event.exchangeRate);
+  const currency = converting ? event!.localCurrency! : base;
+  // A card rate for another currency pair must not carry over.
+  if (currency !== cart.currency || base !== cart.baseCurrency) Object.assign(cardFx, { rate: null, at: 0 });
+  cart.eventId = event?.id ?? null;
+  cart.baseCurrency = base;
+  cart.currency = currency;
+  cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
+  cart.roundingIncrement = event?.roundingIncrement ?? 0;
+  cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
+  cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
+}
 
 /** Reads the setting and, when it applies, today's rate (or the last one this device saw, offline). */
 export async function loadCardFx(): Promise<void> {
@@ -413,6 +434,9 @@ export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
 export async function checkout(saleId: string, pay: CheckoutPayment): Promise<CheckoutOutcome> {
   if (isEmpty.value) return { approved: false, error: 'The cart is empty.' };
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
+  // Checked against the event the sale is recorded on, not only the banner's.
+  const lock = cart.eventId ? sdk().data.events.sellLock(cart.eventId) : null;
+  if (lock && !lock.forced) return { approved: false, error: `Sell 🔒 - ${lock.by.map((e) => e.name).join(', ')} took this event's leftovers.` };
 
   const charged = total.value;
   const base = baseTotal.value;

@@ -157,8 +157,11 @@ export const UPLOAD_PURPOSES = {
       heic: rule(25 * MB, 'image/heic', 'image/heif'),
     },
   },
-  /** This device's own backup (JSON) to restore. */
-  backupJson: { noun: 'a backup', kinds: { text: rule(64 * MB, 'application/json', 'text/plain', 'text/json') } },
+  /** This device's own backup to restore: a zip with the photos as files, or an older single JSON file. */
+  backupJson: {
+    noun: 'a backup',
+    kinds: { zip: rule(256 * MB, 'application/zip', 'application/x-zip-compressed'), text: rule(64 * MB, 'application/json', 'text/plain', 'text/json') },
+  },
   /** A ZollTool backup to import: JSON, or a zip with the photos beside it. */
   backupImport: {
     noun: 'a backup',

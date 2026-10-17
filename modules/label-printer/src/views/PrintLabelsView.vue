@@ -154,23 +154,24 @@ function selectNone(): void {
   selected.value = new Set();
 }
 /**
- * The fast path: whatever the active event has claimed - one label per unit
- * claimed, not per SKU, since the point is a label for every physical item
- * going out. Falls back to on-hand stock if no event is active.
+ * The fast path: one label per unit the active event still has of its claim
+ * (claimed, less what it sold or carried on), not per SKU - the point is a
+ * label for every physical item going out. With no active event, one per
+ * unit here now (the last count less sales since).
  */
 async function selectClaimed(): Promise<void> {
   const event = sdk().data.events.active();
   const counts = new Map<string, number>();
   if (event) {
     const availability = sdk().data.inventory.availability(event.id);
-    const claimed = new Map(availability.map((a) => [`${a.productId}:${a.variantId}`, a.claimed]));
+    const claimed = new Map(availability.map((a) => [`${a.productId}:${a.variantId}`, a.source === 'claim' ? Math.max(0, a.available) : 0]));
     for (const l of allLeaves.value) {
       const n = claimed.get(l.key) ?? 0;
       if (n > 0) counts.set(l.key, n);
     }
   } else {
     for (const l of allLeaves.value) {
-      const n = sdk().data.inventory.onHand(l.productId, l.variantId || null);
+      const n = sdk().data.inventory.inStock(l.productId, l.variantId || null);
       if (n > 0) counts.set(l.key, n);
     }
   }

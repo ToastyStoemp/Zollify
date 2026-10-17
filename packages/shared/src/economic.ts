@@ -84,7 +84,7 @@ const toMinor = (n: number): number => Math.round(n * 100);
 
 export function dayJournal(
   transactions: Transaction[],
-  consignors: Pick<Consignor, 'id' | 'name' | 'commissionPct' | 'storeCommission'>[],
+  consignors: Pick<Consignor, 'id' | 'name' | 'commissionPct' | 'storeCommission' | 'commissionHistory'>[],
   day: string,
   settings: EconomicSettings,
 ): DayJournal {
@@ -124,7 +124,7 @@ export function dayJournal(
         add('rent', -sign * gross, vatCode);
       } else if (item.consignorId && settings.consignment === 'agency') {
         const consignor = byId.get(item.consignorId);
-        const pct = typeof item.commissionPct === 'number' ? item.commissionPct : consignor ? commissionFor(consignor, tx.eventId) : null;
+        const pct = typeof item.commissionPct === 'number' ? item.commissionPct : consignor ? commissionFor(consignor, tx.eventId, tx.timestamp) : null;
         if (pct == null) {
           problems.add(`"${item.title}" belongs to a renter who is no longer listed - set their commission or book it by hand.`);
           return;

@@ -140,3 +140,24 @@ describe('packages from remote artists', () => {
     expect((await call(artist, 'DELETE', link(`/shipments/${id}`))).statusCode).toBe(409);
   });
 });
+
+describe('a restock after the store cleared its claim', () => {
+  it('leaves the claim cleared, so the store keeps selling the item from the shared stock', async () => {
+    await push(store, [{ type: 'stock.set', payload: { eventId: 'zh', productId: 'tee', variantId: 's', broughtQty: -1, updatedAt: Date.now() - 1000 } }]);
+    const res = await call(artist, 'POST', link('/stock'), { storeId: 'zh', lines: [{ productId: 'tee', variantId: 's', qty: 5 }] });
+    expect(res.statusCode).toBe(200);
+    const ops = (await app.inject({ method: 'GET', url: '/api/sync/pull?since=0&limit=1000', headers: auth(store) })).json().ops as { type: string; payload: { eventId: string; productId: string; variantId: string; broughtQty: number; updatedAt: number } }[];
+    const claims = ops.filter((o) => o.type === 'stock.set' && o.payload.eventId === 'zh' && o.payload.productId === 'tee' && o.payload.variantId === 's');
+    expect(claims.sort((a, b) => a.payload.updatedAt - b.payload.updatedAt).at(-1)!.payload.broughtQty).toBe(-1);
+  });
+});
+
+describe('changing an artist’s commission', () => {
+  it('keeps the old rate on record, and a client cannot wipe it', async () => {
+    await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 35, storeIds: ['zh'] });
+    await call(store, 'PUT', '/consignors/ana', { name: 'Ana', commissionPct: 35, storeIds: ['zh'], commissionHistory: [] });
+    const ana = (await call(store, 'GET', '/consignors')).json().consignors.find((c: { id: string }) => c.id === 'ana');
+    expect(ana.commissionPct).toBe(35);
+    expect(ana.commissionHistory).toEqual([{ until: expect.any(Number), commissionPct: 40, storeCommission: {} }]);
+  });
+});

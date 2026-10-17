@@ -138,7 +138,9 @@ function applyStock(
     const onHand = mode === 'add' ? left + line.qty : line.qty;
     ops.push({ type: 'inventory.set', payload: { productId: line.productId, variantId: line.variantId, onHand, updatedAt: now } satisfies InventoryItem });
     const claim = storeId ? claims.get(`${storeId}|${key(line.productId, line.variantId)}`) : undefined;
-    if (claim && mode === 'add') {
+    // A negative claim is a cleared one (clearClaim): the store sells that item
+    // from the shared stock, so a restock must not bring a claim back.
+    if (claim && claim.broughtQty >= 0 && mode === 'add') {
       ops.push({ type: 'stock.set', payload: { ...claim, broughtQty: claim.broughtQty + line.qty, updatedAt: now } satisfies EventStock });
     }
     applied.push(line);

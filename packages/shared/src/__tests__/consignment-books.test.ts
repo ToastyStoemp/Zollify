@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   BooksSettingsSchema,
   cardFeeOf,
+  commissionFor,
   consignmentLines,
+  nextCommissionHistory,
   consignmentStatements,
   feesDue,
   localDay,
@@ -105,5 +107,48 @@ describe('the store report', () => {
     const csv = reportCsv(report, () => 'Zurich shop');
     expect(csv).toContain('Ana,CHF,1,90,10,36,54,0,50,15,-11,30,-61');
     expect(csv).toContain('Zurich shop,CHF,1,2,110,10,8.24,101.76,20,90,0,1.80,90,36,20');
+  });
+});
+
+describe('a sale reverted after its period', () => {
+  const settings = { ...BooksSettingsSchema.parse({ timeZone: 'Europe/Zurich' }) };
+  // Sold on Sunday 29 March, reverted on Thursday 2 April.
+  const sold = tx('s', '2026-03-29T10:00:00Z', [{ lineTotal: 50, consignorId: 'ana' }], { revertedAt: at('2026-04-02T09:00:00Z'), revertedBy: 'refund' });
+  const report = (from: string, to: string) =>
+    storeReport({ period: { from, to }, settings, transactions: [sold], consignors: [ana], payouts: [], fees: [], rentals: [] });
+
+  it('still counts in the period it was sold in, so a report already sent does not change', () => {
+    const march = report('2026-03-01', '2026-03-31');
+    expect(march.totals[0]).toMatchObject({ sales: 1, gross: 50, artistShare: 30 });
+    expect(march.artists[0]).toMatchObject({ artistShare: 30, balance: 30 });
+  });
+
+  it('comes off in the period it was reverted in', () => {
+    const april = report('2026-04-01', '2026-04-30');
+    expect(april.totals[0]).toMatchObject({ sales: -1, gross: -50, artistShare: -30, cash: -50 });
+    expect(april.artists[0]).toMatchObject({ units: -1, artistShare: -30, balance: 0 });
+  });
+});
+
+describe('commission as it was when the item sold', () => {
+  it('a rate change does not rewrite sales made before it', () => {
+    const changedAt = at('2026-03-15T00:00:00Z');
+    const history = nextCommissionHistory(ana, { commissionPct: 35, storeCommission: {} }, changedAt);
+    expect(history).toEqual([{ until: changedAt, commissionPct: 40, storeCommission: {} }]);
+    const now = { ...ana, commissionPct: 35, commissionHistory: history };
+    const lines = consignmentLines(
+      [tx('before', '2026-03-10T10:00:00Z', [{ lineTotal: 100, consignorId: 'ana' }]), tx('after', '2026-03-20T10:00:00Z', [{ lineTotal: 100, consignorId: 'ana' }])],
+      [now],
+    );
+    expect(Object.fromEntries(lines.map((l) => [l.txId, l.commissionPct]))).toEqual({ before: 40, after: 35 });
+  });
+
+  it('keeps per-store rates too, and records nothing when the rates did not change', () => {
+    const was = { commissionPct: 40, storeCommission: { zh: 25 } };
+    const history = nextCommissionHistory(was, { commissionPct: 40, storeCommission: { zh: 30 } }, 100);
+    expect(commissionFor({ commissionPct: 40, storeCommission: { zh: 30 }, commissionHistory: history }, 'zh', 50)).toBe(25);
+    expect(commissionFor({ commissionPct: 40, storeCommission: { zh: 30 }, commissionHistory: history }, 'zh', 150)).toBe(30);
+    expect(nextCommissionHistory({ commissionPct: 40, storeCommission: { zh: 30 }, commissionHistory: history }, { commissionPct: 40, storeCommission: { zh: 25 } }, 200)).toHaveLength(2);
+    expect(nextCommissionHistory(was, { ...was }, 200)).toEqual([]);
   });
 });

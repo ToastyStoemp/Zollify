@@ -123,21 +123,22 @@ function storeHoldings(): Map<string, number> {
 
 /** Sales charged to storage locations: unclaimed sales by devices that sell from one. */
 const soldFromLocations = computed(() => {
-  const claimed = new Map<string, Set<string>>();
-  const hasClaim = (eventId: string, key: string): boolean => {
-    let keys = claimed.get(eventId);
+  const claims = new Map<string, Map<string, number>>();
+  // What each event's claim covers: its claim less what it handed on to another event.
+  const claimOf = (eventId: string, key: string): number | null => {
+    let keys = claims.get(eventId);
     if (!keys) {
-      keys = new Set(
+      keys = new Map(
         sdk()
           .data.inventory.availability(eventId)
           .filter((a) => a.claimed !== null)
-          .map((a) => itemKey(a.productId, a.variantId)),
+          .map((a) => [itemKey(a.productId, a.variantId), a.source === 'claim' ? a.available + a.soldHere : a.claimed!]),
       );
-      claimed.set(eventId, keys);
+      claims.set(eventId, keys);
     }
-    return keys.has(key);
+    return keys.get(key) ?? null;
   };
-  return locationSales(sdk().data.transactions.recent(), deviceHomes.value, liveIds.value, hasClaim);
+  return locationSales(sdk().data.transactions.recent(), deviceHomes.value, liveIds.value, claimOf);
 });
 
 export const rows = computed<StorageRow[]>(() => {

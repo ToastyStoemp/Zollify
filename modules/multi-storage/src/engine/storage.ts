@@ -111,27 +111,40 @@ export interface LocationSale {
 }
 
 /**
- * Sales charged to a storage location, per item and location. Only sales at
- * an event with no claim on the item count, made by a device that had picked
- * a location still in use; everything else is Home's (or the claim's).
+ * Sales charged to a storage location, per item and location: units sold by
+ * a device that had picked a location still in use, beyond what the event's
+ * claim covered. A claim's units were packed for the event, so the first
+ * sales there come out of them; once they run out (or with no claim, or a
+ * claim of 0) the rest comes off the pile, as everywhere else in the stock.
  */
 export function locationSales(
   sales: Iterable<SaleRecord>,
   homes: Map<string, DeviceHome>,
   liveIds: Set<string>,
-  hasClaim: (eventId: string, key: string) => boolean,
+  /** The units an event's claim covers for an item, or null when it has none. */
+  claimOf: (eventId: string, key: string) => number | null,
 ): Map<string, Map<string, LocationSale[]>> {
   const out = new Map<string, Map<string, LocationSale[]>>();
-  for (const tx of sales) {
+  /** Units of each event's claim already used up, per item, in sale order. */
+  const used = new Map<string, number>();
+  for (const tx of [...sales].sort((a, b) => a.timestamp - b.timestamp)) {
     if (tx.revertedAt) continue;
     const locationId = locationAt(homes.get(tx.deviceId)?.history, tx.timestamp);
-    if (locationId === null || !liveIds.has(locationId)) continue;
     for (const item of tx.items) {
       const key = itemKey(item.pid, item.vid);
-      if (!(item.qty > 0) || hasClaim(tx.eventId, key)) continue;
+      if (!(item.qty > 0)) continue;
+      const claim = claimOf(tx.eventId, key);
+      let qty = item.qty;
+      if (claim !== null) {
+        const k = `${tx.eventId}|${key}`;
+        const before = used.get(k) ?? 0;
+        used.set(k, before + item.qty);
+        qty = Math.max(0, before + item.qty - Math.max(claim, before));
+      }
+      if (!qty || locationId === null || !liveIds.has(locationId)) continue;
       const forItem = out.get(key) ?? new Map<string, LocationSale[]>();
       const list = forItem.get(locationId) ?? [];
-      list.push({ at: tx.timestamp, qty: item.qty });
+      list.push({ at: tx.timestamp, qty });
       forItem.set(locationId, list);
       out.set(key, forItem);
     }

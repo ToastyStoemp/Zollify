@@ -30,10 +30,13 @@ const editingId = ref<string | null>(null);
 const fmt = (n: number, cur = 'EUR'): string => `${cur} ${n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 // Overview totals only make sense in one currency; with a mix, the label
 // says so rather than adding francs to euros silently.
+/** An expense in another currency than the event's: the row's expenses and margin cannot be one sum (same rule as the event's own page). */
+const rowMixed = (r: { currency: string; currencies: string[] }): boolean => r.currencies.some((c) => c && c !== (r.currency || 'EUR'));
 const totals = computed(() => {
   const currencies = [...new Set(rows.value.map((r) => r.currency).filter(Boolean))];
   return {
     currency: currencies.length === 1 ? currencies[0]! : 'mixed',
+    expensesMixed: rows.value.some(rowMixed),
     revenue: rows.value.reduce((s, r) => s + r.revenue, 0),
     expenses: rows.value.reduce((s, r) => s + r.expenses, 0),
     margin: rows.value.reduce((s, r) => s + r.margin, 0),
@@ -190,8 +193,8 @@ async function openInvoice(e: Expense): Promise<void> {
     <template v-if="!current">
       <ul class="totals">
         <li><span class="label">Revenue</span><strong class="good">{{ fmt(totals.revenue, totals.currency) }}</strong></li>
-        <li><span class="label">Expenses</span><strong class="bad">−{{ fmt(totals.expenses, totals.currency) }}</strong></li>
-        <li><span class="label">Margin</span><strong :class="totals.margin >= 0 ? 'good' : 'bad'">{{ fmt(totals.margin, totals.currency) }}</strong></li>
+        <li><span class="label">Expenses</span><strong class="bad">{{ totals.expensesMixed ? 'mixed currencies' : '−' + fmt(totals.expenses, totals.currency) }}</strong></li>
+        <li><span class="label">Margin</span><strong :class="totals.margin >= 0 ? 'good' : 'bad'">{{ totals.expensesMixed ? '-' : fmt(totals.margin, totals.currency) }}</strong></li>
       </ul>
       <p v-if="!rows.length" class="empty">No events yet.</p>
       <div v-else class="table-scroll">
@@ -204,9 +207,9 @@ async function openInvoice(e: Expense): Promise<void> {
               <td><strong>{{ r.name }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
               <td class="mono">{{ r.start || '-' }}</td>
               <td class="num good">{{ fmt(r.revenue, r.currency) }}</td>
-              <td class="num bad">{{ r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
-              <td :class="['num', r.margin >= 0 ? 'good' : 'bad']">{{ fmt(r.margin, r.currency) }}</td>
-              <td class="sub">{{ r.expenseCount }} item{{ r.expenseCount === 1 ? '' : 's' }}{{ r.unbooked ? ` · ${r.unbooked} unbooked` : '' }}{{ r.currencies.length > 1 ? ' · mixed currencies' : '' }}</td>
+              <td class="num bad">{{ rowMixed(r) ? 'mixed currencies' : r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
+              <td :class="['num', r.margin >= 0 ? 'good' : 'bad']">{{ rowMixed(r) ? '-' : fmt(r.margin, r.currency) }}</td>
+              <td class="sub">{{ r.expenseCount }} item{{ r.expenseCount === 1 ? '' : 's' }}{{ r.unbooked ? ` · ${r.unbooked} unbooked` : '' }}{{ rowMixed(r) ? ' · mixed currencies' : '' }}</td>
             </tr>
           </tbody>
         </table>

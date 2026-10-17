@@ -206,7 +206,7 @@ export interface Webhooks {
   stop(): void;
 }
 
-const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 'sharing', 'discounts', 'fees', 'reports']);
+const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 'sharing', 'discounts', 'fees', 'reports', 'tax-deadlines']);
 
 export function createWebhooks(
   db: Database.Database,
@@ -398,7 +398,7 @@ export function createWebhooks(
     emit,
     notification(accountId, n) {
       const event = (n.kind && NOTIFICATION_EVENTS.has(n.kind) ? n.kind : 'other') as WebhookEvent;
-      emit(accountId, event, { title: n.title, ...(n.body ? { body: n.body } : {}), tone: event === 'fees' ? 'warn' : 'info' });
+      emit(accountId, event, { title: n.title, ...(n.body ? { body: n.body } : {}), tone: event === 'fees' || event === 'tax-deadlines' ? 'warn' : 'info' });
     },
     onOps,
     async test(hook, accountId) {

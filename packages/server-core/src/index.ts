@@ -68,3 +68,4 @@ export {
   type UploadConfig,
   type DecodedUpload,
 } from './upload-limits';
+export { runAutoEvents } from './auto-events';

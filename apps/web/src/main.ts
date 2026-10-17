@@ -21,6 +21,7 @@ import {
   refreshPendingCount,
   resumeOffline,
   startAutoSync,
+  startAutoEvents,
   startRealtime,
   startTillLock,
 } from '@zollify/platform';
@@ -97,6 +98,7 @@ async function boot(): Promise<void> {
   if (getAccount()) {
     startAutoSync();
     startRealtime();
+    startAutoEvents();
     // A shared till opens locked: whoever is there says who they are first.
     startTillLock();
   }

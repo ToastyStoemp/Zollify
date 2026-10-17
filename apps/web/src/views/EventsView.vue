@@ -9,6 +9,9 @@ import EventSeriesModal from '../components/EventSeriesModal.vue';
 import StoreSetupWizard from '../components/StoreSetupWizard.vue';
 import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
 import {
+  autoEventSettings,
+  loadAutoEventSettings,
+  setAutoEventSettings,
   activeEventId,
   claimUnsoldFrom,
   claimsForEvent,
@@ -43,6 +46,12 @@ const router = useRouter();
 const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode: 'events' });
 const storesPage = computed(() => props.mode === 'stores');
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+
+// ── Automatic opening and closing (account-wide; applied by owner and admin devices) ──
+onMounted(() => void loadAutoEventSettings().catch(() => undefined));
+async function toggleAuto(which: 'open' | 'close', on: boolean): Promise<void> {
+  await guard(() => setAutoEventSettings({ [which]: on }));
+}
 /** Staff see takings only when the owner allows it (Settings → Team). */
 const showTotals = computed(() => seesSalesTotals(account.value));
 const isHelper = computed(() => (account.value?.allowedEventIds?.length ?? 0) > 0);
@@ -499,6 +508,12 @@ async function save(): Promise<void> {
       </div>
     </header>
 
+    <details v-if="canEdit && !storesPage" class="auto" :open="autoEventSettings.open || autoEventSettings.close">
+      <summary>Automatic: {{ autoEventSettings.open && autoEventSettings.close ? 'open and close by date' : autoEventSettings.open ? 'open by date' : autoEventSettings.close ? 'close by date' : 'off' }}</summary>
+      <label class="check"><input type="checkbox" :checked="autoEventSettings.open" @change="toggleAuto('open', ($event.target as HTMLInputElement).checked)" /> <span>Open each event on its first day, and switch the till to it when it is the only one running</span></label>
+      <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
+      <p class="hint">For the whole account. The server does it at midnight where the event is held, whether or not a device is on; tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
+    </details>
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
@@ -674,6 +689,10 @@ h1 { margin: 0; font-size: 1.35rem; }
 header button { display: inline-flex; align-items: center; gap: .4rem; }
 .header-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
+.auto { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .55rem .8rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .45rem; font-size: .875rem; }
+.auto summary { cursor: pointer; font-weight: 600; }
+.auto[open] summary { margin-bottom: .2rem; }
+.auto .check { display: flex; align-items: flex-start; gap: .45rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); font-size: .82rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }

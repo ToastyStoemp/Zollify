@@ -76,3 +76,29 @@ export function guessFromDevice(): { code: string; name: string; currency: strin
   const name = COUNTRIES.find((c) => c.code === code)?.name;
   return code && name ? { code, name, currency: currencyOf(code) } : null;
 }
+
+/** UTC offset of a zone at a moment, in minutes; null for a zone this runtime does not know. */
+function offsetOf(zone: string, at: number): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'longOffset' }).formatToParts(at);
+    const name = parts.find((p) => p.type === 'timeZoneName')?.value ?? '';
+    const m = /GMT([+-])(\d{2}):?(\d{2})?/.exec(name);
+    if (!m) return name === 'GMT' ? 0 : null;
+    return (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3] ?? 0));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The time zone a country keeps, when it keeps one: every zone listed for it
+ * agrees on the offset at `at`. Undefined for a country spread over several
+ * (the US, Canada, Australia, Brazil) or one not listed - the caller then
+ * has to judge without knowing the local clock.
+ */
+export function zoneOfCountry(code: string, at = Date.now()): string | undefined {
+  const zones = Object.entries(ZONE_COUNTRY).filter(([, c]) => c === code).map(([z]) => z);
+  if (!zones.length) return undefined;
+  const offsets = new Set(zones.map((z) => offsetOf(z, at)));
+  return offsets.size === 1 && !offsets.has(null) ? zones[0] : undefined;
+}

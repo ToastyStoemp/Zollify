@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
 import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected, setDisplaySubscribed } from '@zollify/platform';
-import { AfterSalePanel, Icon } from '@zollify/ui';
+import { AfterSalePanel, BrandLogo, Icon } from '@zollify/ui';
 
 /**
  * Customer display - ZollTool's. This device mirrors another register's cart
@@ -108,7 +108,7 @@ const amount = (n: number): string => n.toFixed(2);
     <router-link :to="{ name: 'settings' }" class="exit" aria-label="Leave display mode"><Icon name="x" :size="18" /></router-link>
 
     <div v-if="screen === 'idle'" class="idle">
-      <img v-if="logo" class="logo" :src="logo" alt="" />
+      <BrandLogo v-if="logo" :src="logo" size="large" />
       <p v-if="boothName" class="brand">{{ boothName }}</p>
       <p v-if="!realtimeConnected" class="hint">Not connected - waiting for the server…</p>
       <p v-else class="hint pulse">Waiting for the next sale…</p>

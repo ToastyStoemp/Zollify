@@ -32,4 +32,6 @@ export type { DeclarantFormModel } from './DeclarantForm.vue';
 export { htmlDocsToPdf, htmlToPdf } from './pdf';
 export { default as QrCode } from './QrCode.vue';
 export { default as AfterSalePanel } from './AfterSalePanel.vue';
+export { default as BrandLogo } from './BrandLogo.vue';
+export { isDarkInk, logoIsDarkInk } from './logo-tone';
 export { qrPngBase64 } from './qr-raster';

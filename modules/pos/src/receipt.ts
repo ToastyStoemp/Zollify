@@ -77,6 +77,8 @@ export const RECEIPT_KEYS = {
   /** MAC address + display name of a paired Bluetooth ESC/POS printer. */
   printerAddress: 'receipt.printerAddress',
   printerName: 'receipt.printerName',
+  /** How large the logo prints and shows: 'small' | 'medium' | 'large' - see LOGO_PRINT_WIDTH. */
+  logoSize: 'receipt.logoSize',
   /** Carbon: print the text as images at a normal line height (default on) - see lib/receipt-raster.ts. */
   compactPrint: 'receipt.compactPrint',
 } as const;
@@ -306,10 +308,11 @@ async function printedLinkLines(): Promise<string[]> {
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
+  const size = await loadLogoSize();
   const [qrB64, logoB64, shared, linkLines] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
-    config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo(),
+    (config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo()).then((b) => (b ? sizePrintLogo(b, size) : b)),
     config.footerText ? Promise.resolve(null) : serverBranding(),
     printedLinkLines(),
   ]);
@@ -362,6 +365,52 @@ function sharedPrintLogo(): Promise<string | undefined> {
  * width and flatten onto white (transparent pixels would print black).
  * Returns base64 PNG without the data: prefix.
  */
+export type LogoSize = 'small' | 'medium' | 'large';
+export const LOGO_SIZES: { id: LogoSize; label: string }[] = [
+  { id: 'small', label: 'Small' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'large', label: 'Large' },
+];
+/** Share of the paper width the printed logo takes. */
+export const LOGO_PRINT_WIDTH: Record<LogoSize, number> = { small: 0.4, medium: 0.65, large: 1 };
+export const asLogoSize = (v: unknown): LogoSize => (v === 'small' || v === 'large' ? v : 'medium');
+
+/** The logo size this device uses (default medium). */
+export async function loadLogoSize(): Promise<LogoSize> {
+  return asLogoSize(await getSetting(RECEIPT_KEYS.logoSize));
+}
+
+/**
+ * The print logo at the chosen size: centred on a paper-wide white strip, so a
+ * printer that stretches images to the paper keeps the size. Large returns the
+ * logo as it is. Falls back to the logo unchanged when it cannot be drawn.
+ */
+export async function sizePrintLogo(b64: string, size: LogoSize): Promise<string> {
+  const share = LOGO_PRINT_WIDTH[size];
+  if (!b64 || share >= 1 || typeof document === 'undefined') return b64;
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error('logo'));
+      img.src = `data:image/png;base64,${b64}`;
+    });
+    const w = Math.round(LOGO_MAX_PX * share);
+    const h = Math.max(1, Math.round((img.naturalHeight * w) / Math.max(1, img.naturalWidth)));
+    const canvas = document.createElement('canvas');
+    canvas.width = LOGO_MAX_PX;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return b64;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, Math.round((LOGO_MAX_PX - w) / 2), 0, w, h);
+    return canvas.toDataURL('image/png').split(',')[1] || b64;
+  } catch {
+    return b64;
+  }
+}
+
 export async function processLogoFile(file: Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, LOGO_MAX_PX / bitmap.width);

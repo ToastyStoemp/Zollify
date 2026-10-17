@@ -229,7 +229,7 @@ async function carryOver(): Promise<void> {
       </ul>
 
       <p class="lede">
-        On hand is what you counted; only sales made after that count reduce Free, so a fresh count resets it. Sold is the lifetime total.
+        On hand is what is here now: your last count less every sale since. Type a new number to recount. Claimed is what running events still have set aside (their claims less what they sold), and Free is On hand less Claimed. Sold is the lifetime total.
         <template v-if="totals.uncounted"> {{ totals.uncounted }} item{{ totals.uncounted === 1 ? '' : 's' }} never counted - Free shows once you count them.</template>
       </p>
 
@@ -263,7 +263,7 @@ async function carryOver(): Promise<void> {
                 min="0"
                 inputmode="numeric"
                 :value="row.onHand"
-                :aria-label="`Units owned of ${row.label}`"
+                :aria-label="`Units here now of ${row.label}`"
                 @wheel="blurOnWheel"
                 @change="updateOnHand(row.productId, row.variantId, Number(($event.target as HTMLInputElement).value))"
               />

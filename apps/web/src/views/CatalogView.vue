@@ -14,7 +14,7 @@ import {
   deleteProduct,
   freeFor,
   mergeProducts,
-  onHandFor,
+  inStockFor,
   saveProductImage,
   setOnHand,
   shellConfirm,
@@ -209,7 +209,7 @@ const groups = computed(() => {
 });
 const types = computed(() => [...new Set(['Art Print', 'Purse', ...allProducts.value.map((p) => p.type).filter((t): t is string => !!t)])].sort());
 
-const onHandOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + onHandFor(p.id, v.id), 0) : onHandFor(p.id, ''));
+const onHandOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + inStockFor(p.id, v.id), 0) : inStockFor(p.id, ''));
 const freeOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + freeFor(p.id, v.id), 0) : freeFor(p.id, ''));
 const soldOf = (p: Product): number => (p.variants.length ? p.variants.reduce((s, v) => s + soldTotal(p.id, v.id), 0) : soldTotal(p.id, ''));
 
@@ -270,8 +270,8 @@ function resetForm(p?: Product): void {
     taxClass: p?.taxClass ?? 'standard',
     forSale: p?.forSale ?? true,
     unlisted: p?.unlisted ?? false,
-    onHand: p ? onHandFor(p.id, '') : 0,
-    variants: (p?.variants ?? []).map((v) => ({ ...v, onHand: onHandFor(p!.id, v.id) })),
+    onHand: p ? inStockFor(p.id, '') : 0,
+    variants: (p?.variants ?? []).map((v) => ({ ...v, onHand: inStockFor(p!.id, v.id) })),
   });
 }
 function openNew(): void {
@@ -420,8 +420,8 @@ async function save(): Promise<void> {
 
     // Stock is written only where it changed, so a plain title edit stays one op.
     if (variants.length) {
-      for (const v of form.variants) if (v.onHand !== onHandFor(productId, v.id)) await setOnHand(productId, v.id, v.onHand);
-    } else if (form.onHand !== onHandFor(productId, '')) {
+      for (const v of form.variants) if (v.onHand !== inStockFor(productId, v.id)) await setOnHand(productId, v.id, v.onHand);
+    } else if (form.onHand !== inStockFor(productId, '')) {
       await setOnHand(productId, '', form.onHand);
     }
     editing.value = false;

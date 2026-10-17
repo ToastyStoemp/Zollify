@@ -1,6 +1,6 @@
 import type { ReceiptSocials, ReceiptToggles } from '@zollify/shared';
 import { sdk } from '../runtime';
-import { getSetting } from './settings';
+import { getSetting, setSetting } from './settings';
 
 /**
  * Receipt branding shared through the server.
@@ -22,6 +22,12 @@ export interface Branding {
 }
 
 const LOGO_KEY = 'receipt.logoScreenB64';
+/** The account's logo as last fetched, kept on the device so the screen never waits for the network. */
+const SERVER_LOGO_CACHE_KEY = 'receipt.serverLogoCache';
+/** After a failed fetch, don't ask again for this long - a till without internet must not retry every sale. */
+const RETRY_AFTER_MS = 60_000;
+/** How long the first fetch may hold the screen up when nothing is cached yet. */
+const FIRST_FETCH_MS = 1500;
 const FOOTER_KEY = 'receipt.footerText';
 
 const canEdit = (): boolean => {
@@ -30,16 +36,33 @@ const canEdit = (): boolean => {
 };
 
 let cached: Promise<Branding | null> | null = null;
+let failedAt = 0;
 
-/** The account's branding as the server has it; null when unreachable. Fetched once per session. */
+/**
+ * The account's branding as the server has it; null when unreachable.
+ * Fetched once per session; after a failure, not again for a minute.
+ */
 export function serverBranding(): Promise<Branding | null> {
+  if (!cached && Date.now() - failedAt < RETRY_AFTER_MS) return Promise.resolve(null);
   cached ??= sdk()
     .http.get<Branding>('branding')
+    .then((b) => {
+      // Kept for the next start, so the logo shows offline too.
+      void setSetting(SERVER_LOGO_CACHE_KEY, b?.logo ?? '').catch(() => undefined);
+      return b;
+    })
     .catch(() => {
       cached = null;
+      failedAt = Date.now();
       return null;
     });
   return cached;
+}
+
+/** For tests: forget what was fetched. */
+export function resetBrandingCache(): void {
+  cached = null;
+  failedAt = 0;
 }
 
 /** Send a deliberate change (Receipts settings). Fields left out stay as they are. */
@@ -61,10 +84,24 @@ export async function backfillBranding(): Promise<void> {
   if (Object.keys(patch).length) await pushBranding(patch).catch(() => {});
 }
 
-/** The logo for on-screen use: this device's own, else the account's. As a data: URL. */
+/**
+ * The logo for on-screen use: this device's own, else the account's. As a
+ * data: URL. Never waits long for the network: the account's logo comes from
+ * the copy kept on the device (refreshed in the background), and only when
+ * there is no copy yet does it wait - briefly - for the server.
+ */
 export async function screenLogo(): Promise<string | undefined> {
-  const local = await getSetting<string>(LOGO_KEY);
-  const b64 = local || (await serverBranding())?.logo;
+  const own = await getSetting<string>(LOGO_KEY);
+  if (own) return `data:image/png;base64,${own}`;
+  const kept = await getSetting<string>(SERVER_LOGO_CACHE_KEY);
+  const fresh = serverBranding().then((b) => b?.logo ?? undefined);
+  let b64: string | null | undefined;
+  if (kept !== undefined) {
+    void fresh; // refreshes the kept copy for next time
+    b64 = kept;
+  } else {
+    b64 = await Promise.race([fresh, new Promise<undefined>((ok) => setTimeout(() => ok(undefined), FIRST_FETCH_MS))]);
+  }
   return b64 ? `data:image/png;base64,${b64}` : undefined;
 }
 

@@ -101,6 +101,8 @@ function tapTerminalState(): void {
 }
 
 onMounted(async () => {
+  // Ready before the first sale, so its thank-you screen has the logo at once.
+  void refreshLogo();
   void backfillBranding();
   providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
   void loadTestMode();
@@ -847,13 +849,30 @@ function holdAfterSale(ms: number): void {
   clearTimeout(afterSaleTimer);
   afterSaleTimer = setTimeout(dismissAfterSale, ms);
 }
+/**
+ * The logo as last seen, so the next thank-you screen has it at once. The
+ * screen never waits for it: everything else it shows is on the device (the
+ * receipt link is made here, before any sync), and a logo that arrives late
+ * just appears.
+ */
+let knownLogo: string | undefined;
+function refreshLogo(): Promise<string | undefined> {
+  return screenLogo()
+    .catch(() => undefined)
+    .then((l) => (knownLogo = l ?? knownLogo));
+}
 async function showAfterSale(sale: SaleEvent, receiptUrl: string | undefined): Promise<void> {
-  const [prefs, canPrint, logo] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false), screenLogo().catch(() => undefined)]);
+  const [prefs, canPrint] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false)]);
   const url = prefs.receiptQr ? receiptUrl : undefined;
   if (!prefs.thankYou && !url) return;
   // An auto-print may already be under way by the time this resolves.
   const print = printing.get(sale.saleId) ?? 'idle';
-  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo, canPrint, print };
+  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo: knownLogo, canPrint, print };
+  if (!knownLogo) {
+    void refreshLogo().then((l) => {
+      if (l && afterSale.value?.saleId === sale.saleId) afterSale.value.logo = l;
+    });
+  }
   // Offering to print means waiting for an answer, same as a QR to scan.
   holdAfterSale(url || canPrint ? 30_000 : 4000);
 }

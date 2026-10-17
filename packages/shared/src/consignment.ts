@@ -30,6 +30,15 @@ export const ConsignorInputSchema = z.object({
   commissionPct: z.number().min(0).max(100),
   /** Per-store overrides of commissionPct, by store id. */
   storeCommission: z.record(z.string().min(1).max(80), z.number().min(0).max(100)).default({}),
+  /**
+   * The rates as they were before each change, oldest first: `until` is when
+   * that rate stopped applying. Kept by the server (a client never sends it),
+   * so changing an artist's commission never rewrites sales already made.
+   */
+  commissionHistory: z
+    .array(z.object({ until: z.number(), commissionPct: z.number().min(0).max(100), storeCommission: z.record(z.string().min(1).max(80), z.number().min(0).max(100)).default({}) }))
+    .max(500)
+    .optional(),
   /** The stores that carry this artist; a shared artist lists several. */
   storeIds: z.array(z.string().min(1).max(80)).max(200).default([]),
   note: z.string().max(1000).default(''),
@@ -56,6 +65,8 @@ export interface Consignor {
   email: string;
   commissionPct: number;
   storeCommission: Record<string, number>;
+  /** See ConsignorInputSchema.commissionHistory. */
+  commissionHistory?: CommissionChange[];
   storeIds: string[];
   note: string;
   archived: boolean;
@@ -91,10 +102,39 @@ export interface ConsignmentPayout extends PayoutInput {
 }
 
 /** The commission a store keeps on this artist's sales there. */
-export function commissionFor(consignor: Pick<Consignor, 'commissionPct' | 'storeCommission'>, storeId: string): number {
-  const override = consignor.storeCommission?.[storeId];
-  return typeof override === 'number' ? override : consignor.commissionPct;
+export interface CommissionChange {
+  until: number;
+  commissionPct: number;
+  storeCommission: Record<string, number>;
 }
+
+/**
+ * The commission the store keeps at `storeId`. With `at`, the rate in force
+ * then: a sale made before a rate change keeps the rate it was made under.
+ */
+export function commissionFor(
+  consignor: Pick<Consignor, 'commissionPct' | 'storeCommission'> & { commissionHistory?: CommissionChange[] },
+  storeId: string,
+  at?: number,
+): number {
+  const then = at === undefined ? undefined : consignor.commissionHistory?.find((h) => at < h.until);
+  const rates = then ?? consignor;
+  const override = rates.storeCommission?.[storeId];
+  return typeof override === 'number' ? override : rates.commissionPct;
+}
+
+/** The history after a save: the previous rates are kept, ending now, when they changed. */
+export function nextCommissionHistory(
+  before: Pick<Consignor, 'commissionPct' | 'storeCommission'> & { commissionHistory?: CommissionChange[] },
+  after: Pick<Consignor, 'commissionPct' | 'storeCommission'>,
+  now: number,
+): CommissionChange[] {
+  const history = [...(before.commissionHistory ?? [])];
+  const same = before.commissionPct === after.commissionPct && JSON.stringify(sorted(before.storeCommission ?? {})) === JSON.stringify(sorted(after.storeCommission ?? {}));
+  if (!same) history.push({ until: now, commissionPct: before.commissionPct, storeCommission: { ...(before.storeCommission ?? {}) } });
+  return history.slice(-500);
+}
+const sorted = (r: Record<string, number>): [string, number][] => Object.entries(r).sort(([a], [b]) => a.localeCompare(b));
 
 /** One sold consigned item, split into what the store keeps and what the artist is owed. */
 export interface ConsignmentLine {
@@ -150,7 +190,7 @@ export function baseFactor(tx: Pick<Transaction, 'total' | 'baseTotal' | 'baseCu
  */
 export function consignmentLines(
   transactions: Transaction[],
-  consignors: Pick<Consignor, 'id' | 'commissionPct' | 'storeCommission'>[],
+  consignors: (Pick<Consignor, 'id' | 'commissionPct' | 'storeCommission'> & { commissionHistory?: CommissionChange[] })[],
   /** Card costs to pass on: each line carries the card fee in proportion to its share of the sale and the artist's part of it. */
   cardFees?: CardFees,
 ): ConsignmentLine[] {
@@ -164,8 +204,8 @@ export function consignmentLines(
     for (const item of tx.items) {
       const consignor = item.consignorId ? byId.get(item.consignorId) : undefined;
       if (!consignor) continue;
-      // A line can carry its own split (a workshop's); otherwise the artist's usual commission.
-      const pct = typeof item.commissionPct === 'number' ? item.commissionPct : commissionFor(consignor, tx.eventId);
+      // A line can carry its own split (a workshop's); otherwise the artist's commission as it was then.
+      const pct = typeof item.commissionPct === 'number' ? item.commissionPct : commissionFor(consignor, tx.eventId, tx.timestamp);
       const grossMinor = toMinor(item.baseLineTotal ?? item.lineTotal);
       const commissionMinor = Math.round((grossMinor * pct) / 100);
       const feeMinor = txFee && txGross > 0 ? Math.round((((txFee * grossMinor) / txGross) * (100 - pct)) / 100) : 0;

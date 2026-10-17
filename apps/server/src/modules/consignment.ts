@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   ConsignorInputSchema,
+  nextCommissionHistory,
   PayoutInputSchema,
   cardFeesOf,
   feesDue,
@@ -355,12 +356,16 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
     const body = ConsignorInputSchema.safeParse(req.body);
     if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That artist is not valid.' });
     const before = consignorRow(db, who.accountId, id.data);
-    const renamed = !!before && parseDoc(before.doc).name !== body.data.name;
+    const prior = before ? parseDoc(before.doc) : null;
+    const renamed = !!prior && prior.name !== body.data.name;
     const now = Date.now();
+    // The history is the server's: what a client sends is ignored, and the old
+    // rates are kept when they change, so past sales keep the rate they had.
+    const doc = { ...body.data, commissionHistory: prior ? nextCommissionHistory(prior, body.data, now) : [] };
     db.prepare(
       `INSERT INTO consignors (accountId, id, doc, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(accountId, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
-    ).run(who.accountId, id.data, JSON.stringify(body.data), now, now);
+    ).run(who.accountId, id.data, JSON.stringify(doc), now, now);
     const saved = consignorRow(db, who.accountId, id.data)!;
     // Shared items carry the artist's name; a rename follows them.
     if (renamed) syncShared(ctx, who.accountId, saved);

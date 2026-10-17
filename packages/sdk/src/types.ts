@@ -353,7 +353,7 @@ export interface ItemAvailability {
   productId: string;
   variantId: string;
   label: string;
-  /** Total owned by the booth. */
+  /** The last count as entered - not less the sales since it. What is here now is `inventory.inStock()`. */
   onHand: number;
   /** This event's claim, or null when it sells from the shared pool. */
   claimed: number | null;
@@ -375,9 +375,14 @@ export interface InventoryApi {
   availability(eventId: string): ItemAvailability[];
   /** What this event can still sell of one item. */
   availableFor(eventId: string, productId: string, variantId?: string | null): number;
+  /** The last count as entered, before any sale since. For "how many are here" use `inStock`. */
   onHand(productId: string, variantId?: string | null): number;
   /** What is physically left: the last count minus every sale since. Claimed stock is still counted - it exists, it is only promised. */
   remaining(productId: string, variantId?: string | null): number;
+  /** Here now, as the Stock page shows it: `remaining`, or 0 for an item never counted (whose `remaining` would be minus its sales). */
+  inStock(productId: string, variantId?: string | null): number;
+  /** Whether anyone has counted this item yet; until then its stock is unknown. */
+  counted(productId: string, variantId?: string | null): boolean;
   setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
   /** Reserve stock for an event. */
   claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;

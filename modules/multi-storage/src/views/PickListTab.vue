@@ -49,7 +49,10 @@ const plan = computed(() => {
   for (const a of sdk().data.inventory.availability(eventId.value)) {
     if (a.claimed === null) continue;
     claimed++;
-    const need = Math.max(0, a.claimed - a.soldHere);
+    // What the event still holds of its claim: less what it sold and what it
+    // handed on to another event (Claim leftovers), so the same units are
+    // never on two pick lists.
+    const need = a.source === 'claim' ? Math.max(0, a.available) : 0;
     const row = byKey.get(itemKey(a.productId, a.variantId));
     if (!need || !row) continue;
     const { steps, short: missing } = pickPlan(need, row, order);

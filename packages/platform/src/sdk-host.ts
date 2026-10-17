@@ -43,6 +43,8 @@ import {
   clearClaim,
   onHandFor,
   remainingFor,
+  inStockFor,
+  countedAt,
   setClaim,
   setOnHand,
 } from './core/inventory';
@@ -162,6 +164,8 @@ const coreData: import('@zollify/sdk').DataApi = {
       )?.available ?? 0,
     onHand: (productId, variantId) => onHandFor(productId, variantId ?? ''),
     remaining: (productId, variantId) => remainingFor(productId, variantId ?? ''),
+    inStock: (productId, variantId) => inStockFor(productId, variantId ?? ''),
+    counted: (productId, variantId) => countedAt(productId, variantId ?? '') > 0,
     setOnHand: (productId, variantId, qty) => setOnHand(productId, variantId, qty),
     claim: (eventId, productId, variantId, qty) => setClaim(eventId, productId, variantId, qty),
     clearClaim: (eventId, productId, variantId) => clearClaim(eventId, productId, variantId),

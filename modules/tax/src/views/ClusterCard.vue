@@ -132,7 +132,13 @@ async function loadCash(): Promise<void> {
   busy.value = 'cash';
   try {
     const d = await api.eventCash(c.value.matchedEvent.id);
-    await apply(update({ cashAmount: d.cash, cashNote: 'Cash from sales', cashLoaded: true }), false);
+    const amount = eng.cashInCardCurrency(c.value, d);
+    const cur = eng.clusterCurrency(c.value);
+    if (amount === null) {
+      sdk().ui.toast(`Cash at this event was taken in ${Object.keys(d.taken ?? {}).join(', ') || d.currency}, the cards in ${cur}. Enter the cash by hand in ${cur}.`, { kind: 'error' });
+      return;
+    }
+    await apply(update({ cashAmount: amount, cashNote: 'Cash from sales', cashLoaded: true }), false);
   } catch (e) {
     sdk().ui.toast(`Cash from sales: ${e instanceof Error ? e.message : String(e)}`, { kind: 'error' });
   } finally {
@@ -158,6 +164,7 @@ function pdf(mode: 'payments' | 'fees'): void {
         <span v-for="d in c.devices ?? [c.device]" v-else :key="d" :class="['badge', sources[0] ?? 'mypos']">{{ d }}</span>
         <span v-if="ambiguous.length > 1" class="badge warn" :title="ambiguous.map((e) => e.name).join(', ')"><Icon name="alert-triangle" :size="12" /> {{ ambiguous.length }} events</span>
         <span v-if="manual.length" class="badge warn"><Icon name="hand" :size="12" /> {{ manual.length }} manual</span>
+        <span v-if="eng.mixedCurrencies(c)" class="badge warn" title="Cards in more than one currency - split the cluster by currency before booking"><Icon name="alert-triangle" :size="12" /> mixed currencies</span>
       </div>
       <div class="meta">
         <span class="stat"><small>Revenue{{ c.cashAmount ? ' +cash' : '' }}</small><strong class="good">{{ fmt(revenue) }}</strong></span>

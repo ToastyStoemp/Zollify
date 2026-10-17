@@ -337,15 +337,21 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         let cash = 0;
         let currency = 'EUR';
         let count = 0;
+        // Also what was taken, in the currency it was taken in: the card side of
+        // a booking is in the terminal's currency, and the two must not be mixed.
+        const taken: Record<string, number> = {};
         for (const t of transactionsFor(accountId)) {
           if (t.eventId !== req.params.eventId || t.revertedBy || t.revertedAt) continue;
           const legs = t.payments.filter((p) => p.kind === 'cash');
           if (!legs.length) continue;
-          cash += legs.reduce((s, p) => s + (Number(p.amount) || 0), 0) / (t.exchangeRate || 1);
+          const amount = legs.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+          cash += amount / (t.exchangeRate || 1);
           currency = t.baseCurrency ?? t.currency ?? currency;
+          if (t.currency) taken[t.currency] = (taken[t.currency] ?? 0) + amount;
           count++;
         }
-        return { eventId: req.params.eventId, cash: round2(cash), currency, count };
+        for (const k of Object.keys(taken)) taken[k] = round2(taken[k]!);
+        return { eventId: req.params.eventId, cash: round2(cash), currency, count, taken };
       });
 
       // ── Payment sources ─────────────────────────────────────────────────

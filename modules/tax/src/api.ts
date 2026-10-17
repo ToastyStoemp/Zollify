@@ -102,7 +102,7 @@ export const api = {
   testConfig: (group: string) => sdk().http.post<{ ok: boolean; detail: string }>('config/test', { group }),
 
   events: () => sdk().http.get<{ events: SalesEvent[] }>('events'),
-  eventCash: (eventId: string) => sdk().http.get<{ cash: number; currency: string; count: number }>(`events/${encodeURIComponent(eventId)}/cash`),
+  eventCash: (eventId: string) => sdk().http.get<{ cash: number; currency: string; count: number; taken?: Record<string, number> }>(`events/${encodeURIComponent(eventId)}/cash`),
 
   myposAccounts: () => sdk().http.get<{ mode: string; accounts: { account_number: string; currency?: string; name?: string }[] }>('mypos/accounts'),
   myposTransactions: (from: string, to: string, accounts?: string[]) =>

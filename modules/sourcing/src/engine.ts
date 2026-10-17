@@ -321,6 +321,8 @@ export interface RestockRow {
   moq: number;
 }
 const key = (pid: string, vid: string | null | undefined): string => `${pid}:${vid ?? ''}`;
+/** The keys a sold item counts toward: its own, and its product's - a dossier saved without a variant covers them all. */
+const keysOf = (pid: string, vid: string | null | undefined): string[] => (vid ? [key(pid, vid), key(pid, null)] : [key(pid, null)]);
 
 /**
  * Per-dossier restock stats. Sold per month comes from a trailing window of
@@ -335,7 +337,7 @@ export function computeRestock(dossiers: Dossier[], transactions: Transaction[],
   for (const t of transactions) {
     if (t.revertedAt || t.timestamp < from) continue;
     earliest = Math.min(earliest, t.timestamp);
-    for (const it of t.items) sold.set(key(it.pid, it.vid), (sold.get(key(it.pid, it.vid)) ?? 0) + it.qty);
+    for (const it of t.items) for (const k of keysOf(it.pid, it.vid)) sold.set(k, (sold.get(k) ?? 0) + it.qty);
   }
   const months = Math.max(1, (Date.now() - earliest) / (30 * 86400000));
   const rows: RestockRow[] = [];
@@ -409,7 +411,7 @@ export function computeEventPlan(events: SalesEvent[], dossiers: Dossier[], tran
       for (const t of transactions) {
         if (t.eventId !== prev.id || t.revertedAt) continue;
         for (const it of t.items) {
-          soldAtPrev.set(key(it.pid, it.vid), (soldAtPrev.get(key(it.pid, it.vid)) ?? 0) + it.qty);
+          for (const k of keysOf(it.pid, it.vid)) soldAtPrev.set(k, (soldAtPrev.get(k) ?? 0) + it.qty);
           block.totalUnits += it.qty;
         }
       }

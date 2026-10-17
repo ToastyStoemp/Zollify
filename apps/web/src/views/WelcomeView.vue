@@ -47,6 +47,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   'multi-storage': { forWhom: 'Only if you keep stock in more than one place - a storage unit, the studio. Shows what is where and what to fetch for each event.', recommended: false },
   sourcing: { forWhom: 'Keep suppliers and draft reorders when stock runs low.', recommended: false },
   'shopify-sync': { forWhom: 'Only if you also run a Shopify store and want the catalogue matched against it.', recommended: false },
+  'odoo-sync': { forWhom: 'Only if you run Odoo: keeps stock level with an Odoo warehouse and can invoice every till sale there.', recommended: false },
   migration: { forWhom: 'Only if you are moving from ZollTool. Import the backup once, then switch it off.', recommended: false },
   'peppol-be': {
     forWhom: 'Belgian B2B invoices as Peppol e-invoices. Takes your name, address, VAT and enterprise number from the first step; you only add the access point and payment details.',

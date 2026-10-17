@@ -36,6 +36,7 @@ modules/
   customs-hub/    one Customs entry point over the country modules
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
+  odoo-sync/      stock level with an Odoo warehouse, till sales invoiced there (client + server half)
   price-cards/    printable price tags from the catalogue
   label-printer/  Bluetooth label printer for price tags and staff badges
   costs/          per-item cost from shipment batches, margins in the catalogue

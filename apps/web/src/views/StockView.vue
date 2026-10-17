@@ -163,8 +163,10 @@ const carryNote = ref('');
 const carrySources = computed(() => [...pastEvents.value, ...upcomingEvents.value].filter((e) => e.id !== eventId.value));
 const carrySource = computed(() => visibleEvents.value.find((e) => e.id === carryFrom.value));
 const carryPreview = computed(() => {
-  if (!carryFrom.value) return null;
-  const rows = unsoldFrom(carryFrom.value);
+  if (!carryFrom.value || !eventId.value) return null;
+  // Exactly what Claim leftovers will take: what is left at the source now
+  // (not counting what this event already took from it), sold-out items left out.
+  const rows = unsoldFrom(carryFrom.value, eventId.value).filter((r) => r.qty > 0);
   return { items: rows.length, units: rows.reduce((n, r) => n + r.qty, 0) };
 });
 const carryHasPrices = computed(() => Boolean(carrySource.value?.localCurrency));

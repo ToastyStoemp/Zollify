@@ -56,4 +56,13 @@ describe('on the venue clock', () => {
     expect(autoEventChangesAt(us, at('2026-10-17T03:00:00Z'), both).close).toEqual([]);
     expect(autoEventChangesAt(us, at('2026-10-17T12:30:00Z'), both).close).toMatchObject([{ id: 'con' }]);
   });
+
+  it('in a country over several zones, opens only once the first day has begun everywhere in it', () => {
+    const us = [placed('con', 'planned', '2026-10-17', '2026-10-18', 'United States')];
+    // 05:00 UTC on the 17th is the 17th in New York but still the evening of
+    // the 16th in the west: not yet (it would lock the event before it, still selling).
+    expect(autoEventChangesAt(us, at('2026-10-17T05:00:00Z'), both).open).toEqual([]);
+    // 10:30 UTC is just past midnight in Honolulu, the westernmost US zone.
+    expect(autoEventChangesAt(us, at('2026-10-17T10:30:00Z'), both).open).toMatchObject([{ id: 'con' }]);
+  });
 });

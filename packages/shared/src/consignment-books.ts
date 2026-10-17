@@ -1,4 +1,5 @@
 import { csvCell } from './csv';
+import { bookLineTotals } from './charged-lines';
 import { AccountingSettingsSchema } from './consignment-accounting';
 import { z } from 'zod';
 import {
@@ -313,7 +314,8 @@ export function storeReport(input: ReportInput): StoreReport {
     const currency = tx.baseCurrency ?? tx.currency;
     const f = baseFactor(tx);
     const rows = [add(totals, currency), add(stores, `${tx.eventId}|${currency}`)];
-    const gross = tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0);
+    const lineGross = bookLineTotals(tx).map(toMinor);
+    const gross = lineGross.reduce((s, g) => s + g, 0);
     const legs = tx.payments?.length ? tx.payments : [{ kind: tx.method === 'card' ? 'card' : tx.method === 'cash' ? 'cash' : 'other', amount: tx.total }];
     const paid = { cash: 0, card: 0, other: 0 };
     for (const l of legs) paid[l.kind === 'cash' || l.kind === 'card' ? l.kind : 'other'] += Math.round(l.amount * f * 100);
@@ -324,23 +326,32 @@ export function storeReport(input: ReportInput): StoreReport {
 
     let lineVat = 0;
     let lineDisc = 0;
+    const grossByRate = new Map<number, number>();
+    // A discount listed apart from the lines (an import): what came off them here.
+    const listed = (tx.discounts ?? []).length ? tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0) - gross : 0;
+    lineDisc += Math.max(0, listed);
     tx.items.forEach((item, i) => {
-      const g = toMinor(item.baseLineTotal ?? item.lineTotal);
-      const lf = item.lineTotal ? (item.baseLineTotal ?? item.lineTotal) / item.lineTotal : f;
+      const g = lineGross[i]!;
+      // Lines are kept in the books' currency, unit price included: no conversion
+      // (a free line used to be "converted" a second time).
+      const lf = item.baseLineTotal != null && item.lineTotal ? item.baseLineTotal / item.lineTotal : 1;
       const d = Math.max(0, Math.round((item.unitPrice * item.qty - item.lineTotal) * lf * 100));
       lineDisc += d;
       if (item.consignorId) artistDisc.set(`${item.consignorId}|${currency}`, (artistDisc.get(`${item.consignorId}|${currency}`) ?? 0) + sign * d);
       const rate = tx.tax && !tx.tax.exempt ? tx.tax.rates[i] : null;
-      if (rate != null) {
-        const v = Math.round((g * rate) / (100 + rate));
-        lineVat += v;
-        const k = `${currency}|${rate}`;
-        const acc = vat.get(k) ?? { gross: 0, vat: 0 };
-        acc.gross += sign * g;
-        acc.vat += sign * v;
-        vat.set(k, acc);
-      }
+      if (rate != null) grossByRate.set(rate, (grossByRate.get(rate) ?? 0) + g);
     });
+    // VAT once per rate per sale, rounded the way the receipt rounds it
+    // (vatBreakdown), so the report and the receipts agree to the cent.
+    for (const [rate, g] of grossByRate) {
+      const v = Math.round((g * rate) / (100 + rate));
+      lineVat += v;
+      const k = `${currency}|${rate}`;
+      const acc = vat.get(k) ?? { gross: 0, vat: 0 };
+      acc.gross += sign * g;
+      acc.vat += sign * v;
+      vat.set(k, acc);
+    }
     for (const d of tx.discounts ?? []) {
       const k = `${d.name}|${currency}`;
       const acc = discounts.get(k) ?? { amount: 0, sales: new Set<string>() };

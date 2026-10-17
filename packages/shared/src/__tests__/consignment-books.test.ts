@@ -152,3 +152,25 @@ describe('commission as it was when the item sold', () => {
     expect(nextCommissionHistory(was, { ...was }, 200)).toEqual([]);
   });
 });
+
+describe('VAT and discounts in the store report', () => {
+  const settings = { ...BooksSettingsSchema.parse({ timeZone: 'Europe/Zurich' }) };
+  const run = (txs: Transaction[]) => storeReport({ period: { from: '2026-03-01', to: '2026-03-31' }, settings, transactions: txs, consignors: [ana], payouts: [], fees: [], rentals: [] });
+
+  it('rounds VAT once per rate per sale, as the receipt does', () => {
+    const r = run([tx('two', '2026-03-05T10:00:00Z', [{ lineTotal: 5 }, { lineTotal: 5 }], { tax: { country: 'CH', exempt: false, rates: [8.1, 8.1] } })]);
+    expect(r.vat).toEqual([{ currency: 'CHF', rate: 8.1, gross: 10, net: 9.25, vat: 0.75 }]);
+  });
+
+  it('a discount listed apart from the lines (an import) is not counted as money taken', () => {
+    const r = run([tx('imp', '2026-03-05T10:00:00Z', [{ lineTotal: 100, consignorId: 'ana' }], { total: 90, discounts: [{ name: 'Show deal', amount: 10 }], payments: [{ kind: 'cash', amount: 90 }] })]);
+    expect(r.totals[0]).toMatchObject({ gross: 90, discounts: 10, cash: 90, consigned: 90, artistShare: 54 });
+  });
+
+  it('a line given away at a converted event counts its whole price as the discount', () => {
+    const r = run([
+      tx('free', '2026-03-05T10:00:00Z', [{ lineTotal: 10, unitPrice: 10 }, { lineTotal: 0, unitPrice: 10 }], { currency: 'SEK', total: 115, baseCurrency: 'CHF', baseTotal: 10, exchangeRate: 11.5 }),
+    ]);
+    expect(r.totals[0]).toMatchObject({ gross: 10, discounts: 10 });
+  });
+});

@@ -299,3 +299,32 @@ describe('sync', () => {
     expect(rec?.full).toBe(rec?.thumb);
   });
 });
+
+describe('last change wins, as on the server', () => {
+  const op = (n: number, type: string, payload: unknown) => ({ opId: String(n).padStart(16, '0'), deviceId: 'other', ts: 1, serverSeq: n, type, payload });
+
+  it('a delete made before an edit does not delete the edited product, whichever arrives first', async () => {
+    pullResponses = [{ ops: [op(1, 'product.upsert', product('p1', 'Edited at 10:05', 1005)), op(2, 'product.delete', { id: 'p1', deletedAt: 1000 })], latestSeq: 2 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).products.get('p1'))?.deletedAt).toBeUndefined();
+  });
+
+  it('a delete made after the last edit deletes it', async () => {
+    pullResponses = [{ ops: [op(1, 'product.upsert', product('p1', 'Print', 1000)), op(2, 'product.delete', { id: 'p1', deletedAt: 1005 })], latestSeq: 2 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).products.get('p1'))?.deletedAt).toBe(1005);
+  });
+
+  it('a cleared claim stays cleared when an older claim from an offline device syncs in later', async () => {
+    const claim = (qty: number, at: number) => ({ eventId: 'A', productId: 'p1', variantId: '', broughtQty: qty, updatedAt: at });
+    pullResponses = [{ ops: [op(1, 'stock.set', claim(5, 1000)), op(2, 'stock.set', claim(-1, 1100))], latestSeq: 2 }];
+    await sync.syncNow();
+    pullResponses = [{ ops: [op(3, 'stock.set', claim(7, 1050))], latestSeq: 3 }];
+    await sync.syncNow();
+    expect(await openCoreDb(account.accountId).eventStock.get(['A', 'p1', ''])).toBeUndefined();
+    // A newer claim after the clear does count.
+    pullResponses = [{ ops: [op(4, 'stock.set', claim(3, 1200))], latestSeq: 4 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).eventStock.get(['A', 'p1', '']))?.broughtQty).toBe(3);
+  });
+});

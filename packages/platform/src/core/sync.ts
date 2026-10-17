@@ -21,7 +21,7 @@ import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
 import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
-import { loadInventory } from './inventory';
+import { claimClearedAt, loadInventory, rememberClaimCleared } from './inventory';
 import { loadSellLockSettings } from './sell-lock';
 import { base64ToBlob } from './images';
 
@@ -128,9 +128,14 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'product.delete': {
-      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
+      // Last change wins, as on the server (reduceProducts): a delete older
+      // than an edit that already arrived is ignored, whatever order the two
+      // reach this device in. Older payloads were { productId, updatedAt }.
+      const d = op.payload as { id?: string; deletedAt?: number; productId?: string; updatedAt?: number };
+      const id = d.id ?? d.productId ?? '';
+      const deletedAt = d.deletedAt ?? d.updatedAt ?? 0;
       const existing = await db.products.get(id);
-      if (existing) {
+      if (existing && deletedAt >= (existing.updatedAt ?? 0)) {
         await db.products.put({ ...existing, deletedAt, updatedAt: deletedAt });
         return 1;
       }
@@ -180,9 +185,12 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'discount.delete': {
-      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
-      const existing = await db.discounts.get(id);
-      if (existing) {
+      // Last change wins, as on the server (reduceDiscounts). Older payloads were { ruleId, updatedAt }.
+      const d = op.payload as { id?: string; deletedAt?: number; ruleId?: string; updatedAt?: number };
+      const id = d.id ?? d.ruleId ?? '';
+      const deletedAt = d.deletedAt ?? d.updatedAt ?? 0;
+      const existing = (await db.discounts.get(id)) as (DiscountRule & { updatedAt?: number }) | undefined;
+      if (existing && deletedAt >= (existing.updatedAt ?? 0)) {
         await db.discounts.put({ ...existing, deletedAt, updatedAt: deletedAt } as never);
         return 1;
       }
@@ -207,12 +215,15 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       ];
       const existing = await db.eventStock.get(key);
       if (existing && (incoming.updatedAt ?? 0) < (existing.updatedAt ?? 0)) return 0;
+      // Cleared after this was set: an older claim arriving late stays cleared.
+      if (!existing && (incoming.updatedAt ?? 0) < (await claimClearedAt(db, key))) return 0;
 
       // A negative quantity is the tombstone for a dropped claim: the protocol
       // has no stock.delete, and the event must fall back to the shared pool
       // rather than keep a stale reservation.
       if (incoming.broughtQty < 0) {
         await db.eventStock.delete(key);
+        await rememberClaimCleared(db, key, incoming.updatedAt ?? 0);
         return 1;
       }
 

@@ -170,3 +170,16 @@ describe('"held by other events"', () => {
     expect(avail('A').reservedElsewhere).toBe(10);
   });
 });
+
+describe('a product that got variants after it was counted', () => {
+  it('keeps its old count on the Stock page instead of dropping it from every total', async () => {
+    await catalog.upsertProduct({ id: P, title: 'Print', price: 1, forSale: true, unlisted: false, variants: [{ id: 'a4', name: 'A4' }, { id: 'a5', name: 'A5' }], sortOrder: 0, updatedAt: Date.now() });
+    const rows = inv.inventoryRows().filter((r) => r.productId === P);
+    expect(rows.map((r) => r.variantId)).toEqual(['a4', 'a5', '']);
+    expect(rows.find((r) => r.variantId === '')).toMatchObject({ onHand: 100, label: expect.stringContaining('not a variant') });
+    // Recounted to 0 and no claim left on it: the row goes.
+    await setStatus('A', 'closed');
+    await inv.setOnHand(P, '', 0);
+    expect(inv.inventoryRows().filter((r) => r.productId === P).map((r) => r.variantId)).toEqual(['a4', 'a5']);
+  });
+});

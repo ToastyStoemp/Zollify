@@ -640,7 +640,7 @@ function artistView(
       const own = lines.filter((l) => l.productId === p.id && (l.variantId ?? '') === r.variantId);
       const count = inventory.get(`${p.id}:${r.variantId}`);
       // Same rule as the till: a count already includes what sold before it.
-      const soldSince = count ? own.filter((l) => l.at > count.updatedAt).reduce((s, l) => s + l.qty, 0) : 0;
+      const soldSince = count ? own.filter((l) => l.at >= count.updatedAt).reduce((s, l) => s + l.qty, 0) : 0;
       items.push({
         productId: p.id,
         variantId: r.variantId,

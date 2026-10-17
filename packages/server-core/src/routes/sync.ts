@@ -124,8 +124,8 @@ export function registerSyncRoutes(
     // and team settings (see TEAM_SETTING_PREFIX). The catalogue, prices,
     // discounts, events and other settings are the owner's and admins'. Their
     // screens already hide those; this is the guarantee.
+    const refused: string[] = staff ? rawOps.filter((op) => !isStaffOp(op)).map((op) => op.opId) : [];
     const ops = (staff ? rawOps.filter(isStaffOp) : rawOps).map((op) => stampSeller(db, op, claims, staff, deviceId));
-    let dropped = rawOps.length - ops.length;
 
     let accepted = 0;
     let txCount = 0;
@@ -135,7 +135,7 @@ export function registerSyncRoutes(
       let seq = (maxSeq.get(claims.accountId) as { m: number }).m;
       for (const op of ops) {
         if (allowed && !opWritable(claims.accountId, allowed, op)) {
-          dropped++;
+          refused.push(op.opId);
           continue;
         }
         const r = insertOp.run(
@@ -156,10 +156,10 @@ export function registerSyncRoutes(
         }
       }
       touchDevice(db, deviceId, claims.accountId, claims.sub, deviceName ?? null, flavor ?? null, Date.now(), parseDevice(req.headers['user-agent']));
-      return { accepted, duplicates: rawOps.length - accepted, latestSeq: seq };
+      return { accepted, duplicates: rawOps.length - accepted - refused.length, latestSeq: seq, ...(refused.length ? { refused } : {}) };
     })();
 
-    if (dropped > 0) req.log.warn({ userId: claims.sub, dropped }, 'dropped ops outside what this user may change');
+    if (refused.length) req.log.warn({ userId: claims.sub, dropped: refused.length }, 'dropped ops outside what this user may change');
 
     bumpMetric(db, claims.accountId, 'syncPushes');
     if (accepted > 0) {

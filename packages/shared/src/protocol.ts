@@ -68,6 +68,13 @@ export interface PushResponse {
   accepted: number;
   duplicates: number;
   latestSeq: number;
+  /**
+   * opIds the server would not store because this user may not make them (a
+   * helper's sale at an event they no longer have, staff editing an event).
+   * Dropped rather than rejected, so the outbox does not retry forever - this
+   * is how the device learns which ones never arrived. Absent on older servers.
+   */
+  refused?: string[];
 }
 
 export interface PullResponse {

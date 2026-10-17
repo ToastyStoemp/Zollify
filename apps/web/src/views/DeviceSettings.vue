@@ -8,7 +8,7 @@ import {
   checkForUpdate,
   checkShellUpdate,
   currentAppVersion,
-  currentShellVersion,
+  shellUpdaterStatus,
   downloadUpdate,
   installDownloadedUpdate,
   queueShellUpdate,
@@ -76,10 +76,14 @@ const updateError = ref<string | null>(null);
 // worth answering) - shown unconditionally, not only after a check.
 const appVersion = ref<{ versionCode: number; versionName: string; flavor: string } | null>(null);
 const shellVersion = ref<string | null>(null);
+/** Why content updates do not work here, when they do not - shown so it can be reported. */
+const shellReason = ref<string | null>(null);
 onMounted(async () => {
   canSelfUpdate.value = await selfUpdates().catch(() => false);
   appVersion.value = await currentAppVersion().catch(() => null);
-  shellVersion.value = await currentShellVersion().catch(() => null);
+  const status = await shellUpdaterStatus().catch((err: unknown) => ({ reason: err instanceof Error ? err.message : String(err) }));
+  shellVersion.value = 'version' in status ? status.version : null;
+  shellReason.value = 'reason' in status ? status.reason : null;
 });
 
 // ── Content updates (every flavour, including Carbon) ───────────────────────
@@ -305,6 +309,10 @@ import SharedTillSettings from './SharedTillSettings.vue';
         <dd class="mono">{{ appVersion ? `${appVersion.flavor} · v${appVersion.versionName} (${appVersion.versionCode})` : '…' }}</dd>
         <dt>Content build</dt>
         <dd class="mono">{{ shellVersion ?? build }}<span v-if="!shellVersion" class="warn"> (content updates unavailable on this install)</span></dd>
+        <template v-if="shellReason">
+          <dt>Why</dt>
+          <dd class="warn">{{ shellReason }}</dd>
+        </template>
       </dl>
       <p class="hint">
         "Check for updates" covers both halves: the app itself (not on Carbon terminals - they take their APK through myPOS instead) and the content it runs, which updates on every flavour without a new install.

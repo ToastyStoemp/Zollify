@@ -1,5 +1,6 @@
 import { getServerUrl, isNative } from './native';
 import { createShellUi } from './shell-ui';
+import { logDiagnostic } from './core/diagnostics';
 
 /**
  * Content-only self-update of the Android shell, through @capgo/capacitor-updater
@@ -47,7 +48,13 @@ function updater(): CapacitorUpdaterPlugin | null {
  * on the assumption a bundle that never reports ready crashed on load.
  */
 export async function notifyShellUpdateReady(): Promise<void> {
-  await updater()?.notifyAppReady();
+  try {
+    await updater()?.notifyAppReady();
+  } catch (err) {
+    // Logged, not thrown: the app must start either way, but a silent failure here hid why updates never worked.
+    logDiagnostic(`content updates: notifyAppReady failed: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
+  }
 }
 
 interface ShellManifest {
@@ -55,6 +62,34 @@ interface ShellManifest {
   url: string;
   integrity: string;
   sizeBytes: number;
+}
+
+/**
+ * Whether content updates work on this install, and if not, why - in words
+ * a person can send back. "Unavailable" alone left a Carbon on a build that
+ * should have had the updater with no way to tell what was wrong: the plugin
+ * missing from the build, present but unreachable, or failing when called.
+ */
+export async function shellUpdaterStatus(): Promise<{ version: string } | { reason: string }> {
+  const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean; isPluginAvailable?: (n: string) => boolean; Plugins?: Record<string, unknown>; PluginHeaders?: { name: string }[] } }).Capacitor;
+  const report = (reason: string): { reason: string } => {
+    logDiagnostic(`content updates unavailable: ${reason}`);
+    return { reason };
+  };
+  if (!isNative() || !cap) return { reason: 'Not running inside the app.' };
+  if (typeof cap.isPluginAvailable === 'function' && !cap.isPluginAvailable('CapacitorUpdater')) {
+    const names = cap.PluginHeaders?.map((h) => h.name).join(', ');
+    return report(`the updater plugin is not loaded in this app build${names ? ` (native plugins: ${names})` : ''}.`);
+  }
+  const plugin = cap.Plugins?.CapacitorUpdater as CapacitorUpdaterPlugin | undefined;
+  if (!plugin) return report('the updater plugin is registered but not reachable from the page.');
+  try {
+    const current = await plugin.current();
+    if (current?.bundle?.version) return { version: current.bundle.version };
+    return report(`the updater answered without a version: ${JSON.stringify(current).slice(0, 200)}`);
+  } catch (err) {
+    return report(`the updater failed when asked for its version: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /** Just what's active right now, for a settings screen to show even before checking anything. Null outside the native app. */

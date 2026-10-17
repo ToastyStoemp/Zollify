@@ -101,6 +101,9 @@ apply from: 'capacitor.build.gradle'
 // every flavor unconditionally via capacitor.build.gradle above, with no
 // per-flavor option of its own, so it's excluded from the carbon variant
 // here instead. Re-run after any `npx cap sync` that changes plugin names.
+// The plugin LIST must match: Capacitor drops every npm plugin when one listed
+// class is missing, so scripts/carbon-plugins.mjs writes carbon's own
+// capacitor.plugins.json without this one (part of `npm run android:sync`).
 android.applicationVariants.all { variant ->
     if (variant.flavorName == 'carbon') {
         variant.getCompileConfiguration().exclude(module: 'capacitor-community-bluetooth-le')

@@ -193,6 +193,13 @@ const viewMode = computed<ViewMode>(() => {
   const mode = atStore.value ? storeMode.value : boothMode.value;
   return mode === 'artists' && !hasArtists.value ? 'grouped' : mode;
 });
+/** The browse modes on offer, for the pills (wide) and the single picker (narrow). */
+const viewModes = computed<{ id: ViewMode; label: string; icon: string }[]>(() => [
+  ...(atStore.value && hasArtists.value ? [{ id: 'artists' as ViewMode, label: 'Artists', icon: 'users' }] : []),
+  { id: 'flat' as ViewMode, label: 'All', icon: 'package' },
+  { id: 'grouped' as ViewMode, label: 'Types', icon: 'layers' },
+]);
+const currentMode = computed(() => viewModes.value.find((m) => m.id === viewMode.value) ?? viewModes.value[0]!);
 function setViewMode(mode: ViewMode): void {
   if (atStore.value) storeMode.value = mode;
   else boothMode.value = mode;
@@ -961,14 +968,20 @@ function lockTill(): void {
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
           <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
         </button>
+        <!-- Narrow screens: the browse modes as one icon beside the terminal (the pills below are hidden there). A native
+             select under the icon, so the device's own picker opens on tap. -->
+        <label class="quiet iconbtn mode-pick" :title="`Showing: ${currentMode.label}`">
+          <Icon :name="currentMode.icon" :size="16" />
+          <select :value="viewMode" :aria-label="`Browse by (showing ${currentMode.label})`" @change="setViewMode(($event.target as HTMLSelectElement).value as ViewMode)">
+            <option v-for="m in viewModes" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+        </label>
         <div class="search-group">
           <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
           <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
         </div>
         <div class="modes">
-          <button v-if="atStore && hasArtists" type="button" :class="['pill', { active: viewMode === 'artists' }]" @click="setViewMode('artists')">Artists</button>
-          <button type="button" :class="['pill', { active: viewMode === 'flat' }]" @click="setViewMode('flat')">All</button>
-          <button type="button" :class="['pill', { active: viewMode === 'grouped' }]" @click="setViewMode('grouped')">Types</button>
+          <button v-for="m in viewModes" :key="m.id" type="button" :class="['pill', { active: viewMode === m.id }]" @click="setViewMode(m.id)">{{ m.label }}</button>
         </div>
       </header>
 
@@ -1307,6 +1320,8 @@ function lockTill(): void {
 .scanner-switch:hover { background: rgba(0, 0, 0, .7); color: #fff; }
 .hint.mono { font-family: ui-monospace, monospace; font-size: .72rem; word-break: break-word; }
 .modes { display: flex; gap: .3rem; }
+.mode-pick { display: none; position: relative; cursor: pointer; }
+.mode-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 1rem; }
 .pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }
 .pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
 .notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
@@ -1433,6 +1448,10 @@ function lockTill(): void {
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
   .search-group { margin-left: 0; width: 100%; order: 3; }
+  /* Pills fold into one icon beside the terminal state: a row less above the products. */
+  .modes { display: none; }
+  .mode-pick { display: inline-flex; }
+  .bar { padding: .5rem .75rem; gap: .5rem; }
   .search { flex: 1; }
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }
   .tile { min-height: 5.5rem; padding: .55rem .6rem; }

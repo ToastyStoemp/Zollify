@@ -230,7 +230,7 @@ const lowStock = computed(() => {
   const ev = event.value;
   const rows = ev
     ? availabilityFor(ev.id).filter((r) => r.claimed !== null || r.onHand > 0).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.available }))
-    : inventoryRows().filter((r) => r.counted).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.free + r.claimed }));
+    : inventoryRows().filter((r) => r.counted).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.onHand }));
   return rows.filter((r) => r.left <= LOW).sort((a, b) => a.left - b.left).slice(0, 6);
 });
 const uncounted = computed(() => inventoryRows().filter((r) => !r.counted).length);

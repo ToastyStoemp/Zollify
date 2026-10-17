@@ -129,6 +129,8 @@ export {
   soldAt,
   soldTotal,
   claimedTotal,
+  heldTotal,
+  inStockFor,
   eventIsOver,
   freeFor,
   heldFor,

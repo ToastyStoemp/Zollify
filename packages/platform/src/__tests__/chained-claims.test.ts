@@ -145,3 +145,16 @@ describe('Sell 🔒', () => {
     expect(lock.sellLocked('A')).toBe(true);
   });
 });
+
+describe('the Stock page row', () => {
+  const row = () => inv.inventoryRows().find((r) => r.productId === P)!;
+  it('On hand drops with every sale, and Free is On hand less what is still claimed', async () => {
+    expect(row()).toMatchObject({ onHand: 100, claimed: 30, free: 70 });
+    await sell('A', 5);
+    expect(row()).toMatchObject({ onHand: 95, claimed: 25, free: 70 });
+    await sell('B', 2); // no claim at B: from the free stock
+    expect(row()).toMatchObject({ onHand: 93, claimed: 25, free: 68 });
+    await setStatus('A', 'closed');
+    expect(row()).toMatchObject({ onHand: 93, claimed: 0, free: 93 });
+  });
+});

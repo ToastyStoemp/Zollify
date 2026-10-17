@@ -323,6 +323,16 @@ export function claimedTotal(productId: string, variantId: string | null = ''): 
   return claimedByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
+/** What running events still hold of their claims (claimed less sold there), for one item. */
+export function heldTotal(productId: string, variantId: string | null = ''): number {
+  return heldByKey.value.get(stockKey(productId, variantId)) ?? 0;
+}
+
+/** What is here now: the last count less sales since. 0 for an item never counted. */
+export function inStockFor(productId: string, variantId: string | null = ''): number {
+  return countedAt(productId, variantId) > 0 ? remainingFor(productId, variantId) : 0;
+}
+
 /**
  * Stock nobody holds - what an event without a claim can draw on: what is
  * physically left (the last count less sales since) less what running events
@@ -445,13 +455,15 @@ export interface InventoryRow {
   productId: string;
   variantId: string;
   label: string;
+  /** Here now: the last count less every sale since. Editing it is a fresh count. */
   onHand: number;
   /** False until someone has counted this item; until then Free means nothing. */
   counted: boolean;
+  /** Still set aside for running events: their claims less what they sold. */
   claimed: number;
   /** Sold ever, across every event. */
   sold: number;
-  /** Unclaimed and unsold - what an event with no claim can draw on. */
+  /** On hand less claimed - what an event with no claim can draw on. */
   free: number;
   /** More is promised or already gone than the booth owns. */
   overCommitted: boolean;
@@ -468,8 +480,8 @@ export function inventoryRows(): InventoryRow[] {
       : [{ id: '', label: product.title }];
 
     for (const entry of entries) {
-      const onHand = onHandFor(product.id, entry.id);
-      const claimed = claimedTotal(product.id, entry.id);
+      const onHand = inStockFor(product.id, entry.id);
+      const claimed = heldTotal(product.id, entry.id);
       const sold = soldTotal(product.id, entry.id);
       const free = freeFor(product.id, entry.id);
       const counted = countedAt(product.id, entry.id) > 0;

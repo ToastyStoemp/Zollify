@@ -29,6 +29,7 @@ export {
   copyEventPricing,
   type EventPricing,
 } from './sales-events';
+export { autoEventSettings, loadAutoEventSettings, setAutoEventSettings, runAutoEvents, startAutoEvents, stopAutoEvents } from './auto-events';
 export {
   queueOp,
   unsyncedOps,

@@ -18,6 +18,7 @@ import { registerDeviceLinkRoutes } from './device-link';
 import { registerDeviceUserRoutes } from './device-users';
 import { registerStatic } from './static';
 import { appendOps, registerSyncRoutes } from './routes/sync';
+import { startAutoEvents } from './auto-events';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
@@ -292,6 +293,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     log: (err) => app.log.warn({ err }, 'webhook failed'),
   });
   app.addHook('onClose', async () => webhooks.stop());
+  // Events open and close by their dates for accounts that ask (Events → Automatic), devices on or not.
+  const stopAutoEvents = startAutoEvents(db, (accountId, ops) => appendOps(db, rooms, accountId, 'auto-events', ops), (err) => app.log.warn({ err }, 'automatic events failed'));
+  app.addHook('onClose', async () => stopAutoEvents());
   const notify: Notify = (accountId, n) => {
     ring(accountId, n);
     webhooks.notification(accountId, n);

@@ -16,7 +16,7 @@ import {
   onAccountChange,
   recordSale,
   signOut,
-  stopAutoSync,
+  stopAutoSync, stopAutoEvents,
   stopRealtime,
   type LoadOutcome,
   type ModuleDescriptor,
@@ -138,6 +138,7 @@ export const loader = new ModuleLoader({
  */
 export async function signOutAndReload(): Promise<void> {
   stopAutoSync();
+  stopAutoEvents();
   stopRealtime();
   await loader.unloadAll();
   await signOut();

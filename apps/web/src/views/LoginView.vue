@@ -18,6 +18,7 @@ import {
   loadSalesEvents,
   loadTransactions,
   startAutoSync,
+  startAutoEvents,
   startTillLock,
   startRealtime,
 } from '@zollify/platform';
@@ -127,6 +128,7 @@ async function afterLogin(body: unknown): Promise<void> {
     await loadEnabledModules(router).catch((err) => console.error('[zollify] module boot failed', err));
     startAutoSync();
     startRealtime();
+    startAutoEvents();
     startTillLock({ unlocked: true });
   })();
   // A module screen (e.g. the till) only exists once its module is loaded.

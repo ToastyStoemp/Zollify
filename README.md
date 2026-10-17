@@ -170,7 +170,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol).
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -395,6 +395,26 @@ own IndexedDB, and what was booked is remembered server-side. **Ledger**: per-
 event P&L from op-log revenue against booth / travel / accommodation costs,
 invoices attached, optional Claude invoice scanning behind daily caps.
 Credentials live encrypted per account under Settings → Integrations.
+
+*Tax deadlines* - when to file and pay, worked out from the business's tax
+setup rather than fetched: no tax office publishes deadlines as data, but the
+rules are fixed in law. The setup (country, state, legal form, VAT status and
+frequency, Dauerfristverlängerung, tax advisor, trade tax, prepayments, EC
+Sales List, EU SME scheme) feeds `deadlinesBetween` in `@zollify/shared`,
+which the app and the server share. **Germany** is complete: VAT returns on
+the 10th (one month later with the extension) and the February special
+prepayment, annual returns on 31 July or the end of February with an advisor,
+income or corporate tax prepayments, trade tax prepayments and the EC Sales
+List, each moved off weekends and national and state holidays (§108 AO). Any
+EU country gets the cross-border **SME scheme report** within a month of each
+quarter; anything else is covered by the business's **own deadlines** (once,
+monthly, quarterly or yearly). Reminders go out at the lead times picked (on
+the day, days, a week, two weeks, a month, or any number up to 90), from 8:00
+in the chosen time zone, under the bell, by email to the owner, and to
+webhooks listening for *Tax deadlines*; one note the day after if a deadline
+is not ticked off. When the server was down through several lead times, one
+reminder stands in for them. Open deadlines show on the home calendar and a
+home card. Adding a country is one more rule set in `tax-deadlines.ts`.
 
 *Public events* (the ZollEvents port) publishes at `/p/public-events/<slug>`:
 the page, `/events.json`, `/embed.js` (drop-in widget for any site), `/events.ics`

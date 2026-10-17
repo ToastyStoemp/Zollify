@@ -129,6 +129,7 @@ export {
   claimedTotal,
   eventIsOver,
   freeFor,
+  heldFor,
   availabilityFor,
   inventoryRows,
   resetInventoryCache,

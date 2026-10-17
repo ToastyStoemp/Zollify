@@ -21,7 +21,7 @@ import {
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
-import { authFetch, getAccount, onAccountChange } from './session';
+import { authFetch, getAccount, onAccountChange, updateProfile } from './session';
 import { canLockTill, lockTill, switchByBadge } from './till-lock';
 import {
   allProducts,
@@ -307,6 +307,10 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
     data: coreData,
 
     account: () => getAccount(),
+    updateVatProfile: (update) => {
+      guard();
+      return updateProfile({ vat: update });
+    },
     lock: { available: () => canLockTill(), lock: () => lockTill(), badge: (code) => switchByBadge(code) },
 
     onAccountChange(handler) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '@zollify/shared';
-import { RECEIPT_FIELD_DEFAULTS, buildReceiptLines, receiptFields } from '../receipt';
+import { RECEIPT_FIELD_DEFAULTS, buildReceiptLines, receiptFields, resolveVatNumber } from '../receipt';
 
 /**
  * A sale charged abroad keeps its lines in the booth's book currency and only
@@ -196,5 +196,14 @@ describe('optional header fields', () => {
   it('reads stored choices over the defaults, ignoring junk', () => {
     expect(receiptFields({ phone: true, email: 'yes' })).toEqual({ ...RECEIPT_FIELD_DEFAULTS, phone: true });
     expect(receiptFields(null)).toEqual(RECEIPT_FIELD_DEFAULTS);
+  });
+});
+
+describe('resolveVatNumber', () => {
+  it('matches a country by name or code alike', () => {
+    const artist = { vatNumber: 'BE0123456789', vatNumbers: [{ country: 'NL', vatNumber: 'NL123B01' }, { country: 'Germany', vatNumber: 'DE999' }] };
+    expect(resolveVatNumber(artist, 'Netherlands')).toBe('NL123B01');
+    expect(resolveVatNumber(artist, 'DE')).toBe('DE999');
+    expect(resolveVatNumber(artist, 'France')).toBe('BE0123456789');
   });
 });

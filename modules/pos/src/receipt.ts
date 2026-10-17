@@ -1,7 +1,7 @@
 import type { Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
+import { countryCodeOf, fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
 import { receiptQrPng } from './lib/after-sale';
@@ -69,19 +69,28 @@ export function receiptFields(stored: unknown): Record<ReceiptField, boolean> {
  * registration if one is set, otherwise the default `vatNumber`.
  */
 export function resolveVatNumber(artist: ArtistInfo, country?: string): string {
-  const c = (country ?? '').trim().toLowerCase();
-  if (c && artist.vatNumbers?.length) {
-    const hit = artist.vatNumbers.find((v) => v.country.trim().toLowerCase() === c && v.vatNumber.trim());
-    if (hit) return hit.vatNumber.trim();
-  }
-  return artist.vatNumber?.trim() ?? '';
+  return ownVatNumber(artist, country)?.vatNumber.trim() ?? artist.vatNumber?.trim() ?? '';
+}
+
+/** "Germany", "germany" and "DE" are the same country; names nobody knows still match as typed. */
+function sameCountry(a: string | undefined, b: string | undefined): boolean {
+  const x = (a ?? '').trim();
+  const y = (b ?? '').trim();
+  if (!x || !y) return false;
+  const code = (s: string): string => (/^[A-Za-z]{2}$/.test(s) ? s.toUpperCase() : countryCodeOf(s));
+  const cx = code(x);
+  const cy = code(y);
+  return cx && cy ? cx === cy : x.toLowerCase() === y.toLowerCase();
+}
+
+/** The registration for `country`, when the list has one. */
+function ownVatNumber(artist: ArtistInfo, country?: string): CountryVat | undefined {
+  return artist.vatNumbers?.find((v) => sameCountry(v.country, country) && v.vatNumber.trim());
 }
 
 /** The country whose registration `resolveVatNumber` prints: the event's when it has one of its own, else home. */
 function vatCountry(artist: ArtistInfo, eventCountry?: string): string | undefined {
-  const c = eventCountry?.trim().toLowerCase();
-  const own = !!c && !!artist.vatNumbers?.some((v) => v.country.trim().toLowerCase() === c && v.vatNumber.trim());
-  return own ? eventCountry : artist.countryOfOrigin;
+  return ownVatNumber(artist, eventCountry) ? eventCountry : artist.countryOfOrigin;
 }
 
 export const RECEIPT_KEYS = {
@@ -362,6 +371,12 @@ export function withProfileFallback(artist: ArtistInfo): ArtistInfo {
   const out: ArtistInfo = { ...artist };
   for (const k of ['companyName', 'fullName', 'street', 'postCodeCity', 'countryOfOrigin', 'phone', 'email'] as const) out[k] = artist[k] || profile[k] || '';
   out.vatNumber = artist.vatNumber || profile.vatId || '';
+  // The business profile's VAT numbers per country (Settings → VAT) fill in any country this device lists none for.
+  const own = artist.vatNumbers ?? [];
+  const fromProfile = (sdk().account()?.profile.vat?.vatNumbers ?? [])
+    .filter((v) => !own.some((o) => sameCountry(o.country, v.country) && o.vatNumber.trim()))
+    .map((v) => ({ country: v.country, vatNumber: v.number }));
+  if (fromProfile.length) out.vatNumbers = [...own, ...fromProfile];
   return out;
 }
 

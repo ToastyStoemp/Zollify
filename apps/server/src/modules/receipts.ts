@@ -13,6 +13,7 @@ import {
   receiptFooterLinks,
   vatBreakdown,
   vatIdLabel,
+  vatNumberFor,
   type ProfileLinks,
   type PublicEvent,
   type ReceiptFooterLink,
@@ -244,8 +245,10 @@ function seller(db: Database.Database, accountId: string, tx: Transaction): Publ
   const row = db.prepare('SELECT name, profile FROM accounts WHERE id = ?').get(accountId) as
     | { name: string; profile: string | null }
     | undefined;
-  const artist = parseProfile(row?.profile).artist;
-  const vatId = artist.vatId.trim() || undefined;
+  const profile = parseProfile(row?.profile);
+  const artist = profile.artist;
+  // The registration for the country of the sale when there is one (Settings → VAT), else the default.
+  const vatId = vatNumberFor(profile, tx.tax?.country) || undefined;
   return {
     // Phone, email and EORI stay off: a receipt needs who sold it and their
     // tax registration, not a way to reach them at home.

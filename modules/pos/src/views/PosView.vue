@@ -35,7 +35,7 @@ import {
   loadTestMode,
   testMode,
 } from '../cart';
-import { getProvider } from '../payments/registry';
+import { defaultProviderId, getProvider } from '../payments/registry';
 import { testTerminalProvider } from '../payments/test-terminal';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
@@ -104,7 +104,7 @@ onMounted(async () => {
   // Ready before the first sale, so its thank-you screen has the logo at once.
   void refreshLogo();
   void backfillBranding();
-  providerId.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  providerId.value = (await sdk().config.get<string>('activeProvider')) ?? defaultProviderId();
   void loadTestMode();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;

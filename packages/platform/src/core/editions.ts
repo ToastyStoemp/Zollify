@@ -11,7 +11,7 @@ import {
   type PlanRow,
 } from '@zollify/shared';
 import { allProducts } from './catalog';
-import { claimFor, claimsForEvent, eventIsOver, freeFor, setClaim } from './inventory';
+import { claimFor, claimsForEvent, eventIsOver, freeFor, heldFor, setClaim, soldAt } from './inventory';
 import { eventPricing, getSalesEvent, upsertSalesEvent, visibleEvents } from './sales-events';
 import { recentTransactions } from './transactions';
 
@@ -163,8 +163,8 @@ export function prepPlanFor(eventId: string, opts: PlanOptions): PlannerRow[] {
     .filter((r) => labels.has(r.key))
     .map((r) => {
       const current = claimFor(eventId, r.productId, r.variantId);
-      // freeFor already subtracts this event's own claim while it reserves, so add it back.
-      const claimable = freeFor(r.productId, r.variantId) + (reserving && current !== null ? current : 0);
+      // freeFor already subtracts what this event holds while it reserves, so add that back - plus what it already sold, which a claim covers too.
+      const claimable = freeFor(r.productId, r.variantId) + (reserving && current !== null ? heldFor(eventId, r.productId, r.variantId) + soldAt(eventId, r.productId, r.variantId) : 0);
       return { ...r, label: labels.get(r.key)!, claimable: Math.max(0, claimable), current };
     })
     .sort((a, b) => a.label.localeCompare(b.label));

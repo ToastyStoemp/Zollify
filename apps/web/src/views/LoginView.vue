@@ -15,6 +15,7 @@ import {
   loadCatalog,
   loadDiscounts,
   loadInventory,
+  loadSellLockSettings,
   loadSalesEvents,
   loadTransactions,
   startAutoSync,
@@ -118,7 +119,7 @@ async function afterLogin(body: unknown): Promise<void> {
     }
   }
   // Whatever this device already has locally - instant, no network.
-  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts(), loadInventory()]);
+  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts(), loadInventory(), loadSellLockSettings().catch(() => undefined)]);
   const next = typeof route.query.next === 'string' ? route.query.next : '/home';
   // Signed in now: go in straight away. Modules download and data syncs in
   // the background, with a progress card while a first sync runs - rather

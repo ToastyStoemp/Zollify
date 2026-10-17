@@ -338,6 +338,14 @@ export interface SalesEventApi {
   upsert(event: SalesEvent): Promise<void>;
   remove(id: string): Promise<void>;
   setStock(entry: EventStock): Promise<void>;
+  /**
+   * Sell 🔒: another open event took over this one's leftovers, so the till
+   * must not sell here. Null when it may sell. `forced` = an owner or admin
+   * forced it open and the account allows that; `canForce` = this user may.
+   */
+  sellLock(eventId: string): { by: { id: string; name: string }[]; forced: boolean; canForce: boolean } | null;
+  /** Force a locked event open for sales (`on`), or lock it again. */
+  forceSell(eventId: string, on: boolean): Promise<void>;
 }
 
 /** What one event can still sell of an item. */

@@ -14,6 +14,7 @@ import {
   getAccount,
   loadCatalog,
   loadInventory,
+  loadSellLockSettings,
   loadSalesEvents,
   loadDiscounts,
   loadTransactions,
@@ -84,6 +85,7 @@ async function boot(): Promise<void> {
       loadTransactions().catch((err) => console.error('[zollify] history load failed', err)),
       loadDiscounts().catch((err) => console.error('[zollify] discounts load failed', err)),
       loadInventory().catch((err) => console.error('[zollify] inventory load failed', err)),
+      loadSellLockSettings().catch(() => undefined),
       refreshPendingCount().catch(() => {}),
     ]);
   }

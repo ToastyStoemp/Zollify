@@ -69,6 +69,23 @@ const activeEvent = computed(() => sdk().data.events.active());
 /** The till still on a convention that already ended: sales would land in its books, currency and VAT. */
 const tillCheck = computed(() => tillEventCheck(activeEvent.value, sdk().data.events.list()));
 const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
+/** Sell 🔒: an open event took over this one's leftovers, so ringing up here would sell from its box. */
+const sellLock = computed(() => (activeEvent.value ? sdk().data.events.sellLock(activeEvent.value.id) : null));
+const sellBlocked = computed(() => !!sellLock.value && !sellLock.value.forced);
+const lockedBy = computed(() => sellLock.value?.by.map((e) => e.name).join(', ') ?? '');
+async function sellAtTaker(): Promise<void> {
+  const e = sellLock.value?.by[0];
+  if (e) await sdk().data.events.setActive(e.id);
+}
+async function forceSell(on: boolean): Promise<void> {
+  const e = activeEvent.value;
+  if (!e) return;
+  try {
+    await sdk().data.events.forceSell(e.id, on);
+  } catch (err) {
+    toast(err instanceof Error ? err.message : String(err), 'bad');
+  }
+}
 async function sellAtToday(): Promise<void> {
   const e = tillCheck.value.runningToday;
   if (e) await sdk().data.events.setActive(e.id);
@@ -700,6 +717,7 @@ const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', spli
 function startPayment(method: string): void {
   if (!itemCount.value) return;
   if (!activeEvent.value) return toast('Pick an active event first (Events).', 'bad');
+  if (sellBlocked.value) return toast(`Sell 🔒 - ${lockedBy.value} took this event's leftovers.`, 'bad');
   payment.method = method;
   payment.total = total.value;
   payment.cashReceived = payment.total.toFixed(2);
@@ -985,7 +1003,18 @@ function lockTill(): void {
         </div>
       </header>
 
-      <div v-if="tillCheck.ended" class="stale" role="alert">
+      <div v-if="sellLock && !sellLock.forced" class="stale locked" role="alert">
+        <Icon name="lock" :size="16" />
+        <span><strong>Sell 🔒 {{ activeEvent?.name }}.</strong> {{ lockedBy }} took over what was left here, so sales here would come out of its stock.</span>
+        <button v-if="sellLock.by.length === 1" type="button" class="primary" @click="sellAtTaker">Sell at {{ sellLock.by[0]!.name }}</button>
+        <button v-if="sellLock.canForce" type="button" class="danger" @click="forceSell(true)">Force sales</button>
+      </div>
+      <div v-else-if="sellLock?.forced" class="stale" role="status">
+        <Icon name="alert-triangle" :size="16" />
+        <span><strong>Sell 🔒 forced open.</strong> {{ lockedBy }} took this event's leftovers; what you sell here may come out of its stock.</span>
+        <button type="button" @click="forceSell(false)">Lock again</button>
+      </div>
+      <div v-else-if="tillCheck.ended" class="stale" role="alert">
         <Icon name="alert-triangle" :size="16" />
         <span><strong>{{ activeEvent?.name }} {{ activeEvent?.status === 'closed' ? 'is closed' : `ended ${fmtDay(tillCheck.endedOn)}` }}.</strong> Sales you ring up now still go to it.</span>
         <button v-if="tillCheck.runningToday" type="button" class="primary" @click="sellAtToday">Sell at {{ tillCheck.runningToday.name }}</button>
@@ -1105,10 +1134,10 @@ function lockTill(): void {
           <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
         <div class="pay">
-          <button type="button" class="cash" :disabled="!itemCount" @click="startPayment('cash')">Cash</button>
-          <button type="button" class="card" :disabled="!itemCount" @click="startPayment('card')">Card</button>
-          <button type="button" class="split" :disabled="!itemCount" @click="startPayment('split')">Split</button>
-          <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount" @click="startPayment(m)">{{ m }}</button>
+          <button type="button" class="cash" :disabled="!itemCount || sellBlocked" @click="startPayment('cash')">Cash</button>
+          <button type="button" class="card" :disabled="!itemCount || sellBlocked" @click="startPayment('card')">Card</button>
+          <button type="button" class="split" :disabled="!itemCount || sellBlocked" @click="startPayment('split')">Split</button>
+          <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount || sellBlocked" @click="startPayment(m)">{{ m }}</button>
         </div>
       </footer>
     </aside>
@@ -1297,6 +1326,8 @@ function lockTill(): void {
 .stale { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .6rem 1rem 0; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #d99a2b); color: var(--zfy-warning-ink, #8a5a00); font-size: .875rem; }
 .stale span { flex: 1; min-width: 12rem; }
 .stale .btn { text-decoration: none; font-weight: 600; color: inherit; }
+.stale.locked { border-color: var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); }
+.stale .danger { color: var(--zfy-danger, #c6512f); border-color: currentColor; }
 .bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
 .event { min-width: 0; display: flex; flex-direction: column; }
 .iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }

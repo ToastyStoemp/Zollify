@@ -11,6 +11,12 @@ import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from
 import {
   autoEventSettings,
   loadAutoEventSettings,
+  canForceSell,
+  forceSell,
+  loadSellLockSettings,
+  sellLockFor,
+  sellLockSettings,
+  setSellLockSettings,
   setAutoEventSettings,
   activeEventId,
   claimUnsoldFrom,
@@ -49,6 +55,15 @@ const canEdit = computed(() => account.value?.role === 'owner' || account.value?
 
 // ── Automatic opening and closing (account-wide; applied by owner and admin devices) ──
 onMounted(() => void loadAutoEventSettings().catch(() => undefined));
+onMounted(() => void loadSellLockSettings().catch(() => undefined));
+/** Sell 🔒: an open event took over this one's leftovers (sell-lock.ts). */
+function lockNote(e: SalesEvent): string | null {
+  const lock = sellLockFor(e.id);
+  if (!lock) return null;
+  const by = lock.by.map((x) => x.name).join(', ');
+  return lock.forced ? `Forced open - ${by} took its leftovers` : `${by} took its leftovers, so the till won't sell here`;
+}
+const toggleForce = (e: SalesEvent, on: boolean) => guard(() => forceSell(e.id, on));
 async function toggleAuto(which: 'open' | 'close', on: boolean): Promise<void> {
   await guard(() => setAutoEventSettings({ [which]: on }));
 }
@@ -514,6 +529,11 @@ async function save(): Promise<void> {
       <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
       <p class="hint">For the whole account. The server does it at midnight where the event is held, whether or not a device is on; tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
     </details>
+    <details v-if="canEdit && !storesPage" class="auto">
+      <summary>Sell 🔒: {{ sellLockSettings.allowForce ? 'owners and admins can force sales' : 'no forcing' }}</summary>
+      <label class="check"><input type="checkbox" :checked="sellLockSettings.allowForce" @change="guard(() => setSellLockSettings({ allowForce: ($event.target as HTMLInputElement).checked }))" /> <span>Let owners and admins force sales at an event marked Sell 🔒</span></label>
+      <p class="hint">An event is marked Sell 🔒 once another event that took over its leftovers opens: the till stops selling there, so nothing comes out of the next event's box. Forcing is off by default.</p>
+    </details>
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
 
@@ -531,6 +551,10 @@ async function save(): Promise<void> {
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
+          <p v-if="lockNote(e)" :class="['lock-note', { forced: sellLockFor(e.id)?.forced }]"><strong>Sell 🔒</strong> {{ lockNote(e) }}.
+            <button v-if="!sellLockFor(e.id)?.forced && canForceSell()" type="button" class="linkbtn" @click="toggleForce(e, true)">Force sales</button>
+            <button v-else-if="sellLockFor(e.id)?.forced && canEdit" type="button" class="linkbtn" @click="toggleForce(e, false)">Lock again</button>
+          </p>
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
           <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ fmtDayRange(e.dateEnd || e.dateStart) }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
@@ -704,6 +728,8 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .title strong { font-size: 1rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
+.lock-note { margin: .25rem 0 0; font-size: .82rem; color: var(--zfy-danger, #c6512f); }
+.lock-note.forced { color: var(--zfy-warning-ink); }
 .pill.ended { background: transparent; border: 1px solid var(--zfy-warning); color: var(--zfy-warning-ink); }
 .ended-note { margin: 0; font-size: .82rem; color: var(--zfy-warning-ink); }
 .linkbtn { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: inherit; text-decoration: underline; cursor: pointer; }

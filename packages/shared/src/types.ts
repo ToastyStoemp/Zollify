@@ -88,6 +88,11 @@ export interface SalesEvent {
   edition?: string;
   /** Booth/cube layout imported from the configurator. See booth-layout.ts. */
   boothLayout?: BoothLayout;
+  /**
+   * Sell anyway although another open event took over this one's leftovers
+   * (see sell-lock.ts). Only honoured while the account allows forcing.
+   */
+  sellLockForced?: boolean;
   updatedAt: number;
   deletedAt?: number;
 }
@@ -188,6 +193,13 @@ export interface EventStock {
   variantId: string;
   broughtQty: number;
   updatedAt: number;
+  /**
+   * Set when this claim took over what another event had left (Claim
+   * leftovers): `qty` units of it left that event, which no longer holds them.
+   * That event's own claim is left as it was - customs and the packing list
+   * still say what it brought.
+   */
+  carried?: { from: string; qty: number };
 }
 
 export type DiscountType = 'bxgy' | 'nth_pct' | 'tiered' | 'combo';

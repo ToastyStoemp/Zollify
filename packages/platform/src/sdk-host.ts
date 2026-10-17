@@ -37,6 +37,7 @@ import { deviceId } from './core/device';
 import { fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
+import { canForceSell, forceSell, sellLockFor } from './core/sell-lock';
 import {
   availabilityFor,
   clearClaim,
@@ -147,6 +148,11 @@ const coreData: import('@zollify/sdk').DataApi = {
     upsert: (event) => upsertSalesEvent(event),
     remove: (id) => deleteSalesEvent(id),
     setStock: (entry) => setStock(entry),
+    sellLock: (eventId) => {
+      const lock = sellLockFor(eventId);
+      return lock ? { by: lock.by.map((e) => ({ id: e.id, name: e.name })), forced: lock.forced, canForce: canForceSell() } : null;
+    },
+    forceSell: (eventId, on) => forceSell(eventId, on),
   },
   inventory: {
     availability: (eventId) => availabilityFor(eventId),

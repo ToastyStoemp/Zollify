@@ -83,6 +83,11 @@ export function claimFor(
   return row ? row.broughtQty : null;
 }
 
+/** Every claim, all events. Reactive. */
+export function allClaims(): EventStock[] {
+  return [...claims.values()];
+}
+
 export function claimsForEvent(eventId: string): EventStock[] {
   return [...claims.values()].filter((c) => c.eventId === eventId);
 }
@@ -111,14 +116,20 @@ export async function setClaim(
   productId: string,
   variantId: string | null,
   qty: number,
+  opts: { carried?: { from: string; qty: number } } = {},
 ): Promise<void> {
   const db = openCoreDb(requireAccountId());
+  const broughtQty = Math.max(0, Math.floor(qty));
+  // An edit keeps where the stock came from, never more of it than is now claimed.
+  const prior = claims.get(claimKey(eventId, productId, variantId))?.carried;
+  const carried = opts.carried ?? prior;
   const row: EventStock = toPlain({
     eventId,
     productId,
     variantId: variantId ?? '',
-    broughtQty: Math.max(0, Math.floor(qty)),
+    broughtQty,
     updatedAt: Date.now(),
+    ...(carried && carried.qty > 0 && broughtQty > 0 ? { carried: { from: carried.from, qty: Math.min(Math.floor(carried.qty), broughtQty) } } : {}),
   });
   await db.eventStock.put(row);
   claims.set(claimKey(eventId, productId, variantId), row);
@@ -248,10 +259,54 @@ export function eventIsOver(event: SalesEvent | undefined, today = localIsoDay()
   return eventHasEnded(event, today);
 }
 
-/** The claim as far as reservations go: a past event's claim no longer holds anything. */
-function reservingClaimFor(eventId: string, productId: string, variantId: string | null): number | null {
-  return eventIsOver(getSalesEvent(eventId)) ? null : claimFor(eventId, productId, variantId);
+/** Units carried on from each event to others (Claim leftovers), per item: they left that event. */
+const carriedOutByEventAndKey = computed(() => {
+  const out = new Map<string, Map<string, number>>();
+  for (const c of claims.values()) {
+    if (!c.carried) continue;
+    const forEvent = out.get(c.carried.from) ?? new Map<string, number>();
+    const key = stockKey(c.productId, c.variantId);
+    forEvent.set(key, (forEvent.get(key) ?? 0) + c.carried.qty);
+    out.set(c.carried.from, forEvent);
+  }
+  return out;
+});
+
+function carriedOut(eventId: string, key: string, exceptTo?: string): number {
+  if (exceptTo === undefined) return carriedOutByEventAndKey.value.get(eventId)?.get(key) ?? 0;
+  let n = 0;
+  for (const c of claims.values()) {
+    if (c.carried?.from === eventId && c.eventId !== exceptTo && stockKey(c.productId, c.variantId) === key) n += c.carried.qty;
+  }
+  return n;
 }
+
+/** An event's claim less what was carried on from it to other events: what it still had to sell. */
+function ownClaim(eventId: string, productId: string, variantId: string | null): number | null {
+  const claim = claimFor(eventId, productId, variantId);
+  return claim === null ? null : Math.max(0, claim - carriedOut(eventId, stockKey(productId, variantId)));
+}
+
+/**
+ * What a running event still holds of an item: its own claim less what it
+ * sold, never negative. Nothing once the event is over, or without a claim.
+ * Sales are counted whenever they were made - a recount does not give back
+ * stock the event already sold.
+ */
+export function heldFor(eventId: string, productId: string, variantId: string | null = ''): number {
+  if (eventIsOver(getSalesEvent(eventId))) return 0;
+  const own = ownClaim(eventId, productId, variantId);
+  return own === null ? 0 : Math.max(0, own - soldAt(eventId, productId, variantId));
+}
+
+const heldByKey = computed(() => {
+  const out = new Map<string, number>();
+  for (const c of claims.values()) {
+    const held = heldFor(c.eventId, c.productId, c.variantId);
+    if (held > 0) out.set(stockKey(c.productId, c.variantId), (out.get(stockKey(c.productId, c.variantId)) ?? 0) + held);
+  }
+  return out;
+});
 
 const claimedByKey = computed(() => {
   const out = new Map<string, number>();
@@ -263,45 +318,20 @@ const claimedByKey = computed(() => {
   return out;
 });
 
-/** Units claimed by every event, for one item. */
+/** Units claimed by every event still on, for one item - as claimed, for display. */
 export function claimedTotal(productId: string, variantId: string | null = ''): number {
   return claimedByKey.value.get(stockKey(productId, variantId)) ?? 0;
 }
 
 /**
- * Units drawn from the shared pool, per item.
- *
- * Sales by events with no claim all come out of the pool. Sales against a
- * claim come out of the claim - until the claim runs out, after which the
- * overage is drawn from the pool too. A print sold past a claim was still a
- * real print that left the pile, and pretending the pool is untouched would
- * let another event sell it a second time.
- */
-const poolSoldByKey = computed(() => {
-  const out = new Map<string, number>();
-  for (const [soldEventId, forEvent] of soldSinceCountByEventAndKey.value) {
-    for (const [key, qty] of forEvent) {
-      const [pid = '', vid = ''] = key.split(':');
-      const claim = reservingClaimFor(soldEventId, pid, vid);
-      const fromPool = claim === null ? qty : Math.max(0, qty - claim);
-      if (fromPool > 0) out.set(key, (out.get(key) ?? 0) + fromPool);
-    }
-  }
-  return out;
-});
-
-/**
- * Stock nobody has claimed and nobody has sold - what an unclaimed event can
- * draw on.
- *
- * Sales made within a claim are deliberately not subtracted here: they were
- * already accounted for when the stock was claimed. Subtracting both is the
- * obvious mistake, and it makes the pool shrink twice for one sale. Only the
- * part of a claimed event's sales that exceeds its claim comes out of here.
+ * Stock nobody holds - what an event without a claim can draw on: what is
+ * physically left (the last count less sales since) less what running events
+ * still hold of their claims. A sale within a claim is already gone from the
+ * pile and from what its event holds, so it is never subtracted twice; a sale
+ * past a claim simply comes off the pile.
  */
 export function freeFor(productId: string, variantId: string | null = ''): number {
-  const key = stockKey(productId, variantId);
-  return onHandFor(productId, variantId) - claimedTotal(productId, variantId) - (poolSoldByKey.value.get(key) ?? 0);
+  return remainingFor(productId, variantId) - (heldByKey.value.get(stockKey(productId, variantId)) ?? 0);
 }
 
 export interface UnsoldRow {
@@ -317,24 +347,29 @@ export interface UnsoldRow {
  * shared pool never set anything aside, so there is nothing of its own left.
  * Selling past a claim leaves zero, never a negative.
  */
-export function unsoldFrom(eventId: string): UnsoldRow[] {
+export function unsoldFrom(eventId: string, exceptTo?: string): UnsoldRow[] {
   return claimsForEvent(eventId).map((c) => ({
     productId: c.productId,
     variantId: c.variantId,
-    qty: Math.max(0, c.broughtQty - soldAt(eventId, c.productId, c.variantId)),
+    // What was already carried on to another event left this one.
+    qty: Math.max(0, c.broughtQty - carriedOut(eventId, stockKey(c.productId, c.variantId), exceptTo) - soldAt(eventId, c.productId, c.variantId)),
   }));
 }
 
 /**
  * Claims for `targetId` exactly what `sourceId` claimed and did not sell - the
- * stock carried straight on from one show to the next. Replaces the target's
- * claims on those items; items the source never claimed are left alone.
+ * stock carried straight on from one show to the next. The units move: the
+ * source stops holding them (its claim stays as it was, for customs and the
+ * packing list), so they are never reserved twice - also while the source is
+ * still open, or after it is reopened. Replaces the target's claims on those
+ * items; an item with nothing left is skipped, so the target keeps selling it
+ * from the shared pool. Running it again takes over what is left now.
  * Returns how many items were claimed.
  */
 export async function claimUnsoldFrom(sourceId: string, targetId: string): Promise<number> {
   if (sourceId === targetId) throw new Error('Pick a different event to claim from.');
-  const rows = unsoldFrom(sourceId);
-  for (const row of rows) await setClaim(targetId, row.productId, row.variantId, row.qty);
+  const rows = unsoldFrom(sourceId, targetId).filter((r) => r.qty > 0);
+  for (const row of rows) await setClaim(targetId, row.productId, row.variantId, row.qty, { carried: { from: sourceId, qty: row.qty } });
   return rows.length;
 }
 
@@ -367,7 +402,6 @@ export interface Availability {
 export function availabilityFor(eventId: string): Availability[] {
   const rows: Availability[] = [];
 
-  const poolSold = poolSoldByKey.value;
   // Once over, whatever the event had is soft-released back to the shared
   // pool for selling purposes - but the claim itself is still there to look
   // at and edit (e.g. reopening a finished event to correct what it took).
@@ -380,18 +414,15 @@ export function availabilityFor(eventId: string): Availability[] {
       : [{ id: '', label: product.title }];
 
     for (const entry of entries) {
-      const key = stockKey(product.id, entry.id);
       const onHand = onHandFor(product.id, entry.id);
       const claimed = claimFor(eventId, product.id, entry.id);
-      const reservingClaim = reserving ? claimed : null;
+      // What it still had to sell: the claim less what was carried on to other events.
+      const reservingClaim = reserving ? ownClaim(eventId, product.id, entry.id) : null;
       const soldHere = soldAt(eventId, product.id, entry.id);
       const totalClaimed = claimedTotal(product.id, entry.id);
 
-      const reservedElsewhere = totalClaimed - (reservingClaim ?? 0);
-      const available =
-        reservingClaim !== null
-          ? reservingClaim - soldHere
-          : onHand - totalClaimed - (poolSold.get(key) ?? 0);
+      const reservedElsewhere = totalClaimed - (reserving ? (claimed ?? 0) : 0);
+      const available = reservingClaim !== null ? reservingClaim - soldHere : freeFor(product.id, entry.id);
 
       rows.push({
         productId: product.id,

@@ -79,6 +79,11 @@ export const activeEvent = computed(() =>
 
 export const activeEventId = computed(() => activeId.value);
 
+/** Every event, also those a helper is not given - for rules that span events (sell-lock.ts). */
+export function allSalesEvents(): SalesEvent[] {
+  return [...events.values()];
+}
+
 export function getSalesEvent(id: string): SalesEvent | undefined {
   return events.get(id);
 }

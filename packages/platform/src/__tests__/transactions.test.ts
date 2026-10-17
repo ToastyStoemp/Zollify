@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import { strFromU8, unzipSync } from 'fflate';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccountSnapshot, SaleEvent } from '@zollify/sdk';
 
@@ -280,18 +281,26 @@ describe('backup', () => {
       thumb: new Blob(['thumb'], { type: 'image/webp' }),
     });
 
-    const file = await backup.createBackup();
-    expect(file.products).toHaveLength(1);
-    expect(file.events).toHaveLength(1);
-    expect(file.transactions).toHaveLength(1);
-    expect(file.images).toHaveLength(1);
+    // A zip: the data as JSON, each photo a file of its own named after its product.
+    const zip = await backup.createBackupZip();
+    expect(zip.filename).toMatch(/\.zip$/);
+    const entries = unzipSync(new Uint8Array(await zip.blob.arrayBuffer()));
+    expect(Object.keys(entries).sort()).toEqual(['images/print-img1.jpg', 'images/thumbs/print-img1.webp', 'zollify-backup.json']);
+    expect(strFromU8(entries['images/print-img1.jpg']!)).toBe('full');
+    const data = JSON.parse(strFromU8(entries['zollify-backup.json']!));
+    expect(data).toMatchObject({ version: 2, images: [{ id: 'img-1', file: 'images/print-img1.jpg' }] });
+    expect(JSON.stringify(data)).not.toContain('B64');
+    expect(data.products).toHaveLength(1);
+    expect(data.events).toHaveLength(1);
+    expect(data.transactions).toHaveLength(1);
 
     await deleteCoreDb(account.accountId);
     catalog.resetCatalogCache();
     events.resetSalesEventCache();
     tx.resetTransactionCache();
 
-    const result = await backup.restoreBackup(JSON.parse(JSON.stringify(file)));
+    const loaded = await backup.readBackupFile(zip.blob);
+    const result = await backup.restoreBackup(loaded.raw, loaded.files);
 
     expect(result.products).toBe(1);
     expect(result.images).toBe(1);
@@ -303,6 +312,27 @@ describe('backup', () => {
     expect(await restoredImage?.full.text()).toBe('full');
     expect(restoredImage?.full.type).toBe('image/jpeg');
     expect(await restoredImage?.thumb.text()).toBe('thumb');
+  });
+
+  it('still restores an older single-file JSON backup with the photos inside it', async () => {
+    const old = {
+      format: 'zollify-backup',
+      version: 1,
+      exportedAt: '2026-01-01T00:00:00Z',
+      accountId: account.accountId,
+      accountName: 'x',
+      products: [{ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false, imageId: 'img-1', updatedAt: 1 }],
+      events: [],
+      inventory: [],
+      eventStock: [],
+      transactions: [],
+      images: [{ id: 'img-1', productId: 'p1', updatedAt: 1, fullB64: btoa('full'), fullType: 'image/jpeg', thumbB64: btoa('thumb'), thumbType: 'image/webp' }],
+    };
+    const loaded = await backup.readBackupFile(new Blob([JSON.stringify(old)], { type: 'application/json' }));
+    expect(loaded.files).toBeUndefined();
+    const result = await backup.restoreBackup(loaded.raw, loaded.files);
+    expect(result.images).toBe(1);
+    expect(await (await openCoreDb(account.accountId).images.get('img-1'))?.full.text()).toBe('full');
   });
 
   it('keeps tombstones so a restore does not resurrect deleted rows', async () => {
@@ -325,7 +355,7 @@ describe('backup', () => {
   it('refuses a backup version it does not understand', () => {
     expect(() =>
       backup.inspectBackup({ format: 'zollify-backup', version: 99 }),
-    ).toThrow(/version 1/i);
+    ).toThrow(/version 99/i);
   });
 
   it('flags a backup from another account instead of restoring silently', () => {

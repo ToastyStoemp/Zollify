@@ -70,6 +70,9 @@ export {
 export {
   BACKUP_VERSION,
   createBackup,
+  createBackupZip,
+  readBackupFile,
+  type LoadedBackup,
   inspectBackup,
   restoreBackup,
   backupFilename,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { getProvider, setActiveProvider } from '../payments/registry';
+import { defaultProviderId, getProvider, setActiveProvider } from '../payments/registry';
 import type { PaymentProviderId } from '../payments/provider';
 import { loadSumupCloudStatus } from '../payments/sumup-cloud';
 import { QrCode } from '@zollify/ui';
@@ -67,7 +67,8 @@ async function refresh(): Promise<void> {
 }
 
 onMounted(async () => {
-  const saved = await sdk().config.get<string>('activeProvider');
+  // Never chosen: a Carbon starts on its own card reader.
+  const saved = (await sdk().config.get<string>('activeProvider')) ?? defaultProviderId();
   if (saved === 'sumup' || saved === 'sumup-cloud') {
     way.value = 'sumup';
     soloRoute.value = saved === 'sumup-cloud' ? 'cloud' : 'bluetooth';

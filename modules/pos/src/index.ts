@@ -1,7 +1,7 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 import { listenForRemotePayments } from './payments/satellite';
-import { allProviders, onActiveProviderChanged } from './payments/registry';
+import { allProviders, onActiveProviderChanged, defaultProviderId, setActiveProvider } from './payments/registry';
 
 /**
  * POS - taking money at the booth.
@@ -76,7 +76,10 @@ export default defineModule({
         sdk.ui.toast('ZollBridge is no longer supported - pick a card terminal under Settings → Payments.', { kind: 'warning', timeoutMs: 8000 });
         return;
       }
-      if (id) onActiveProviderChanged(id as never);
+      if (id) return onActiveProviderChanged(id as never);
+      // Never chosen: a Carbon starts on its own card reader rather than manual entry.
+      const fallback = defaultProviderId();
+      if (fallback !== 'manual') await setActiveProvider(fallback);
     });
 
     sdk.log.info('pos module ready');

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
-import { allProviders, onActiveProviderChanged } from '../payments/registry';
+import { allProviders, defaultProviderId, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
 import { GO2_HOST_SETTING, GO2_PORT_SETTING, GO2_TRANSPORT_SETTING, connectGo2, type Go2Transport } from '../payments/mypos-go2';
@@ -69,7 +69,7 @@ const newMethod = ref('');
 onMounted(async () => {
   void refreshStatuses();
   pollTimer = setInterval(() => void refreshStatuses(), 5000);
-  active.value = (await sdk().config.get<string>('activeProvider')) ?? 'manual';
+  active.value = (await sdk().config.get<string>('activeProvider')) ?? defaultProviderId();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
   void loadTestMode();

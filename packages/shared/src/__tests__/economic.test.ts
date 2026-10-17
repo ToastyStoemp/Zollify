@@ -102,3 +102,17 @@ describe('e-conomic day journal', () => {
     expect(j.problems.join(' ')).toMatch(/account for "Kort"/);
   });
 });
+
+describe('an imported sale with its discount listed apart', () => {
+  it('books what was paid, not the lines before the discount', () => {
+    const j = dayJournal(
+      [tx('imp', [item('mug', 100)], { total: 90, method: 'cash', payments: [{ kind: 'cash', amount: 90 }], discounts: [{ name: 'Show deal', amount: 10 }] })],
+      renters,
+      DAY,
+      settings,
+    );
+    expect(line(j, 'cash')?.amount).toBe(90);
+    expect(line(j, 'sales')?.amount).toBe(-90);
+    expect(sum(j.lines)).toBe(0);
+  });
+});

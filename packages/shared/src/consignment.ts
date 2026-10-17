@@ -3,6 +3,7 @@ import { BicSchema, IbanSchema } from './consignment-accounting';
 import type { ConsignmentFee } from './consignment-books';
 import type { StoreFeature } from './store-events';
 import type { SalesEvent, Transaction } from './types';
+import { bookLineTotals } from './charged-lines';
 
 /**
  * Consignment - selling artists' work on their behalf.
@@ -200,13 +201,14 @@ export function consignmentLines(
     if (tx.revertedAt || tx.revertedBy) continue;
     const currency = tx.baseCurrency ?? tx.currency;
     const txFee = cardFees ? toMinor(cardFeeOf(tx, cardFees)) : 0;
-    const txGross = tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0);
-    for (const item of tx.items) {
+    const lineGross = bookLineTotals(tx).map(toMinor);
+    const txGross = lineGross.reduce((s, g) => s + g, 0);
+    for (const [n, item] of tx.items.entries()) {
       const consignor = item.consignorId ? byId.get(item.consignorId) : undefined;
       if (!consignor) continue;
       // A line can carry its own split (a workshop's); otherwise the artist's commission as it was then.
       const pct = typeof item.commissionPct === 'number' ? item.commissionPct : commissionFor(consignor, tx.eventId, tx.timestamp);
-      const grossMinor = toMinor(item.baseLineTotal ?? item.lineTotal);
+      const grossMinor = lineGross[n]!;
       const commissionMinor = Math.round((grossMinor * pct) / 100);
       const feeMinor = txFee && txGross > 0 ? Math.round((((txFee * grossMinor) / txGross) * (100 - pct)) / 100) : 0;
       out.push({

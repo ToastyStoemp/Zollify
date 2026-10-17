@@ -87,3 +87,36 @@ describe('merging products', () => {
     expect(ops.filter((o) => o.type === 'product.delete')).toHaveLength(1);
   });
 });
+
+describe('a merge and the claims on what is merged', () => {
+  it('keeps where carried leftovers came from, and the claims’ own times', async () => {
+    await catalog.upsertProduct(product('cat', 'Keychain Cat'));
+    await catalog.upsertProduct(product('dog', 'Keychain Dog'));
+    for (const id of ['A', 'B']) await events.upsertSalesEvent({ id, name: id, venue: {}, currency: 'CHF', status: 'active', dateStart: '2999-01-01', updatedAt: 1 } as never);
+    await inventory.setOnHand('dog', '', 10);
+    await inventory.setClaim('A', 'dog', '', 6);
+    await inventory.claimUnsoldFrom('A', 'B');
+    const before = inventory.claimsForEvent('B')[0]!;
+    expect(before.carried).toEqual({ from: 'A', qty: 6 });
+
+    await mergeProducts(
+      { ...product('cat', 'Keychain'), variants: [{ id: 'v-cat', name: 'Cat', price: 10 }, { id: 'v-dog', name: 'Dog', price: 10 }] },
+      {
+        id: 'm2',
+        intoId: 'cat',
+        sources: [
+          { fromKey: 'cat', toPid: 'cat', toVid: 'v-cat', title: 'Keychain', variantLabel: 'Cat' },
+          { fromKey: 'dog', toPid: 'cat', toVid: 'v-dog', title: 'Keychain', variantLabel: 'Dog' },
+        ],
+        updatedAt: Date.now(),
+      },
+      ['dog'],
+    );
+
+    const after = inventory.claimsForEvent('B').find((c) => c.productId === 'cat' && c.variantId === 'v-dog')!;
+    expect(after).toMatchObject({ broughtQty: 6, carried: { from: 'A', qty: 6 }, updatedAt: before.updatedAt });
+    // So A still holds nothing of it: the leftovers are reserved once.
+    expect(inventory.heldFor('A', 'cat', 'v-dog')).toBe(0);
+    expect(inventory.heldFor('B', 'cat', 'v-dog')).toBe(6);
+  });
+});

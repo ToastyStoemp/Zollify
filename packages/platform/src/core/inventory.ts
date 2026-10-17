@@ -137,6 +137,22 @@ export async function setClaim(
 }
 
 /**
+ * When a claim was cleared. The row itself is gone (nothing else has to skip
+ * a tombstone), so this is what stops an older claim that syncs in late -
+ * from a device that was offline - bringing it back, as the server's
+ * last-change-wins already does (reduceStock).
+ */
+const CLEARED_PREFIX = 'core.claimCleared.';
+const clearedKey = (key: [string, string, string]): string => `${CLEARED_PREFIX}${key.join('|')}`;
+export async function rememberClaimCleared(db: ReturnType<typeof openCoreDb>, key: [string, string, string], at: number): Promise<void> {
+  await db.settings.put({ key: clearedKey(key), value: at });
+}
+export async function claimClearedAt(db: ReturnType<typeof openCoreDb>, key: [string, string, string]): Promise<number> {
+  const row = await db.settings.get(clearedKey(key));
+  return typeof row?.value === 'number' ? row.value : 0;
+}
+
+/**
  * Drops a claim so the event falls back to the shared pool.
  *
  * Distinct from claiming zero, which reserves nothing but still says "this
@@ -150,13 +166,15 @@ export async function clearClaim(
 ): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const key: [string, string, string] = [eventId, productId, variantId ?? ''];
+  const now = Date.now();
   await db.eventStock.delete(key);
+  await rememberClaimCleared(db, key, now);
   claims.delete(claimKey(eventId, productId, variantId));
   // Sync carries a tombstone rather than a deletion: the wire protocol has no
   // stock.delete, and a claim of -1 is unambiguous as "no claim".
   await queueOp({
     type: 'stock.set',
-    payload: { eventId, productId, variantId: variantId ?? '', broughtQty: -1, updatedAt: Date.now() },
+    payload: { eventId, productId, variantId: variantId ?? '', broughtQty: -1, updatedAt: now },
   });
 }
 
@@ -468,6 +486,19 @@ export interface InventoryRow {
   overCommitted: boolean;
 }
 
+/**
+ * A product that got variants later can still have a count, a claim or sales
+ * on the product itself, from before. Those would drop out of every total
+ * without a word, so the product gets a row of its own for them until they
+ * are cleared (recount it to 0).
+ */
+function hasPreVariantStock(productId: string): boolean {
+  const key = stockKey(productId, '');
+  if ((items.get(key)?.onHand ?? 0) !== 0 || inStockFor(productId, '') !== 0) return true;
+  for (const c of claims.values()) if (c.productId === productId && c.variantId === '' && !eventIsOver(getSalesEvent(c.eventId))) return true;
+  return false;
+}
+
 /** The whole inventory, with what is spoken for. */
 export function inventoryRows(): InventoryRow[] {
   const rows: InventoryRow[] = [];
@@ -475,7 +506,10 @@ export function inventoryRows(): InventoryRow[] {
   for (const product of allProducts.value) {
     const variants = product.variants ?? [];
     const entries = variants.length
-      ? variants.map((v) => ({ id: v.id, label: `${product.title} · ${v.name}` }))
+      ? [
+          ...variants.map((v) => ({ id: v.id, label: `${product.title} · ${v.name}` })),
+          ...(hasPreVariantStock(product.id) ? [{ id: '', label: `${product.title} · not a variant (counted before it had variants)` }] : []),
+        ]
       : [{ id: '', label: product.title }];
 
     for (const entry of entries) {

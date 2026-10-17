@@ -53,7 +53,7 @@ const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode
 const storesPage = computed(() => props.mode === 'stores');
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 
-// ── Automatic opening and closing (account-wide; applied by owner and admin devices) ──
+// ── Automatic opening and closing (account-wide; the server applies it - server-core auto-events.ts) ──
 onMounted(() => void loadAutoEventSettings().catch(() => undefined));
 onMounted(() => void loadSellLockSettings().catch(() => undefined));
 /** Sell 🔒: an open event took over this one's leftovers (sell-lock.ts). */
@@ -527,7 +527,7 @@ async function save(): Promise<void> {
       <summary>Automatic: {{ autoEventSettings.open && autoEventSettings.close ? 'open and close by date' : autoEventSettings.open ? 'open by date' : autoEventSettings.close ? 'close by date' : 'off' }}</summary>
       <label class="check"><input type="checkbox" :checked="autoEventSettings.open" @change="toggleAuto('open', ($event.target as HTMLInputElement).checked)" /> <span>Open each event on its first day, and switch the till to it when it is the only one running</span></label>
       <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
-      <p class="hint">For the whole account. The server does it at midnight where the event is held, whether or not a device is on; tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
+      <p class="hint">For the whole account. The server checks every hour, at five past, whether or not a device is on: an event opens in the first hour of its first day where it is held, and closes in the first hour of the day after its last. In a country with several time zones it goes by the westernmost one, so nothing opens or closes early. Tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
     </details>
     <details v-if="canEdit && !storesPage" class="auto">
       <summary>Sell 🔒: {{ sellLockSettings.allowForce ? 'owners and admins can force sales' : 'no forcing' }}</summary>

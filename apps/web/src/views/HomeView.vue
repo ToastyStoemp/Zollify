@@ -7,6 +7,7 @@ import {
   activeEvent,
   availabilityFor,
   allProducts,
+  countedAt,
   currentAccount,
   dismissRefusedSales,
   inventoryRows,
@@ -101,7 +102,8 @@ const bestToday = computed(() => {
 // ── Coming up ───────────────────────────────────────────────────────────────
 const upcoming = computed(() =>
   visibleEvents.value
-    .filter((e) => e.dateStart && (e.dateEnd ?? e.dateStart)! >= today.value)
+    // A closed event is not coming up, whatever its dates say.
+    .filter((e) => e.status !== 'closed' && e.dateStart && (e.dateEnd ?? e.dateStart)! >= today.value)
     .sort((a, b) => a.dateStart!.localeCompare(b.dateStart!))
     .slice(0, 4),
 );
@@ -231,7 +233,8 @@ const LOW = 3;
 const lowStock = computed(() => {
   const ev = event.value;
   const rows = ev
-    ? availabilityFor(ev.id).filter((r) => r.claimed !== null || r.onHand > 0).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.available }))
+    ? // Claimed, or counted at all - an item recounted to 0 (sold out) is exactly what belongs here.
+      availabilityFor(ev.id).filter((r) => r.claimed !== null || countedAt(r.productId, r.variantId) > 0).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.available }))
     : inventoryRows().filter((r) => r.counted).map((r) => ({ key: r.productId + r.variantId, label: r.label, left: r.onHand }));
   return rows.filter((r) => r.left <= LOW).sort((a, b) => a.left - b.left).slice(0, 6);
 });

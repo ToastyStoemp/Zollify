@@ -105,7 +105,8 @@ function stockState(db: Database.Database, storeAccountId: string) {
     const since = count?.updatedAt ?? 0;
     let sold = 0;
     for (const tx of transactions) {
-      if (tx.revertedAt || tx.revertedBy || tx.timestamp <= since) continue;
+      // As on the devices (inventory.ts): a sale at the very moment of the count is after it.
+      if (tx.revertedAt || tx.revertedBy || tx.timestamp < since) continue;
       for (const i of tx.items) if (i.pid === productId && (i.vid ?? '') === variantId) sold += i.qty;
     }
     return Math.max(0, (count?.onHand ?? 0) - sold);

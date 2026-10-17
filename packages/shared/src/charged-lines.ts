@@ -92,6 +92,21 @@ export function paidLineTotals(
   return chargedLineTotals(tx);
 }
 
+/**
+ * Each line's amount for the books, in the books' currency, after every
+ * discount. The till spreads its discounts into the lines already; an older
+ * sale (a ZollTool import) can list them separately, its lines adding up to
+ * the total *before* them - those are spread across the lines here, so
+ * nothing books the discount as money taken.
+ */
+export function bookLineTotals(tx: Pick<Transaction, 'items' | 'total' | 'currency' | 'baseCurrency' | 'baseTotal' | 'discounts'>): number[] {
+  const book = tx.items.map((i) => toMinor(i.baseLineTotal ?? i.lineTotal));
+  if (!tx.discounts?.length) return book.map((m) => m / 100);
+  const converted = Boolean(tx.baseCurrency) && tx.baseCurrency !== tx.currency && (tx.baseTotal ?? 0) > 0;
+  const target = toMinor(converted ? tx.baseTotal! : tx.total);
+  return spreadTo(book, target).map((m) => m / 100);
+}
+
 /** Scales whole-cent amounts to sum to `target`, the remainder on the largest. */
 function spreadTo(minor: number[], target: number): number[] {
   const sum = minor.reduce((a, b) => a + b, 0);

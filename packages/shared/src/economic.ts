@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { RENT_REF_KIND, baseFactor, commissionFor, type Consignor } from './consignment';
 import { localDay } from './consignment-books';
 import type { Transaction } from './types';
+import { bookLineTotals } from './charged-lines';
 
 /**
  * A day of till sales as one e-conomic journal voucher (kassekladde).
@@ -114,8 +115,11 @@ export function dayJournal(
     if (!tx.tax) problems.add(`A sale at ${new Date(tx.timestamp).toISOString()} has no VAT recorded - book it by hand.`);
 
     let credited = 0;
+    // After every discount, so a sale whose discount is listed apart from its
+    // lines (an import) is not booked as more money taken than was paid.
+    const lineGross = bookLineTotals(tx).map(toMinor);
     tx.items.forEach((item, i) => {
-      const gross = toMinor(item.baseLineTotal ?? item.lineTotal);
+      const gross = lineGross[i]!;
       const rate = tx.tax && !tx.tax.exempt ? tx.tax.rates[i] : null;
       const vatCode = rate == null ? undefined : settings.vatCodes[String(rate)];
       if (rate != null && !vatCode) problems.add(`No e-conomic VAT code set for ${rate}%.`);

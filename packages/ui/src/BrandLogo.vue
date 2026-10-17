@@ -25,9 +25,9 @@ watch(
 
 <style scoped>
 .zfy-logo { display: block; max-width: min(16rem, 70vw); object-fit: contain; }
-.zfy-logo.small { max-height: 3rem; max-width: min(9rem, 50vw); }
-.zfy-logo.medium { max-height: 6rem; }
-.zfy-logo.large { max-height: 10rem; max-width: min(22rem, 80vw); }
+.zfy-logo.small { --zfy-logo-h: 3rem; max-height: 3rem; max-width: min(9rem, 50vw); }
+.zfy-logo.medium { --zfy-logo-h: 6rem; max-height: 6rem; }
+.zfy-logo.large { --zfy-logo-h: 10rem; max-height: 10rem; max-width: min(22rem, 80vw); }
 </style>
 
 <style>

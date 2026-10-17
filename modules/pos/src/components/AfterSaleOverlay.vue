@@ -60,11 +60,14 @@ onMounted(() => void loadLogoSize().then((s) => (logoSize.value = s)).catch(() =
 </template>
 
 <style scoped>
-.after-sale { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: 1rem; background: color-mix(in srgb, var(--zfy-ink, #1a2230) 45%, transparent); }
-.after-sale-card { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; padding: 2rem 2.5rem; border-radius: 18px; background: var(--zfy-surface, #fff); box-shadow: 0 20px 50px rgb(0 0 0 / .25); max-width: 100%; max-height: 100%; overflow-y: auto; }
+.after-sale { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; padding: max(.5rem, env(safe-area-inset-top)) .75rem max(.5rem, env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--zfy-ink, #1a2230) 45%, transparent); }
+/* Bounded by the screen: the panel inside shrinks its QR to fit rather than the card scrolling. */
+.after-sale-card { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: clamp(.5rem, 2.2vh, 1.25rem); padding: clamp(1rem, 3.5vh, 2rem) clamp(1.25rem, 5vw, 2.5rem); border-radius: 18px; background: var(--zfy-surface, #fff); box-shadow: 0 20px 50px rgb(0 0 0 / .25); max-width: 100%; max-height: calc(100vh - 1rem); max-height: calc(100dvh - 1rem - env(safe-area-inset-top) - env(safe-area-inset-bottom)); min-height: 0; overflow: hidden; }
+.after-sale-card > * { flex: none; }
+.after-sale-card > :deep(.zfy-after-sale) { flex: 0 1 auto; }
 .after-sale-card .primary { min-width: 10rem; }
 .after-sale-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
-.after-sale-actions button { min-height: 2.75rem; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.after-sale-actions button { min-height: clamp(2.25rem, 6vh, 2.75rem); display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
 .caption { margin: 0 0 -.5rem; font-size: .85rem; color: var(--zfy-muted, #5a6472); text-align: center; }
 .fallback-total { margin: 0; font-size: 2.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .warning { margin: -.5rem 0 0; font-size: .9rem; font-weight: 600; color: var(--zfy-danger, #c6512f); }

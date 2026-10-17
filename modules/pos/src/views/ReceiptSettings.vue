@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { EMPTY_RECEIPT_SOCIALS, checkPickedFile, receiptFooterLinks, type ReceiptSocials, type Transaction } from '@zollify/shared';
 import { CountryPicker } from '@zollify/ui';
-import { LOGO_SIZES, asLogoSize, sizePrintLogo, type LogoSize, LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, withProfileFallback, type ArtistInfo, type ReceiptLine } from '../receipt';
+import { LOGO_SIZES, asLogoSize, sizePrintLogo, type LogoSize, RECEIPT_FIELD_DEFAULTS, receiptFields, type ReceiptField, LOGO_MAX_PX, RECEIPT_KEYS, buildReceiptLines, processLogoFile, processLogoForScreen, withProfileFallback, type ArtistInfo, type ReceiptLine } from '../receipt';
 import { getSetting, setSetting } from '../lib/settings';
 import { sdk } from '../runtime';
 import { pushBranding, pushReceiptToggles, serverSocials } from '../lib/branding';
@@ -40,6 +40,8 @@ const footerText = ref('');
 const autoPrint = ref(false);
 const printQr = ref(true);
 const compactPrint = ref(true);
+/** Optional header fields: ticked ones print. The bare minimum is the default. */
+const fields = reactive<Record<ReceiptField, boolean>>({ ...RECEIPT_FIELD_DEFAULTS });
 /** A sample QR for the preview; same size and placement as a real one. */
 const sampleQrB64 = ref('');
 const logoB64 = ref('');
@@ -64,6 +66,7 @@ onMounted(async () => {
     autoPrint.value = (await getSetting<boolean>(RECEIPT_KEYS.autoPrint)) ?? false;
     printQr.value = (await getSetting<boolean>(RECEIPT_KEYS.printQr)) ?? true;
     compactPrint.value = (await getSetting<boolean>(RECEIPT_KEYS.compactPrint)) ?? true;
+    Object.assign(fields, receiptFields(await getSetting(RECEIPT_KEYS.fields)));
     sampleQrB64.value = (await receiptQrPng('SAMPLEsampleSAMPLE0000')) ?? '';
     logoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoScreenB64)) ?? '';
     printLogoB64.value = (await getSetting<string>(RECEIPT_KEYS.logoB64)) ?? '';
@@ -146,6 +149,7 @@ async function save(): Promise<void> {
     await setSetting(RECEIPT_KEYS.autoPrint, autoPrint.value);
     await setSetting(RECEIPT_KEYS.printQr, printQr.value);
     await setSetting(RECEIPT_KEYS.compactPrint, compactPrint.value);
+    await setSetting(RECEIPT_KEYS.fields, { ...fields });
     await shareBranding({ footer: footerText.value });
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
@@ -173,7 +177,7 @@ const sampleTx = computed<Transaction>(() => ({
   payments: [{ kind: 'card', amount: 47, provider: 'card', cardBrand: 'VISA', authCode: '004215', txRef: '304512780093' }],
 }));
 const previewLines = computed<ReceiptLine[]>(() =>
-  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: withProfileFallback({ ...artist }), logoB64: sizedLogoB64.value, footerText: footerText.value, qrB64: printQr.value ? sampleQrB64.value : undefined }, previewCountry.value || undefined),
+  buildReceiptLines(sampleTx.value, previewCountry.value ? `Convention · ${previewCountry.value}` : 'Sample Convention', { artist: withProfileFallback({ ...artist }), logoB64: sizedLogoB64.value, footerText: footerText.value, qrB64: printQr.value ? sampleQrB64.value : undefined, fields: { ...fields } }, previewCountry.value || undefined),
 );
 </script>
 
@@ -187,18 +191,20 @@ const previewLines = computed<ReceiptLine[]>(() =>
       <form class="form" @submit.prevent="save">
         <p class="hint">
           The name, address, contact and VAT number come from your Business profile (greyed out below).
-          Type in a field only when the receipt must differ.
+          Type in a field only when the receipt must differ. Untick "print" to leave an optional field off the receipt:
+          by default receipts carry only what the law asks for - name, address and VAT number - not your phone or email.
+          A sole trader in Germany must show their own name, so keep "Full name" on if the company name is a trade name.
           <router-link :to="{ name: 'settings', query: { panel: 'core.profile' } }">Edit Business profile</router-link>
         </p>
         <div class="grid">
           <label><span>Company / artist name</span><input v-model="artist.companyName" type="text" :placeholder="profile?.companyName" /></label>
-          <label><span>Full name</span><input v-model="artist.fullName" type="text" :placeholder="profile?.fullName" /></label>
+          <div class="field"><span class="head">Full name <label class="print"><input v-model="fields.fullName" type="checkbox" /> print</label></span><input v-model="artist.fullName" type="text" :placeholder="profile?.fullName" aria-label="Full name" /></div>
           <label><span>Street</span><input v-model="artist.street" type="text" autocomplete="street-address" :placeholder="profile?.street" /></label>
           <label><span>Postcode + city</span><input v-model="artist.postCodeCity" type="text" :placeholder="profile?.postCodeCity" /></label>
-          <label><span>Country</span><CountryPicker v-model="artist.countryOfOrigin" store="name" :placeholder="profile?.countryOfOrigin || undefined" /></label>
-          <label><span>Phone</span><input v-model="artist.phone" type="tel" :placeholder="profile?.phone" /></label>
-          <label><span>Email</span><input v-model="artist.email" type="email" :placeholder="profile?.email" /></label>
-          <label><span>Default VAT / UID number</span><input v-model="artist.vatNumber" type="text" :placeholder="profile?.vatId || 'CHE-123.456.789 MWST'" /></label>
+          <div class="field"><span class="head">Country <label class="print"><input v-model="fields.country" type="checkbox" /> print</label></span><CountryPicker v-model="artist.countryOfOrigin" store="name" :placeholder="profile?.countryOfOrigin || undefined" /></div>
+          <div class="field"><span class="head">Phone <label class="print"><input v-model="fields.phone" type="checkbox" /> print</label></span><input v-model="artist.phone" type="tel" :placeholder="profile?.phone" aria-label="Phone" /></div>
+          <div class="field"><span class="head">Email <label class="print"><input v-model="fields.email" type="checkbox" /> print</label></span><input v-model="artist.email" type="email" :placeholder="profile?.email" aria-label="Email" /></div>
+          <div class="field"><span class="head">Default VAT / UID number <label class="print"><input v-model="fields.vatNumber" type="checkbox" /> print</label></span><input v-model="artist.vatNumber" type="text" :placeholder="profile?.vatId || 'CHE-123.456.789 MWST'" aria-label="Default VAT / UID number" /></div>
         </div>
 
         <fieldset>
@@ -275,6 +281,9 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .7rem; width: 100%; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }
 label.inline { flex-direction: row; align-items: center; gap: .4rem; }
+.field { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; width: 100%; }
+.field .head { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
+label.print { flex-direction: row; align-items: center; gap: .25rem; width: auto; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 fieldset { width: 100%; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; }
 legend { font-size: .8rem; font-weight: 600; padding: 0 .3rem; }
 .links { margin: 0; padding-left: 1.1rem; font-size: .85rem; overflow-wrap: anywhere; }

@@ -44,6 +44,26 @@ export interface ArtistInfo {
   vatNumbers?: CountryVat[];
 }
 
+/** Header fields a business may leave off its receipts. Name, street and city always print. */
+export type ReceiptField = 'fullName' | 'country' | 'phone' | 'email' | 'vatNumber';
+
+/**
+ * What prints by default: the bare minimum the receipt rules ask for. The
+ * owner's name (a sole trader's legal name, Germany § 33 UStDV), the country
+ * (part of a full address when selling abroad) and the VAT number (Swiss UID,
+ * Danish CVR) stay on; phone and email are asked for nowhere and, for a sole
+ * trader, are often private - so they are off until switched on.
+ */
+export const RECEIPT_FIELD_DEFAULTS: Record<ReceiptField, boolean> = { fullName: true, country: true, phone: false, email: false, vatNumber: true };
+
+/** The stored choices over the defaults; anything but a boolean falls back. */
+export function receiptFields(stored: unknown): Record<ReceiptField, boolean> {
+  const src = (stored && typeof stored === 'object' ? stored : {}) as Record<string, unknown>;
+  const out = { ...RECEIPT_FIELD_DEFAULTS };
+  for (const k of Object.keys(out) as ReceiptField[]) if (typeof src[k] === 'boolean') out[k] = src[k] as boolean;
+  return out;
+}
+
 /**
  * The VAT number to print for a sale in `country`: the country-specific
  * registration if one is set, otherwise the default `vatNumber`.
@@ -79,6 +99,8 @@ export const RECEIPT_KEYS = {
   printerName: 'receipt.printerName',
   /** How large the logo prints and shows: 'small' | 'medium' | 'large' - see LOGO_PRINT_WIDTH. */
   logoSize: 'receipt.logoSize',
+  /** Which optional header fields print - see RECEIPT_FIELD_DEFAULTS. */
+  fields: 'receipt.fields',
   /** Carbon: print the text as images at a normal line height (default on) - see lib/receipt-raster.ts. */
   compactPrint: 'receipt.compactPrint',
 } as const;
@@ -168,6 +190,7 @@ export async function loadReceiptConfig(): Promise<{
   footerText: string;
   autoPrint: boolean;
   printQr: boolean;
+  fields: Record<ReceiptField, boolean>;
 }> {
   return {
     artist: (await getSetting<ArtistInfo>(RECEIPT_KEYS.artist)) ?? {},
@@ -176,13 +199,14 @@ export async function loadReceiptConfig(): Promise<{
     footerText: (await getSetting<string>(RECEIPT_KEYS.footerText)) ?? '',
     autoPrint: (await getSetting<boolean>(RECEIPT_KEYS.autoPrint)) ?? false,
     printQr: (await getSetting<boolean>(RECEIPT_KEYS.printQr)) ?? true,
+    fields: receiptFields(await getSetting(RECEIPT_KEYS.fields)),
   };
 }
 
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[] },
+  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[]; /** Optional header fields to print; absent ones follow RECEIPT_FIELD_DEFAULTS. */ fields?: Partial<Record<ReceiptField, boolean>> },
   eventCountry?: string,
 ): ReceiptLine[] {
   const { artist, logoB64, footerText } = config;
@@ -192,14 +216,16 @@ export function buildReceiptLines(
   // ── Header: logo + artist block ──
   if (logoB64) lines.push({ kind: 'image', imageB64: logoB64 });
   if (artist.companyName) lines.push({ ...center(artist.companyName), doubleHeight: true });
-  if (artist.fullName && artist.fullName !== artist.companyName) lines.push(center(artist.fullName));
+  const show = { ...RECEIPT_FIELD_DEFAULTS, ...config.fields };
+  // Without a company name the full name is the business name, and always prints.
+  if (artist.fullName && artist.fullName !== artist.companyName && (show.fullName || !artist.companyName)) lines.push(center(artist.fullName));
   if (artist.street) lines.push(center(artist.street));
-  const cityLine = [artist.postCodeCity, artist.countryOfOrigin].filter(Boolean).join(', ');
+  const cityLine = [artist.postCodeCity, show.country ? artist.countryOfOrigin : ''].filter(Boolean).join(', ');
   if (cityLine) lines.push(center(cityLine));
-  if (artist.phone) lines.push(center(artist.phone));
-  if (artist.email) lines.push(center(artist.email));
+  if (show.phone && artist.phone) lines.push(center(artist.phone));
+  if (show.email && artist.email) lines.push(center(artist.email));
   // An exempt sale prints its exemption instead (see the VAT block below).
-  const vat = tx.tax?.exempt ? '' : resolveVatNumber(artist, eventCountry);
+  const vat = tx.tax?.exempt || !show.vatNumber ? '' : resolveVatNumber(artist, eventCountry);
   if (vat) lines.push(center(`${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}`));
 
   lines.push({ kind: 'text', text: DIVIDER });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '@zollify/shared';
-import { buildReceiptLines } from '../receipt';
+import { RECEIPT_FIELD_DEFAULTS, buildReceiptLines, receiptFields } from '../receipt';
 
 /**
  * A sale charged abroad keeps its lines in the booth's book currency and only
@@ -162,5 +162,39 @@ describe('printed footer links', () => {
     expect(out.some((l) => l.includes('Webstore: shop.example.com'))).toBe(true);
     expect(out.every((l) => l.length <= 32)).toBe(true);
     expect(out.indexOf('Thanks!')).toBeLessThan(out.findIndex((l) => l.includes('Webstore')));
+  });
+});
+
+describe('optional header fields', () => {
+  const artist = { companyName: 'Phuong Ninjin', fullName: 'Phuong Nguyen', street: 'Buckower Damm 93', postCodeCity: '12349 Berlin', countryOfOrigin: 'Germany', phone: '+49 176 0000000', email: 'shop@example.com', vatNumber: 'DE357138076' };
+  const text = (fields?: Parameters<typeof buildReceiptLines>[2]['fields']) =>
+    buildReceiptLines(sale(), 'Herofest', { artist, logoB64: '', footerText: '', fields }).map((l) => l.text ?? '').join('\n');
+
+  it('prints the bare minimum by default: no phone or email', () => {
+    const t = text();
+    for (const s of ['Phuong Ninjin', 'Phuong Nguyen', 'Buckower Damm 93', '12349 Berlin, Germany', 'DE357138076']) expect(t).toContain(s);
+    expect(t).not.toContain('+49 176');
+    expect(t).not.toContain('shop@example.com');
+    expect(RECEIPT_FIELD_DEFAULTS).toMatchObject({ phone: false, email: false, vatNumber: true });
+  });
+
+  it('prints or hides each optional field as ticked', () => {
+    const t = text({ phone: true, email: true, country: false, vatNumber: false, fullName: false });
+    expect(t).toContain('+49 176');
+    expect(t).toContain('shop@example.com');
+    expect(t).toContain('12349 Berlin\n');
+    expect(t).not.toContain('Germany');
+    expect(t).not.toContain('DE357138076');
+    expect(t).not.toContain('Phuong Nguyen');
+  });
+
+  it('always prints the full name when it is the only name', () => {
+    const t = buildReceiptLines(sale(), 'Herofest', { artist: { ...artist, companyName: '' }, logoB64: '', footerText: '', fields: { fullName: false } }).map((l) => l.text ?? '').join('\n');
+    expect(t).toContain('Phuong Nguyen');
+  });
+
+  it('reads stored choices over the defaults, ignoring junk', () => {
+    expect(receiptFields({ phone: true, email: 'yes' })).toEqual({ ...RECEIPT_FIELD_DEFAULTS, phone: true });
+    expect(receiptFields(null)).toEqual(RECEIPT_FIELD_DEFAULTS);
   });
 });

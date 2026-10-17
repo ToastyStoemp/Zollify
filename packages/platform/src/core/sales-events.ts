@@ -47,7 +47,7 @@ export async function loadSalesEvents(): Promise<void> {
   const candidate = stored?.value as string | undefined;
   // Only restore an active event that still exists and is still visible -
   // otherwise a deleted event leaves the till pointed at nothing.
-  if (candidate && events.has(candidate)) {
+  if (candidate && visibleEvents.value.some((e) => e.id === candidate)) {
     activeId.value = candidate;
     return;
   }
@@ -73,9 +73,15 @@ export const visibleEvents = computed(() => {
   return all.filter((e) => set.has(e.id));
 });
 
-export const activeEvent = computed(() =>
-  activeId.value ? (events.get(activeId.value) ?? null) : null,
-);
+/**
+ * The till's event - null once this user may no longer see it (a helper whose
+ * access was taken away), so the till stops selling into an event the server
+ * would refuse the sales for.
+ */
+export const activeEvent = computed(() => {
+  const e = activeId.value ? events.get(activeId.value) : undefined;
+  return e && visibleEvents.value.some((v) => v.id === e.id) ? e : null;
+});
 
 export const activeEventId = computed(() => activeId.value);
 

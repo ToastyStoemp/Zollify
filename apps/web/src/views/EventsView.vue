@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -147,7 +147,10 @@ async function guard(work: () => Promise<void>): Promise<void> {
 }
 const activate = (e: SalesEvent) =>
   guard(async () => {
-    if (e.status !== 'active') await upsertSalesEvent({ ...e, status: 'active' });
+    if (e.status !== 'active') {
+      if (!canEdit.value) throw new Error('Only an owner or admin can open this event.');
+      await upsertSalesEvent({ ...e, status: 'active' });
+    }
     await setActiveEvent(e.id);
   });
 const sell = (e: SalesEvent) =>
@@ -161,10 +164,7 @@ async function close(e: SalesEvent): Promise<void> {
     : await shellConfirm('Closing stops sales for this event. Nothing is deleted - history and exports stay, and you can reopen it any time.', 'Close event?');
   if (!ok) return;
   await guard(async () => {
-    const end = e.dateEnd || e.dateStart;
-    const today = localIsoDay();
-    // An event that has not happened yet parks back to planned rather than finishing.
-    await upsertSalesEvent({ ...e, status: end && end > today ? 'planned' : 'closed' });
+    await upsertSalesEvent({ ...e, status: statusOnClose(e) });
     if (activeEventId.value === e.id) await setActiveEvent(null);
   });
 }
@@ -558,9 +558,10 @@ async function save(): Promise<void> {
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
           <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ fmtDayRange(e.dateEnd || e.dateStart) }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
-            <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
+            <!-- Opening and reopening change the event for everyone, which only owners and admins may do (the server keeps staff to sales). -->
+            <button v-if="e.status === 'planned' && canEdit" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
-            <button v-else-if="e.status === 'closed'" type="button" @click="sell(e)">Reopen</button>
+            <button v-else-if="e.status === 'closed' && canEdit" type="button" @click="sell(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <div v-if="hasMore(e)" class="more" @click.stop>
               <button type="button" :aria-expanded="menuFor === e.id" aria-haspopup="menu" aria-label="More actions" @click="menuFor = menuFor === e.id ? null : e.id"><Icon name="more" :size="16" /></button>

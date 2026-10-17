@@ -133,3 +133,20 @@ it('does not deliver broadcasts to an already-open socket after user removal', a
     socket.terminate();
   }
 });
+
+it('names the ops it refuses, so a device knows which sales never arrived', async () => {
+  // Its own helper: an earlier test removes the shared one.
+  app.zollify.db.prepare('INSERT INTO users (id, accountId, email, passwordHash, role, createdAt, allowedEventIds) VALUES (?, ?, ?, ?, ?, ?, ?)').run('audit-helper-2', 'audit-account', 'audit-helper-2@test.invalid', 'unused', 'member', 1, '["allowed"]');
+  const helper = app.jwt.sign({ sub: 'audit-helper-2', accountId: 'audit-account', role: 'member' });
+  const ok = op('tx.create', { id: 'helper-ok', eventId: 'allowed' });
+  const away = op('tx.create', { id: 'helper-away', eventId: 'private' });
+  const edit = op('event.upsert', { id: 'allowed', name: 'Renamed', updatedAt: 9 });
+  const raw = await push(helper, [ok, away, edit]);
+  const res = raw.json();
+  if (raw.statusCode !== 200) throw new Error(raw.body);
+  expect(res.accepted).toBe(1);
+  expect([...res.refused].sort()).toEqual([edit.opId, away.opId].sort());
+  expect(res.duplicates).toBe(0);
+  // Nothing refused: no field at all.
+  expect((await push(helper, [op('tx.create', { id: 'helper-ok-2', eventId: 'allowed' })])).json().refused).toBeUndefined();
+});

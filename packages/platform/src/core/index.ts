@@ -51,6 +51,10 @@ export {
   lastSyncAt,
   lastSyncError,
   syncProgress,
+  refusedSales,
+  loadRefusedSales,
+  dismissRefusedSales,
+  type RefusedSale,
   type SyncState,
   type SyncResult,
 } from './sync';

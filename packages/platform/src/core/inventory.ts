@@ -429,9 +429,8 @@ export function availabilityFor(eventId: string): Availability[] {
       // What it still had to sell: the claim less what was carried on to other events.
       const reservingClaim = reserving ? ownClaim(eventId, product.id, entry.id) : null;
       const soldHere = soldAt(eventId, product.id, entry.id);
-      const totalClaimed = claimedTotal(product.id, entry.id);
-
-      const reservedElsewhere = totalClaimed - (reserving ? (claimed ?? 0) : 0);
+      // What other running events still hold - their claims less what they sold or handed on.
+      const reservedElsewhere = heldTotal(product.id, entry.id) - (reserving ? heldFor(eventId, product.id, entry.id) : 0);
       const available = reservingClaim !== null ? reservingClaim - soldHere : freeFor(product.id, entry.id);
 
       rows.push({

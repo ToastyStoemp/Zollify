@@ -131,6 +131,7 @@ export {
   claimedTotal,
   heldTotal,
   inStockFor,
+  countedAt,
   eventIsOver,
   freeFor,
   heldFor,

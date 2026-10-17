@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -103,14 +103,14 @@ const finished = computed(() =>
   visibleEvents.value.filter((e) => !isStore(e) && e.status === 'closed').sort((a, b) => dateKey(b).localeCompare(dateKey(a)) || b.updatedAt - a.updatedAt),
 );
 
-/** Sales and revenue per event, in the event's base currency. */
+/** Sales and revenue per event, in the event's base currency at each sale's day rate (booked-base.ts). */
 const statsById = computed(() => {
   const map = new Map<string, { count: number; revenue: number; currency: string }>();
   for (const tx of recentTransactions.value) {
     if (tx.revertedAt) continue;
     const cur = map.get(tx.eventId) ?? { count: 0, revenue: 0, currency: tx.baseCurrency ?? tx.currency };
     cur.count++;
-    cur.revenue += tx.baseTotal ?? tx.total;
+    cur.revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
     map.set(tx.eventId, cur);
   }
   return map;

@@ -33,7 +33,10 @@ export interface CustomerSummary extends CustomerContact {
   createdAt: number;
   commissionCount: number;
   openCount: number;
+  /** Across currencies - use `owedBy` to show it. */
   owed: number;
+  /** What is still to pay, per currency (absent from an older server). */
+  owedBy?: { currency: string; amount: number }[];
   /** When the details go; null while a commission is still open. */
   erasesAt: number | null;
 }

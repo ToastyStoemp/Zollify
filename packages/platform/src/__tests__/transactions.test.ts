@@ -150,10 +150,13 @@ describe('recording sales', () => {
         baseCurrency: 'CHF',
         baseTotal: 65,
         exchangeRate: 10.77,
+        marketRate: { rate: 11.02, at: 5 },
       }),
     );
 
     const stored = tx.getTransaction('abroad');
+    // And the day's market rate, so what the sale was worth that day can be told.
+    expect(stored?.marketRate).toEqual({ rate: 11.02, at: 5 });
     expect(stored?.currency).toBe('SEK');
     expect(stored?.total).toBe(700);
     expect(stored?.baseCurrency).toBe('CHF');

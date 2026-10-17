@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { base64BodyLimit, maxBytesFor, type SalesEvent, type Transaction } from '@zollify/shared';
+import { base64BodyLimit, maxBytesFor, toBaseFactor, type SalesEvent, type Transaction } from '@zollify/shared';
 import {
   checkQuota,
   decodeUpload,
@@ -219,7 +219,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const out: Record<string, number> = {};
         for (const t of txns) {
           if (t.revertedBy || t.revertedAt) continue;
-          const base = t.baseTotal != null ? Number(t.baseTotal) : (Number(t.total) || 0) / (t.exchangeRate || 1);
+          // At the sale's day rate when the till recorded one; else as booked.
+          const base = t.marketRate || t.baseTotal == null ? (Number(t.total) || 0) * toBaseFactor(t, t.baseCurrency ?? t.currency) : Number(t.baseTotal);
           out[t.eventId] = (out[t.eventId] ?? 0) + base;
         }
         return out;
@@ -345,7 +346,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
           const legs = t.payments.filter((p) => p.kind === 'cash');
           if (!legs.length) continue;
           const amount = legs.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-          cash += amount / (t.exchangeRate || 1);
+          cash += amount * (t.marketRate ? toBaseFactor(t, t.baseCurrency ?? t.currency) : 1 / (t.exchangeRate || 1));
           currency = t.baseCurrency ?? t.currency ?? currency;
           if (t.currency) taken[t.currency] = (taken[t.currency] ?? 0) + amount;
           count++;

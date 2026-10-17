@@ -94,10 +94,35 @@ export async function setTestMode(on: boolean): Promise<void> {
   await sdk().config.set(TEST_MODE_KEY, on);
 }
 export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
+/**
+ * The day's market rate for a converted sale (base -> charged), recorded with
+ * each sale so its base value is what the money was worth that day. Fetched
+ * with the card rate; a rate older than MARKET_RATE_MAX_AGE is not recorded -
+ * the sale is then valued at its date's rate later.
+ */
+export const marketFx = reactive({ rate: null as number | null, at: 0, pair: '' });
+const MARKET_RATE_MAX_AGE = 3 * 86400000;
+export async function loadMarketFx(): Promise<void> {
+  const pair = `${cart.baseCurrency}:${cart.currency}`;
+  // A rate for another currency pair must never be recorded with this one's sales.
+  if (marketFx.pair !== pair) Object.assign(marketFx, { rate: null, at: 0, pair });
+  if (!isConverting.value) return;
+  try {
+    const latest = await sdk().fx?.latest(cart.baseCurrency, cart.currency);
+    if (latest && marketFx.pair === pair) Object.assign(marketFx, latest);
+  } catch {
+    /* none - the sale is valued at its date's rate later */
+  }
+}
+const marketRateNow = (): { rate: number; at: number } | null =>
+  marketFx.pair === `${cart.baseCurrency}:${cart.currency}` && marketFx.rate && Date.now() - marketFx.at < MARKET_RATE_MAX_AGE
+    ? { rate: marketFx.rate, at: marketFx.at }
+    : null;
 export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
 
 /** Reads the setting and, when it applies, today's rate (or the last one this device saw, offline). */
 export async function loadCardFx(): Promise<void> {
+  void loadMarketFx();
   cardFx.enabled = (await sdk().config.get<boolean>(CARD_IN_BASE_KEY)) ?? false;
   if (!cardInBase.value) return;
   try {
@@ -454,6 +479,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseCurrency: cart.baseCurrency,
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
+      ...(isConverting.value && marketRateNow() ? { marketRate: marketRateNow()! } : {}),
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),

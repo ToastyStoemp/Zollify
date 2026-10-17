@@ -378,6 +378,14 @@ export interface Transaction {
   baseTotal?: number;
   /** Exchange rate snapshot used at checkout (base -> currency). */
   exchangeRate?: number;
+  /**
+   * The day's market rate when the sale was made (base -> currency, like
+   * exchangeRate), so the base-currency value is what the money was worth
+   * that day - see booked-base.ts. `at` is when the till last fetched it.
+   * Absent on unconverted sales, older ones, and when the till had no recent
+   * rate.
+   */
+  marketRate?: { rate: number; at: number };
   /** Op id of the revert that cancelled this transaction, if any. */
   revertedBy?: string;
   revertedAt?: number;

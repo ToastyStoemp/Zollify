@@ -643,7 +643,11 @@ export interface Sdk {
    * last rate this device fetched when offline (`at` says when that was);
    * null when no rate was ever fetched. Never an event's own pricing rate.
    */
-  fx: { latest(from: string, to: string): Promise<{ rate: number; at: number } | null> };
+  fx: {
+    latest(from: string, to: string): Promise<{ rate: number; at: number } | null>;
+    /** Market rates for past days (ISO dates): 1 `from` = rate `to`. A day without a rate is left out. Absent on older shells. */
+    on?(from: string, to: string, dates: string[]): Promise<Record<string, number>>;
+  };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

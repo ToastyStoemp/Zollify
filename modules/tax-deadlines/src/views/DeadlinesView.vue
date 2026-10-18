@@ -5,13 +5,14 @@ import { ACTION_LABELS, daysBetween, dueIn, leadLabel, localIsoDay, normalizeLea
 import { Icon } from '@zollify/ui';
 import { doneSet, loadState, offline, setDone, state } from '../api';
 import { groupDeadlines } from '../list';
-import DeadlinesSetup from './DeadlinesSetup.vue';
 
 /**
  * Every filing and payment deadline ahead, worked out from the tax setup.
- * Ticking one off stops its reminders; missed ones stay on top until they are.
+ * Ticking one off as filed stops its reminders; missed ones stay on top until
+ * they are. The setup itself lives in one place, Settings → Tax deadlines,
+ * and this page only links there.
  */
-const tab = ref<'upcoming' | 'setup'>('upcoming');
+const SETUP = { name: 'settings', query: { panel: 'tax-deadlines.setup' } };
 const error = ref('');
 const busy = ref<string | null>(null);
 const showDone = ref(false);
@@ -30,8 +31,7 @@ function smeReportLink(d: TaxDeadline): { name: string; query: Record<string, st
 
 onMounted(async () => {
   try {
-    const s = await loadState(true);
-    if (!s.settings.configured) tab.value = 'setup';
+    await loadState(true);
   } catch {
     error.value = 'Could not load your deadlines.';
   }
@@ -79,27 +79,27 @@ const sections = computed(() =>
         <h1>Tax deadlines</h1>
         <p class="hint">When to file and pay, worked out from your tax setup. {{ settings?.configured ? reminderLine : '' }}</p>
       </div>
-      <div class="seg">
-        <button type="button" :class="{ on: tab === 'upcoming' }" :disabled="!settings?.configured" @click="tab = 'upcoming'">Upcoming</button>
-        <button type="button" :class="{ on: tab === 'setup' }" @click="tab = 'setup'">Setup</button>
-      </div>
+      <router-link v-if="settings?.configured" :to="SETUP" class="secondary setup"><Icon name="settings" :size="14" /> Change setup</router-link>
     </header>
 
     <p v-if="offline" class="note"><Icon name="alert-triangle" :size="14" /> Offline: showing what this device last saw. Ticking off needs a connection.</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <template v-if="tab === 'setup'">
-      <p v-if="settings && !settings.configured" class="intro">Tell Zollify how your business is set up for tax, and pick how early you want to be reminded. You can change this any time.</p>
-      <DeadlinesSetup @saved="tab = 'upcoming'" />
-    </template>
+    <article v-if="settings && !settings.configured" class="card">
+      <p class="intro">Tell Zollify how your business is set up for tax, and pick how early you want to be reminded. It takes a minute and you can change it any time.</p>
+      <router-link :to="SETUP" class="primary setup">Set up tax deadlines</router-link>
+    </article>
 
     <template v-else-if="groups">
-      <p v-if="!sections.length" class="hint">Nothing open in the next year. Add your own deadlines under Setup.</p>
+      <p v-if="!sections.length" class="hint">Nothing open in the next year. Your own deadlines can be added under <router-link :to="SETUP">Change setup</router-link>.</p>
       <article v-for="s in sections" :key="s.key" :class="['card', s.key]">
         <h2>{{ s.title }}</h2>
         <ul class="list">
           <li v-for="d in s.items" :key="d.id">
-            <input type="checkbox" :disabled="busy === d.id || offline" :aria-label="`Mark ${d.title} done`" @change="tick(d, true)" />
+            <label class="tick" :title="`Tick off ${d.title} as filed`">
+              <input type="checkbox" :disabled="busy === d.id || offline" :aria-label="`Mark ${d.title} filed`" @change="tick(d, true)" />
+              <span>Filed</span>
+            </label>
             <button type="button" class="row" :aria-expanded="open === d.id" @click="open = open === d.id ? null : d.id">
               <span class="when">
                 <strong>{{ fmtDay(d.due) }}</strong>
@@ -122,11 +122,14 @@ const sections = computed(() =>
 
       <article v-if="groups.done.length" class="card">
         <button type="button" class="quiet toggle" @click="showDone = !showDone">
-          Done ({{ groups.done.length }}) <Icon :name="showDone ? 'chevron-up' : 'chevron-down'" :size="14" />
+          Show done ({{ groups.done.length }}) <Icon :name="showDone ? 'chevron-up' : 'chevron-down'" :size="14" />
         </button>
         <ul v-if="showDone" class="list done">
           <li v-for="d in groups.done" :key="d.id">
-            <input type="checkbox" checked :disabled="busy === d.id || offline" :aria-label="`Mark ${d.title} not done`" @change="tick(d, false)" />
+            <label class="tick" :title="`Untick ${d.title}: not filed after all`">
+              <input type="checkbox" checked :disabled="busy === d.id || offline" :aria-label="`Mark ${d.title} not filed`" @change="tick(d, false)" />
+              <span>Filed</span>
+            </label>
             <span class="row static">
               <span class="when"><strong>{{ fmtDay(d.due) }}</strong></span>
               <span class="what"><span class="title">{{ d.title }}</span></span>
@@ -149,6 +152,14 @@ h2 { margin: 0; font-size: .95rem; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .82rem; }
 .hint.small { font-size: .75rem; }
 .intro { margin: 0; font-size: .9rem; }
+.setup { display: inline-flex; align-items: center; gap: .35rem; align-self: flex-start; text-decoration: none; border-radius: 8px; padding: .5rem .9rem; font-weight: 600; font-size: .875rem; min-height: 2.5rem; }
+.setup.secondary { border: 1px solid var(--zfy-line, #d6dde4); color: inherit; }
+.setup.secondary:hover { border-color: var(--zfy-accent, #0e7c66); }
+.setup.primary { background: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); }
+.setup.primary:hover { background: var(--zfy-accent-ink, #0a5a4a); }
+.tick { display: inline-flex; flex-direction: column; align-items: center; gap: .1rem; font-size: .68rem; color: var(--zfy-muted, #5a6472); cursor: pointer; min-width: 2.4rem; }
+.tick input { margin: 0; }
+.done .tick { color: var(--zfy-accent-ink, #0a5a4a); }
 .note { margin: 0; display: flex; gap: .4rem; align-items: center; font-size: .82rem; color: var(--zfy-warning-ink, #8a5a1e); }
 .error { margin: 0; color: var(--zfy-danger, #c6512f); }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .5rem; }

@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { COUNTRY_BY_CODE, fmtRate } from '@zollify/shared';
+import { COUNTRY_BY_CODE, countryCodeOf, fmtRate } from '@zollify/shared';
 import {
   buildSmeReport,
   previousQuarter,
   quarterLabel,
   quarterOf,
   reportCsv,
+  schemeApplies,
   type CountryRow,
   type Quarter,
   type QuarterRef,
@@ -20,7 +21,8 @@ import { sdk } from '../runtime';
  */
 
 const now = quarterOf(Date.now());
-// The quarter to report is usually the one that just ended - unless a link (a tax deadline) names one.
+// The quarter to report is usually the one that just ended: its report is the one due next
+// (a month after the quarter closes) - unless a link (a tax deadline) names one.
 const route = useRoute();
 function fromQuery(): QuarterRef | null {
   const y = Number(route.query.year);
@@ -28,6 +30,17 @@ function fromQuery(): QuarterRef | null {
   return Number.isInteger(y) && y > 2000 && [1, 2, 3, 4].includes(q) ? { year: y, quarter: q as Quarter } : null;
 }
 const selected = ref<QuarterRef>(fromQuery() ?? previousQuarter(now));
+/** Shown while the default (last quarter) is up, so an all-zero page is not taken for a broken one. */
+const isDueNext = computed(() => selected.value.year === previousQuarter(now).year && selected.value.quarter === previousQuarter(now).quarter);
+
+/**
+ * Whether this business has anything to file at all: only once it is on the
+ * cross-border scheme (EX number, or exempt in another EU country). A
+ * Kleinunternehmer at home alone sees the page but owes no report.
+ */
+const profile = computed(() => sdk().account()?.profile);
+const home = computed(() => countryCodeOf(profile.value?.artist?.countryOfOrigin));
+const applies = computed(() => schemeApplies(profile.value, home.value));
 watch(() => [route.query.year, route.query.quarter], () => {
   const q = fromQuery();
   if (q) selected.value = q;
@@ -78,7 +91,9 @@ const STATUS: Record<CountryRow['status'], string> = { exempt: 'Exempt', charged
 
 async function exportCsv(): Promise<void> {
   const q = selected.value;
-  await sdk().ui.saveFile(`sme-report-${q.year}-Q${q.quarter}.csv`, reportCsv(report.value, name), 'text/csv');
+  const a = sdk().account();
+  const header = { businessName: a?.profile.artist.companyName || a?.profile.artist.fullName || a?.accountName, exNumber: a?.profile.vat?.exNumber };
+  await sdk().ui.saveFile(`sme-report-${q.year}-Q${q.quarter}.csv`, reportCsv(report.value, name, header), 'text/csv');
 }
 </script>
 
@@ -91,6 +106,10 @@ async function exportCsv(): Promise<void> {
           Sales per country for {{ quarterLabel(selected) }}. Exempt sales count in full; where VAT was charged, the
           amount without VAT. Due by {{ dueBy }}, filed in your home country.
         </p>
+        <p v-if="!applies" class="warn" role="note">
+          You have no EX number, so there is nothing to file - this report matters once you are exempt in another EU country.
+        </p>
+        <p v-if="isDueNext" class="hint">Showing {{ quarterLabel(selected) }}, the quarter due next. Pick another quarter on the right.</p>
       </div>
       <div class="pick">
         <label>

@@ -6,6 +6,7 @@ import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
 import { localIsoDay } from '@zollify/shared';
+import { vatByEvent } from '../ledger-vat';
 
 /**
  * Ledger: per-event profit and loss. Revenue comes from the till; costs -
@@ -14,10 +15,26 @@ import { localIsoDay } from '@zollify/shared';
  * event.
  */
 
-const rows = ref<PnlRow[]>([]);
+const serverRows = ref<PnlRow[]>([]);
+/**
+ * Revenue without the VAT the till collected: VAT is the tax office's money,
+ * so a Copenhagen event at 25% must not look more profitable than it was.
+ * The server sends what customers paid; the VAT comes off here from the
+ * sales core holds, so rows carry `vat` and a net revenue and margin.
+ */
+const rows = computed<(PnlRow & { vat: number })[]>(() => {
+  const vat = vatByEvent(sdk().data.transactions.recent());
+  return serverRows.value.map((r) => {
+    const v = vat[r.eventId] ?? 0;
+    const revenue = Math.round((r.revenue - v) * 100) / 100;
+    return { ...r, vat: v, revenue, margin: Math.round((revenue - r.expenses) * 100) / 100 };
+  });
+});
+/** Only a configured Lexware connection makes "not yet in Lexware" mean anything; without it the count is noise. */
+const lexware = computed(() => Boolean(status.value?.lexware.configured));
 const categories = ref<{ id: string; label: string }[]>([]);
 const expenses = ref<Expense[]>([]);
-const current = ref<PnlRow | null>(null);
+const current = ref<(PnlRow & { vat: number }) | null>(null);
 const error = ref<string | null>(null);
 const busy = ref<string | null>(null);
 const scan = ref<InvoiceScan | null>(null);
@@ -38,6 +55,7 @@ const totals = computed(() => {
     currency: currencies.length === 1 ? currencies[0]! : 'mixed',
     expensesMixed: rows.value.some(rowMixed),
     revenue: rows.value.reduce((s, r) => s + r.revenue, 0),
+    vat: rows.value.reduce((s, r) => s + r.vat, 0),
     expenses: rows.value.reduce((s, r) => s + r.expenses, 0),
     margin: rows.value.reduce((s, r) => s + r.margin, 0),
   };
@@ -52,13 +70,13 @@ const expensesMixed = computed(() => expenses.value.some((e) => e.currency && e.
 async function loadPnl(): Promise<void> {
   error.value = null;
   try {
-    rows.value = (await api.pnl()).rows;
+    serverRows.value = (await api.pnl()).rows;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load the ledger.';
   }
 }
 
-async function openEvent(row: PnlRow): Promise<void> {
+async function openEvent(row: PnlRow & { vat: number }): Promise<void> {
   current.value = row;
   form.value = { ...blank(), eventId: row.eventId, currency: row.currency || 'EUR' };
   editingId.value = null;
@@ -192,15 +210,16 @@ async function openInvoice(e: Expense): Promise<void> {
     <!-- ── P&L overview ───────────────────────────────────────────────────── -->
     <template v-if="!current">
       <ul class="totals">
-        <li><span class="label">Revenue</span><strong class="good">{{ fmt(totals.revenue, totals.currency) }}</strong></li>
+        <li><span class="label">Revenue <small>excl. VAT</small></span><strong class="good">{{ fmt(totals.revenue, totals.currency) }}</strong></li>
         <li><span class="label">Expenses</span><strong class="bad">{{ totals.expensesMixed ? 'mixed currencies' : '−' + fmt(totals.expenses, totals.currency) }}</strong></li>
         <li><span class="label">Margin</span><strong :class="totals.margin >= 0 ? 'good' : 'bad'">{{ totals.expensesMixed ? '-' : fmt(totals.margin, totals.currency) }}</strong></li>
       </ul>
+      <p v-if="totals.vat" class="hint">Revenue is what customers paid without the VAT charged ({{ fmt(totals.vat, totals.currency) }} in all), since that goes to the tax office. Exempt sales count in full.</p>
       <p v-if="!rows.length" class="empty">No events yet.</p>
       <div v-else class="table-scroll">
         <table>
           <thead>
-            <tr><th>Event</th><th>When</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Margin</th><th>Costs</th></tr>
+            <tr><th>Event</th><th>When</th><th class="num">Revenue <small>excl. VAT</small></th><th class="num">Expenses</th><th class="num">Margin</th><th>Items</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.eventId" class="row" role="button" tabindex="0" @click="openEvent(r)" @keydown.enter="openEvent(r)" @keydown.space.prevent="openEvent(r)">
@@ -209,7 +228,7 @@ async function openInvoice(e: Expense): Promise<void> {
               <td class="num good">{{ fmt(r.revenue, r.currency) }}</td>
               <td class="num bad">{{ rowMixed(r) ? 'mixed currencies' : r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
               <td :class="['num', r.margin >= 0 ? 'good' : 'bad']">{{ rowMixed(r) ? '-' : fmt(r.margin, r.currency) }}</td>
-              <td class="sub">{{ r.expenseCount }} item{{ r.expenseCount === 1 ? '' : 's' }}{{ r.unbooked ? ` · ${r.unbooked} unbooked` : '' }}{{ rowMixed(r) ? ' · mixed currencies' : '' }}</td>
+              <td class="sub">{{ r.expenseCount }} expense{{ r.expenseCount === 1 ? '' : 's' }}{{ lexware && r.unbooked ? ` · ${r.unbooked} not yet in Lexware` : '' }}{{ rowMixed(r) ? ' · mixed currencies' : '' }}</td>
             </tr>
           </tbody>
         </table>
@@ -219,10 +238,11 @@ async function openInvoice(e: Expense): Promise<void> {
     <!-- ── One event ──────────────────────────────────────────────────────── -->
     <template v-else>
       <ul class="totals">
-        <li><span class="label">Revenue</span><strong class="good">{{ fmt(current.revenue, current.currency) }}</strong></li>
+        <li><span class="label">Revenue <small>excl. VAT</small></span><strong class="good">{{ fmt(current.revenue, current.currency) }}</strong></li>
         <li><span class="label">Expenses</span><strong class="bad">{{ expensesMixed ? 'mixed currencies' : '−' + fmt(expenseTotal, current.currency) }}</strong></li>
         <li><span class="label">Margin</span><strong :class="expensesMixed ? '' : (current.revenue - expenseTotal >= 0 ? 'good' : 'bad')">{{ expensesMixed ? '—' : fmt(current.revenue - expenseTotal, current.currency) }}</strong></li>
       </ul>
+      <p v-if="current.vat" class="hint">{{ fmt(current.vat, current.currency) }} VAT was charged on top and goes to the tax office, so it is not counted as revenue.</p>
 
       <form class="card" @submit.prevent="save">
         <div class="formhead">
@@ -290,6 +310,7 @@ h2 { margin: 0; font-size: 1.05rem; }
 .totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .6rem; flex-wrap: wrap; }
 .totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .5rem .8rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 9rem; }
 .totals .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted, #5a6472); }
+.totals .label small, th small { font-size: .65rem; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .totals strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
 .good { color: var(--zfy-accent-ink, #0a5a4a); }
 .bad { color: var(--zfy-danger, #c6512f); }

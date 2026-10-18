@@ -52,6 +52,17 @@ function migrate(db: Database.Database): void {
   `);
 }
 
+/**
+ * The day the account was created, in the account's reminder time zone.
+ * Deadlines from before it were never this account's to file: a business
+ * that signs up in October must not open on "missed" returns from July.
+ */
+export function accountSinceDay(db: Database.Database, accountId: string, timeZone: string): string | undefined {
+  const row = db.prepare('SELECT createdAt FROM accounts WHERE id = ?').get(accountId) as { createdAt: number } | undefined;
+  return row?.createdAt ? dayInZone(row.createdAt, timeZone) : undefined;
+}
+
+/** The account's settings, with `since` filled in from the account itself (it is derived, never stored). */
 export function readSettings(db: Database.Database, accountId: string): TaxDeadlineSettings {
   const row = db.prepare('SELECT doc FROM tax_deadline_settings WHERE accountId = ?').get(accountId) as { doc: string } | undefined;
   let raw: unknown = {};
@@ -61,7 +72,9 @@ export function readSettings(db: Database.Database, accountId: string): TaxDeadl
     raw = {};
   }
   const parsed = TaxDeadlineSettingsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : TaxDeadlineSettingsSchema.parse({});
+  const settings = parsed.success ? parsed.data : TaxDeadlineSettingsSchema.parse({});
+  const since = accountSinceDay(db, accountId, settings.reminders.timeZone);
+  return since ? { ...settings, since } : settings;
 }
 
 function doneIds(db: Database.Database, accountId: string): Set<string> {
@@ -185,7 +198,9 @@ function routes(ctx: ModuleContext): FastifyPluginAsync {
       if (!isTimeZone(body.data.reminders.timeZone)) return reply.code(400).send({ error: 'invalid_request', message: 'Unknown time zone.' });
       const ids = body.data.custom.map((c) => c.id);
       if (new Set(ids).size !== ids.length) return reply.code(400).send({ error: 'invalid_request', message: 'Two custom deadlines share an id.' });
-      const doc: TaxDeadlineSettings = { ...body.data, reminders: { ...body.data.reminders, leadDays: normalizeLeadDays(body.data.reminders.leadDays) }, configured: true };
+      // `since` is the account's creation day, read fresh each time, so a client cannot send one.
+      const { since: _since, ...sent } = body.data;
+      const doc: TaxDeadlineSettings = { ...sent, reminders: { ...sent.reminders, leadDays: normalizeLeadDays(sent.reminders.leadDays) }, configured: true };
       db.prepare('INSERT INTO tax_deadline_settings (accountId, doc, updatedAt) VALUES (?, ?, ?) ON CONFLICT(accountId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt').run(who.accountId, JSON.stringify(doc), Date.now());
       return state(who.accountId);
     });

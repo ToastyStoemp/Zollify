@@ -58,7 +58,7 @@ export default defineModule({
 
     sdk.settings.panel({
       id: 'payments',
-      label: 'Payments',
+      label: 'Card terminal',
       component: () => import('./views/PaymentSettings.vue'),
       // Which terminal the till talks to is an account-level decision, not
       // something a helper working one event should be changing mid-shift.

@@ -277,7 +277,7 @@ function commissionLine(l: ArtistConsignment): string {
 
         <details v-if="l.items.length" open>
           <summary>Your items there ({{ l.items.length }})</summary>
-          <table>
+          <div class="table-scroll"><table>
             <thead><tr><th>Item</th><th class="num">Price</th><th class="num">Sold</th><th class="num">Left</th></tr></thead>
             <tbody>
               <tr v-for="i in l.items" :key="`${i.productId}:${i.variantId}`">
@@ -287,12 +287,12 @@ function commissionLine(l: ArtistConsignment): string {
                 <td class="num" :title="i.remaining == null ? 'The store has not counted this item' : ''">{{ i.remaining ?? '-' }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </details>
 
         <details v-if="l.statement.byStore.length">
           <summary>Per store</summary>
-          <table>
+          <div class="table-scroll"><table>
             <tbody>
               <tr v-for="r in l.statement.byStore" :key="`${r.storeId}|${r.currency}`">
                 <td>{{ venueName(l, r.storeId) }}</td>
@@ -300,12 +300,12 @@ function commissionLine(l: ArtistConsignment): string {
                 <td class="num">{{ fmtPrice(r.artistShare, r.currency) }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </details>
 
         <details v-if="l.lines.length">
           <summary>Sales ({{ l.lines.length }})</summary>
-          <table>
+          <div class="table-scroll"><table>
             <tbody>
               <tr v-for="s in l.lines" :key="`${s.txId}:${s.productId}:${s.variantId}`">
                 <td>{{ fmtDate(s.at) }}</td>
@@ -314,7 +314,7 @@ function commissionLine(l: ArtistConsignment): string {
                 <td class="num">{{ fmtPrice(s.artistShare, s.currency) }}<small v-if="est(s.artistShare, s.currency, dayOf(s.at))" class="est">{{ est(s.artistShare, s.currency, dayOf(s.at)) }}</small></td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </details>
 
         <details v-if="(l.fees ?? []).length" :open="openFees(l) > 0">
@@ -332,7 +332,7 @@ function commissionLine(l: ArtistConsignment): string {
 
         <details v-if="l.payouts.length">
           <summary>Payouts ({{ l.payouts.length }})</summary>
-          <table>
+          <div class="table-scroll"><table>
             <tbody>
               <tr v-for="p in l.payouts" :key="p.id">
                 <td>{{ p.date }}</td>
@@ -340,7 +340,7 @@ function commissionLine(l: ArtistConsignment): string {
                 <td class="hint">{{ p.storeId ? venueName(l, p.storeId) : 'All stores' }}<template v-if="p.note"> · {{ p.note }}</template></td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </details>
       </template>
     </article>

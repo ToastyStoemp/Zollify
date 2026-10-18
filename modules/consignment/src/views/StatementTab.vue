@@ -199,7 +199,7 @@ async function exportCsv(): Promise<void> {
         <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Owed' : 'They owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
       </div>
 
-      <table v-if="s.byStore.length">
+      <div class="table-scroll"><table v-if="s.byStore.length">
         <thead><tr><th>Sold at</th><th class="num">Units</th><th class="num">Sales<small>incl. VAT</small></th><th class="num">Commission<small>incl. VAT</small></th><th class="num">Artist's share<small>incl. VAT</small></th></tr></thead>
         <tbody>
           <tr v-for="r in s.byStore" :key="`${r.storeId}|${r.currency}`">
@@ -210,12 +210,12 @@ async function exportCsv(): Promise<void> {
             <td class="num">{{ fmtPrice(r.artistShare, r.currency) }}</td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
 
       <template v-for="t in s.totals" :key="`vat|${t.currency}`">
         <div v-if="vatOf(c, t.currency).length" class="vat">
           <p class="hint"><strong>{{ c.name }} is VAT-registered</strong><template v-if="c.vatId"> ({{ c.vatId }})</template>: their share split into net and the VAT each item sold at, for the self-billing invoice. Commission is the store's VAT-inclusive fee.</p>
-          <table>
+          <div class="table-scroll"><table>
             <thead><tr><th>Rate</th><th class="num">Net</th><th class="num">VAT</th><th class="num">Share incl. VAT</th></tr></thead>
             <tbody>
               <tr v-for="r in vatOf(c, t.currency)" :key="String(r.rate)">
@@ -225,7 +225,7 @@ async function exportCsv(): Promise<void> {
                 <td class="num">{{ fmtPrice(r.gross, t.currency) }}</td>
               </tr>
             </tbody>
-          </table>
+          </table></div>
         </div>
       </template>
 
@@ -256,7 +256,7 @@ async function exportCsv(): Promise<void> {
 
       <details v-if="linesOf(c.id).length" :open="open[c.id]" @toggle="open[c.id] = ($event.target as HTMLDetailsElement).open">
         <summary>Sales ({{ linesOf(c.id).length }})</summary>
-        <table v-if="open[c.id]">
+        <div class="table-scroll"><table v-if="open[c.id]">
           <tbody>
             <tr v-for="l in linesOf(c.id)" :key="`${l.txId}:${l.productId}:${l.variantId}`">
               <td>{{ fmtDate(l.at) }}</td>
@@ -266,7 +266,7 @@ async function exportCsv(): Promise<void> {
               <td class="num">{{ fmtPrice(l.artistShare, l.currency) }}</td>
             </tr>
           </tbody>
-        </table>
+        </table></div>
       </details>
     </article>
 

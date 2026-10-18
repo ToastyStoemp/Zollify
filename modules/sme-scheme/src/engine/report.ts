@@ -105,8 +105,8 @@ export function reportedCountries(profile: ReportInput['profile']): string[] {
 
 const toMinor = (n: number): number => Math.round(n * 100);
 
-/** Book currency: what the event keeps its accounts in. */
-const bookCurrency = (tx: Transaction): string => tx.baseCurrency || tx.currency;
+/** Book currency: what the event keeps its accounts in. Upper-cased, so an old sale in "Eur" adds up with "EUR". */
+const bookCurrency = (tx: Transaction): string => (tx.baseCurrency || tx.currency || 'EUR').toUpperCase();
 
 /**
  * Each line's paid amount in the book currency, in minor units, adding up to
@@ -178,7 +178,7 @@ export function buildSmeReport(input: ReportInput): SmeReport {
   }
 
   // Zero rows for the countries the scheme covers that saw no sale in this book currency.
-  const zeroCurrency = input.currency || 'EUR';
+  const zeroCurrency = (input.currency || 'EUR').toUpperCase();
   for (const country of reportedCountries(input.profile)) {
     if ([...accs.values()].some((a) => a.country === country)) continue;
     accs.set(`${country}|${zeroCurrency}`, { country, currency: zeroCurrency, sales: 0, exemptMinor: 0, byRate: new Map(), exemptSales: 0, chargedSales: 0 });

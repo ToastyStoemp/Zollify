@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, currencyOf, customsGuidance, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, currencyOf, customsGuidance, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, editionLabelOf, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -538,6 +538,7 @@ async function save(): Promise<void> {
     exchangeRate: converting && hasRate ? rate : undefined,
     roundingIncrement: Number(form.roundingIncrement) || 0,
     vat: formVat(),
+    edition: !store && !existing?.edition && (form.dateStart || form.dateEnd) ? editionLabelOf({ dateStart: form.dateStart, dateEnd: form.dateEnd, edition: undefined }) : existing?.edition,
     // A store has no dates to wait for, so it opens as soon as it exists.
     status: existing?.status ?? (store ? 'active' : 'planned'),
     updatedAt: Date.now(),

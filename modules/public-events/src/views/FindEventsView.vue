@@ -66,6 +66,7 @@ async function quickAdd(l: PoolListing): Promise<void> {
       name: l.name,
       dateStart: l.dateStart,
       dateEnd: l.dateEnd,
+      edition: l.edition || editionLabelOf({ dateStart: l.dateStart, dateEnd: l.dateEnd, edition: undefined }),
       venue: { street: l.street, postcode: l.postcode, city: l.city, country: l.country },
       currency: sdk().account()?.profile.defaultCurrency || 'EUR',
       status: 'planned',

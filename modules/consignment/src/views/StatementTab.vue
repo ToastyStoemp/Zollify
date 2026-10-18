@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import type { ConsignmentFee, ConsignmentLine, ConsignorStatement } from '@zollify/shared';
-import { FEE_REASONS, fmtPrice, csvCell, localIsoDay } from '@zollify/shared';
+import type { BooksSettings, ConsignmentFee, ConsignmentLine, Consignor, ConsignorStatement, ReportPeriod } from '@zollify/shared';
+import { FEE_REASONS, fmtPrice, csvCell, localDay, localIsoDay, vatSplit } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { addPayout, deletePayout, deliveryText, errorText, loadStatement, today, waiveFee, type Statement } from '../api';
+import { addPayout, deletePayout, deliveryText, errorText, loadReports, loadStatement, today, waiveFee, type Statement } from '../api';
 import { sdk } from '../runtime';
+import { statementHtml } from '../statement-print';
 import FeeDialog from './FeeDialog.vue';
 
 /**
@@ -16,6 +17,8 @@ const emit = defineEmits<{ error: [message: string | null] }>();
 
 const data = ref<Statement | null>(null);
 const showArchived = ref(false);
+/** The report settings and the period now running, for the printable statement. */
+const books = ref<{ settings: BooksSettings; period: ReportPeriod } | null>(null);
 async function refresh(): Promise<void> {
   emit('error', null);
   try {
@@ -24,7 +27,15 @@ async function refresh(): Promise<void> {
     emit('error', errorText(err, 'Could not load the statement.'));
   }
 }
-onMounted(refresh);
+onMounted(async () => {
+  await refresh();
+  try {
+    const { settings, periods } = await loadReports();
+    if (periods[0]) books.value = { settings, period: periods[0] };
+  } catch {
+    // Printing is just unavailable until the reports load; the statement itself still shows.
+  }
+});
 
 const venueName = (id: string): string => data.value?.venues.find((v) => v.id === id)?.name ?? 'Removed event';
 const consignorName = (id: string): string => data.value?.consignors.find((c) => c.id === id)?.name ?? 'Removed artist';
@@ -41,6 +52,41 @@ const cards = computed(() => {
 const payoutsOf = (id: string) => data.value?.payouts.filter((p) => p.consignorId === id) ?? [];
 const linesOf = (id: string): ConsignmentLine[] => data.value?.lines.filter((l) => l.consignorId === id) ?? [];
 const open = ref<Record<string, boolean>>({});
+
+// ── VAT in a registered artist's share ──────────────────────────────────────
+// Every figure above is VAT-inclusive (commission is taken from what the
+// customer paid). A VAT-registered artist's statement has to show the net
+// and VAT in their share - it is their invoice, written by the store.
+const vatOf = (c: Consignor, currency: string) => (c.vatRegistered ? vatSplit(linesOf(c.id).filter((l) => l.currency === currency), (l) => l.artistShare) : []);
+
+// ── Print ───────────────────────────────────────────────────────────────────
+/** A provisional statement for one artist, any day: the running period so far and what is owed now. */
+async function print(c: Consignor, s: ConsignorStatement): Promise<void> {
+  if (!books.value || !data.value) return;
+  const { settings, period } = books.value;
+  const account = sdk().account();
+  const artist = account?.profile.artist;
+  const inPeriod = (ms: number): boolean => {
+    const day = localDay(ms, settings.timeZone);
+    return day >= period.from && day <= period.to;
+  };
+  const html = statementHtml({
+    store: {
+      name: artist?.companyName || artist?.fullName || account?.accountName || 'Store',
+      address: [artist?.street ?? '', artist?.postCodeCity ?? '', artist?.countryOfOrigin ?? ''],
+      vatId: artist?.vatId ?? '',
+    },
+    artist: c,
+    period,
+    lines: linesOf(c.id).filter((l) => inPeriod(l.at)),
+    payouts: payoutsOf(c.id),
+    totals: s.totals,
+    storeName: venueName,
+  });
+  if (!(await sdk().ui.openDocument(`statement-${c.name.replace(/[^\w-]+/g, '_')}-${today()}.html`, html))) {
+    emit('error', 'The statement was blocked by the browser - allow pop-ups and try again.');
+  }
+}
 
 // ── Fees ────────────────────────────────────────────────────────────────────
 const feesOf = (id: string): ConsignmentFee[] => data.value?.fees?.filter((f) => f.consignorId === id) ?? [];
@@ -99,7 +145,7 @@ async function removePayout(id: string): Promise<void> {
 // ── Export ──────────────────────────────────────────────────────────────────
 async function exportCsv(): Promise<void> {
   if (!data.value) return;
-  const head = ['Date', 'Artist', 'Sold at', 'Item', 'Qty', 'Currency', 'Gross', 'Commission %', 'Commission', 'Artist share'];
+  const head = ['Date', 'Artist', 'Sold at', 'Item', 'Qty', 'Currency', 'Gross incl. VAT', 'VAT rate %', 'Commission %', 'Commission incl. VAT', 'Artist share incl. VAT'];
   const rows = data.value.lines.map((l) => [
     localIsoDay(l.at),
     consignorName(l.consignorId),
@@ -108,6 +154,7 @@ async function exportCsv(): Promise<void> {
     l.qty,
     l.currency,
     l.gross.toFixed(2),
+    l.taxRate ?? '',
     l.commissionPct,
     l.commission.toFixed(2),
     l.artistShare.toFixed(2),
@@ -120,7 +167,7 @@ async function exportCsv(): Promise<void> {
 <template>
   <div class="tab">
     <div class="bar">
-      <p class="hint">Commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out. Space rent comes off once each month has started (Planner), and so do fees you charge.</p>
+      <p class="hint">All amounts include VAT: commission is taken from what the customer paid for each item, discounts included. Reverted sales are left out. Space rent comes off once each month has started (Shelf rental), and so do fees you charge.</p>
       <label class="check"><input v-model="showArchived" type="checkbox" /> Show archived</label>
       <button type="button" @click="refresh"><Icon name="refresh-cw" :size="14" /> Refresh</button>
       <button type="button" :disabled="!data?.lines.length" @click="exportCsv"><Icon name="download" :size="14" /> Export sales</button>
@@ -134,6 +181,7 @@ async function exportCsv(): Promise<void> {
         <strong>{{ c.name }}</strong>
         <span v-if="disputed(c.id)" class="flag">Objects to {{ disputed(c.id) === 1 ? 'a fee' : `${disputed(c.id)} fees` }}</span>
         <span class="grow" />
+        <button type="button" :disabled="!books" :title="books ? 'A provisional statement for the running period - not the invoice, which is issued when the period closes (Reports)' : 'Loading…'" @click="print(c, s)"><Icon name="printer" :size="14" /> Statement (print)</button>
         <button type="button" @click="charging = c.id"><Icon name="alert-triangle" :size="14" /> Charge a fee</button>
         <button type="button" class="primary" @click="openPay(c.id)"><Icon name="banknote" :size="14" /> Record payout</button>
       </header>
@@ -141,9 +189,9 @@ async function exportCsv(): Promise<void> {
       <p v-if="!s.totals.length" class="hint">Nothing sold or paid yet.</p>
       <div v-for="t in s.totals" :key="t.currency" class="totals">
         <div><span>Sold</span><strong>{{ t.units }}</strong></div>
-        <div><span>Sales</span><strong>{{ fmtPrice(t.gross, t.currency) }}</strong></div>
-        <div><span>Commission</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong></div>
-        <div><span>Artist's share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+        <div><span>Sales incl. VAT</span><strong>{{ fmtPrice(t.gross, t.currency) }}</strong></div>
+        <div><span>Commission incl. VAT</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong></div>
+        <div><span>Artist's share incl. VAT</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
         <div v-if="t.cardFees"><span>Card costs</span><strong>{{ fmtPrice(t.cardFees, t.currency) }}</strong></div>
         <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
         <div v-if="t.fees"><span>Fees</span><strong>{{ fmtPrice(t.fees, t.currency) }}</strong></div>
@@ -152,7 +200,7 @@ async function exportCsv(): Promise<void> {
       </div>
 
       <table v-if="s.byStore.length">
-        <thead><tr><th>Sold at</th><th class="num">Units</th><th class="num">Sales</th><th class="num">Commission</th><th class="num">Artist's share</th></tr></thead>
+        <thead><tr><th>Sold at</th><th class="num">Units</th><th class="num">Sales<small>incl. VAT</small></th><th class="num">Commission<small>incl. VAT</small></th><th class="num">Artist's share<small>incl. VAT</small></th></tr></thead>
         <tbody>
           <tr v-for="r in s.byStore" :key="`${r.storeId}|${r.currency}`">
             <td>{{ venueName(r.storeId) }}</td>
@@ -163,6 +211,23 @@ async function exportCsv(): Promise<void> {
           </tr>
         </tbody>
       </table>
+
+      <template v-for="t in s.totals" :key="`vat|${t.currency}`">
+        <div v-if="vatOf(c, t.currency).length" class="vat">
+          <p class="hint"><strong>{{ c.name }} is VAT-registered</strong><template v-if="c.vatId"> ({{ c.vatId }})</template>: their share split into net and the VAT each item sold at, for the self-billing invoice. Commission is the store's VAT-inclusive fee.</p>
+          <table>
+            <thead><tr><th>Rate</th><th class="num">Net</th><th class="num">VAT</th><th class="num">Share incl. VAT</th></tr></thead>
+            <tbody>
+              <tr v-for="r in vatOf(c, t.currency)" :key="String(r.rate)">
+                <td>{{ r.rate == null ? 'No VAT' : `${r.rate}%` }}</td>
+                <td class="num">{{ fmtPrice(r.net, t.currency) }}</td>
+                <td class="num">{{ fmtPrice(r.vat, t.currency) }}</td>
+                <td class="num">{{ fmtPrice(r.gross, t.currency) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
 
       <details v-if="feesOf(c.id).length" :open="disputed(c.id) > 0">
         <summary>Fees ({{ feesOf(c.id).length }})</summary>
@@ -254,6 +319,9 @@ label.check { display: flex; align-items: center; gap: .4rem; font-size: .85rem;
 table { width: 100%; border-collapse: collapse; font-size: .84rem; }
 th, td { padding: .35rem .5rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); text-align: left; }
 th { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); font-weight: 600; }
+th small { display: block; font-weight: 400; text-transform: none; letter-spacing: 0; font-size: .64rem; }
+.vat { display: flex; flex-direction: column; gap: .3rem; padding: .5rem .7rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); }
+.vat table { max-width: 32rem; }
 tbody tr:last-child td { border-bottom: 0; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 summary { cursor: pointer; font-size: .85rem; font-weight: 600; }

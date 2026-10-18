@@ -13,6 +13,16 @@ describe('groupDeadlines', () => {
     expect(g.done).toEqual([]);
   });
 
+  it('never lists a deadline from before the account as missed', () => {
+    // Signed up 1 October: the August return (due 10 September) was never this account's.
+    const g = groupDeadlines({ ...settings, since: '2026-10-01' }, new Set(), '2026-10-01');
+    expect(g.overdue).toEqual([]);
+    expect(g.soon.map((d) => d.id)).toEqual(['de.vat-return:2026-09']);
+    // Unless the business says it started earlier.
+    const older = groupDeadlines({ ...settings, since: '2026-10-01', profile: { ...settings.profile, startYear: 2026 } }, new Set(), '2026-10-01');
+    expect(older.overdue.map((d) => d.id)).toContain('de.vat-return:2026-08');
+  });
+
   it('moves ticked-off deadlines to done', () => {
     const g = groupDeadlines(settings, new Set(['de.vat-return:2026-08', 'de.vat-return:2026-09']), '2026-10-01');
     expect(g.overdue.map((d) => d.id)).not.toContain('de.vat-return:2026-08');

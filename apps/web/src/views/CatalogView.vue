@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref } from 'vue';
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
 import { HS_CODES, checkPickedFile, crossesCustomsBorder, csvCell, fmtPrice, localIsoDay } from '@zollify/shared';
 import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
@@ -105,6 +106,21 @@ function customsIssues(p: Product): string[] {
 
 /** Customs fields and checks only exist for a business with a customs module switched on. */
 const customsOn = computed(() => contributions.routes.some((r) => r.moduleId === 'customs-ch' || r.moduleId === 'customs-de'));
+
+// ── Artists: whose product is this ──────────────────────────────────────────
+// A consigned product carries its artist on itself (consignorId/-Name), so
+// the badge needs nothing from the module; the list to pick from does, and
+// comes through the consignor sources modules contribute - core never
+// imports a module.
+const consignmentOn = computed(() => contributions.routes.some((r) => r.moduleId === 'consignment'));
+const artists = computed(() => (consignmentOn.value ? contributions.consignors() : []));
+const anyConsigned = computed(() => allProducts.value.some((p) => p.consignorId));
+const artistName = (p: Pick<Product, 'consignorId' | 'consignorName'>): string => artists.value.find((a) => a.id === p.consignorId)?.name ?? p.consignorName ?? 'Artist';
+const hasRoute = (name: string): boolean => contributions.routes.some((r) => r.name === name);
+/** Where the module lists this artist's items, when it is on. */
+const artistItemsLink = (consignorId: string): string | null => (hasRoute('consignment:items') ? `/m/consignment/items?consignor=${encodeURIComponent(consignorId)}` : null);
+/** Group by type as the till does, or by artist when there are artists to tell apart. */
+const groupBy = ref<'type' | 'artist'>('type');
 /**
  * Issues are only worth flagging on every row when stock is about to cross a
  * customs border: an event still to come in a country outside the home
@@ -200,14 +216,19 @@ async function move(pid: string, dir: -1 | 1): Promise<void> {
   for (let k = 0; k < list.length; k++) if (list[k]!.sortOrder !== k) await upsertProduct({ ...list[k]!, sortOrder: k });
 }
 
-/** Always grouped by type, matching the till. */
+const OWN_STOCK = 'Own stock';
+/** Grouped by type, matching the till - or by artist, with the store's own stock as one group. */
 const groups = computed(() => {
   const map = new Map<string, Product[]>();
+  const byArtist = groupBy.value === 'artist' && consignmentOn.value;
   for (const p of filtered.value) {
-    const type = p.type?.trim() || 'Other';
-    (map.get(type) ?? map.set(type, []).get(type)!).push(p);
+    const key = byArtist ? (p.consignorId ? artistName(p) : OWN_STOCK) : p.type?.trim() || 'Other';
+    (map.get(key) ?? map.set(key, []).get(key)!).push(p);
   }
-  return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([type, products]) => ({ type, products }));
+  // Own stock first when grouped by artist: it is the one group that is not an artist.
+  return [...map.entries()]
+    .sort((a, b) => (byArtist && (a[0] === OWN_STOCK || b[0] === OWN_STOCK) ? (a[0] === OWN_STOCK ? -1 : 1) : a[0].localeCompare(b[0])))
+    .map(([type, products]) => ({ type, products }));
 });
 const types = computed(() => [...new Set(['Art Print', 'Purse', ...allProducts.value.map((p) => p.type).filter((t): t is string => !!t)])].sort());
 
@@ -251,8 +272,20 @@ const form = reactive({
   unlisted: false,
   onHand: 0,
   variants: [] as VariantForm[],
+  /** The artist this is consigned by; '' = the store's own stock. */
+  consignorId: '',
 });
 const existing = computed(() => (editId.value ? allProducts.value.find((p) => p.id === editId.value) : undefined));
+/**
+ * An item a linked artist shares from their own catalogue is the server's to
+ * write: the artist owns it, so the store cannot hand it to someone else here.
+ * Imported copies and tagged products are the store's and can be retagged.
+ */
+const sharedByArtist = computed(() => Boolean(existing.value?.consignorProductId && existing.value.consignorProductId === existing.value.id));
+/** The picker needs the module's list; a product tagged with an artist no longer in it (archived, module off) is shown, not edited. */
+/** The picked artist's name; falls back to the name kept on the product when the module cannot say. */
+const formArtist = computed(() => artistName({ consignorId: form.consignorId, consignorName: existing.value?.consignorName }));
+const canPickArtist = computed(() => consignmentOn.value && artists.value.length > 0 && !sharedByArtist.value && (!form.consignorId || artists.value.some((a) => a.id === form.consignorId)));
 const hasPhoto = computed(() => Boolean(imagePreview.value || ((existing.value?.imageId || duplicateFrom.value?.imageId) && !removeImage.value)));
 
 function resetForm(p?: Product): void {
@@ -278,6 +311,7 @@ function resetForm(p?: Product): void {
     unlisted: p?.unlisted ?? false,
     onHand: p ? inStockFor(p.id, '') : 0,
     variants: (p?.variants ?? []).map((v) => ({ ...v, onHand: inStockFor(p!.id, v.id) })),
+    consignorId: p?.consignorId ?? '',
   });
 }
 function openNew(): void {
@@ -305,6 +339,20 @@ function duplicate(p: Product): void {
   editing.value = true;
 }
 onUnmounted(() => resetForm());
+
+/**
+ * "New item for Lotte" on the consignment module's items page lands here as
+ * ?new=1&consignor=<id>: the editor opens with the artist already picked.
+ * The query is dropped so a reload does not open a second new product.
+ */
+const route = useRoute();
+const router = useRouter();
+onMounted(() => {
+  if (route.query.new !== '1' || !canEdit.value) return;
+  openNew();
+  if (typeof route.query.consignor === 'string') form.consignorId = route.query.consignor;
+  void router.replace({ query: {} });
+});
 
 async function pickImage(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
@@ -375,6 +423,23 @@ async function dropUnusedImages(ids: string[]): Promise<void> {
   for (const id of new Set(ids)) if (!used.has(id)) await deleteImage(id).catch(() => {});
 }
 
+/**
+ * The artist fields as the form leaves them. Own stock carries none; a
+ * retagged product keeps the name on itself for the till and labels (they
+ * work offline) and loses the link to the copy it was imported from, which
+ * belonged to the previous artist.
+ */
+function consignorFields(prior: Product | undefined): Pick<Product, 'consignorId' | 'consignorName' | 'consignorProductId'> {
+  const id = form.consignorId;
+  if (!id) return { consignorId: undefined, consignorName: undefined, consignorProductId: undefined };
+  const unchanged = prior?.consignorId === id;
+  return {
+    consignorId: id,
+    consignorName: artists.value.find((a) => a.id === id)?.name ?? (unchanged ? prior?.consignorName : undefined),
+    consignorProductId: unchanged ? prior?.consignorProductId : undefined,
+  };
+}
+
 async function save(): Promise<void> {
   if (!form.title.trim()) {
     error.value = 'Give the product a title before saving.';
@@ -419,6 +484,7 @@ async function save(): Promise<void> {
       imageId,
       sortOrder: prior?.sortOrder ?? allProducts.value.length,
       updatedAt: Date.now(),
+      ...consignorFields(prior),
     };
     await upsertProduct(product);
     // Photos this save replaced or removed would otherwise sit in the database forever.
@@ -476,6 +542,14 @@ async function remove(product: Product): Promise<void> {
             <option value="unlisted">Left off lists</option>
           </select>
         </div>
+        <!-- Only once there is an artist to tell apart from own stock; a store with no consigned work never sees it. -->
+        <div v-if="consignmentOn && anyConsigned" class="filterwrap" :class="{ active: groupBy !== 'type' }">
+          <Icon name="users" :size="16" />
+          <select v-model="groupBy" aria-label="Group by">
+            <option value="type">By type</option>
+            <option value="artist">By artist</option>
+          </select>
+        </div>
         <button v-if="canEdit && mergeCandidates.length > 1" type="button" class="quiet" aria-label="Merge products" @click="openMerge"><Icon name="layers" :size="14" /> <span class="label">Merge</span></button>
         <button v-if="canEdit && allProducts.length > 1" type="button" class="quiet" aria-label="Reorder products" @click="reordering = true"><Icon name="list-ordered" :size="14" /> <span class="label">Reorder</span></button>
       </div>
@@ -503,7 +577,7 @@ async function remove(product: Product): Promise<void> {
           <button type="button" class="row" @click="canEdit ? openEdit(p) : undefined">
             <ProductThumb :image-id="p.imageId" :alt="p.title" :size="40" />
             <span class="main">
-              <span class="title">{{ p.title || '(untitled)' }} <em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">off lists</em><em v-if="customsOn && (borderAhead || filter === 'customs') && customsIssues(p).length" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
+              <span class="title">{{ p.title || '(untitled)' }} <em v-if="consignmentOn && p.consignorId && groupBy !== 'artist'" class="artist" :title="`Consigned by ${artistName(p)}`">{{ artistName(p) }}</em><em v-if="!p.forSale">not for sale</em><em v-if="p.unlisted">off lists</em><em v-if="customsOn && (borderAhead || filter === 'customs') && customsIssues(p).length" class="issue">{{ customsIssues(p).join(' · ') }}</em></span>
               <span class="sub">{{ p.sku }}<template v-if="p.sku && p.variants.length"> · </template><template v-if="p.variants.length">{{ p.variants.length }} variant{{ p.variants.length === 1 ? '' : 's' }}</template></span>
             </span>
             <span class="side">
@@ -600,6 +674,20 @@ async function remove(product: Product): Promise<void> {
           <small class="hint">The actual rate follows each event's country - see Settings → VAT.</small>
         </label>
 
+        <label v-if="canPickArtist">
+          <span>Artist</span>
+          <select v-model="form.consignorId">
+            <option value="">Your own stock</option>
+            <option v-for="a in artists" :key="a.id" :value="a.id">{{ a.name }}</option>
+          </select>
+          <small class="hint">{{ form.consignorId ? `Sold on ${formArtist}'s behalf - the sale is split with them on the Statement.` : 'Pick an artist when you sell this on their behalf.' }}</small>
+        </label>
+        <p v-else-if="form.consignorId" class="consigned">
+          <Icon name="users" :size="14" />
+          <span>Consigned by <strong>{{ formArtist }}</strong><template v-if="sharedByArtist"> - shared from their own catalogue, so they manage it</template></span>
+          <router-link v-if="artistItemsLink(form.consignorId)" :to="artistItemsLink(form.consignorId)!">Their items</router-link>
+        </p>
+
         <details v-if="customsOn" class="customs" :open="Boolean(form.tariffNo || form.originCountry || form.year || form.material)">
           <summary>Customs details</summary>
           <p class="hint">Only needed for paperwork when crossing a border with stock.</p>
@@ -670,6 +758,9 @@ async function remove(product: Product): Promise<void> {
 <style scoped>
 .title em { font-style: normal; font-weight: 500; font-size: .68rem; color: var(--zfy-muted, #5a6472); background: var(--zfy-bg, #f1f4f6); border-radius: 4px; padding: .05rem .35rem; margin-left: .3rem; vertical-align: middle; }
 .title em.issue { color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); }
+.title em.artist { color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
+.consigned { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; margin: 0; padding: .5rem .7rem; border-radius: 8px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); font-size: .84rem; }
+.consigned span { flex: 1; min-width: 12rem; }
 .toolbar { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .toolbar button { display: inline-flex; align-items: center; gap: .3rem; font-size: .8rem; min-height: 2.2rem; }
 .thr input { width: 3.5rem; min-height: 2.2rem; padding: .1rem .4rem; }

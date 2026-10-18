@@ -22,8 +22,8 @@ export default defineModule({
 
   setup(sdk: Sdk) {
     setSdk(sdk);
-    sdk.routes.add({ path: '', name: 'index', title: 'Costs', component: () => import('./views/CostsView.vue') });
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'Costs', icon: 'coins', order: 150 });
+    sdk.routes.add({ path: '', name: 'index', title: 'Unit costs', component: () => import('./views/CostsView.vue') });
+    sdk.nav.add({ routeName: 'index', group: 'books', label: 'Unit costs', icon: 'coins', order: 150 });
     sdk.log.info('costs module ready');
   },
 

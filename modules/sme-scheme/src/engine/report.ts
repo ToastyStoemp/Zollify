@@ -229,19 +229,46 @@ export function buildSmeReport(input: ReportInput): SmeReport {
   return { quarter: input.quarter, rows, totals: [...byCurrency.values()], reverted, estimated };
 }
 
+/** What goes above the columns in the CSV, so the file still says whose and which quarter it is when forwarded. */
+export interface CsvHeader {
+  businessName?: string;
+  exNumber?: string;
+  /** Defaults to today. */
+  generated?: Date;
+}
+
+/**
+ * Whether the quarterly report is this business's to file. It is only due
+ * once the business is on the cross-border scheme: an EX number, or exempt in
+ * an EU country other than home. A Kleinunternehmer at home alone files nothing.
+ */
+export function schemeApplies(profile: ReportInput['profile'], home: string): boolean {
+  if (profile?.vat?.exNumber?.trim()) return true;
+  return reportedCountries(profile).some((c) => c !== home);
+}
+
 /**
  * The report as CSV, one row per country - for the accountant or for typing
  * into the home country's SME portal. Plain dot decimals so a spreadsheet in
  * any locale reads them as numbers; semicolons so Belgian and German Excel
- * split the columns without asking.
+ * split the columns without asking. A few header lines first (business, EX
+ * number, quarter, when it was made), since the file travels without its page.
  */
-export function reportCsv(report: SmeReport, countryName: (code: string) => string): string {
+export function reportCsv(report: SmeReport, countryName: (code: string) => string, header: CsvHeader = {}): string {
   const cell = (v: string | number): string => {
     const s = typeof v === 'number' ? v.toFixed(2) : v;
     return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const generated = (header.generated ?? new Date()).toISOString().slice(0, 10);
+  const lines = [
+    `Business;${cell(header.businessName || '-')}`,
+    `EX number;${cell(header.exNumber || '-')}`,
+    `Quarter;${quarterLabel(report.quarter)}`,
+    `Generated;${generated}`,
+    '',
+  ];
   const head = ['Country', 'Code', 'EU', 'Status', 'Sales', 'Currency', 'Exempt gross', 'Charged gross', 'VAT', 'Reported'];
-  const lines = [head.join(';')];
+  lines.push(head.join(';'));
   for (const r of report.rows) {
     lines.push(
       [

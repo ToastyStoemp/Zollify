@@ -1,4 +1,4 @@
-import { addDays, deadlinesBetween, type TaxDeadline, type TaxDeadlineSettings } from '@zollify/shared';
+import { addDays, deadlinesBetween, type DeadlineSource, type TaxDeadline } from '@zollify/shared';
 
 /** How far back a missed deadline still shows, and how far ahead the list looks. */
 export const LOOK_BACK_DAYS = 120;
@@ -14,7 +14,7 @@ export interface DeadlineGroups {
 }
 
 /** The page's sections: missed and still open, the next month, after that, and what is done. */
-export function groupDeadlines(settings: Pick<TaxDeadlineSettings, 'profile' | 'custom' | 'off'>, done: Set<string>, today: string): DeadlineGroups {
+export function groupDeadlines(settings: DeadlineSource, done: Set<string>, today: string): DeadlineGroups {
   const all = deadlinesBetween(settings, addDays(today, -LOOK_BACK_DAYS), addDays(today, LOOK_AHEAD_DAYS));
   const soonEnd = addDays(today, SOON_DAYS);
   const open = all.filter((d) => !done.has(d.id));

@@ -38,7 +38,8 @@ const fmtDay = (day: string) => new Date(`${day}T12:00:00`).toLocaleDateString(u
     </ul>
     <p v-if="items.length > SHOW" class="empty">and {{ items.length - SHOW }} more</p>
     <footer class="foot">
-      <a href="#/m/tax-deadlines">{{ settings?.configured ? 'All deadlines' : 'Set up' }} <Icon name="chevron-right" :size="14" /></a>
+      <!-- Setup lives in Settings → Tax deadlines; the module page only lists what is due. -->
+      <a :href="settings?.configured ? '#/m/tax-deadlines' : '#/settings?panel=tax-deadlines.setup'">{{ settings?.configured ? 'All deadlines' : 'Set up' }} <Icon name="chevron-right" :size="14" /></a>
     </footer>
   </div>
 </template>

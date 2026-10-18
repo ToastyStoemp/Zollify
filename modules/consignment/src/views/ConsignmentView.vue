@@ -11,13 +11,13 @@ import ReportsTab from './ReportsTab.vue';
 
 /**
  * One consignment page for the store owner. Each part (artists, items,
- * planner, store events, statement, reports) is its own page in the
+ * shelf rental, featured artists and workshops, statement, reports) is its own page in the
  * sidebar's Stores section, so no screen carries all of them at once. The
  * artist's side is the separate "My stores" module.
  */
 export type Page = 'artists' | 'items' | 'planner' | 'programme' | 'statement' | 'reports';
 const props = defineProps<{ page: Page }>();
-const TITLES: Record<Page, string> = { artists: 'Artists', items: 'Consigned items', planner: 'Planner', programme: 'Store events', statement: 'Statement', reports: 'Reports' };
+const TITLES: Record<Page, string> = { artists: 'Artists', items: "Artists' items", planner: 'Shelf rental', programme: 'Featured artists & workshops', statement: 'Statement', reports: 'Reports' };
 
 /** Bumped when one of our notifications is opened, so the page reloads even if it was already showing. */
 const revision = ref(0);

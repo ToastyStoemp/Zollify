@@ -91,7 +91,15 @@ async function remove(p: Product): Promise<void> {
   if (ok) await guard(() => unassign(p.id), 'Could not update the item.');
 }
 
-// ── Tag existing products ───────────────────────────────────────────────────
+// ── New and existing products ───────────────────────────────────────────────
+/**
+ * Items are ordinary products, so a new one is made on the Products page;
+ * `?new=1&consignor=` opens its editor with this artist already picked, so
+ * nobody has to come back here to tag it.
+ */
+function newItem(): void {
+  location.hash = `#/catalog?new=1&consignor=${encodeURIComponent(consignorId.value)}`;
+}
 const picking = ref(false);
 const search = ref('');
 const picked = ref<string[]>([]);
@@ -149,7 +157,7 @@ async function runImport(): Promise<void> {
 <template>
   <div class="tab">
     <IncomingPackages @error="emit('error', $event)" />
-    <p v-if="!choices.length" class="empty">Add an artist first, then tag their items here.</p>
+    <p v-if="!choices.length" class="empty">Add an artist first (Stores → Artists), then add their items here.</p>
     <template v-else>
       <div class="bar">
         <label class="pick">
@@ -160,8 +168,9 @@ async function runImport(): Promise<void> {
         </label>
         <span class="grow" />
         <button v-if="consignor?.linked" type="button" @click="pricingOpen = true"><Icon name="coins" :size="14" /> Prices</button>
-        <button type="button" @click="openPicker"><Icon name="tag" :size="14" /> Tag catalogue items</button>
-        <button type="button" class="quiet" :disabled="!consignor?.linked" :title="consignor?.linked ? 'A one-off copy you manage yourself - shared items stay in step with the artist instead' : 'Link their account first (Artists → Link code)'" @click="openImport">
+        <button type="button" class="primary" @click="newItem"><Icon name="plus" :size="14" /> New item</button>
+        <button type="button" @click="openPicker"><Icon name="tag" :size="14" /> Add existing products</button>
+        <button type="button" class="quiet" :disabled="!consignor?.linked" :title="consignor?.linked ? 'A one-off copy you manage yourself - shared items stay in step with the artist instead' : `Only for an artist with their own Zollify account - invite ${consignor?.name ?? 'them'} under Artists first`" @click="openImport">
           <Icon name="download" :size="14" /> Import a copy
         </button>
       </div>
@@ -177,7 +186,14 @@ async function runImport(): Promise<void> {
         <button type="button" class="primary" @click="pricingOpen = true"><Icon name="coins" :size="14" /> Set prices</button>
       </div>
 
-      <p v-if="!rows.length" class="empty">No items for {{ consignor?.name }} yet.</p>
+      <div v-if="!rows.length" class="empty">
+        <p><strong>No items for {{ consignor?.name }} yet.</strong></p>
+        <p>Their items are ordinary products, tagged with their name - the till, labels and stock treat them like your own.</p>
+        <div class="empty-actions">
+          <button type="button" class="primary" @click="newItem"><Icon name="plus" :size="14" /> New item for {{ consignor?.name }}</button>
+          <button type="button" :disabled="!unassigned.length" :title="unassigned.length ? '' : 'Every product in your catalogue is already tagged'" @click="openPicker"><Icon name="tag" :size="14" /> Add existing products</button>
+        </div>
+      </div>
       <div v-else class="table-wrap">
         <table>
           <thead>
@@ -204,10 +220,11 @@ async function runImport(): Promise<void> {
       </div>
     </template>
 
-    <ModalShell v-if="picking" :title="`Tag items for ${consignor?.name}`" @close="picking = false">
+    <ModalShell v-if="picking" :title="`Add existing products for ${consignor?.name}`" @close="picking = false">
       <div class="form">
+        <p class="hint">Products you already have that are {{ consignor?.name }}'s work. Products tagged with another artist are not listed.</p>
         <input v-model="search" type="search" placeholder="Search your catalogue" />
-        <p v-if="!unassigned.length" class="hint">Nothing untagged matches.</p>
+        <p v-if="!unassigned.length" class="hint">{{ search ? 'No untagged product matches.' : 'Every product is already tagged.' }} Use New item to add one for {{ consignor?.name }}.</p>
         <ul class="list">
           <li v-for="p in unassigned" :key="p.id">
             <label class="check"><input v-model="picked" type="checkbox" :value="p.id" /> {{ p.title }}<span v-if="p.sku" class="hint"> · {{ p.sku }}</span></label>
@@ -217,7 +234,7 @@ async function runImport(): Promise<void> {
       <template #footer>
         <div class="footer">
           <button type="button" @click="picking = false">Cancel</button>
-          <button type="button" class="primary" :disabled="!picked.length" @click="assignPicked">Tag {{ picked.length || '' }}</button>
+          <button type="button" class="primary" :disabled="!picked.length" @click="assignPicked">Add {{ picked.length || '' }}</button>
         </div>
       </template>
     </ModalShell>
@@ -261,6 +278,10 @@ async function runImport(): Promise<void> {
 .grow { flex: 1; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
+.empty p { margin: 0 0 .4rem; font-size: .88rem; }
+.empty strong { color: var(--zfy-ink, #1a2230); }
+.empty-actions { display: flex; justify-content: center; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+.empty-actions button { min-height: 2.4rem; display: inline-flex; align-items: center; gap: .35rem; font-size: .82rem; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
 table { width: 100%; border-collapse: collapse; font-size: .85rem; }
 th, td { padding: .45rem .7rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); text-align: left; }

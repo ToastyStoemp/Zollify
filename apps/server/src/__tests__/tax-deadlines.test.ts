@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway, type MailMessage } from '@zollify/server-core';
-import { sendDeadlineReminders, taxDeadlinesServerModule } from '../modules/tax-deadlines';
+import { accountSinceDay, sendDeadlineReminders, taxDeadlinesServerModule } from '../modules/tax-deadlines';
 
 /**
  * Reminders are the point of the module: they must come at the lead times
@@ -58,6 +58,8 @@ beforeAll(async () => {
   const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner@example.test', password: PASSWORD } });
   token = login.json().accessToken;
   accountId = login.json().user.accountId;
+  // Deadlines count from the account's creation day; pin it so the 2026 dates below stay this account's.
+  app.zollify.db.prepare('UPDATE accounts SET createdAt = ? WHERE id = ?').run(Date.parse('2026-01-01T12:00:00Z'), accountId);
 });
 
 afterAll(async () => {
@@ -78,10 +80,13 @@ describe('tax deadlines', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('saves settings with lead days cleaned up', async () => {
-    const res = await call('PUT', '/settings', SETTINGS);
+  it('saves settings with lead days cleaned up, and says when the account started', async () => {
+    const res = await call('PUT', '/settings', { ...SETTINGS, since: '2020-01-01' });
     expect(res.statusCode).toBe(200);
     expect(res.json().settings).toMatchObject({ configured: true, reminders: { leadDays: [14, 3] } });
+    // `since` is the account's own creation day, whatever the client sent.
+    expect(res.json().settings.since).toBe('2026-01-01');
+    expect(accountSinceDay(app.zollify.db, accountId, 'Europe/Berlin')).toBe('2026-01-01');
   });
 
   it('reminds at the first lead time, once, and not at night', async () => {
@@ -104,6 +109,22 @@ describe('tax deadlines', () => {
     await call('PUT', '/done/de.vat-return:2026-09', { done: false });
     expect(await sendDeadlineReminders(svc, at('2026-10-09'))).toBe(1);
     expect(notes().at(-1)).toBe('VAT return September 2026 due in 3 days');
+  });
+
+  it('reminds about nothing from before the account existed', async () => {
+    const svc = services() as unknown as Parameters<typeof sendDeadlineReminders>[0];
+    const db = app.zollify.db;
+    // An account created on 13 October 2026 has the September return (due 12 October) behind it already.
+    db.prepare('UPDATE accounts SET createdAt = ? WHERE id = ?').run(Date.parse('2026-10-13T12:00:00Z'), accountId);
+    try {
+      expect(await sendDeadlineReminders(svc, at('2026-10-13'))).toBe(0);
+      expect(notes().some((t) => t.startsWith('Overdue'))).toBe(false);
+      // The October return (due 10 November) is this account's: its two-week reminder comes.
+      expect(await sendDeadlineReminders(svc, at('2026-10-27'))).toBe(1);
+      expect(notes().at(-1)).toBe('VAT return October 2026 due in 14 days');
+    } finally {
+      db.prepare('UPDATE accounts SET createdAt = ? WHERE id = ?').run(Date.parse('2026-01-01T12:00:00Z'), accountId);
+    }
   });
 
   it('rejects odd deadline ids', async () => {

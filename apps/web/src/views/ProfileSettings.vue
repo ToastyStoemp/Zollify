@@ -62,7 +62,7 @@ async function save(): Promise<void> {
       <p class="hint">Shows the Events page, the Stores page, or both. Nothing is deleted when you switch one off.</p>
     </fieldset>
 
-    <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" />
+    <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" :show-eori="runs.events" />
 
     <div class="row">
       <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save' }}</button>

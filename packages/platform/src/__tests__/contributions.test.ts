@@ -20,3 +20,16 @@ describe('setup steps', () => {
     expect(c.setupStepsFor('owner')).toEqual([]);
   });
 });
+
+describe('consignor sources', () => {
+  it('merges every module\'s list by name, skipping one that fails, and withdraws it with the module', () => {
+    const c = new ContributionRegistry();
+    c.addConsignorSource('consignment', () => [{ id: 'y', name: 'Youssef' }, { id: 'a', name: 'Anneke' }]);
+    c.addConsignorSource('broken', () => {
+      throw new Error('offline');
+    });
+    expect(c.consignors().map((a) => a.name)).toEqual(['Anneke', 'Youssef']);
+    c.removeModule('consignment');
+    expect(c.consignors()).toEqual([]);
+  });
+});

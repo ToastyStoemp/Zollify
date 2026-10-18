@@ -59,7 +59,7 @@ export const myposCarbonRemoteProvider: PaymentProvider = {
   },
   async getStatus(): Promise<ProviderStatus> {
     const target = await getSetting<string>(REMOTE_CARBON_DEVICE_KEY);
-    if (!target) return { connected: false, detail: 'No remote Carbon chosen - pick one under Payments' };
+    if (!target) return { connected: false, detail: 'No remote Carbon chosen - pick one below' };
     return sdk().realtime.connected() ? { connected: true, detail: 'Ready (online)' } : { connected: false, detail: 'Not connected to the server' };
   },
   async startPayment(req: PaymentRequest): Promise<PaymentResult> {

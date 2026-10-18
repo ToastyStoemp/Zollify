@@ -149,6 +149,52 @@ export function journalCsv(invoices: ArtistInvoice[], s: AccountingSettings): st
   return out.join('\n') + '\n';
 }
 
+// ── Who the payment file can pay ────────────────────────────────────────────
+
+export interface PaymentPreviewRow {
+  consignorId: string;
+  name: string;
+  amount: number;
+  currency: string;
+}
+export interface PaymentPreview {
+  included: PaymentPreviewRow[];
+  /** Owed, but the file cannot pay them: no IBAN, or one a bank would bounce. */
+  skipped: (PaymentPreviewRow & { reason: 'no_iban' | 'bad_iban' })[];
+  /** Per currency: what the file would pay against everything owed in it. */
+  totals: { currency: string; inFile: number; owed: number }[];
+}
+
+/**
+ * What a payment file would and would not contain, worked out before it is
+ * asked for: the server leaves out anyone without a valid IBAN, and an owner
+ * who only sees the file's total has no way to notice that it is short.
+ * `ibanOf` is the IBAN on record for an artist, '' or undefined when none.
+ */
+export function paymentFilePreview(owed: PaymentPreviewRow[], ibanOf: (consignorId: string) => string | undefined): PaymentPreview {
+  const included: PaymentPreview['included'] = [];
+  const skipped: PaymentPreview['skipped'] = [];
+  const totals = new Map<string, { inFile: number; owed: number }>();
+  for (const row of owed) {
+    if (!(row.amount > 0)) continue;
+    const t = totals.get(row.currency) ?? { inFile: 0, owed: 0 };
+    t.owed += toMinor(row.amount);
+    const iban = ibanOf(row.consignorId) ?? '';
+    if (isValidIban(iban)) {
+      included.push(row);
+      t.inFile += toMinor(row.amount);
+    } else {
+      skipped.push({ ...row, reason: iban ? 'bad_iban' : 'no_iban' });
+    }
+    totals.set(row.currency, t);
+  }
+  return {
+    included,
+    skipped,
+    totals: [...totals.entries()].map(([currency, t]) => ({ currency, inFile: t.inFile / 100, owed: t.owed / 100 })).sort((a, b) => a.currency.localeCompare(b.currency)),
+  };
+}
+
 // ── ISO 20022 pain.001.001.03 ───────────────────────────────────────────────
 
 export interface Pain001Payment {

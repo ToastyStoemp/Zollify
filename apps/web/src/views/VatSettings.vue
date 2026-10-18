@@ -3,17 +3,16 @@ import { computed, ref } from 'vue';
 import { COUNTRY_BY_CODE, VAT_RATES_AS_OF, countryCodeOf, vatIdLabel } from '@zollify/shared';
 import { currentAccount, shellConfirm, updateProfile } from '@zollify/platform';
 import { CountryPicker } from '@zollify/ui';
-import { contributions } from '../boot';
+import SmeExemptionForm from '../components/SmeExemptionForm.vue';
 
 /**
  * VAT across the countries the business sells in: whether it is on a
  * small-business scheme, and its VAT number in each country it is registered
  * in. Rates follow each event's country and can be set per event.
  *
- * The exemption itself (which countries, the EX number, the receipt wording)
- * is the SME scheme module's to set. It is shown here as a summary, because
- * the till applies it whether or not that module is on - and choosing "I
- * charge VAT" here is how an exemption is ended without it.
+ * Answering Yes opens the exemption itself (which countries, the EX number,
+ * the receipt line) right here - one panel for one decision. Choosing "I
+ * charge VAT" ends an exemption, after asking.
  */
 
 const account = currentAccount;
@@ -30,7 +29,6 @@ const home = computed(() => countryCodeOf(account.value?.profile.artist.countryO
 const defaultVat = computed(() => account.value?.profile.artist.vatId?.trim() ?? '');
 const exemptIn = computed(() => account.value?.profile.vat?.exemptCountries ?? []);
 const name = (code: string): string => COUNTRY_BY_CODE[code] ?? code;
-const smeModuleOn = computed(() => contributions.settingsFor(account.value?.role ?? 'member').some((p) => p.moduleId === 'sme-scheme'));
 const dupes = computed(() => {
   const seen = new Set<string>();
   const out = new Set<string>();
@@ -99,16 +97,11 @@ async function save(): Promise<void> {
       </label>
     </fieldset>
 
-    <section v-if="scheme === 'sme'" class="summary">
-      <p v-if="exemptIn.length">
-        Exempt in <strong>{{ exemptIn.map(name).join(', ') }}</strong>. Sales there print the exemption instead of VAT.
-      </p>
-      <p v-else class="warn">No exempt countries set yet, so every sale still charges VAT.</p>
-      <router-link v-if="smeModuleOn" :to="{ name: 'settings', query: { panel: 'sme-scheme.exemption' } }">Set exemption and EX number</router-link>
-      <p v-else class="hint">
-        Switch on the SME scheme module to set where you are exempt and get the quarterly report.
-        <router-link :to="{ name: 'settings', query: { panel: 'core.modules' } }">Open Modules</router-link>
-      </p>
+    <section v-if="scheme === 'sme'" class="exemption">
+      <h3>Where you are exempt</h3>
+      <p v-if="!exemptIn.length" class="warn">No exempt countries ticked yet, so every sale still charges VAT.</p>
+      <SmeExemptionForm />
+      <p class="hint">The quarterly report of sales per country for the EU scheme is the SME report module, under Books.</p>
     </section>
 
     <fieldset :disabled="!canEdit">
@@ -147,8 +140,8 @@ legend { font-size: .85rem; font-weight: 600; padding: 0 .3rem; }
 .choice label:focus-within { outline: 2px solid var(--zfy-accent); outline-offset: 2px; }
 .choice input { position: absolute; opacity: 0; pointer-events: none; }
 .choice span { color: var(--zfy-muted); }
-.summary { display: flex; flex-direction: column; gap: .35rem; font-size: .875rem; }
-.summary p { margin: 0; }
+.exemption { display: flex; flex-direction: column; gap: .6rem; border: 1px solid var(--zfy-line); border-radius: 10px; padding: .7rem .9rem; }
+.exemption h3 { margin: 0; font-size: .85rem; font-weight: 600; }
 .vatrow { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(10rem, 1.3fr) auto; gap: .4rem; align-items: center; }
 .vatrow small { grid-column: 1 / -1; }
 .mono { font-variant-numeric: tabular-nums; }

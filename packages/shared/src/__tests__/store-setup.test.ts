@@ -52,3 +52,18 @@ describe('store setup', () => {
     expect(f).toMatchObject({ timeZone: 'Europe/Berlin', reportPeriod: 'biweekly', defaultCommissionPct: '35' });
   });
 });
+
+describe('number inputs', () => {
+  it('reads a Number from a type="number" field the same as its text', async () => {
+    const { storeSetupDefaults, storeSetupProblem, storeVat, booksFrom, STORE_SETUP_STEPS } = await import('../store-setup');
+    const { BooksSettingsSchema } = await import('../consignment-books');
+    const books = BooksSettingsSchema.parse({});
+    const f = { ...storeSetupDefaults(books, {}), name: 'Shop', currency: 'EUR', consignment: true, timeZone: 'Europe/Brussels' } as never as ReturnType<typeof storeSetupDefaults>;
+    (f as unknown as Record<string, unknown>).defaultCommissionPct = 30;
+    (f as unknown as Record<string, unknown>).vatStandard = 21;
+    (f as unknown as Record<string, unknown>).artistDiscountMaxPct = 15;
+    for (const step of STORE_SETUP_STEPS) expect(storeSetupProblem(step, f)).toBeNull();
+    expect(storeVat(f)).toEqual({ standard: 21 });
+    expect(booksFrom(f, books).defaultCommissionPct).toBe(30);
+  });
+});

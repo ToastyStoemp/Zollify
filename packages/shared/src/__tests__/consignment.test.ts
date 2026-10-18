@@ -100,6 +100,39 @@ describe('consignment', () => {
     const s = consignmentStatements([], [{ consignorId: 'ana', amount: 10, currency: 'EUR' }], ['ana'])[0]!;
     expect(s.totals[0]).toMatchObject({ currency: 'EUR', paid: 10, balance: -10 });
   });
+
+  it('keeps the VAT rate each line sold at, none for an exempt or untaxed sale', () => {
+    const taxed = tx('t1', 'bern', [item('own', 10), item('riso', 35, 'ana'), item('mug', 20, 'ben')], { tax: { country: 'BE', exempt: false, rates: [21, 6, 21] } });
+    const exempt = tx('t2', 'bern', [item('riso', 35, 'ana')], { tax: { country: 'BE', exempt: true, rates: [null] } });
+    const untaxed = tx('t3', 'bern', [item('riso', 35, 'ana')]);
+    const lines = consignmentLines([taxed, exempt, untaxed], [ana, ben]);
+    expect(lines.map((l) => [l.txId, l.productId, l.taxRate])).toEqual(expect.arrayContaining([['t1', 'riso', 6], ['t1', 'mug', 21], ['t2', 'riso', null], ['t3', 'riso', null]]));
+  });
+});
+
+describe('VAT split of an artist share', () => {
+  it('takes the VAT out of the share per rate and lists untaxed lines apart', async () => {
+    const { vatSplit } = await import('../consignment');
+    const lines = [
+      { taxRate: 6, artistShare: 24.5 },
+      { taxRate: 6, artistShare: 24.5 },
+      { taxRate: 21, artistShare: 12.1 },
+      { taxRate: null, artistShare: 5 },
+    ];
+    expect(vatSplit(lines, (l) => l.artistShare)).toEqual([
+      { rate: 21, gross: 12.1, net: 10, vat: 2.1 },
+      { rate: 6, gross: 49, net: 46.23, vat: 2.77 },
+      { rate: null, gross: 5, net: 5, vat: 0 },
+    ]);
+  });
+
+  it('rounds once per rate so the parts add up to the share', async () => {
+    const { vatSplit } = await import('../consignment');
+    const rows = vatSplit([{ taxRate: 6, artistShare: 0.33 }, { taxRate: 6, artistShare: 0.33 }, { taxRate: 6, artistShare: 0.33 }], (l) => l.artistShare);
+    expect(rows).toHaveLength(1);
+    expect(Math.round((rows[0]!.net + rows[0]!.vat) * 100)).toBe(99);
+    expect(vatSplit([], () => 0)).toEqual([]);
+  });
 });
 
 describe('shared item prices', () => {

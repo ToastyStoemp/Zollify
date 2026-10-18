@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { fmtPrice, type Transaction } from '@zollify/shared';
-import { receiptAmounts, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { fmtPrice } from '@zollify/shared';
+import { paymentLabel, receiptAmounts, receiptSeller, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import { QrCode, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
 import { screenLogo } from '../lib/branding';
@@ -10,12 +10,33 @@ import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 
 const props = defineProps<{ saleId?: string }>();
 
-const tx = ref<Transaction | null>(null);
-const eventName = ref('');
+/**
+ * Looked up live, not once on mount: a sale made on the phone reaches the
+ * laptop through sync, and a laptop opened straight onto this page may mount
+ * before that sync has landed. History already lists the sale by then; the
+ * receipt used to refuse it with "can only be reprinted where the sale was
+ * recorded". Any device that has the sale can print its receipt.
+ */
+const tx = computed(() => (props.saleId ? sdk().data.transactions.get(props.saleId) ?? null : null));
+const event = computed(() => (tx.value?.eventId ? sdk().data.events.get(tx.value.eventId) : undefined));
+const eventName = computed(() => event.value?.name ?? '');
+/** Shown once a sync has had a fair chance; before that the sale may simply not have arrived yet. */
+const waited = ref(false);
+onMounted(() => window.setTimeout(() => (waited.value = true), 4000));
 const canPrintNatively = ref(false);
 const message = ref<string | null>(null);
 const failed = ref(false);
 const router = useRouter();
+
+/** The seller block, as on paper and on the customer's online receipt. */
+const seller = ref<{ text: string; heading?: boolean }[]>([]);
+watch(
+  tx,
+  async (sale) => {
+    seller.value = sale ? await receiptSeller(sale, event.value?.venue?.country).catch(() => []) : [];
+  },
+  { immediate: true },
+);
 
 /**
  * Opened from History (or the till's last-sale bar), a past sale shows the
@@ -37,13 +58,6 @@ const printState = ref<PrintState>('idle');
 onMounted(async () => {
   canPrintNatively.value = await printingAvailable().catch(() => false);
   logo.value = await screenLogo().catch(() => undefined);
-
-  if (!props.saleId) return;
-  const found = sdk().data.transactions.get(props.saleId) ?? null;
-  tx.value = found;
-  if (found?.eventId) {
-    eventName.value = sdk().data.events.get(found.eventId)?.name ?? '';
-  }
 });
 
 const lines = computed(() => tx.value?.items ?? []);
@@ -71,11 +85,28 @@ function closeCard(): void {
   else showCard.value = false;
 }
 
-const paidWith = computed(() =>
-  (tx.value?.payments ?? [])
-    .map((leg) => [leg.provider ?? leg.kind, leg.cardBrand, leg.settled ? `charged ${fmtPrice(leg.settled.amount, leg.settled.currency)}` : ''].filter(Boolean).join(' · '))
-    .join(', '),
-);
+/**
+ * "Cash", "Card · Visa", "Cash EUR 20.00, Card EUR 15.00" for a split - the
+ * method, never the terminal driver's id. The card brand is the one detail
+ * worth a customer's eye; a settlement in another currency is on the printed
+ * copy too.
+ */
+const paidWith = computed(() => {
+  const sale = tx.value;
+  if (!sale) return '';
+  const legs = sale.payments ?? [];
+  return legs
+    .map((leg) =>
+      [
+        legs.length > 1 ? `${paymentLabel(sale, leg)} ${fmtPrice(leg.amount, sale.currency)}` : paymentLabel(sale, leg),
+        leg.cardBrand,
+        leg.settled ? `charged ${fmtPrice(leg.settled.amount, leg.settled.currency)}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    )
+    .join(', ');
+});
 
 /**
  * Prints through the thermal printer when there is one, and falls back to the
@@ -120,13 +151,17 @@ async function print(): Promise<void> {
       </div>
     </header>
 
-    <p v-if="!tx" class="empty">
-      That sale isn't on this device. Receipts can only be reprinted where the sale was recorded, or
-      after a sync has brought it across.
+    <p v-if="!tx && !waited" class="empty">Looking for this sale…</p>
+    <p v-else-if="!tx" class="empty">
+      That sale isn't on this device yet. It appears here once a sync has brought it across - any device that
+      shows it in History can print its receipt.
     </p>
     <p v-if="message" :class="['result', { bad: failed }]" role="status">{{ message }}</p>
 
     <article v-if="tx" class="paper">
+      <div v-if="seller.length" class="seller">
+        <p v-for="(s, i) in seller" :key="i" :class="{ heading: s.heading }">{{ s.text }}</p>
+      </div>
       <p class="event">{{ eventName || 'No event' }}</p>
       <p class="when">{{ new Date(tx.timestamp).toLocaleString() }}</p>
 
@@ -161,7 +196,7 @@ async function print(): Promise<void> {
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
-      <p class="ref">{{ tx.id }}</p>
+      <p class="ref">Receipt {{ tx.receiptNumber ?? tx.id.slice(-8) }}</p>
     </article>
 
     <div v-if="receiptUrl" class="online">
@@ -203,6 +238,9 @@ h1 { font-size: 1.25rem; margin: 0; }
   padding: 1rem; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: .8rem;
   display: flex; flex-direction: column; gap: .35rem;
 }
+.seller { text-align: center; padding-bottom: .4rem; border-bottom: 1px dashed #999; }
+.seller p { margin: 0; }
+.seller .heading { font-weight: 700; font-size: .95rem; }
 .event { margin: 0; font-weight: 700; }
 .when, .ref { margin: 0; color: #5a6472; font-size: .72rem; }
 .ref { word-break: break-all; }

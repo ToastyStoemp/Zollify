@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   TaxDeadlineSettingsSchema,
   deadlinesBetween,
+  deadlinesFrom,
   easterSunday,
   germanAnnualDeadline,
   germanHolidays,
@@ -95,6 +96,49 @@ describe('Germany', () => {
   it('switches rules off', () => {
     const s = settings({}, { off: ['de.trade-tax-return'] });
     expect(due(s, 'de.trade-tax-return:2025')).toBeUndefined();
+  });
+
+  it('offers only the rules the answers leave standing', () => {
+    const ids = (p: Partial<TaxDeadlineSettings['profile']>) => rulesFor(settings(p).profile, 2026).map((r) => r.id);
+    // A Kleinunternehmer files no VAT returns and, without the EU scheme, no SME report.
+    expect(ids({ vat: 'small-business' })).toEqual(['de.income-tax-return', 'de.trade-tax-return']);
+    expect(ids({ vat: 'small-business', euSmeScheme: true, tradeTax: false })).toEqual(['de.income-tax-return', 'eu.sme-report']);
+    // Charging VAT quarterly: returns and the annual return, but no special prepayment (monthly with extension only).
+    expect(ids({ vat: 'regular', vatFrequency: 'quarterly', extension: true })).toEqual(['de.vat-return', 'de.vat-annual', 'de.income-tax-return', 'de.trade-tax-return']);
+    expect(ids({ vat: 'regular', vatFrequency: 'monthly', extension: true, ecSalesList: true })).toContain('de.vat-special-prepayment');
+    expect(ids({ vat: 'regular', vatFrequency: 'monthly', extension: true, ecSalesList: true })).toContain('de.ec-sales-list');
+    expect(ids({ vat: 'regular', incomeTaxPrepayments: true, tradeTaxPrepayments: true })).toEqual(expect.arrayContaining(['de.income-tax-prepayment', 'de.trade-tax-prepayment']));
+  });
+});
+
+describe('deadlines count from the account, or the business start', () => {
+  const s = settings({ vatFrequency: 'monthly' });
+
+  it('leaves out what was due before the account existed', () => {
+    const before = deadlinesBetween({ ...s, since: '2026-10-18' }, '2026-06-01', '2026-12-31').map((d) => d.id);
+    // Sept return due 12 Oct, income tax return 2025 due 31 Jul: both before sign-up.
+    expect(before).not.toContain('de.vat-return:2026-09');
+    expect(before).not.toContain('de.income-tax-return:2025');
+    expect(before).toContain('de.vat-return:2026-10'); // due 10 Nov
+    // Nothing at all when the window ends before the account started.
+    expect(deadlinesBetween({ ...s, since: '2027-01-01' }, '2026-01-01', '2026-12-31')).toEqual([]);
+    // A deadline due on the sign-up day itself still counts.
+    expect(deadlinesBetween({ ...s, since: '2026-10-12' }, '2026-10-01', '2026-10-31').map((d) => d.id)).toContain('de.vat-return:2026-09');
+  });
+
+  it('counts from 1 January of a given start year instead', () => {
+    expect(deadlinesFrom({ profile: s.profile, since: '2026-10-18' })).toBe('2026-10-18');
+    expect(deadlinesFrom({ profile: { ...s.profile, startYear: 2025 }, since: '2026-10-18' })).toBe('2025-01-01');
+    expect(deadlinesFrom({ profile: s.profile })).toBeUndefined();
+    const older = { ...s, profile: { ...s.profile, startYear: 2025 }, since: '2026-10-18' };
+    expect(deadlinesBetween(older, '2026-06-01', '2026-12-31').map((d) => d.id)).toContain('de.income-tax-return:2025');
+    expect(deadlinesBetween(older, '2024-01-01', '2024-12-31')).toEqual([]);
+  });
+
+  it('sends no overdue note for a deadline from before the account', () => {
+    const r = { ...s, since: '2026-10-13', reminders: { leadDays: [3], email: true, overdue: true, timeZone: 'Europe/Berlin' } };
+    expect(remindersDue(r, '2026-10-13', new Set(), new Set()).map((x) => x.deadline.id)).not.toContain('de.vat-return:2026-09');
+    expect(remindersDue({ ...r, since: '2026-10-01' }, '2026-10-13', new Set(), new Set()).find((x) => x.deadline.id === 'de.vat-return:2026-09')).toMatchObject({ lead: -1 });
   });
 });
 

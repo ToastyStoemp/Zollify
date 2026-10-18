@@ -1,4 +1,4 @@
-import type { Transaction } from '@zollify/shared';
+import type { PaymentLeg, Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
 import { countryCodeOf, fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
@@ -212,30 +212,68 @@ export async function loadReceiptConfig(): Promise<{
   };
 }
 
+/** Built-in methods; anything else in `tx.method` is a name the booth gave its own (TWINT, PayPal QR…). */
+const BUILT_IN_METHODS = new Set(['cash', 'card', 'split']);
+
+/**
+ * What a receipt calls a payment: Cash, Card, or the booth's own method name.
+ * Never the terminal driver's id - "manual" or "mypos-go2" is how the till
+ * took the card, not what the customer paid with (that leaked as "Paid: manual").
+ */
+export function paymentLabel(tx: Pick<Transaction, 'method'>, leg: Pick<PaymentLeg, 'kind' | 'provider'>): string {
+  if (leg.kind === 'cash') return 'Cash';
+  const method = String(tx.method ?? '').trim();
+  return method && !BUILT_IN_METHODS.has(method) ? method : 'Card';
+}
+
+/**
+ * The seller block at the top of a receipt, one text line each: business
+ * name, owner's name, street, city and country, phone, email, VAT number with
+ * its country's label. Shared by the printed copy and the on-screen one, so a
+ * seller on a laptop hands over the same receipt a thermal printer would.
+ * An exempt sale carries its exemption instead of a VAT number (see the VAT
+ * block in buildReceiptLines).
+ */
+export function sellerLines(
+  tx: Pick<Transaction, 'tax'>,
+  config: { artist: ArtistInfo; fields?: Partial<Record<ReceiptField, boolean>> },
+  eventCountry?: string,
+): { text: string; heading?: boolean }[] {
+  const { artist } = config;
+  const out: { text: string; heading?: boolean }[] = [];
+  if (artist.companyName) out.push({ text: artist.companyName, heading: true });
+  const show = { ...RECEIPT_FIELD_DEFAULTS, ...config.fields };
+  // Without a company name the full name is the business name, and always prints.
+  if (artist.fullName && artist.fullName !== artist.companyName && (show.fullName || !artist.companyName)) out.push({ text: artist.fullName });
+  if (artist.street) out.push({ text: artist.street });
+  const cityLine = [artist.postCodeCity, show.country ? artist.countryOfOrigin : ''].filter(Boolean).join(', ');
+  if (cityLine) out.push({ text: cityLine });
+  if (show.phone && artist.phone) out.push({ text: artist.phone });
+  if (show.email && artist.email) out.push({ text: artist.email });
+  const vat = tx.tax?.exempt || !show.vatNumber ? '' : resolveVatNumber(artist, eventCountry);
+  if (vat) out.push({ text: `${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}` });
+  return out;
+}
+
+/** The seller block as this device prints it: saved receipt settings, blanks filled from the business profile. */
+export async function receiptSeller(tx: Pick<Transaction, 'tax'>, eventCountry?: string): Promise<{ text: string; heading?: boolean }[]> {
+  const config = await loadReceiptConfig();
+  return sellerLines(tx, { artist: withProfileFallback(config.artist), fields: config.fields }, eventCountry);
+}
+
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
   config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[]; /** Optional header fields to print; absent ones follow RECEIPT_FIELD_DEFAULTS. */ fields?: Partial<Record<ReceiptField, boolean>> },
   eventCountry?: string,
 ): ReceiptLine[] {
-  const { artist, logoB64, footerText } = config;
+  const { logoB64, footerText } = config;
   const lines: ReceiptLine[] = [];
   const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
 
   // ── Header: logo + artist block ──
   if (logoB64) lines.push({ kind: 'image', imageB64: logoB64 });
-  if (artist.companyName) lines.push({ ...center(artist.companyName), doubleHeight: true });
-  const show = { ...RECEIPT_FIELD_DEFAULTS, ...config.fields };
-  // Without a company name the full name is the business name, and always prints.
-  if (artist.fullName && artist.fullName !== artist.companyName && (show.fullName || !artist.companyName)) lines.push(center(artist.fullName));
-  if (artist.street) lines.push(center(artist.street));
-  const cityLine = [artist.postCodeCity, show.country ? artist.countryOfOrigin : ''].filter(Boolean).join(', ');
-  if (cityLine) lines.push(center(cityLine));
-  if (show.phone && artist.phone) lines.push(center(artist.phone));
-  if (show.email && artist.email) lines.push(center(artist.email));
-  // An exempt sale prints its exemption instead (see the VAT block below).
-  const vat = tx.tax?.exempt || !show.vatNumber ? '' : resolveVatNumber(artist, eventCountry);
-  if (vat) lines.push(center(`${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}`));
+  for (const s of sellerLines(tx, config, eventCountry)) lines.push(s.heading ? { ...center(s.text), doubleHeight: true } : center(s.text));
 
   lines.push({ kind: 'text', text: DIVIDER });
   const when = new Date(tx.timestamp);
@@ -287,9 +325,7 @@ export function buildReceiptLines(
 
   // ── Payment legs ──
   for (const leg of tx.payments) {
-    const label =
-      leg.kind === 'cash' ? 'Cash' : leg.provider && leg.provider !== 'card' ? leg.provider : 'Card';
-    lines.push({ kind: 'text', text: row(label, fmtPrice(leg.amount, tx.currency)) });
+    lines.push({ kind: 'text', text: row(paymentLabel(tx, leg), fmtPrice(leg.amount, tx.currency)) });
     // Charged on the card in another currency (cards in the base currency).
     if (leg.settled) lines.push({ kind: 'text', text: row('  charged', fmtPrice(leg.settled.amount, leg.settled.currency)) });
     if (leg.cardBrand || leg.authCode) {

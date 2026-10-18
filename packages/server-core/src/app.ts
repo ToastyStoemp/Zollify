@@ -229,6 +229,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir, {
     // Modules set up accounts their invites created (a store's artist gets "My stores").
     accountCreated: (e) => {
+      // Every new business starts with the default modules (the till above all); without
+      // this a self-registered account opened to a shell with nothing to sell from.
+      seedDefaults(db, e.accountId, opts.defaultModules);
       for (const m of opts.serverModules) {
         try {
           m.onAccountCreated?.(services(m), e);

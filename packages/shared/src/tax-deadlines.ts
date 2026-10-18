@@ -70,6 +70,12 @@ export const TaxDeadlineProfileSchema = z.object({
   ecSalesListFrequency: z.enum(['monthly', 'quarterly']).default('quarterly'),
   /** Uses the EU cross-border SME scheme (has an EX number): a quarterly turnover report at home. */
   euSmeScheme: z.boolean().default(false),
+  /**
+   * The year the business started, when it is older than the account. Deadlines
+   * from 1 January of that year on count; unset, they count from the day the
+   * account was created (`since`), so a new account never opens on "missed".
+   */
+  startYear: z.number().int().min(1990).max(2100).optional(),
 });
 export type TaxDeadlineProfile = z.infer<typeof TaxDeadlineProfileSchema>;
 
@@ -116,8 +122,21 @@ export const TaxDeadlineSettingsSchema = z.object({
     .default({ leadDays: [7, 1], email: true, overdue: true, timeZone: 'Europe/Berlin' }),
   /** True once someone saved the settings: until then nothing is reminded. */
   configured: z.boolean().default(false),
+  /**
+   * The day the account was created (YYYY-MM-DD). Deadlines due before it were
+   * never this account's to file, so they are neither listed as missed nor
+   * reminded about. The server fills it in from the account on every read; a
+   * `startYear` in the profile takes its place when set.
+   */
+  since: Day.optional(),
 });
 export type TaxDeadlineSettings = z.infer<typeof TaxDeadlineSettingsSchema>;
+
+/** The first day deadlines count from: 1 January of `startYear` when given, else the account's creation day. */
+export function deadlinesFrom(settings: Pick<TaxDeadlineSettings, 'profile'> & Partial<Pick<TaxDeadlineSettings, 'since'>>): string | undefined {
+  if (settings.profile.startYear) return `${settings.profile.startYear}-01-01`;
+  return settings.since;
+}
 
 export function defaultTaxDeadlineSettings(): TaxDeadlineSettings {
   return TaxDeadlineSettingsSchema.parse({});
@@ -416,7 +435,7 @@ function smeReports(p: TaxDeadlineProfile, year: number): Omit<TaxDeadline, 'due
       period: `Q${q} ${year}`,
       action: 'file' as const,
       statutory: ymd(dy, dm, lastDayOfMonth(dy, dm)),
-      detail: 'Turnover per EU country for the quarter (zero where there was none), filed in the country you are established in. Zollify\'s SME report has the figures.',
+      detail: 'Turnover per EU country for the quarter (zero where there was none), filed in the country you are established in. The figures are under Books → SME report.',
       where: p.country === 'DE' ? 'BZSt Online-Portal' : 'Your tax office',
     };
   });
@@ -427,9 +446,17 @@ export function hasCountryRules(country: string): boolean {
   return country in RULE_SETS;
 }
 
-/** The rules that can apply to a profile, to switch off one by one. */
-export function rulesFor(profile: TaxDeadlineProfile): RuleInfo[] {
-  return [...(RULE_SETS[profile.country]?.rules ?? []), ...(EU.includes(profile.country) ? [SME_RULE] : [])];
+/**
+ * The rules the profile's answers leave standing, to switch off one by one.
+ * A Kleinunternehmer is not offered VAT returns, a business without the EU
+ * scheme no SME report: the list shows what the answers decided, not every
+ * rule the country has. Worked out by asking each rule set for a year's
+ * deadlines, the same way the list itself is built, so the two cannot drift.
+ */
+export function rulesFor(profile: TaxDeadlineProfile, year = new Date().getUTCFullYear()): RuleInfo[] {
+  const set = RULE_SETS[profile.country];
+  const active = new Set([...(set?.deadlines(profile, year) ?? []), ...smeReports(profile, year)].map((d) => d.ruleId));
+  return [...(set?.rules ?? []), ...(EU.includes(profile.country) ? [SME_RULE] : [])].filter((r) => active.has(r.id));
 }
 
 function customOccurrences(c: CustomDeadline, from: string, to: string): Omit<TaxDeadline, 'due'>[] {
@@ -447,15 +474,22 @@ function customOccurrences(c: CustomDeadline, from: string, to: string): Omit<Ta
   return out;
 }
 
+/** What `deadlinesBetween` and the reminders work from; `since` is optional because older callers never had it. */
+export type DeadlineSource = Pick<TaxDeadlineSettings, 'profile' | 'custom' | 'off'> & Partial<Pick<TaxDeadlineSettings, 'since'>>;
+
 /**
  * Every deadline due between `from` and `to` (inclusive), sorted by due day.
- * Rules in `settings.off` are left out.
+ * Rules in `settings.off` are left out, as is anything due before the day
+ * the deadlines count from (`deadlinesFrom`).
  */
-export function deadlinesBetween(settings: Pick<TaxDeadlineSettings, 'profile' | 'custom' | 'off'>, from: string, to: string): TaxDeadline[] {
+export function deadlinesBetween(settings: DeadlineSource, from: string, to: string): TaxDeadline[] {
   const p = settings.profile;
   const set = RULE_SETS[p.country];
   const off = new Set(settings.off);
   const out: TaxDeadline[] = [];
+  const first = deadlinesFrom(settings);
+  if (first && first > from) from = first;
+  if (from > to) return out;
   // A year's rules can fall due well into the next two (annual returns with an advisor).
   for (let y = parts(from)[0] - 2; y <= parts(to)[0]; y++) {
     for (const d of [...(set?.deadlines(p, y) ?? []), ...smeReports(p, y)]) {
@@ -491,7 +525,7 @@ export interface ReminderDue {
  * `${deadlineId}|${lead}` for what already went out.
  */
 export function remindersDue(
-  settings: Pick<TaxDeadlineSettings, 'profile' | 'custom' | 'off' | 'reminders'>,
+  settings: DeadlineSource & Pick<TaxDeadlineSettings, 'reminders'>,
   today: string,
   done: Set<string>,
   sent: Set<string>,

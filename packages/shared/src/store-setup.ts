@@ -40,9 +40,12 @@ export interface StoreSetupForm {
 export const storeSetupSteps = (f: Pick<StoreSetupForm, 'consignment'>): StoreSetupStep[] =>
   STORE_SETUP_STEPS.filter((s) => f.consignment || (s !== 'artists' && s !== 'money'));
 
-const num = (v: string): number => (v.trim() === '' ? NaN : Number(v.replace(',', '.')));
-const within = (v: string, min: number, max: number): boolean => num(v) >= min && num(v) <= max;
-const rateOk = (v: string): boolean => v.trim() === '' || within(v, 0, 99.99);
+// The form's number inputs hand back a Number once typed in (v-model on type="number"),
+// a string while untouched; both must read the same.
+const text = (v: string | number): string => (typeof v === 'number' ? String(v) : (v ?? '')).trim();
+const num = (v: string | number): number => (text(v) === '' ? NaN : Number(text(v).replace(',', '.')));
+const within = (v: string | number, min: number, max: number): boolean => num(v) >= min && num(v) <= max;
+const rateOk = (v: string | number): boolean => text(v) === '' || within(v, 0, 99.99);
 
 /** Why this step cannot be left yet, in words for the person, or null. */
 export function storeSetupProblem(step: StoreSetupStep, f: StoreSetupForm): string | null {
@@ -71,8 +74,8 @@ export function storeVat(f: Pick<StoreSetupForm, 'vatMode' | 'vatStandard' | 'va
   const vat: EventVat = {};
   if (f.vatMode !== 'auto') vat.mode = f.vatMode;
   if (f.vatMode !== 'exempt') {
-    if (f.vatStandard.trim() !== '' && rateOk(f.vatStandard)) vat.standard = num(f.vatStandard);
-    if (f.vatReduced.trim() !== '' && rateOk(f.vatReduced)) vat.reduced = num(f.vatReduced);
+    if (text(f.vatStandard) !== '' && rateOk(f.vatStandard)) vat.standard = num(f.vatStandard);
+    if (text(f.vatReduced) !== '' && rateOk(f.vatReduced)) vat.reduced = num(f.vatReduced);
   }
   return Object.keys(vat).length ? vat : undefined;
 }

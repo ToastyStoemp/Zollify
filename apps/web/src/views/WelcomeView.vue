@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, EU_COUNTRIES as EU_COUNTRIES_FOR_SME, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -72,11 +72,60 @@ const canRename = computed(() => account.value?.role === 'owner');
 // Stages: 1 who you are, 2 the event or store, 3 modules, then one per step the
 // switched-on modules add (card payments from the till), then Next steps. Module
 // steps come after the module choice, so a module switched on there asks its own.
-const step = ref(1);
 const MODULES_STAGE = 3;
+/**
+ * Where setup was left. A reload, a lost session or coming back later used to
+ * start over at step 1 with the answers blank, although the event and the
+ * profile were already saved - people created their event twice. Kept per
+ * account in this browser only; finishing or skipping clears it.
+ */
+const stepKey = `zollify.welcome.step.${account.value?.accountId ?? ''}`;
+const readStep = (): number => {
+  try {
+    const n = Number(sessionStorage.getItem(stepKey));
+    return Number.isInteger(n) && n > 1 ? n : 1;
+  } catch {
+    return 1;
+  }
+};
+const step = ref(readStep());
+watch(step, (n) => {
+  try {
+    if (n > 1) sessionStorage.setItem(stepKey, String(n));
+    else sessionStorage.removeItem(stepKey);
+  } catch {
+    /* this visit only */
+  }
+});
+const forgetStep = (): void => {
+  try {
+    sessionStorage.removeItem(stepKey);
+  } catch {
+    /* nothing kept */
+  }
+};
 const moduleSteps = computed(() => contributions.setupStepsFor(account.value?.role ?? 'member'));
-const moduleStepViews = computed(() => moduleSteps.value.map((s) => defineAsyncComponent(s.component)));
-const nextStage = computed(() => MODULES_STAGE + 1 + moduleSteps.value.length);
+// The first tax question, kept to one tap. Yes switches on the SME module, which asks where
+// it applies in its own step; No puts "Add your VAT numbers" on the last page.
+type Scheme = '' | 'sme' | 'vat';
+const SCHEMES: { id: Scheme; title: string; text: string }[] = [
+  { id: 'sme', title: 'Yes', text: 'I am exempt from VAT below a turnover threshold.' },
+  { id: 'vat', title: 'No, I charge VAT', text: 'My receipts show VAT and my VAT number.' },
+  { id: '', title: 'Not sure yet', text: 'Decide later under Settings → VAT.' },
+];
+const storedVat = account.value?.profile.vat;
+const scheme = ref<Scheme>(storedVat?.scheme || (storedVat?.exemptCountries?.length ? 'sme' : ''));
+/**
+ * The steps after Modules: core's own first (the small-business exemption, when
+ * the business said it is on a scheme - where, and the EX number), then one per
+ * step the switched-on modules add (card payments from the till).
+ */
+const extraSteps = computed(() => [
+  ...(scheme.value === 'sme' ? [{ id: 'core.exemption', title: 'Small-business exemption', component: () => import('../components/SmeExemptionSetupStep.vue') }] : []),
+  ...moduleSteps.value,
+]);
+const extraStepViews = computed(() => extraSteps.value.map((s) => defineAsyncComponent(s.component)));
+const nextStage = computed(() => MODULES_STAGE + 1 + extraSteps.value.length);
 const moduleStep = computed(() => (step.value > MODULES_STAGE && step.value < nextStage.value ? step.value - MODULES_STAGE - 1 : -1));
 const busy = ref(false);
 const error = ref<string | null>(null);
@@ -92,19 +141,18 @@ const toRuns = (s: SellsAt): Runs => (s.events && s.stores ? 'both' : s.stores ?
 const runs = ref<Runs>(toRuns(sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e)))));
 const runsEvents = computed(() => runs.value !== 'stores');
 const runsStores = computed(() => runs.value !== 'events');
-// Preselected, but still a choice the owner sees and confirms with Continue; skipping setup shares nothing.
-// Applied with the modules, since the pool lives in Public events.
-const shareEvents = ref(true);
-// The first tax question, kept to one tap. Yes switches on the SME module, which asks where
-// it applies in its own step; No puts "Add your VAT numbers" on the last page.
-type Scheme = '' | 'sme' | 'vat';
-const SCHEMES: { id: Scheme; title: string; text: string }[] = [
-  { id: 'sme', title: 'Yes', text: 'I am exempt from VAT below a turnover threshold.' },
-  { id: 'vat', title: 'No, I charge VAT', text: 'My receipts show VAT and my VAT number.' },
-  { id: '', title: 'Not sure yet', text: 'Decide later under Settings → VAT.' },
-];
-const storedVat = account.value?.profile.vat;
-const scheme = ref<Scheme>(storedVat?.scheme || (storedVat?.exemptCountries?.length ? 'sme' : ''));
+// Off until the owner says yes: sharing is opt-in, and the answer has to stick - it used to
+// reset to "yes" on every revisit and quietly publish the event. Starts from what the server
+// has, so re-running setup shows the real state. Applied with the modules (the pool lives in Public events).
+const shareEvents = ref(false);
+onMounted(async () => {
+  try {
+    const cur = (await authFetch('/m/public-events/pool/settings')) as { share?: boolean };
+    if (typeof cur.share === 'boolean') shareEvents.value = cur.share;
+  } catch {
+    /* module off or not published here: stays off */
+  }
+});
 /** Re-running setup and now charging VAT: the exemption set earlier ends, or sales would keep printing it. */
 const endsExemption = computed(() => scheme.value === 'vat' && (storedVat?.exemptCountries?.length ?? 0) > 0);
 const name = ref(account.value?.accountName ?? '');
@@ -133,10 +181,11 @@ async function saveWho(): Promise<void> {
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
     });
-    // A store selling artists' work wants Consignment; suggest it. Customs paperwork is for
-    // taking stock to fairs across a border, so a stores-only business starts without it.
+    // Consignment follows the store's own answer ("whose work do you sell?") in its wizard,
+    // not the Stores choice: a shop selling only its own stock got it ticked and with it the
+    // Rent and Workshop till tiles. Customs paperwork is for taking stock to fairs across a
+    // border, so a stores-only business starts without it.
     const next = new Set(wanted.value);
-    if (runsStores.value && modules.value.some((m) => m.moduleId === 'consignment')) next.add('consignment');
     if (!runsEvents.value) for (const id of ['customs-hub', 'customs-ch', 'customs-de']) next.delete(id);
     if (runsEvents.value && shareEvents.value && modules.value.some((m) => m.moduleId === 'public-events')) next.add('public-events');
     if (scheme.value === 'sme' && modules.value.some((m) => m.moduleId === 'sme-scheme')) next.add('sme-scheme');
@@ -154,6 +203,10 @@ async function saveWho(): Promise<void> {
 // name empty to skip; events that already synced in make this step moot.
 // The country decides the event's VAT and whether stock crosses a customs border, so it is asked, not assumed.
 const eventForm = ref({ name: '', dateStart: '', dateEnd: '', city: '', country: '' });
+// The country just given on step 1 is the likeliest; it used to show only as a placeholder, so people typed it twice.
+watch(step, (n) => {
+  if (n === 2 && !eventForm.value.country && artist.value.countryOfOrigin) eventForm.value.country = artist.value.countryOfOrigin;
+});
 // A store is set up by its own questions (VAT, artists, reports), in a window of their own.
 const settingUp = ref(false);
 const storeMade = ref(false);
@@ -180,10 +233,14 @@ async function saveEvent(): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    const base = { venue: { country: eventForm.value.country || artist.value.countryOfOrigin || undefined, city: eventForm.value.city.trim() || undefined }, currency: currency.value.trim().toUpperCase() || 'CHF', status: 'active' as const, updatedAt: Date.now() };
+    // A convention weeks away is upcoming, not selling now: the first event used to open
+    // the till at once, so a Dane's shop sales were filed against a Stockholm con in November.
+    const today = new Date().toISOString().slice(0, 10);
+    const onNow = !eventForm.value.dateStart || eventForm.value.dateStart <= today;
+    const base = { venue: { country: eventForm.value.country || artist.value.countryOfOrigin || undefined, city: eventForm.value.city.trim() || undefined }, currency: currency.value.trim().toUpperCase() || 'CHF', status: (onNow ? 'active' : 'planned') as SalesEvent['status'], updatedAt: Date.now() };
     const event: SalesEvent = { ...base, id: crypto.randomUUID(), name, dateStart: eventForm.value.dateStart || undefined, dateEnd: eventForm.value.dateEnd || undefined };
     await upsertSalesEvent(event);
-    await setActiveEvent(event.id);
+    if (onNow && !visibleEvents.value.some((e) => isStore(e) && !e.deletedAt)) await setActiveEvent(event.id);
     step.value = 3;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create that event.';
@@ -207,9 +264,12 @@ onMounted(async () => {
         Number(guideFor(b).recommended) - Number(guideFor(a).recommended) ||
         a.title.localeCompare(b.title),
     );
-    // Start from what is already on; a brand-new account has the seeded
-    // defaults, which match the recommendations.
-    wanted.value = new Set(res.modules.filter((m) => m.enabled).map((m) => m.moduleId));
+    // Start from what is already on. A business setting up for the first time also
+    // gets every recommended module ticked - "Recommended" with the box empty left
+    // people without a till. Re-running setup keeps what the owner chose since.
+    const fresh = !account.value?.profile.setupCompletedAt;
+    wanted.value = new Set(res.modules.filter((m) => m.enabled || (fresh && guideFor(m).recommended && m.moduleId !== 'consignment')).map((m) => m.moduleId));
+    if (fresh && CUSTOMS.some((c) => wanted.value.has(c.id))) wanted.value.add('customs-hub');
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load the module list.';
   }
@@ -270,7 +330,8 @@ async function addFromPool(l: PoolListing): Promise<void> {
     await upsertSalesEvent(event);
     // Only so the pool stops offering it; the event is added either way.
     await authFetch(`/m/public-events/pool/listings/${encodeURIComponent(l.id)}/adopt`, { method: 'POST', body: JSON.stringify({ eventId: event.id }) }).catch(() => undefined);
-    if (!poolAdded.value.length) await setActiveEvent(event.id);
+    // Only an event already running becomes the till; a planned one waits for its dates.
+    if (!poolAdded.value.length && l.dateStart <= new Date().toISOString().slice(0, 10)) await setActiveEvent(event.id);
     poolAdded.value = [...poolAdded.value, l.name];
     poolResults.value = poolResults.value.filter((x) => x.id !== l.id);
   } catch (err) {
@@ -300,18 +361,55 @@ const CUSTOMS: { id: string; label: string }[] = [
 const TITLES: Record<string, string> = { pos: 'Till' };
 const customsChoices = computed(() => CUSTOMS.filter((c) => modules.value.some((m) => m.moduleId === c.id)));
 const customsWanted = computed(() => CUSTOMS.some((c) => wanted.value.has(c.id)));
+/**
+ * Modules that only make sense for one country's businesses. Anyone else
+ * sees them folded under "Other countries" rather than beside the till: a
+ * Belgian store was offered Danish bookkeeping and German Lexware books, and
+ * ticked the wrong ones.
+ */
+const COUNTRY_ONLY: Record<string, string[]> = {
+  'peppol-be': ['BE'],
+  economic: ['DK'],
+  tax: ['DE'],
+  'tax-deadlines': ['DE', ...EU_COUNTRIES_FOR_SME],
+};
+const homeCode = computed(() => countryCodeOf(artist.value.countryOfOrigin));
+/** Shown in its group, or folded away: the business is in a country the module serves, or has it on already. */
+const fitsCountry = (id: string): boolean => {
+  if (wanted.value.has(id)) return true;
+  // The SME report is for businesses on the scheme; "I charge VAT" folds it away.
+  if (id === 'sme-scheme' && scheme.value !== 'sme') return false;
+  const only = COUNTRY_ONLY[id];
+  return !only || !homeCode.value || only.includes(homeCode.value);
+};
+const showOther = ref(false);
 const moduleGroups = computed(() => {
   const byId = new Map(modules.value.map((m) => [m.moduleId, m]));
   const placed = new Set(['customs', 'customs-hub', ...CUSTOMS.map((c) => c.id)]);
-  const groups = GROUPS.map((g) => ({
-    title: g.title,
-    items: g.ids.filter((id) => (id === 'customs' ? customsChoices.value.length > 0 : byId.has(id))).map((id) => {
-      placed.add(id);
-      return id === 'customs' ? { id, mod: null } : { id, mod: byId.get(id)! };
-    }),
-  }));
-  const other = modules.value.filter((m) => !placed.has(m.moduleId)).map((m) => ({ id: m.moduleId, mod: m }));
-  return [...groups, { title: 'Other', items: other }].filter((g) => g.items.length);
+  const folded: { id: string; mod: AvailableModule }[] = [];
+  const groups = GROUPS
+    // The Events block is for events, the Stores block for stores: a stores-only shop
+    // was shown Public events as RECOMMENDED and the whole convention toolkit.
+    .filter((g) => (g.title !== 'Events' || runsEvents.value) && (g.title !== 'Stores' || runsStores.value))
+    .map((g) => ({
+      title: g.title,
+      items: g.ids
+        .filter((id) => (id === 'customs' ? customsChoices.value.length > 0 : byId.has(id)))
+        .flatMap((id) => {
+          placed.add(id);
+          if (id === 'customs') return [{ id, mod: null as AvailableModule | null }];
+          const mod = byId.get(id)!;
+          if (!fitsCountry(id)) {
+            folded.push({ id, mod });
+            return [];
+          }
+          return [{ id, mod }];
+        }),
+    }));
+  // Stores-only: the event modules still exist, under Other, for the day they are wanted.
+  for (const id of GROUPS.flatMap((g) => g.ids)) if (!placed.has(id) && byId.has(id)) { placed.add(id); folded.push({ id, mod: byId.get(id)! }); }
+  const other = [...modules.value.filter((m) => !placed.has(m.moduleId)).map((m) => ({ id: m.moduleId, mod: m as AvailableModule | null })), ...folded];
+  return [...groups, { title: 'Other countries and setups', items: other, folded: true }].filter((g) => g.items.length);
 });
 function setCustoms(id: string, on: boolean): void {
   const next = new Set(wanted.value);
@@ -376,8 +474,8 @@ const hasStores = computed(() => visibleEvents.value.some((e) => isStore(e) && !
 const paymentsAsked = computed(() => moduleSteps.value.some((m) => m.id === 'pos.payments'));
 /** Charging VAT and no number per country yet: worth a line on the last page. */
 const vatNumbersMissing = computed(() => scheme.value === 'vat' && !(account.value?.profile.vat?.vatNumbers ?? []).length);
-/** Said yes to a scheme but the module that asks where is not on (unpublished here, or unticked). */
-const smeNotAsked = computed(() => scheme.value === 'sme' && !moduleSteps.value.some((m) => m.id === 'sme-scheme.exemption') && !(account.value?.profile.vat?.exemptCountries ?? []).length);
+/** Said yes to a scheme but left the exemption step without ticking a country: every sale still charges VAT. */
+const smeNotSet = computed(() => scheme.value === 'sme' && !(account.value?.profile.vat?.exemptCountries ?? []).length);
 /** The Android app this server hands out, for card readers and the till on a tablet. Null when none is published, or already in it. */
 const androidApp = ref<{ url: string } | null>(null);
 onMounted(async () => {
@@ -391,10 +489,33 @@ onMounted(async () => {
   }
 });
 
+/**
+ * Skipping from the first step still keeps what is on that screen - what you run,
+ * country, currency, the VAT answer. Skip used to drop them, so a Dane who chose
+ * "Both" landed on an Events-only account counting in CHF.
+ */
+async function skipFromStart(): Promise<void> {
+  busy.value = true;
+  error.value = null;
+  try {
+    await updateProfile({
+      sells: { events: runsEvents.value, stores: runsStores.value },
+      artist: artist.value,
+      vat: { scheme: scheme.value },
+      ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
+      ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
+    });
+  } catch {
+    /* the profile can be finished later under Settings; skipping must not fail */
+  }
+  await finish();
+}
+
 async function finish(to: { name: string; query?: Record<string, string> } = { name: 'home' }): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
+    forgetStep();
     await updateProfile({ setupCompleted: true });
     await router.replace(to);
   } catch (err) {
@@ -411,7 +532,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <li :class="{ current: step === 1, done: step > 1 }">Who you are</li>
       <li :class="{ current: step === 2, done: step > 2 }">{{ step2Label }}</li>
       <li :class="{ current: step === MODULES_STAGE, done: step > MODULES_STAGE }">Modules</li>
-      <li v-for="(m, i) in moduleSteps" :key="m.id" :class="{ current: step === MODULES_STAGE + 1 + i, done: step > MODULES_STAGE + 1 + i }">{{ m.title }}</li>
+      <li v-for="(m, i) in extraSteps" :key="m.id" :class="{ current: step === MODULES_STAGE + 1 + i, done: step > MODULES_STAGE + 1 + i }">{{ m.title }}</li>
       <li :class="{ current: step === nextStage }">Next steps</li>
     </ol>
 
@@ -421,7 +542,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-if="step === 1" class="card" @submit.prevent="saveWho">
       <h1>Welcome to Zollify</h1>
       <p class="lede">
-        One app for your business: the till, stock, events and paperwork. First, who is behind the
+        One app for your business: the till, stock, {{ runsStores && !runsEvents ? "your store" : runsStores ? "events, stores" : "events" }} and paperwork. First, who is behind the
         table? Your name, country and currency are enough to start; the rest can wait until a receipt
         or a customs form needs it, under Settings → Business profile.
       </p>
@@ -462,7 +583,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" compact :show-eori="runsEvents" />
 
       <footer class="actions">
-        <button type="button" class="quiet" :disabled="busy" @click="finish()">Skip setup</button>
+        <button type="button" class="quiet" :disabled="busy" @click="skipFromStart">Skip setup</button>
         <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : 'Continue' }}</button>
       </footer>
     </form>
@@ -503,8 +624,8 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 
     <!-- ── 3 ─────────────────────────────────────────────────────────────── -->
     <form v-else-if="moduleStep >= 0" class="card" @submit.prevent="step++">
-      <h1>{{ moduleSteps[moduleStep]!.title }}</h1>
-      <component :is="moduleStepViews[moduleStep]" />
+      <h1>{{ extraSteps[moduleStep]!.title }}</h1>
+      <component :is="extraStepViews[moduleStep]" />
       <footer class="actions">
         <button type="button" class="quiet" @click="step--">Back</button>
         <button type="submit" class="primary">Continue</button>
@@ -519,8 +640,9 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </p>
 
       <section v-for="g in moduleGroups" :key="g.title" class="mgroup">
-        <h2>{{ g.title }}</h2>
-        <ul class="modules">
+        <h2 v-if="!('folded' in g)">{{ g.title }}</h2>
+        <button v-else type="button" class="quiet fold" :aria-expanded="showOther" @click="showOther = !showOther">{{ showOther ? 'Hide' : 'Show' }} {{ g.items.length }} more - other countries, events or stores</button>
+        <ul v-if="!('folded' in g) || showOther" class="modules">
           <li v-for="item in g.items" :key="item.id">
             <template v-if="item.mod">
               <label>
@@ -599,14 +721,14 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <span>One for each country you are registered in. Receipts there print it; elsewhere they print the number from your business details.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.vat' } })">Open VAT</button>
         </li>
-        <li v-if="smeNotAsked">
+        <li v-if="smeNotSet">
           <strong>Set where you are exempt</strong>
           <span>Until you do, every sale charges VAT. Your EX number goes in the same place.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.vat' } })">Open VAT</button>
         </li>
         <li v-if="sellingOn && !paymentsAsked">
           <strong>Pick how you take payment</strong>
-          <span>Cash and an external card terminal work out of the box; wired terminals live under Settings → Payments.</span>
+          <span>Cash and an external card terminal work out of the box; wired terminals live under Settings → Card terminal.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'pos.payments' } })">Open Payments</button>
         </li>
         <li v-if="androidApp && sellingOn" class="app">
@@ -617,7 +739,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         </li>
         <li>
           <strong>Invite helpers</strong>
-          <span>Give someone the till for one event without handing over the whole account.</span>
+          <span>{{ runsStores ? "Give staff the till without handing over the whole account - they ring up sales, you see the totals." : "Give someone the till for one event without handing over the whole account." }}</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.team' } })">Open Team</button>
         </li>
       </ol>
@@ -671,6 +793,7 @@ h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.01em; text-wrap: balance; }
 .actions { display: flex; justify-content: space-between; gap: .5rem; padding-top: .5rem; border-top: 1px solid var(--zfy-line); }
 .mgroup { display: flex; flex-direction: column; gap: .5rem; }
 .mgroup h2 { margin: .4rem 0 0; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--zfy-muted); }
+.fold { align-self: flex-start; font-size: .85rem; color: var(--zfy-muted); padding: .3rem 0; }
 .customs { border: 1px solid var(--zfy-line); border-radius: 10px; }
 .customs > label { border: 0 !important; }
 .countries { display: flex; flex-direction: column; gap: .35rem; padding: 0 .9rem .75rem 2.6rem; }

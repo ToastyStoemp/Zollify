@@ -23,14 +23,14 @@ export default defineModule({
   setup(sdk: Sdk) {
     setSdk(sdk);
     sdk.routes.addAll([
-      { path: '', name: 'index', title: 'Payments', component: () => import('./views/PaymentsView.vue') },
-      { path: 'ledger', name: 'ledger', title: 'Ledger', component: () => import('./views/LedgerView.vue') },
+      { path: '', name: 'index', title: 'Card statements', component: () => import('./views/PaymentsView.vue') },
+      { path: 'ledger', name: 'ledger', title: 'Event profit', component: () => import('./views/LedgerView.vue') },
     ]);
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'Payments', icon: 'credit-card', order: 200 });
-    sdk.nav.add({ routeName: 'ledger', group: 'books', label: 'Ledger', icon: 'book', order: 210 });
+    sdk.nav.add({ routeName: 'index', group: 'books', label: 'Card statements', icon: 'credit-card', order: 200 });
+    sdk.nav.add({ routeName: 'ledger', group: 'books', label: 'Event profit', icon: 'book', order: 210 });
     sdk.settings.panel({
       id: 'integrations',
-      label: 'Integrations',
+      label: 'Bookkeeping connections',
       component: () => import('./views/IntegrationsSettings.vue'),
       minRole: 'admin',
       order: 200,

@@ -69,6 +69,17 @@ const known = computed(() => hasCountryRules(p.value.country));
 const rules = computed(() => (form.value ? rulesFor(form.value.profile) : []));
 const countryName = computed(() => COUNTRIES.find((c) => c.code === p.value.country)?.name ?? p.value.country);
 
+const thisYear = Number(localIsoDay().slice(0, 4));
+/** The start year as the input holds it: '' for none, since a number input cannot hold undefined. */
+const startYear = computed<number | ''>({
+  get: () => p.value.startYear ?? '',
+  set: (v) => {
+    const n = Number(v);
+    if (v === '' || !Number.isInteger(n)) delete p.value.startYear;
+    else p.value.startYear = n;
+  },
+});
+
 const leads = computed(() => normalizeLeadDays(form.value?.reminders.leadDays ?? []));
 const extraLeads = computed(() => leads.value.filter((d) => !REMINDER_PRESETS.some((pr) => pr.days === d)));
 function toggleLead(days: number): void {
@@ -100,6 +111,7 @@ function removeCustom(c: CustomDeadline): void {
 async function save(): Promise<void> {
   const f = form.value!;
   if (f.custom.some((c) => !c.title.trim())) return void (error.value = 'Give each of your own deadlines a name.');
+  if (f.profile.startYear !== undefined && (f.profile.startYear < 1990 || f.profile.startYear > thisYear + 1)) return void (error.value = `The start year must be between 1990 and ${thisYear + 1}.`);
   busy.value = true;
   error.value = '';
   notice.value = '';
@@ -201,11 +213,17 @@ async function save(): Promise<void> {
         <input v-model="p.euSmeScheme" type="checkbox" />
         <span>I use the EU cross-border SME scheme (EX number)<small>: a quarterly turnover report</small></span>
       </label>
+
+      <label class="start">
+        <span>My business started in <small>(optional)</small></span>
+        <input v-model="startYear" type="number" inputmode="numeric" :min="1990" :max="thisYear + 1" :placeholder="String(thisYear)" />
+        <small class="hint">Deadlines count from this year on. Left empty, they count from the day this account was created, so nothing from before shows as missed.</small>
+      </label>
     </section>
 
     <section v-if="rules.length" class="block">
       <h3>Deadlines to follow</h3>
-      <p class="hint">Untick any that do not apply to you.</p>
+      <p class="hint">Only the deadlines your answers above call for are listed. Untick any that still do not apply to you.</p>
       <label v-for="r in rules" :key="r.id" class="check">
         <input type="checkbox" :checked="!form.off.includes(r.id)" @change="toggleRule(r.id)" />
         <span>{{ r.label }}</span>
@@ -298,6 +316,8 @@ label > span, .field > span { font-weight: 500; }
 .check small { color: var(--zfy-muted, #5a6472); }
 .check input { margin-top: .15rem; flex: none; }
 .indent { margin-left: 1.6rem; align-self: flex-start; }
+.start input { width: 7rem; }
+.start > span small { font-weight: 400; color: var(--zfy-muted, #5a6472); }
 .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .chip { min-height: 2.1rem; padding: .25rem .75rem; border-radius: 999px; font-size: .82rem; font-weight: 400; display: inline-flex; align-items: center; gap: .3rem; }
 .chip.on { background: var(--zfy-accent-soft); border-color: var(--zfy-accent); color: var(--zfy-accent-ink); font-weight: 600; }

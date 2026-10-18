@@ -8,7 +8,7 @@ import { sdk } from '../runtime';
  * Payment Bridge, the customer pays on the terminal, and the terminal tells
  * the server the outcome, which the till asks for until it has it. Works
  * from any device - nothing pairs locally. Each account adds its own Poynt
- * app and connects its Nexi business once under Settings → Payments, and
+ * app and connects its Nexi business once under Settings → Card terminal, and
  * each till picks its terminal there.
  */
 
@@ -89,7 +89,7 @@ export const nexiSmartposProvider: PaymentProvider = {
 
   async startPayment(req: PaymentRequest): Promise<PaymentResult> {
     const terminal = await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING);
-    if (!terminal) return { approved: false, provider: 'nexi-smartpos', error: 'No terminal picked for this till - choose one under Settings → Payments.' };
+    if (!terminal) return { approved: false, provider: 'nexi-smartpos', error: 'No terminal picked for this till - choose one under Settings → Card terminal.' };
     const run = { ref: null as string | null, stopped: false };
     current = run;
     try {

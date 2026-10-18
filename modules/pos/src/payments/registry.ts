@@ -32,13 +32,13 @@ export function getProvider(id: PaymentProviderId | undefined): PaymentProvider 
 /**
  * The card terminal a device uses until someone picks one: on a myPOS
  * Carbon/Smart terminal its own card reader (on-device), elsewhere recording
- * cards by hand. A choice made under Settings → Payments always wins.
+ * cards by hand. A choice made under Settings → Card terminal always wins.
  */
 export function defaultProviderId(): PaymentProviderId {
   return hasNativePlugin('CarbonPayment') ? 'mypos-carbon' : 'manual';
 }
 
-/** Makes `id` the card terminal this device uses - what picking it under Settings → Payments does. */
+/** Makes `id` the card terminal this device uses - what picking it under Settings → Card terminal does. */
 export async function setActiveProvider(id: PaymentProviderId): Promise<void> {
   await sdk().config.set('activeProvider', id);
   onActiveProviderChanged(id);

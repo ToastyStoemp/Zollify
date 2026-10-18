@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COUNTRY_CODES } from './countries';
+import { COUNTRY_BY_CODE, COUNTRY_CODES } from './countries';
 import { paidLineTotals } from './charged-lines';
 import type { SalesEvent, Transaction } from './types';
 
@@ -44,7 +44,8 @@ export const VAT_RATES: Record<string, { standard: number; reduced: number[] }> 
   SK: { standard: 23, reduced: [19, 5] },
   SI: { standard: 22, reduced: [9.5, 5] },
   ES: { standard: 21, reduced: [10, 4] },
-  SE: { standard: 25, reduced: [12, 6] },
+  // Books, newspapers and art prints are 6%; 12% is food and hotels - the first reduced rate is what "Reduced" products take, and a seller's reduced goods are nearly always print.
+  SE: { standard: 25, reduced: [6, 12] },
   // Outside the EU, where booths commonly travel.
   CH: { standard: 8.1, reduced: [2.6] },
   LI: { standard: 8.1, reduced: [2.6] },
@@ -102,6 +103,38 @@ export function crossesCustomsBorder(from: string | undefined | null, to: string
   const b = countryCodeOf(to) || (to ?? '').trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(a) || !/^[A-Z]{2}$/.test(b) || a === b) return false;
   return !(EU_COUNTRIES.includes(a) && EU_COUNTRIES.includes(b));
+}
+
+export interface CustomsGuidance {
+  /** 'none' = no papers (same country or EU to EU); 'border' = papers both ways; 'unknown' = a country is missing. */
+  kind: 'none' | 'border' | 'unknown';
+  /** ISO codes, '' when unknown. */
+  from: string;
+  to: string;
+  /** One plain sentence for an event card or the customs hub. */
+  text: string;
+}
+
+/**
+ * What taking stock from home to an event means in customs terms, said
+ * plainly: a seller should not have to know that Denmark to Sweden is
+ * intra-EU, or be asked which country's forms they want. Countries by name
+ * or code.
+ */
+export function customsGuidance(home: string | undefined | null, eventCountry: string | undefined | null): CustomsGuidance {
+  const code = (c: string | undefined | null): string => {
+    const raw = (c ?? '').trim();
+    return countryCodeOf(raw) || (/^[A-Za-z]{2}$/.test(raw) ? raw.toUpperCase() : '');
+  };
+  const from = code(home);
+  const to = code(eventCountry);
+  const name = (c: string): string => COUNTRY_BY_CODE[c] ?? c;
+  if (!from || !to) {
+    return { kind: 'unknown', from, to, text: !from ? 'Set your country under Settings → Business profile to see whether this event needs customs papers.' : "Set the event's country to see whether it needs customs papers." };
+  }
+  if (from === to) return { kind: 'none', from, to, text: 'No customs papers: same country.' };
+  if (!crossesCustomsBorder(from, to)) return { kind: 'none', from, to, text: 'No customs papers: EU to EU.' };
+  return { kind: 'border', from, to, text: `${name(from)} → ${name(to)}: import papers for ${name(to)} and an export declaration from ${name(from)}.` };
 }
 
 /** Which rate a product takes: the country's standard rate, or its reduced rate (books, some art). */
@@ -186,6 +219,11 @@ const HOME_NOTES: Record<string, string> = {
   DE: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.',
   AT: 'Umsatzsteuerbefreit - Kleinunternehmer gem. § 6 Abs. 1 Z 27 UStG',
   FR: 'TVA non applicable, art. 293 B du CGI',
+  // Belgium's wording is bilingual on purpose: a Ghent receipt and a Liège one carry the same line.
+  BE: 'Bijzondere vrijstellingsregeling kleine ondernemingen / Régime particulier de franchise des petites entreprises',
+  NL: 'Vrijgesteld van btw - kleineondernemersregeling (KOR)',
+  IT: 'Operazione senza applicazione dell\'IVA - regime forfettario',
+  ES: 'Operación exenta de IVA - régimen de franquicia',
 };
 const GENERIC_HOME_NOTE = 'VAT exempt - small business scheme';
 const CROSS_BORDER_NOTE = 'VAT exempt under the EU SME scheme';

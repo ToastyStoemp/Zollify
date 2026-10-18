@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SaleTax, Transaction } from '@zollify/shared';
-import { buildSmeReport, previousQuarter, quarterOf, quarterRange, reportCsv, type QuarterRef } from '../report';
+import { buildSmeReport, previousQuarter, quarterOf, quarterRange, reportCsv, schemeApplies, type QuarterRef } from '../report';
 
 const Q3: QuarterRef = { year: 2026, quarter: 3 };
 const inQ3 = new Date(2026, 7, 15, 12).getTime();
@@ -118,8 +118,22 @@ describe('countries with no sales', () => {
 });
 
 describe('reportCsv', () => {
-  it('writes one semicolon row per country', () => {
-    const csv = reportCsv(build([sale(2000, charged('DE', 19))]), (c) => (c === 'DE' ? 'Germany' : c));
-    expect(csv.split('\n')[1]).toBe('Germany;DE;yes;charged;1;EUR;0.00;2000.00;319.33;1680.67');
+  it('writes a header block, then one semicolon row per country', () => {
+    const csv = reportCsv(build([sale(2000, charged('DE', 19))]), (c) => (c === 'DE' ? 'Germany' : c), { businessName: 'Ink; Paper', exNumber: 'DE123EX', generated: new Date(Date.UTC(2026, 9, 18)) });
+    const lines = csv.split('\n');
+    expect(lines.slice(0, 5)).toEqual(['Business;"Ink; Paper"', 'EX number;DE123EX', 'Quarter;Q3 2026', 'Generated;2026-10-18', '']);
+    expect(lines[5]).toBe('Country;Code;EU;Status;Sales;Currency;Exempt gross;Charged gross;VAT;Reported');
+    expect(lines[6]).toBe('Germany;DE;yes;charged;1;EUR;0.00;2000.00;319.33;1680.67');
+    expect(reportCsv(build([]), (c) => c).split('\n').slice(0, 2)).toEqual(['Business;-', 'EX number;-']);
+  });
+});
+
+describe('schemeApplies', () => {
+  it('is due with an EX number or an exemption abroad, not for a Kleinunternehmer at home alone', () => {
+    expect(schemeApplies({ vat: { exemptCountries: ['DE'] } }, 'DE')).toBe(false);
+    expect(schemeApplies({ vat: { exemptCountries: ['DE', 'AT'] } }, 'DE')).toBe(true);
+    expect(schemeApplies({ vat: { exemptCountries: ['DE'], exNumber: 'DE123EX' } }, 'DE')).toBe(true);
+    expect(schemeApplies({ vat: { exemptCountries: ['DE', 'CH'] } }, 'DE')).toBe(false); // Switzerland is not in the scheme
+    expect(schemeApplies(null, 'DE')).toBe(false);
   });
 });

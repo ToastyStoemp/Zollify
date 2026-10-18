@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '@zollify/shared';
-import { RECEIPT_FIELD_DEFAULTS, buildReceiptLines, receiptFields, resolveVatNumber } from '../receipt';
+import { RECEIPT_FIELD_DEFAULTS, buildReceiptLines, paymentLabel, receiptFields, resolveVatNumber, sellerLines } from '../receipt';
 
 /**
  * A sale charged abroad keeps its lines in the booth's book currency and only
@@ -205,5 +205,49 @@ describe('resolveVatNumber', () => {
     expect(resolveVatNumber(artist, 'Netherlands')).toBe('NL123B01');
     expect(resolveVatNumber(artist, 'DE')).toBe('DE999');
     expect(resolveVatNumber(artist, 'France')).toBe('BE0123456789');
+  });
+});
+
+describe('seller block', () => {
+  const artist = { companyName: 'Lena Draws', fullName: 'Lena Hartmann', street: 'Karl-Liebknecht-Str. 12', postCodeCity: '04107 Leipzig', countryOfOrigin: 'Germany', vatNumber: 'DE123456789' };
+
+  it('is the same block the printed copy carries, in order', () => {
+    const block = sellerLines(sale({ currency: 'EUR' }), { artist }).map((s) => s.text);
+    expect(block).toEqual(['Lena Draws', 'Lena Hartmann', 'Karl-Liebknecht-Str. 12', '04107 Leipzig, Germany', 'USt-IdNr.: DE123456789']);
+    const printed = buildReceiptLines(sale({ currency: 'EUR' }), 'Con', { artist, logoB64: '', footerText: '' }).slice(0, block.length).map((l) => l.text);
+    expect(printed).toEqual(block);
+  });
+
+  it('marks the business name as the heading', () => {
+    expect(sellerLines(sale(), { artist })[0]).toEqual({ text: 'Lena Draws', heading: true });
+  });
+
+  it('leaves the VAT number off an exempt sale - the exemption line stands in for it', () => {
+    const block = sellerLines(sale({ tax: { country: 'DE', exempt: true, rates: [null, null], note: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.' } }), { artist }).map((s) => s.text);
+    expect(block.join('\n')).not.toContain('DE123456789');
+    expect(block).toContain('04107 Leipzig, Germany');
+  });
+
+  it('is empty when nothing about the seller is known', () => {
+    expect(sellerLines(sale(), { artist: {} })).toEqual([]);
+  });
+});
+
+describe('payment label', () => {
+  it('names the method, never the terminal driver', () => {
+    expect(paymentLabel({ method: 'card' }, { kind: 'card', provider: 'manual' })).toBe('Card');
+    expect(paymentLabel({ method: 'card' }, { kind: 'card', provider: 'mypos-go2' })).toBe('Card');
+    expect(paymentLabel({ method: 'cash' }, { kind: 'cash', provider: 'manual' })).toBe('Cash');
+    expect(paymentLabel({ method: 'split' }, { kind: 'card', provider: 'sumup' })).toBe('Card');
+  });
+
+  it("keeps the booth's own method name", () => {
+    expect(paymentLabel({ method: 'TWINT' }, { kind: 'card', provider: 'TWINT' })).toBe('TWINT');
+  });
+
+  it('prints "Card" on the paper copy for a card recorded by hand', () => {
+    const lines = text(sale({ method: 'card', payments: [{ kind: 'card', amount: 45, provider: 'manual' }] }));
+    expect(amountOn(lines, 'Card')).toBe('CHF 45.00');
+    expect(lines.join('\n')).not.toContain('manual');
   });
 });

@@ -18,9 +18,11 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
+import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, thresholdDismissKey, tillEventCheck, type ThresholdWarning } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import GettingStarted from '../components/GettingStarted.vue';
+import ThresholdWarnings from '../components/ThresholdWarnings.vue';
+import { useThresholdWarnings } from '../composables/thresholds';
 
 /**
  * Home is the booth's morning glance: where you are selling, how today is
@@ -34,6 +36,39 @@ const account = currentAccount;
 const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Close to or past a small-business threshold: said on Home, where it is seen before the next sale. */
+const { warnings: thresholdWarnings } = useThresholdWarnings();
+/**
+ * Dismissed on Home, per account on this device. A dismissal holds only
+ * while the warning stays the same (thresholdDismissKey): it comes back when
+ * it gets worse, at the next 10%, or in a new year. Settings → VAT and the
+ * SME report keep showing every warning regardless.
+ */
+const dismissedKey = computed(() => `zollify.thresholds.dismissed.${account.value?.accountId ?? ''}`);
+function readDismissed(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(dismissedKey.value) ?? '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+const dismissed = ref(readDismissed());
+watch(dismissedKey, () => (dismissed.value = readDismissed()));
+const thisYear = new Date().getFullYear();
+const homeWarnings = computed(() => thresholdWarnings.value.filter((w) => !dismissed.value.has(thresholdDismissKey(w, thisYear))));
+function dismissWarning(w: ThresholdWarning): void {
+  const key = thresholdDismissKey(w, thisYear);
+  // Keep this year's only, so the list does not grow forever.
+  const next = new Set([...dismissed.value].filter((k) => k.startsWith(`${thisYear}:`)));
+  next.add(key);
+  dismissed.value = next;
+  try {
+    localStorage.setItem(dismissedKey.value, JSON.stringify([...next]));
+  } catch {
+    /* storage blocked - dismissed for this visit only */
+  }
+}
 /** Events, stores or both - what the account runs decides the shortcuts here. */
 const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
 /** Where the active event or store is managed. */
@@ -281,6 +316,8 @@ const syncLine = computed(() => {
     </p>
 
     <div class="grid">
+      <!-- Turnover per country is the owner's business, not a helper's. -->
+      <ThresholdWarnings v-if="isAdmin && homeWarnings.length" class="wide" :warnings="homeWarnings" settings-link dismissible @dismiss="dismissWarning" />
       <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
       <article class="card wide today-card">
@@ -440,6 +477,7 @@ h2 { margin: 0; font-size: 1rem; }
 }
 .card { border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 .card.wide { grid-column: 1 / -1; }
+.grid > .thresholds { grid-column: 1 / -1; }
 .chead { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .sub { color: var(--zfy-muted); font-size: .85rem; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; }
 .sub.warn { color: var(--zfy-warning-ink); }

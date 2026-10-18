@@ -166,6 +166,12 @@ const vatProfileFields = {
   exemptCountries: z.array(z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/)).max(40),
   /** EX identification number, for exempt sales outside the home country. */
   exNumber: z.string().trim().max(40),
+  /**
+   * The business's own small-business thresholds per country (ISO code →
+   * amount in that country's threshold currency), where the built-in figure
+   * (sme-thresholds.ts) is out of date or does not fit them.
+   */
+  thresholds: z.record(z.string().regex(/^[A-Z]{2}$/), z.number().positive().max(1e9)).refine((r) => Object.keys(r).length <= 40),
   /** Overrides the note printed on exempt receipts at home (e.g. the national legal wording). */
   homeNote: z.string().trim().max(200),
   /** Overrides the note printed on exempt receipts in other countries. */
@@ -180,6 +186,8 @@ export const VatProfileSchema = z.object({
   })),
   exemptCountries: vatProfileFields.exemptCountries.default([]),
   exNumber: vatProfileFields.exNumber.default(''),
+  // A bad entry drops the overrides, never the whole VAT profile.
+  thresholds: vatProfileFields.thresholds.catch({}).default({}),
   homeNote: vatProfileFields.homeNote.default(''),
   crossBorderNote: vatProfileFields.crossBorderNote.default(''),
 });

@@ -120,9 +120,21 @@ describe('account profile', () => {
     expect((await put({ homeNote: 'Kleinunternehmer' })).statusCode).toBe(200);
 
     const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
-    expect(profile.vat).toEqual({ exemptCountries: ['DE', 'NL'], exNumber: 'DE123456789EX', homeNote: 'Kleinunternehmer', crossBorderNote: '' });
+    expect(profile.vat).toEqual({ scheme: '', vatNumbers: [], exemptCountries: ['DE', 'NL'], exNumber: 'DE123456789EX', homeNote: 'Kleinunternehmer', crossBorderNote: '' });
 
     expect((await put({ exemptCountries: ['Germany'] })).statusCode).toBe(400);
+  });
+
+  it('keeps the VAT scheme answer and the VAT numbers per country, without touching the exemption', async () => {
+    const put = (vat: unknown) => app.inject({ method: 'PUT', url: '/api/account/profile', headers: auth(), payload: { vat } });
+    expect((await put({ exemptCountries: ['DE'] })).statusCode).toBe(200);
+    expect((await put({ scheme: 'vat', vatNumbers: [{ country: 'nl', number: ' NL123B01 ' }] })).statusCode).toBe(200);
+
+    const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(profile.vat).toMatchObject({ scheme: 'vat', vatNumbers: [{ country: 'NL', number: 'NL123B01' }], exemptCountries: ['DE'] });
+
+    expect((await put({ scheme: 'maybe' })).statusCode).toBe(400);
+    expect((await put({ vatNumbers: [{ country: 'Netherlands', number: 'x' }] })).statusCode).toBe(400);
   });
 
   it('changes only the artist fields sent', async () => {

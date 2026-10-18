@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { ACTION_LABELS, daysBetween, dueIn, leadLabel, localIsoDay, normalizeLeadDays, type TaxDeadline } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import { doneSet, loadState, offline, setDone, state } from '../api';
@@ -16,6 +17,16 @@ const busy = ref<string | null>(null);
 const showDone = ref(false);
 const open = ref<string | null>(null);
 const today = localIsoDay();
+
+// The SME scheme report's figures come from the SME scheme module, when it is on. Linked by
+// route name, as modules never import one another; "Q3 2026" opens that quarter there.
+const router = useRouter();
+const SME_REPORT = 'sme-scheme:index';
+function smeReportLink(d: TaxDeadline): { name: string; query: Record<string, string> } | null {
+  if (d.ruleId !== 'eu.sme-report' || !router.hasRoute(SME_REPORT)) return null;
+  const m = /^Q([1-4]) (\d{4})$/.exec(d.period ?? '');
+  return { name: SME_REPORT, query: m ? { year: m[2]!, quarter: m[1]! } : {} };
+}
 
 onMounted(async () => {
   try {
@@ -102,6 +113,7 @@ const sections = computed(() =>
             </button>
             <div v-if="open === d.id" class="detail">
               <p v-if="d.detail">{{ d.detail }}</p>
+              <router-link v-if="smeReportLink(d)" :to="smeReportLink(d)!" class="figures">Open the figures for {{ d.period }}</router-link>
               <p v-if="d.statutory !== d.due" class="hint">The law says {{ fmtDay(d.statutory) }}; that is not a working day, so it moves to {{ fmtDay(d.due) }}.</p>
             </div>
           </li>
@@ -157,6 +169,7 @@ h2 { margin: 0; font-size: .95rem; }
 .what small { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .detail { grid-column: 2; display: flex; flex-direction: column; gap: .3rem; padding: 0 .2rem .4rem; font-size: .82rem; }
 .detail p { margin: 0; }
+.figures { font-weight: 600; color: var(--zfy-accent-ink); }
 .done .title { color: var(--zfy-muted, #5a6472); text-decoration: line-through; }
 .toggle { align-self: flex-start; display: inline-flex; align-items: center; gap: .3rem; padding-left: 0; font-weight: 600; }
 @media (max-width: 560px) {

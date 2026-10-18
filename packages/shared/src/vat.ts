@@ -113,7 +113,22 @@ export type TaxClass = 'standard' | 'reduced';
  * member state can be exempt in others too; it then gets an identification
  * number with the suffix "EX", which receipts in those countries must show.
  */
+/** A VAT registration in one country. */
+const VatNumberSchema = z.object({
+  country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  number: z.string().trim().min(1).max(40),
+});
+export type VatNumber = z.infer<typeof VatNumberSchema>;
+
 const vatProfileFields = {
+  /**
+   * The answer to setup's first tax question: on a small-business scheme
+   * ('sme'), charging VAT ('vat'), or not answered yet (''). It only decides
+   * what setup asks next; what a sale charges still follows exemptCountries.
+   */
+  scheme: z.enum(['', 'sme', 'vat']),
+  /** VAT registrations per country, for receipts in that country. The profile's own vatId is the default. */
+  vatNumbers: z.array(VatNumberSchema).max(40),
   /** ISO codes of the countries where the booth is exempt (home country included, if so). */
   exemptCountries: z.array(z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/)).max(40),
   /** EX identification number, for exempt sales outside the home country. */
@@ -124,6 +139,12 @@ const vatProfileFields = {
   crossBorderNote: z.string().trim().max(200),
 };
 export const VatProfileSchema = z.object({
+  scheme: vatProfileFields.scheme.catch(''),
+  // One bad row (an old client, a hand edit) drops that row, not the whole VAT profile.
+  vatNumbers: z.array(z.unknown()).max(40).default([]).transform((rows) => rows.flatMap((r) => {
+    const ok = VatNumberSchema.safeParse(r);
+    return ok.success ? [ok.data] : [];
+  })),
   exemptCountries: vatProfileFields.exemptCountries.default([]),
   exNumber: vatProfileFields.exNumber.default(''),
   homeNote: vatProfileFields.homeNote.default(''),
@@ -132,6 +153,20 @@ export const VatProfileSchema = z.object({
 export type VatProfile = z.infer<typeof VatProfileSchema>;
 /** A change to some fields - no defaults, so fields left out stay as they are. */
 export const VatProfileUpdateSchema = z.object(vatProfileFields).partial();
+
+/**
+ * The VAT number for selling in a country: that country's registration when
+ * there is one, otherwise the business's default number. Country by name or code.
+ */
+export function vatNumberFor(
+  profile: { vat?: { vatNumbers?: VatNumber[] }; artist?: { vatId?: string } } | null | undefined,
+  country: string | undefined | null,
+): string {
+  const raw = (country ?? '').trim();
+  const code = /^[A-Za-z]{2}$/.test(raw) ? raw.toUpperCase() : countryCodeOf(raw);
+  const hit = code ? profile?.vat?.vatNumbers?.find((v) => v.country === code) : undefined;
+  return hit?.number ?? profile?.artist?.vatId?.trim() ?? '';
+}
 
 /** Per-event VAT, set on the event form. Absent fields fall back to the country and the business profile. */
 export interface EventVat {

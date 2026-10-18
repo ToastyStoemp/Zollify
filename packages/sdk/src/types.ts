@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction, VatProfile } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -569,6 +569,12 @@ export interface Sdk {
   /** Current account and user. Returns a snapshot; use `onAccountChange` to react. */
   account(): AccountSnapshot | null;
   onAccountChange(handler: (account: AccountSnapshot | null) => void): Unsubscribe;
+  /**
+   * Saves part of the account's VAT profile (scheme, VAT numbers, exemptions)
+   * and adopts the server's view, so `account()` shows it straight after.
+   * Owners and admins only; the server refuses anyone else.
+   */
+  updateVatProfile(update: Partial<VatProfile>): Promise<void>;
 
   /**
    * A shared till: several people unlock this device with their own PIN.

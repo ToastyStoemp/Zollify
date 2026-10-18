@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TxItem } from '../types';
-import { countryCodeOf, crossesCustomsBorder, resolveEventVat, saleTaxFor, vatBreakdown, vatIdLabel, type EventVat } from '../vat';
+import { VatProfileSchema, countryCodeOf, crossesCustomsBorder, resolveEventVat, saleTaxFor, vatBreakdown, vatIdLabel, vatNumberFor, type EventVat } from '../vat';
 
 const ev = (country: string, vat?: EventVat) => ({ venue: { country }, vat });
 const profile = (exemptCountries: string[] = [], extra: Record<string, string> = {}) => ({
@@ -134,5 +134,25 @@ describe('crossesCustomsBorder', () => {
   it('says no when a country is unknown', () => {
     expect(crossesCustomsBorder('', 'Switzerland')).toBe(false);
     expect(crossesCustomsBorder('Germany', undefined)).toBe(false);
+  });
+});
+
+describe('VAT profile: scheme and VAT numbers', () => {
+  it('defaults to unanswered with no numbers, and keeps older profiles valid', () => {
+    expect(VatProfileSchema.parse({ exemptCountries: ['DE'] })).toMatchObject({ scheme: '', vatNumbers: [], exemptCountries: ['DE'] });
+  });
+
+  it('drops a broken VAT number row instead of the whole profile', () => {
+    const p = VatProfileSchema.parse({ scheme: 'vat', vatNumbers: [{ country: 'nl', number: ' NL123B01 ' }, { country: 'Germany', number: 'x' }, null] });
+    expect(p.vatNumbers).toEqual([{ country: 'NL', number: 'NL123B01' }]);
+    expect(VatProfileSchema.parse({ scheme: 'maybe' }).scheme).toBe('');
+  });
+
+  it('picks the country’s own number, else the default', () => {
+    const profile = { vat: { vatNumbers: [{ country: 'NL', number: 'NL123B01' }] }, artist: { vatId: 'BE0123456789' } };
+    expect(vatNumberFor(profile, 'Netherlands')).toBe('NL123B01');
+    expect(vatNumberFor(profile, 'nl')).toBe('NL123B01');
+    expect(vatNumberFor(profile, 'Germany')).toBe('BE0123456789');
+    expect(vatNumberFor(null, 'DE')).toBe('');
   });
 });

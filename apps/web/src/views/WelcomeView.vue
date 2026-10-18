@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -52,6 +52,14 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
     forWhom: 'Belgian B2B invoices as Peppol e-invoices. Takes your name, address, VAT and enterprise number from the first step; you only add the access point and payment details.',
     recommended: false,
   },
+  'sme-scheme': {
+    forWhom: 'For small businesses exempt from VAT: where you are exempt, the EX number for the EU SME scheme, and a quarterly report of sales per country.',
+    recommended: false,
+  },
+  'tax-deadlines': {
+    forWhom: 'Reminders before each filing and payment date, worked out from your VAT answers here - Germany in full, the EU SME scheme report anywhere in the EU, and your own dates.',
+    recommended: false,
+  },
   economic: { forWhom: 'Danish books: each day of sales goes into your e-conomic journal with its VAT codes, renters’ shares kept apart, for your accountant to post.', recommended: false },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
   commissions: { forWhom: 'For artists taking custom work: save the customer, take a deposit at the till, and give them a QR code to follow progress.', recommended: false },
@@ -87,6 +95,18 @@ const runsStores = computed(() => runs.value !== 'events');
 // Preselected, but still a choice the owner sees and confirms with Continue; skipping setup shares nothing.
 // Applied with the modules, since the pool lives in Public events.
 const shareEvents = ref(true);
+// The first tax question, kept to one tap. Yes switches on the SME module, which asks where
+// it applies in its own step; No puts "Add your VAT numbers" on the last page.
+type Scheme = '' | 'sme' | 'vat';
+const SCHEMES: { id: Scheme; title: string; text: string }[] = [
+  { id: 'sme', title: 'Yes', text: 'I am exempt from VAT below a turnover threshold.' },
+  { id: 'vat', title: 'No, I charge VAT', text: 'My receipts show VAT and my VAT number.' },
+  { id: '', title: 'Not sure yet', text: 'Decide later under Settings → VAT.' },
+];
+const storedVat = account.value?.profile.vat;
+const scheme = ref<Scheme>(storedVat?.scheme || (storedVat?.exemptCountries?.length ? 'sme' : ''));
+/** Re-running setup and now charging VAT: the exemption set earlier ends, or sales would keep printing it. */
+const endsExemption = computed(() => scheme.value === 'vat' && (storedVat?.exemptCountries?.length ?? 0) > 0);
 const name = ref(account.value?.accountName ?? '');
 const startArtist = account.value?.profile.artist ?? emptyProfile().artist;
 // The contact email starts as the one they signed in with - nearly always the
@@ -108,6 +128,7 @@ async function saveWho(): Promise<void> {
     await updateProfile({
       sells: { events: runsEvents.value, stores: runsStores.value },
       artist: artist.value,
+      vat: { scheme: scheme.value, ...(endsExemption.value ? { exemptCountries: [] } : {}) },
       links: { ...links.value },
       ...(/^[A-Za-z]{3}$/.test(currency.value.trim()) ? { defaultCurrency: currency.value.trim().toUpperCase() } : {}),
       ...(canRename.value && name.value.trim() ? { name: name.value.trim() } : {}),
@@ -118,6 +139,7 @@ async function saveWho(): Promise<void> {
     if (runsStores.value && modules.value.some((m) => m.moduleId === 'consignment')) next.add('consignment');
     if (!runsEvents.value) for (const id of ['customs-hub', 'customs-ch', 'customs-de']) next.delete(id);
     if (runsEvents.value && shareEvents.value && modules.value.some((m) => m.moduleId === 'public-events')) next.add('public-events');
+    if (scheme.value === 'sme' && modules.value.some((m) => m.moduleId === 'sme-scheme')) next.add('sme-scheme');
     wanted.value = next;
     step.value = 2;
   } catch (err) {
@@ -195,7 +217,11 @@ onMounted(async () => {
 
 function guideFor(mod: AvailableModule) {
   const g = GUIDE[mod.moduleId] ?? { forWhom: mod.description ?? '', recommended: false };
-  return mod.moduleId === 'consignment' ? { ...g, recommended: runsStores.value } : g;
+  if (mod.moduleId === 'consignment') return { ...g, recommended: runsStores.value };
+  if (mod.moduleId === 'sme-scheme') return { ...g, recommended: scheme.value === 'sme' };
+  // On the scheme there is a quarterly report to file; in Germany, a full calendar of returns.
+  if (mod.moduleId === 'tax-deadlines') return { ...g, recommended: scheme.value === 'sme' || countryCodeOf(artist.value.countryOfOrigin) === 'DE' };
+  return g;
 }
 
 // ── The shared pool: pick the next convention instead of typing it ──────────
@@ -263,7 +289,7 @@ const GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Selling', ids: ['pos', 'price-cards', 'label-printer', 'commissions'] },
   { title: 'Events', ids: ['public-events', 'convention-checklist', 'customs'] },
   { title: 'Stores', ids: ['consignment', 'consignment-artist', 'multi-storage'] },
-  { title: 'Books and stock', ids: ['tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync'] },
+  { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync'] },
   { title: 'Moving in', ids: ['migration'] },
 ];
 const CUSTOMS: { id: string; label: string }[] = [
@@ -348,6 +374,10 @@ const hasProducts = computed(() => allProducts.value.length > 0);
 const hasEvents = computed(() => visibleEvents.value.some((e) => !isStore(e) && !e.deletedAt));
 const hasStores = computed(() => visibleEvents.value.some((e) => isStore(e) && !e.deletedAt));
 const paymentsAsked = computed(() => moduleSteps.value.some((m) => m.id === 'pos.payments'));
+/** Charging VAT and no number per country yet: worth a line on the last page. */
+const vatNumbersMissing = computed(() => scheme.value === 'vat' && !(account.value?.profile.vat?.vatNumbers ?? []).length);
+/** Said yes to a scheme but the module that asks where is not on (unpublished here, or unticked). */
+const smeNotAsked = computed(() => scheme.value === 'sme' && !moduleSteps.value.some((m) => m.id === 'sme-scheme.exemption') && !(account.value?.profile.vat?.exemptCountries ?? []).length);
 /** The Android app this server hands out, for card readers and the till on a tablet. Null when none is published, or already in it. */
 const androidApp = ref<{ url: string } | null>(null);
 onMounted(async () => {
@@ -417,6 +447,16 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <strong>Yes, share my events</strong>
         </label>
       </fieldset>
+
+      <fieldset class="runs">
+        <legend>Are you on a small-business VAT scheme?</legend>
+        <label v-for="o in SCHEMES" :key="o.id || 'unsure'" :class="{ on: scheme === o.id }">
+          <input v-model="scheme" type="radio" name="scheme" :value="o.id" />
+          <strong>{{ o.title }}</strong>
+          <span>{{ o.text }}</span>
+        </label>
+      </fieldset>
+      <p v-if="endsExemption" class="lede small warn">You are set as exempt in {{ storedVat!.exemptCountries.join(', ') }}. Continuing with "No" ends that - new sales there charge VAT.</p>
 
       <p v-if="guessed" class="lede small">Country and currency are a guess from this device's settings - change them if they are wrong.</p>
       <ArtistForm v-model="artist" v-model:links="links" v-model:name="name" v-model:currency="currency" :can-rename="canRename" compact :show-eori="runsEvents" />
@@ -554,6 +594,16 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
           <span>Each shop sells through the till with its own stock on the shelves.</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'stores' })">Open Stores</button>
         </li>
+        <li v-if="vatNumbersMissing">
+          <strong>Add your VAT numbers</strong>
+          <span>One for each country you are registered in. Receipts there print it; elsewhere they print the number from your business details.</span>
+          <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.vat' } })">Open VAT</button>
+        </li>
+        <li v-if="smeNotAsked">
+          <strong>Set where you are exempt</strong>
+          <span>Until you do, every sale charges VAT. Your EX number goes in the same place.</span>
+          <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.vat' } })">Open VAT</button>
+        </li>
         <li v-if="sellingOn && !paymentsAsked">
           <strong>Pick how you take payment</strong>
           <span>Cash and an external card terminal work out of the box; wired terminals live under Settings → Payments.</span>
@@ -604,6 +654,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
 .pool-name { flex: 1; display: flex; flex-direction: column; gap: .1rem; min-width: 0; }
 .pool-name small { color: var(--zfy-muted); font-size: .8rem; }
 .lede.ok { color: var(--zfy-accent-ink); }
+.lede.warn { color: var(--zfy-warning-ink); }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; counter-reset: step; }
 .steps li { display: flex; align-items: center; gap: .4rem; font-size: .8rem; color: var(--zfy-faint); }
 .steps li::before { counter-increment: step; content: counter(step); display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--zfy-line); font-variant-numeric: tabular-nums; }

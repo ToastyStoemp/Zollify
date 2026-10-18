@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { allProducts, currentAccount, inventoryRows, recentTransactions, visibleEvents } from '@zollify/platform';
 import { isStore, sellsAt } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
+import { contributions } from '../boot';
 
 /**
  * Getting started, on Home: the few things a new business does before its
@@ -35,6 +36,7 @@ const steps = computed<Step[]>(() => {
       to: { name: 'settings', query: { panel: 'core.profile' } },
       action: 'Add details',
     },
+    taxStep(),
     {
       id: 'products',
       title: 'Add your products',
@@ -69,6 +71,45 @@ const steps = computed<Step[]>(() => {
   });
   return list;
 });
+
+/**
+ * VAT, by the answer to setup's scheme question: on a scheme, done once the
+ * exempt countries are set (in the SME module when it is on); charging VAT,
+ * done once there is a VAT number; unanswered, asks the question first.
+ */
+function taxStep(): Step {
+  const vat = account.value?.profile.vat;
+  const scheme = vat?.scheme || (vat?.exemptCountries?.length ? 'sme' : '');
+  if (scheme === 'sme') {
+    const smeOn = contributions.settingsFor(account.value?.role ?? 'member').some((p) => p.moduleId === 'sme-scheme');
+    return {
+      id: 'tax',
+      title: 'Set where you are exempt',
+      text: 'Your small-business exemption and EX number - until then every sale charges VAT.',
+      done: Boolean(vat?.exemptCountries?.length),
+      to: { name: 'settings', query: { panel: smeOn ? 'sme-scheme.exemption' : 'core.vat' } },
+      action: 'Set up',
+    };
+  }
+  if (scheme === 'vat') {
+    return {
+      id: 'tax',
+      title: 'Add your VAT numbers',
+      text: 'One per country you are registered in - receipts there print it.',
+      done: Boolean(vat?.vatNumbers?.length || account.value?.profile.artist.vatId?.trim()),
+      to: { name: 'settings', query: { panel: 'core.vat' } },
+      action: 'Add',
+    };
+  }
+  return {
+    id: 'tax',
+    title: 'How do you handle VAT?',
+    text: 'Small-business scheme, or charging VAT - one question.',
+    done: false,
+    to: { name: 'settings', query: { panel: 'core.vat' } },
+    action: 'Answer',
+  };
+}
 
 const doneCount = computed(() => steps.value.filter((s) => s.done).length);
 const hideKey = computed(() => `zollify.getting-started.hidden.${account.value?.accountId ?? ''}`);

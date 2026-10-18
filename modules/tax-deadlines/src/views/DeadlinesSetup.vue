@@ -16,6 +16,8 @@ import {
 } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import { loadState, saveSettings } from '../api';
+import { fromBusinessProfile, vatMismatch } from '../from-profile';
+import { sdk } from '../runtime';
 
 /**
  * The tax setup the deadlines are worked out from, how early to be reminded,
@@ -50,7 +52,8 @@ const zones = (() => {
 onMounted(async () => {
   try {
     const s = (await loadState()).settings;
-    form.value = clone(s.configured ? s : { ...s, reminders: { ...s.reminders, timeZone: deviceZone } });
+    // Never set up yet: start from what the business already said (country, VAT scheme, EX number).
+    form.value = clone(s.configured ? s : { ...s, profile: fromBusinessProfile(s.profile, sdk().account()?.profile), reminders: { ...s.reminders, timeZone: deviceZone } });
   } catch {
     form.value = { ...defaultTaxDeadlineSettings(), reminders: { ...defaultTaxDeadlineSettings().reminders, timeZone: deviceZone } };
     error.value = 'Could not load your settings; saving will start fresh.';
@@ -58,6 +61,8 @@ onMounted(async () => {
 });
 
 const p = computed(() => form.value!.profile);
+/** The deadlines' VAT status disagrees with Settings → VAT: say so, the reminders would be for the wrong returns. */
+const mismatch = computed(() => (form.value ? vatMismatch(form.value.profile, sdk().account()?.profile) : null));
 const isDE = computed(() => p.value.country === 'DE');
 const inEU = computed(() => EU_COUNTRIES.includes(p.value.country));
 const known = computed(() => hasCountryRules(p.value.country));
@@ -145,6 +150,7 @@ async function save(): Promise<void> {
         <Icon name="alert-triangle" :size="14" />
         Zollify knows Germany's tax calendar so far. For {{ countryName }} you get {{ inEU ? 'the EU SME scheme report and ' : '' }}the deadlines you add below.
       </p>
+      <p v-if="mismatch" class="note"><Icon name="alert-triangle" :size="14" /> {{ mismatch }}</p>
 
       <template v-if="isDE">
         <div class="field">

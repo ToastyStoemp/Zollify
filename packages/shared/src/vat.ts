@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { COUNTRY_CODES } from './countries';
+import { COUNTRY_BY_CODE, COUNTRY_CODES } from './countries';
 import { paidLineTotals } from './charged-lines';
 import type { SalesEvent, Transaction } from './types';
 
@@ -103,6 +103,38 @@ export function crossesCustomsBorder(from: string | undefined | null, to: string
   const b = countryCodeOf(to) || (to ?? '').trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(a) || !/^[A-Z]{2}$/.test(b) || a === b) return false;
   return !(EU_COUNTRIES.includes(a) && EU_COUNTRIES.includes(b));
+}
+
+export interface CustomsGuidance {
+  /** 'none' = no papers (same country or EU to EU); 'border' = papers both ways; 'unknown' = a country is missing. */
+  kind: 'none' | 'border' | 'unknown';
+  /** ISO codes, '' when unknown. */
+  from: string;
+  to: string;
+  /** One plain sentence for an event card or the customs hub. */
+  text: string;
+}
+
+/**
+ * What taking stock from home to an event means in customs terms, said
+ * plainly: a seller should not have to know that Denmark to Sweden is
+ * intra-EU, or be asked which country's forms they want. Countries by name
+ * or code.
+ */
+export function customsGuidance(home: string | undefined | null, eventCountry: string | undefined | null): CustomsGuidance {
+  const code = (c: string | undefined | null): string => {
+    const raw = (c ?? '').trim();
+    return countryCodeOf(raw) || (/^[A-Za-z]{2}$/.test(raw) ? raw.toUpperCase() : '');
+  };
+  const from = code(home);
+  const to = code(eventCountry);
+  const name = (c: string): string => COUNTRY_BY_CODE[c] ?? c;
+  if (!from || !to) {
+    return { kind: 'unknown', from, to, text: !from ? 'Set your country under Settings → Business profile to see whether this event needs customs papers.' : "Set the event's country to see whether it needs customs papers." };
+  }
+  if (from === to) return { kind: 'none', from, to, text: 'No customs papers: same country.' };
+  if (!crossesCustomsBorder(from, to)) return { kind: 'none', from, to, text: 'No customs papers: EU to EU.' };
+  return { kind: 'border', from, to, text: `${name(from)} → ${name(to)}: import papers for ${name(to)} and an export declaration from ${name(from)}.` };
 }
 
 /** Which rate a product takes: the country's standard rate, or its reduced rate (books, some art). */

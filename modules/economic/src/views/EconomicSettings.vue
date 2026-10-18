@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { EconomicSettingsSchema, type EconomicSettings } from '@zollify/shared';
 import { errorText, loadSettings, saveGrant, saveSettings, testConnection, type Connection } from '../api';
 
@@ -15,14 +16,23 @@ const vatRows = ref<{ rate: string; code: string }[]>([]);
 const error = ref<string | null>(null);
 const ok = ref<string | null>(null);
 
-const ACCOUNTS: { key: keyof EconomicSettings['accounts']; label: string; hint: string; agency?: boolean }[] = [
-  { key: 'sales', label: 'Sales', hint: 'Your own goods' },
-  { key: 'rent', label: 'Shelf rent', hint: 'Space rent taken at the till, with VAT' },
-  { key: 'commission', label: 'Commission', hint: "Your share of renters' sales", agency: true },
-  { key: 'renters', label: 'Owed to renters', hint: 'Liability until paid out', agency: true },
-  { key: 'cash', label: 'Cash', hint: 'Till cash' },
-  { key: 'card', label: 'Card', hint: 'Card takings, before settlement' },
+/**
+ * Renters' accounts (shelf rent, commission, owed to renters) only mean
+ * something to a store that consigns other people's goods - a shop selling
+ * its own stock sees Sales, Cash and Card. The consignment module being on is
+ * what says which kind of store this is.
+ */
+const router = useRouter();
+const consignmentOn = computed(() => router.hasRoute('consignment:index'));
+const ACCOUNTS: { key: keyof EconomicSettings['accounts']; label: string; hint: string; placeholder: string; renters?: boolean; agency?: boolean }[] = [
+  { key: 'sales', label: 'Sales', hint: 'Your own goods', placeholder: 'e.g. 1010' },
+  { key: 'rent', label: 'Shelf rent', hint: 'Space rent taken at the till, with VAT', placeholder: 'account number', renters: true },
+  { key: 'commission', label: 'Commission', hint: "Your share of renters' sales", placeholder: 'account number', renters: true, agency: true },
+  { key: 'renters', label: 'Owed to renters', hint: 'Liability until paid out', placeholder: 'account number', renters: true, agency: true },
+  { key: 'cash', label: 'Cash', hint: 'Till cash', placeholder: 'account number' },
+  { key: 'card', label: 'Card', hint: 'Card takings, before settlement', placeholder: 'account number' },
 ];
+const shownAccounts = computed(() => ACCOUNTS.filter((a) => (!a.renters || consignmentOn.value) && (!a.agency || settings.value.consignment === 'agency')));
 
 function take(res: { settings: EconomicSettings } & Connection): void {
   const { settings: s, ...c } = res;
@@ -77,25 +87,29 @@ async function disconnect(): Promise<void> {
     <p v-if="ok" class="ok">{{ ok }}</p>
 
     <h3>Agreement</h3>
-    <p v-if="conn && !conn.server" class="error">This server is not registered with e-conomic yet.</p>
+    <p v-if="conn && !conn.server" class="error">This server is not registered with e-conomic yet - whoever runs it has to add Zollify's e-conomic app secret before any agreement can connect.</p>
     <p v-if="conn?.grant" class="ok">An agreement is connected.</p>
+    <p class="hint">The agreement grant token is what e-conomic hands you when you approve an app for your agreement: it comes from your e-conomic agreement's app settings, where the Zollify app is listed. Paste it here; it is kept encrypted and never shown again. Your accountant or e-conomic support can help if you cannot find it.</p>
     <div class="row">
       <label class="grow"><span>Agreement grant token{{ conn?.grant ? ' (paste a new one to replace it)' : '' }}</span><input v-model="token" type="password" autocomplete="off" /></label>
       <button type="button" class="primary" :disabled="token.trim().length < 10" @click="connect">Connect</button>
       <button v-if="conn?.grant" type="button" class="quiet" @click="disconnect">Disconnect</button>
     </div>
 
-    <h3>Renters' goods</h3>
+    <h3 v-if="consignmentOn">Renters' goods</h3>
+    <template v-if="consignmentOn">
     <label class="check"><input v-model="settings.consignment" type="radio" value="agency" /> <span><strong>As agent (formidler)</strong> - only your commission is revenue, with VAT; the renter's share is owed to them</span></label>
     <label class="check"><input v-model="settings.consignment" type="radio" value="commission" /> <span><strong>Commission sale (kommissionssalg)</strong> - you sell in your own name: the full price is revenue, with VAT</span></label>
     <p class="hint">Ask your accountant which one applies to you.</p>
+    </template>
 
     <h3>Accounts</h3>
+    <p class="hint">Account numbers from your chart of accounts (kontoplan) in e-conomic - your accountant knows them.</p>
     <div class="grid">
       <label><span>Journal number</span><input v-model.number="settings.journalNumber" type="number" min="1" /></label>
-      <label v-for="a in ACCOUNTS.filter((a) => !a.agency || settings.consignment === 'agency')" :key="a.key">
+      <label v-for="a in shownAccounts" :key="a.key">
         <span>{{ a.label }} <small>{{ a.hint }}</small></span>
-        <input v-model.number="settings.accounts[a.key]" type="number" min="1" />
+        <input v-model.number="settings.accounts[a.key]" type="number" min="1" :placeholder="a.placeholder" />
       </label>
     </div>
 

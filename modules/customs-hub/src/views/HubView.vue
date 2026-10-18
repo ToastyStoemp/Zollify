@@ -2,11 +2,14 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { collectBundleProviders, type CustomsPhase } from '@zollify/customs-core';
+import { customsGuidance } from '@zollify/shared';
 import { htmlDocsToPdf, Icon } from '@zollify/ui';
 import { sdk } from '../runtime';
 
 interface CountryCard {
   key: string;
+  /** ISO code of the country whose paperwork this module produces. */
+  code: string;
   flag: string;
   title: string;
   description: string;
@@ -18,6 +21,7 @@ interface CountryCard {
 const COUNTRIES: CountryCard[] = [
   {
     key: 'ch',
+    code: 'CH',
     flag: '🇨🇭',
     title: 'Switzerland',
     description: 'e-dec XML, Forms 11.74 and 11.87, sold/return goods lists, proforma invoices.',
@@ -27,6 +31,7 @@ const COUNTRIES: CountryCard[] = [
   },
   {
     key: 'de',
+    code: 'DE',
     flag: '🇩🇪',
     title: 'Germany',
     description: 'Export/re-import packing lists, DEXPDF XML, IAA-Plus filing sheet, proforma invoice.',
@@ -46,6 +51,22 @@ const countries = computed(() => COUNTRIES.filter((c) => router.hasRoute(c.index
  */
 const eventId = computed(() => (typeof route.query.event === 'string' ? route.query.event : null));
 const event = computed(() => (eventId.value ? sdk().data.events.get(eventId.value) ?? null : null));
+
+/**
+ * Worked out from the business's country and the event's, so the page tells
+ * the seller what applies instead of asking "which country's paperwork?":
+ * same country or EU to EU means none; otherwise the modules for the two
+ * countries on that border come first, the rest are listed below.
+ */
+const guidance = computed(() => (event.value ? customsGuidance(sdk().account()?.profile.artist.countryOfOrigin, event.value.venue?.country) : null));
+const relevant = computed(() => {
+  const g = guidance.value;
+  if (!g || g.kind !== 'border') return [] as CountryCard[];
+  // Liechtenstein shares Switzerland's customs territory, so the Swiss module covers it.
+  const side = (c: string): string => (c === 'LI' ? 'CH' : c);
+  return countries.value.filter((c) => c.code === side(g.from) || c.code === side(g.to));
+});
+const others = computed(() => (guidance.value ? countries.value.filter((c) => !relevant.value.includes(c)) : countries.value));
 
 function openTarget(c: CountryCard) {
   return eventId.value && router.hasRoute(c.documentsRoute)
@@ -112,9 +133,12 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
 <template>
   <section class="page customs-hub">
     <header><h1>Customs</h1></header>
-    <p v-if="eventId" class="lede">
-      Which country's paperwork do you need<template v-if="event"> for <strong>{{ event.name }}</strong></template>?
-    </p>
+    <template v-if="guidance && event">
+      <p :class="['lede', 'guidance', guidance.kind]"><strong>{{ event.name }}</strong> - {{ guidance.text }}</p>
+      <p v-if="guidance.kind === 'none'" class="lede">You can still generate packing lists and proforma invoices below if an organiser asks for them.</p>
+      <p v-else-if="guidance.kind === 'border' && !relevant.length && countries.length" class="lede">No module for that border is on; the installed ones are listed below.</p>
+    </template>
+    <p v-else-if="eventId" class="lede">Which country's paperwork do you need?</p>
     <p v-else class="lede">Pick a country to open its events and generate paperwork, or jump to its declarant settings.</p>
 
     <p v-if="countries.length === 0" class="empty">
@@ -156,8 +180,20 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
       </div>
     </article>
 
-    <div v-if="countries.length" class="cards">
-      <article v-for="c in countries" :key="c.key" class="card">
+    <div v-if="relevant.length" class="cards">
+      <article v-for="c in relevant" :key="c.key" class="card picked">
+        <div class="flag">{{ c.flag }}</div>
+        <h2>{{ c.title }}</h2>
+        <p class="desc">{{ c.description }}</p>
+        <div class="actions">
+          <router-link :to="openTarget(c)" class="primary">Open documents</router-link>
+          <router-link :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
+        </div>
+      </article>
+    </div>
+    <h2 v-if="relevant.length && others.length" class="others">Other country modules</h2>
+    <div v-if="others.length" class="cards">
+      <article v-for="c in others" :key="c.key" class="card">
         <div class="flag">{{ c.flag }}</div>
         <h2>{{ c.title }}</h2>
         <p class="desc">{{ c.description }}</p>
@@ -188,6 +224,10 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
 .secondary { border: 1px solid var(--zfy-line, #d6dde4); color: inherit; }
 .secondary:hover { border-color: var(--zfy-accent, #0e7c66); }
 .export { margin-bottom: 1rem; }
+.guidance.none { color: var(--zfy-accent-ink, #0a5a4a); }
+.guidance.border { color: var(--zfy-warning-ink, #8a5a1e); }
+.card.picked { border-color: var(--zfy-accent, #0e7c66); box-shadow: 0 0 0 1px var(--zfy-accent, #0e7c66); }
+.others { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; color: var(--zfy-muted, #5a6472); margin: 1rem 0 .5rem; }
 .pick { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; max-width: 22rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; }
 .btn-primary { display: inline-flex; align-items: center; gap: .4rem; background: var(--zfy-accent, #0e7c66); border-color: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); }

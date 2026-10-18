@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, currencyOf, customsGuidance, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -74,9 +74,21 @@ const baseCurrency = computed(() => account.value?.profile.defaultCurrency ?? 'C
 const error = ref<string | null>(null);
 
 const hasRoute = (name: string): boolean => router.hasRoute(name);
-// One Customs button per event; the hub then asks which country's paperwork.
+// One Customs button per event; the hub opens the paperwork for the border being crossed.
 const customsOn = (): boolean =>
   hasRoute('customs-hub:index') && (hasRoute('customs-ch:documents') || hasRoute('customs-de:documents'));
+/**
+ * Customs in one line, from home country and event country: "No customs
+ * papers: EU to EU", or which direction the border is crossed. The app knows
+ * both countries, so the seller is told rather than asked.
+ */
+const homeCountry = computed(() => account.value?.profile.artist.countryOfOrigin ?? '');
+const customsNote = (e: SalesEvent): string => {
+  if (isStore(e) || !e.venue?.country) return '';
+  const g = customsGuidance(homeCountry.value, e.venue.country);
+  return g.kind === 'unknown' ? '' : g.text;
+};
+const formCustoms = computed(() => (editKind.value === 'event' && form.country.trim() ? customsGuidance(homeCountry.value, form.country) : null));
 
 // Sort key = the event's date; undated events sort last.
 const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '￿';
@@ -452,6 +464,24 @@ async function fetchRate(): Promise<void> {
   form.exchangeRate = String(rate);
 }
 
+/**
+ * The event country's currency when it differs from the books' - Sweden
+ * sells in SEK while a Danish account books in DKK. Offered, not imposed: a
+ * convention may well take euros at the door.
+ */
+const suggestedCurrency = computed(() => {
+  const code = countryCodeOf(form.country);
+  const cur = code ? currencyOf(code) : '';
+  return cur && cur !== baseCurrency.value && cur !== form.localCurrency.trim().toUpperCase() ? cur : '';
+});
+async function useSuggestedCurrency(): Promise<void> {
+  form.localCurrency = suggestedCurrency.value;
+  form.exchangeRate = '';
+  await fetchRate();
+}
+/** Whether a saved event converts but has no usable rate yet - the till cannot charge in its currency until one is entered. */
+const missingRate = (e: SalesEvent): boolean => Boolean(e.localCurrency) && !(e.exchangeRate != null && e.exchangeRate > 0);
+
 const localExample = computed(() => {
   const rate = parseFloat(form.exchangeRate);
   if (!form.localCurrency || !(rate > 0)) return '';
@@ -471,7 +501,11 @@ async function save(): Promise<void> {
   const existing = editId.value ? visibleEvents.value.find((e) => e.id === editId.value) : undefined;
   const local = form.localCurrency.trim().toUpperCase();
   const rate = parseFloat(form.exchangeRate);
-  const converting = Boolean(local) && Number.isFinite(rate) && rate > 0;
+  const hasRate = Number.isFinite(rate) && rate > 0;
+  // A currency without a rate used to be dropped on save without a word (the
+  // rate fetch had failed and the seller pressed Save anyway). Keep it and
+  // say so on the card; the till asks for the rate before it converts.
+  const converting = Boolean(local);
   const pricing = !existing && pricesCarry.value && pricesSource.value ? eventPricing(pricesSource.value) : {};
   const event: SalesEvent = {
     ...existing,
@@ -495,7 +529,7 @@ async function save(): Promise<void> {
     boothLayout: !existing && !store ? carriedLayout.value : existing?.boothLayout,
     currency: baseCurrency.value,
     localCurrency: converting ? local : undefined,
-    exchangeRate: converting ? rate : undefined,
+    exchangeRate: converting && hasRate ? rate : undefined,
     roundingIncrement: Number(form.roundingIncrement) || 0,
     vat: formVat(),
     // A store has no dates to wait for, so it opens as soon as it exists.
@@ -524,16 +558,20 @@ async function save(): Promise<void> {
       </div>
     </header>
 
-    <details v-if="canEdit && !storesPage" class="auto" :open="autoEventSettings.open || autoEventSettings.close">
-      <summary>Automatic: {{ autoEventSettings.open && autoEventSettings.close ? 'open and close by date' : autoEventSettings.open ? 'open by date' : autoEventSettings.close ? 'close by date' : 'off' }}</summary>
-      <label class="check"><input type="checkbox" :checked="autoEventSettings.open" @change="toggleAuto('open', ($event.target as HTMLInputElement).checked)" /> <span>Open each event on its first day, and switch the till to it when it is the only one running</span></label>
-      <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
-      <p class="hint">For the whole account. The server checks every hour, at five past, whether or not a device is on: an event opens in the first hour of its first day where it is held, and closes in the first hour of the day after its last. In a country with several time zones it goes by the westernmost one, so nothing opens or closes early. Tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
-    </details>
+    <!-- Account-wide switches few sellers ever touch, behind one plain-language disclosure. -->
     <details v-if="canEdit && !storesPage" class="auto">
-      <summary>Sell 🔒: {{ sellLockSettings.allowForce ? 'owners and admins can force sales' : 'no forcing' }}</summary>
-      <label class="check"><input type="checkbox" :checked="sellLockSettings.allowForce" @change="guard(() => setSellLockSettings({ allowForce: ($event.target as HTMLInputElement).checked }))" /> <span>Let owners and admins force sales at an event marked Sell 🔒</span></label>
-      <p class="hint">An event is marked Sell 🔒 once another event that took over its leftovers opens: the till stops selling there, so nothing comes out of the next event's box. Forcing is off by default.</p>
+      <summary>Advanced</summary>
+      <details class="auto inner" :open="autoEventSettings.open || autoEventSettings.close">
+        <summary>Open and close events by their dates: {{ autoEventSettings.open && autoEventSettings.close ? 'on' : autoEventSettings.open ? 'open only' : autoEventSettings.close ? 'close only' : 'off' }}</summary>
+        <label class="check"><input type="checkbox" :checked="autoEventSettings.open" @change="toggleAuto('open', ($event.target as HTMLInputElement).checked)" /> <span>Open each event on its first day, and switch the till to it when it is the only one running</span></label>
+        <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
+        <p class="hint">For the whole account. The server checks every hour, at five past, whether or not a device is on: an event opens in the first hour of its first day where it is held, and closes in the first hour of the day after its last. In a country with several time zones it goes by the westernmost one, so nothing opens or closes early. Tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
+      </details>
+      <details class="auto inner">
+        <summary>Force-selling at a locked event: {{ sellLockSettings.allowForce ? 'on' : 'off' }}</summary>
+        <label class="check"><input type="checkbox" :checked="sellLockSettings.allowForce" @change="guard(() => setSellLockSettings({ allowForce: ($event.target as HTMLInputElement).checked }))" /> <span>Let owners and admins force sales at a locked event</span></label>
+        <p class="hint">An event is locked once another event that took over its leftovers opens: the till stops selling there, so nothing comes out of the next event's box. Forcing is off by default.</p>
+      </details>
     </details>
     <p v-if="isHelper" class="hint">You're set up as a helper, so you only see the events you've been given.</p>
     <p v-if="error && !editing" class="error" role="alert">{{ error }}</p>
@@ -546,11 +584,14 @@ async function save(): Promise<void> {
       <ul v-if="group.list.length" class="grid">
         <li v-for="e in group.list" :key="e.id" :class="['card', { active: e.id === activeEventId }]">
           <div class="title">
-            <strong>{{ e.name }}</strong>
+            <button v-if="canEdit" type="button" class="name" @click="openEdit(e)">{{ e.name }}</button>
+            <strong v-else>{{ e.name }}</strong>
             <span v-if="e.edition" class="pill">{{ e.edition }}</span>
             <span :class="['pill', pill(e).cls]">{{ pill(e).label }}</span>
           </div>
           <p class="when"><template v-if="isStore(e)">Store</template>{{ fmtDates(e) }}<template v-if="e.venue?.city"> · {{ e.venue.city }}</template><template v-if="e.localCurrency"> · {{ e.currency }} → {{ e.localCurrency }}</template><template v-if="vatSummary(e)"> · {{ vatSummary(e) }}</template></p>
+          <p v-if="missingRate(e)" class="warn-note">{{ e.localCurrency }} has no exchange rate yet - the till cannot charge in it. <button v-if="canEdit" type="button" class="linkbtn" @click="openEdit(e)">Enter a rate</button></p>
+          <p v-if="customsNote(e)" class="customs-note">{{ customsNote(e) }}</p>
           <p v-if="showTotals" class="stats">{{ stats(e.id).count }} sale{{ stats(e.id).count === 1 ? '' : 's' }} · {{ fmtPrice(stats(e.id).revenue, stats(e.id).currency) }}</p>
           <p v-if="lockNote(e)" :class="['lock-note', { forced: sellLockFor(e.id)?.forced }]"><strong>Sell 🔒</strong> {{ lockNote(e) }}.
             <button v-if="!sellLockFor(e.id)?.forced && canForceSell()" type="button" class="linkbtn" @click="toggleForce(e, true)">Force sales</button>
@@ -615,6 +656,7 @@ async function save(): Promise<void> {
           <label><span>Postcode</span><input v-model="form.postcode" type="text" /></label>
           <label><span>Country</span><CountryPicker v-model="form.country" store="name" /></label>
         </div>
+        <p v-if="formCustoms" :class="formCustoms.kind === 'border' ? 'customs-line border' : 'customs-line'">{{ formCustoms.text }}</p>
         <label v-if="editKind === 'event'"><span>Organiser tax id (optional)</span><input v-model="form.tin" type="text" placeholder="For customs paperwork" /></label>
 
         <fieldset v-if="editKind === 'event'">
@@ -653,6 +695,10 @@ async function save(): Promise<void> {
               <select v-model="form.roundingIncrement"><option v-for="[v, l] in ROUNDING" :key="v" :value="v">{{ l }}</option></select>
             </label>
           </div>
+          <p v-if="suggestedCurrency" class="suggest">
+            Customers in {{ form.country.trim() }} pay in {{ suggestedCurrency }} - <button type="button" class="linkbtn" @click="useSuggestedCurrency">add it as local currency</button>
+          </p>
+          <p v-if="form.localCurrency.trim() && !(parseFloat(form.exchangeRate) > 0)" class="warn">No rate yet - the event saves with {{ form.localCurrency.trim().toUpperCase() }}, but the till cannot charge in it until a rate is entered.</p>
           <div class="rate">
             <button type="button" :disabled="!form.localCurrency.trim() || fetchingRate" @click="fetchRate">
               <Icon name="refresh-cw" :size="14" /> {{ fetchingRate ? 'Fetching…' : "Fetch today's rate" }}
@@ -721,6 +767,8 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .auto { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .55rem .8rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; gap: .45rem; font-size: .875rem; }
 .auto summary { cursor: pointer; font-weight: 600; }
 .auto[open] summary { margin-bottom: .2rem; }
+.auto.inner { border: 0; padding: 0 0 0 .4rem; background: none; }
+.auto.inner summary { font-weight: 500; }
 .auto .check { display: flex; align-items: flex-start; gap: .45rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); font-size: .82rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
@@ -730,7 +778,14 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .card { display: flex; flex-direction: column; gap: .35rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }
 .card.active { border-color: var(--zfy-accent, #0e7c66); box-shadow: 0 0 0 1px var(--zfy-accent, #0e7c66); }
 .title { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
-.title strong { font-size: 1rem; }
+.title strong, .title .name { font-size: 1rem; font-weight: 700; }
+.title .name { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: inherit; text-align: left; cursor: pointer; min-height: 0; }
+.title .name:hover { text-decoration: underline; }
+.customs-note { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.warn-note { margin: 0; font-size: .82rem; color: var(--zfy-warning-ink, #8a5a1e); }
+.customs-line { margin: 0; font-size: .82rem; color: var(--zfy-muted, #5a6472); }
+.customs-line.border { color: var(--zfy-warning-ink, #8a5a1e); }
+.suggest { margin: 0; font-size: .82rem; }
 .pill { font-size: .66rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; border-radius: 999px; padding: .15rem .5rem; background: var(--zfy-bg, #f1f4f6); color: var(--zfy-muted, #5a6472); }
 .pill.selling, .pill.active, .pill.open { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .lock-note { margin: .25rem 0 0; font-size: .82rem; color: var(--zfy-danger, #c6512f); }

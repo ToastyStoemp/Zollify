@@ -41,10 +41,11 @@ import {
 import { defaultProviderId, getProvider } from '../payments/registry';
 import { testTerminalProvider } from '../payments/test-terminal';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
-import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable } from '../receipt';
+import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
+import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { sdk } from '../runtime';
-import { afterSalePrefs, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
+import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
 
@@ -592,6 +593,30 @@ const lines = computed(() =>
     return { ...l, chargedUnit, chargedTotal: round2(chargedUnit * l.qty) };
   }),
 );
+
+/**
+ * The VAT inside the total, per rate, when the event charges VAT - so a seller
+ * sees in the cart what the receipt will say ("incl. 25% VAT EUR 19.60"), not
+ * only afterwards. Nothing when the event is exempt or no rate is known. Same
+ * arithmetic as the receipt: each line's charged total less its share of the
+ * discounts, VAT = gross × rate / (100 + rate), rounded once per rate.
+ */
+const cartVat = computed(() => {
+  if (!lines.value.length) return [];
+  const tax = saleTaxFor(cart.eventId, cart.lines.map((l) => l.productId));
+  if (!tax || tax.exempt) return [];
+  const asLines = lines.value.map((l) => ({ pid: l.productId, vid: l.variantId, title: l.name, variantLabel: l.variantLabel ?? null, type: l.type, qty: l.qty, unitPrice: l.chargedUnit, lineTotal: l.chargedTotal }));
+  const shares = allocateDiscounts(asLines, chargeTotals.value);
+  const byRate = new Map<number, number>();
+  asLines.forEach((l, i) => {
+    const rate = tax.rates[i];
+    if (rate == null) return;
+    byRate.set(rate, (byRate.get(rate) ?? 0) + Math.round((l.lineTotal - (shares[i] ?? 0)) * 100));
+  });
+  return [...byRate.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([rate, grossMinor]) => ({ rate, vat: Math.round((grossMinor * rate) / (100 + rate)) / 100 }));
+});
 
 const clearArmed = ref(false);
 let clearTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1167,6 +1192,7 @@ function lockTill(): void {
           <div v-for="r in appliedDiscounts" :key="r.rule.id" class="row good"><span>{{ r.rule.name }}</span><span>− {{ money(r.amount) }}</span></div>
           <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(customDiscountCharged) }}</span></div>
           <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
+          <div v-for="r in cartVat" :key="r.rate" class="row muted small"><span>incl. {{ vatRateLabel(r.rate) }} VAT</span><span>{{ money(r.vat) }}</span></div>
           <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
           <div v-if="cardInBase" class="row muted small"><span>Card charges</span><span>{{ onCard(total) || 'no rate yet' }}</span></div>
         </div>

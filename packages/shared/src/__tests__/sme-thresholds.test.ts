@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Transaction } from '../types';
 import { buildSmeYear } from '../sme-report';
-import { thresholdFor, thresholdRatePairs, thresholdWarnings, SME_THRESHOLDS } from '../sme-thresholds';
+import { thresholdDismissKey, thresholdFor, thresholdRatePairs, thresholdWarnings, SME_THRESHOLDS } from '../sme-thresholds';
 
 let n = 0;
 /** One exempt sale of `total` in `country`, in `year`. */
@@ -106,5 +106,21 @@ describe('the table', () => {
       expect(t.amount).toBeGreaterThan(0);
     }
     expect(Object.keys(SME_THRESHOLDS)).toHaveLength(26);
+  });
+});
+
+describe('dismissing', () => {
+  const key = (level: 'near' | 'over' | 'over-year-end', share: number, year = 2026) => thresholdDismissKey({ country: 'BE', level, share }, year);
+  it('keeps a dismissal while the warning stays the same', () => {
+    expect(key('near', 0.81)).toBe(key('near', 0.88));
+  });
+  it('brings it back at the next 10%, when it gets worse, and in a new year', () => {
+    expect(key('near', 0.91)).not.toBe(key('near', 0.88));
+    expect(key('over', 1.02)).not.toBe(key('near', 0.98));
+    expect(key('over-year-end', 1.1)).not.toBe(key('over', 1.1));
+    expect(key('near', 0.85, 2027)).not.toBe(key('near', 0.85, 2026));
+  });
+  it('does not nag again past the threshold', () => {
+    expect(key('over', 1.05)).toBe(key('over', 1.4));
   });
 });

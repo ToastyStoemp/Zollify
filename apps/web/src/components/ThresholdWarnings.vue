@@ -6,7 +6,14 @@ import type { ThresholdWarning } from '@zollify/shared';
  * bar for how far along, and the country's official page. Over a threshold
  * reads as an alert; getting close as a note.
  */
-defineProps<{ warnings: ThresholdWarning[]; /** Link to Settings → VAT to change a threshold. */ settingsLink?: boolean }>();
+defineProps<{
+  warnings: ThresholdWarning[];
+  /** Link to Settings → VAT to change a threshold. */
+  settingsLink?: boolean;
+  /** Each warning gets a Dismiss button (Home); the parent decides what dismissing keeps away. */
+  dismissible?: boolean;
+}>();
+defineEmits<{ dismiss: [warning: ThresholdWarning] }>();
 
 const tone = (w: ThresholdWarning): string => (w.level === 'near' || w.level === 'over-year-end' ? 'near' : 'over');
 </script>
@@ -16,6 +23,7 @@ const tone = (w: ThresholdWarning): string => (w.level === 'near' || w.level ===
     <article v-for="w in warnings" :key="`${w.country}-${w.level}`" :class="['tw', tone(w)]" :role="tone(w) === 'over' ? 'alert' : 'note'">
       <header>
         <strong>{{ w.title }}</strong>
+        <button v-if="dismissible" type="button" class="dismiss" :aria-label="`Dismiss: ${w.title}`" @click="$emit('dismiss', w)">Dismiss</button>
       </header>
       <div v-if="w.limit" class="bar" aria-hidden="true"><span :style="{ width: `${Math.min(100, w.share * 100)}%` }"></span></div>
       <p>{{ w.text }}</p>
@@ -32,7 +40,10 @@ const tone = (w: ThresholdWarning): string => (w.level === 'near' || w.level ===
 .thresholds { display: flex; flex-direction: column; gap: .5rem; }
 .tw { display: flex; flex-direction: column; gap: .35rem; padding: .7rem .85rem; border-radius: 12px; border: 1px solid var(--zfy-warning); background: var(--zfy-surface); }
 .tw.over { border-color: var(--zfy-danger); }
+.tw header { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
 .tw header strong { font-size: .92rem; }
+.dismiss { flex: none; min-height: 0; padding: .15rem .45rem; border: 0; background: none; color: var(--zfy-muted); font-size: .8rem; cursor: pointer; }
+.dismiss:hover:not(:disabled) { background: var(--zfy-surface-2); color: var(--zfy-ink); }
 .tw.over header strong { color: var(--zfy-danger); }
 .tw.near header strong { color: var(--zfy-warning-ink); }
 .tw p { margin: 0; font-size: .85rem; color: var(--zfy-ink); }

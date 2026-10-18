@@ -288,3 +288,15 @@ export function thresholdWarnings(args: {
   const rank: Record<ThresholdLevel, number> = { over: 0, 'no-scheme': 1, 'last-year': 2, 'over-year-end': 3, near: 4 };
   return out.sort((a, b) => rank[a.level] - rank[b.level] || b.share - a.share);
 }
+
+/**
+ * What a dismissed warning is remembered by. A warning dismissed on Home
+ * stays away only while nothing changes: it comes back when it gets worse
+ * (near → over), at each further 10% while near (80%, then 90%), and in a
+ * new year. Over-type warnings carry no band - once over, the one thing to
+ * do is act, and saying so again at 110% helps no one.
+ */
+export function thresholdDismissKey(w: Pick<ThresholdWarning, 'country' | 'level' | 'share'>, year: number): string {
+  const band = w.level === 'near' ? `:${Math.min(9, Math.floor(w.share * 10))}` : '';
+  return `${year}:${w.country}:${w.level}${band}`;
+}

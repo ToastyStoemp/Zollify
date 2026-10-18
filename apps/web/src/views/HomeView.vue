@@ -18,7 +18,7 @@ import {
   syncState,
   visibleEvents,
 } from '@zollify/platform';
-import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
+import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, thresholdDismissKey, tillEventCheck, type ThresholdWarning } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import GettingStarted from '../components/GettingStarted.vue';
 import ThresholdWarnings from '../components/ThresholdWarnings.vue';
@@ -38,6 +38,37 @@ const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 /** Close to or past a small-business threshold: said on Home, where it is seen before the next sale. */
 const { warnings: thresholdWarnings } = useThresholdWarnings();
+/**
+ * Dismissed on Home, per account on this device. A dismissal holds only
+ * while the warning stays the same (thresholdDismissKey): it comes back when
+ * it gets worse, at the next 10%, or in a new year. Settings → VAT and the
+ * SME report keep showing every warning regardless.
+ */
+const dismissedKey = computed(() => `zollify.thresholds.dismissed.${account.value?.accountId ?? ''}`);
+function readDismissed(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(dismissedKey.value) ?? '[]');
+    return new Set(Array.isArray(raw) ? raw.filter((k): k is string => typeof k === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+const dismissed = ref(readDismissed());
+watch(dismissedKey, () => (dismissed.value = readDismissed()));
+const thisYear = new Date().getFullYear();
+const homeWarnings = computed(() => thresholdWarnings.value.filter((w) => !dismissed.value.has(thresholdDismissKey(w, thisYear))));
+function dismissWarning(w: ThresholdWarning): void {
+  const key = thresholdDismissKey(w, thisYear);
+  // Keep this year's only, so the list does not grow forever.
+  const next = new Set([...dismissed.value].filter((k) => k.startsWith(`${thisYear}:`)));
+  next.add(key);
+  dismissed.value = next;
+  try {
+    localStorage.setItem(dismissedKey.value, JSON.stringify([...next]));
+  } catch {
+    /* storage blocked - dismissed for this visit only */
+  }
+}
 /** Events, stores or both - what the account runs decides the shortcuts here. */
 const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
 /** Where the active event or store is managed. */
@@ -286,7 +317,7 @@ const syncLine = computed(() => {
 
     <div class="grid">
       <!-- Turnover per country is the owner's business, not a helper's. -->
-      <ThresholdWarnings v-if="isAdmin && thresholdWarnings.length" class="wide" :warnings="thresholdWarnings" settings-link />
+      <ThresholdWarnings v-if="isAdmin && homeWarnings.length" class="wide" :warnings="homeWarnings" settings-link dismissible @dismiss="dismissWarning" />
       <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
       <article class="card wide today-card">

@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue';
 import type { AppNotification } from '@zollify/shared';
+import { isNative } from '../native';
 import { authFetch, getAccount } from '../session';
 import { createShellUi } from '../shell-ui';
 
@@ -37,7 +38,27 @@ const readKinds = (): string[] => {
 };
 export const notifyKinds = ref<string[]>(readKinds());
 
-/** Saves the choice here and on the server, and asks the browser for permission the first time something is on. */
+// ── System notifications on Android ─────────────────────────────────────────
+// Capacitor's WebView has no Notification API; the app posts them through
+// @capacitor/local-notifications. Loaded on demand so the web bundle stays out of it.
+const localNotifications = () => import('@capacitor/local-notifications').then((m) => m.LocalNotifications);
+/** The Android permission, kept here so `systemNotificationState` can answer without a round trip to the plugin. */
+let nativePermission: NotificationPermission | null = null;
+const toPermission = (state: string): NotificationPermission => (state === 'granted' || state === 'denied' ? state : 'default');
+if (isNative()) {
+  localNotifications()
+    .then((ln) => ln.checkPermissions())
+    .then((r) => (nativePermission = toPermission(r.display)))
+    .catch(() => undefined);
+}
+/** A stable int for the plugin from the note's id: Android keys notifications by number, and the same note must replace itself. */
+const notificationNumber = (id: string): number => {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) | 0;
+  return h;
+};
+
+/** Saves the choice here and on the server, and asks for permission the first time something is on. */
 export async function setNotifyKinds(kinds: string[]): Promise<void> {
   notifyKinds.value = kinds;
   try {
@@ -45,17 +66,36 @@ export async function setNotifyKinds(kinds: string[]): Promise<void> {
   } catch {
     /* no storage: the server copy still steers the reminders */
   }
-  if (kinds.length && typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission().catch(() => undefined);
+  if (kinds.length) {
+    if (isNative()) {
+      try {
+        nativePermission = toPermission((await (await localNotifications()).requestPermissions()).display);
+      } catch {
+        /* an app without the plugin: toasts only */
+      }
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission().catch(() => undefined);
+  }
   await authFetch('/devices/me/notifications', { method: 'PUT', body: JSON.stringify({ kinds, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }) });
 }
 
-/** Whether the browser will show system notifications for this device: granted, denied, or not asked (null where it has none). */
-export const systemNotificationState = (): NotificationPermission | null => (typeof Notification !== 'undefined' ? Notification.permission : null);
+/** Whether this device will show system notifications: granted, denied, or not asked (null where it has none). */
+export const systemNotificationState = (): NotificationPermission | null => {
+  if (isNative()) return nativePermission;
+  return typeof Notification !== 'undefined' ? Notification.permission : null;
+};
 
 function showOnScreen(n: AppNotification): void {
   createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
   // A system notification only while the app is in the background: in front, the toast already said it.
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
+  if (document.visibilityState === 'visible') return;
+  if (isNative()) {
+    if (nativePermission !== 'granted') return;
+    localNotifications()
+      .then((ln) => ln.schedule({ notifications: [{ id: notificationNumber(n.id), title: n.title, body: n.body }] }))
+      .catch(() => undefined);
+    return;
+  }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
   try {
     new Notification(n.title, { body: n.body, tag: n.id });
   } catch {

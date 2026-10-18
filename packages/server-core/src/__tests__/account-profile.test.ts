@@ -19,13 +19,14 @@ beforeAll(async () => {
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.OWNER_PASSWORD = OWNER_PASSWORD;
   process.env.REQUIRE_CAPTCHA = '0';
+  process.env.REGISTRATION_OPEN = '1';
 
   app = await buildGateway({
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
     jwtSecret: 'test-secret-value-long-enough-for-signing',
     serverModules: [],
-    defaultModules: [],
+    defaultModules: ['pos'],
     allowedOrigins: [],
     requireHttps: false,
     trustProxy: false,
@@ -273,5 +274,15 @@ describe('erasing the account data', () => {
     await push([sale('s3', Date.UTC(2001, 5, 1))]);
     const ok = await app.inject({ method: 'POST', url: '/api/account/wipe', headers: auth(), payload: {} });
     expect(ok.statusCode).toBe(200);
+  });
+});
+
+describe('a new account starts with its default modules', () => {
+  it('seeds the defaults on open registration, not only for accounts present at boot', async () => {
+    const res = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'late@test.local', password: 'LatePass-2026!', accountName: 'Late Joiner' } });
+    expect([200, 201]).toContain(res.statusCode);
+    const accountId = res.json().user.accountId as string;
+    const rows = app.zollify.db.prepare('SELECT moduleId FROM account_modules WHERE accountId = ? AND enabled = 1').all(accountId) as { moduleId: string }[];
+    expect(rows.map((r) => r.moduleId)).toEqual(expect.arrayContaining(['pos']));
   });
 });

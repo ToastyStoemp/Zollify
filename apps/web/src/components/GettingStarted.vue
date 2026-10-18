@@ -3,7 +3,6 @@ import { computed, ref } from 'vue';
 import { allProducts, currentAccount, inventoryRows, recentTransactions, visibleEvents } from '@zollify/platform';
 import { isStore, sellsAt } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
-import { contributions } from '../boot';
 
 /**
  * Getting started, on Home: the few things a new business does before its
@@ -67,7 +66,7 @@ const steps = computed<Step[]>(() => {
     // A card payment that went through a terminal - not one typed in by hand.
     done: recentTransactions.value.some((t) => (t.payments ?? []).some((p) => p.kind === 'card' && p.provider && p.provider !== 'manual')),
     to: { name: 'settings', query: { panel: 'pos.payments' } },
-    action: 'Payments',
+    action: 'Card terminal',
   });
   return list;
 });
@@ -81,13 +80,12 @@ function taxStep(): Step {
   const vat = account.value?.profile.vat;
   const scheme = vat?.scheme || (vat?.exemptCountries?.length ? 'sme' : '');
   if (scheme === 'sme') {
-    const smeOn = contributions.settingsFor(account.value?.role ?? 'member').some((p) => p.moduleId === 'sme-scheme');
     return {
       id: 'tax',
       title: 'Set where you are exempt',
       text: 'Your small-business exemption and EX number - until then every sale charges VAT.',
       done: Boolean(vat?.exemptCountries?.length),
-      to: { name: 'settings', query: { panel: smeOn ? 'sme-scheme.exemption' : 'core.vat' } },
+      to: { name: 'settings', query: { panel: 'core.vat' } },
       action: 'Set up',
     };
   }

@@ -85,7 +85,7 @@ export interface ServerModule {
    * module, enabled or not, so a module that issued the invite (a store
    * inviting an artist) can set the account up. Must not throw.
    */
-  onAccountCreated?(ctx: ModuleServices, e: { accountId: string; userId: string; inviteCode: string }): void;
+  onAccountCreated?(ctx: ModuleServices, e: { accountId: string; userId: string; inviteCode?: string }): void;
   /**
    * An account is being deleted, or its data wiped. Called for every module,
    * enabled or not, inside the deleting transaction: drop the rows this

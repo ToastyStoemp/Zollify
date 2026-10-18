@@ -67,7 +67,7 @@ export const sumupProvider: PaymentProvider = {
   /** Opens SumUp's own sign-in screen. */
   async configure(): Promise<void> {
     const affiliateKey = await sumupAffiliateKey();
-    if (!affiliateKey) throw new Error('This server has no SumUp affiliate key - enter one under Settings → Payments');
+    if (!affiliateKey) throw new Error('This server has no SumUp affiliate key - enter one under Settings → Card terminal');
     const res = await SumUp.login({ affiliateKey });
     if (!res.loggedIn) throw new Error(res.message || 'SumUp login was cancelled');
   },

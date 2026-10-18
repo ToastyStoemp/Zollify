@@ -47,7 +47,7 @@ export default defineModule({
       order: 101,
     });
 
-    // First-run setup asks how the seller takes card payments; the full list stays under Settings → Payments.
+    // First-run setup asks how the seller takes card payments; the full list stays under Settings → Card terminal.
     sdk.setup.step({
       id: 'payments',
       title: 'Card payments',
@@ -73,7 +73,7 @@ export default defineModule({
       // A terminal that no longer exists (ZollBridge) falls back to recording cards by hand, visibly.
       if (id && !allProviders().some((p) => p.id === id)) {
         await sdk.config.set('activeProvider', 'manual');
-        sdk.ui.toast('ZollBridge is no longer supported - pick a card terminal under Settings → Payments.', { kind: 'warning', timeoutMs: 8000 });
+        sdk.ui.toast('ZollBridge is no longer supported - pick a card terminal under Settings → Card terminal.', { kind: 'warning', timeoutMs: 8000 });
         return;
       }
       if (id) return onActiveProviderChanged(id as never);

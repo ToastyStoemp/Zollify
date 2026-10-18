@@ -231,6 +231,8 @@ const readMode = (key: string): ViewMode | null => {
 const boothMode = ref<ViewMode>(readMode(VIEW_KEY) === 'flat' ? 'flat' : 'grouped');
 const storeMode = ref<ViewMode>(readMode(STORE_VIEW_KEY) ?? 'artists');
 const atStore = computed(() => isStore(activeEvent.value));
+/** Whether this business runs stores at all: decides where "open one" points. */
+const sellsStores = computed(() => Boolean(sdk().account()?.profile.sells?.stores) || sdk().data.events.list().some((e) => isStore(e) && !e.deletedAt));
 /** Artists only mean something when the catalogue has their work in it. */
 const hasArtists = computed(() => products.value.some((p) => p.consignorId));
 const viewMode = computed<ViewMode>(() => {
@@ -1016,9 +1018,10 @@ function lockTill(): void {
           <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
           <h1 v-else class="warn">No active event</h1>
           <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
-          <small v-else>Open one under Events - sales are filed against an event.</small>
+          <small v-else-if="activeEvent">{{ atStore ? 'Selling at the store' : 'Selling at this event' }}{{ today.count ? ` · ${today.count} sale${today.count === 1 ? '' : 's'} today` : '' }}</small>
+          <small v-else>Open one under {{ sellsStores ? 'Stores or Events' : 'Events' }} - every sale is filed against one.</small>
         </div>
-        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Payments.">TEST MODE - nothing is recorded</router-link>
+        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Card terminal.">TEST MODE - nothing is recorded</router-link>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
         <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">

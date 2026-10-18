@@ -15,7 +15,7 @@ import SumupSoloPairing from './SumupSoloPairing.vue';
  * device over the internet when the server is set up for it; every other
  * reader connects through the Android app, so on a computer this only
  * explains what to do and saves nothing for a terminal it cannot talk to. The full list,
- * with Nexi and the rest, stays under Settings → Payments.
+ * with Nexi and the rest, stays under Settings → Card terminal.
  */
 type Way = 'sumup' | 'mypos' | 'other' | 'cash';
 type MyposId = 'mypos-go2' | 'mypos-carbon' | 'mypos-glass';
@@ -126,7 +126,7 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 
 <template>
   <div class="setup">
-    <p class="lede">Customers pay by card on a reader that works with Zollify. Pick yours and we set this device up for it. Skip this if you only take cash - you can come back under Settings → Payments.</p>
+    <p class="lede">Customers pay by card on a reader that works with Zollify. Pick yours and we set this device up for it. Skip this if you only take cash - you can come back under Settings → Card terminal.</p>
 
     <div class="ways" role="radiogroup" aria-label="How you take card payments">
       <label :class="{ on: way === 'sumup' }"><input type="radio" name="way" :checked="way === 'sumup'" @change="pick('sumup')" /><strong>SumUp</strong><span>Solo, Solo Lite or Air</span></label>
@@ -222,11 +222,11 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
       </ol>
     </div>
 
-    <p v-else-if="way === 'other'" class="hint">Nexi SmartPOS and the other terminals are set up under Settings → Payments once you are in. Your choice there is kept for this device.</p>
-    <p v-else-if="way === 'cash'" class="hint">Card payments are recorded by hand at the till: you confirm the card payment happened and the sale is booked. Add a reader any time under Settings → Payments.</p>
+    <p v-else-if="way === 'other'" class="hint">Nexi SmartPOS and the other terminals are set up under Settings → Card terminal once you are in. Your choice there is kept for this device.</p>
+    <p v-else-if="way === 'cash'" class="hint">Card payments are recorded by hand at the till: you confirm the card payment happened and the sale is booked. Add a reader any time under Settings → Card terminal.</p>
 
     <p v-if="(way === 'sumup' || way === 'mypos') && providerId && providerId !== 'sumup-cloud' && !usable" class="note">
-      Readers connect through the Zollify Android app{{ way === 'mypos' ? ` (${myposDevice.needs})` : '' }}, so there is nothing to connect from here. Open Zollify on your till device and finish under <strong>Settings → Payments</strong> - the steps above are what it needs.
+      Readers connect through {{ way === 'mypos' ? myposDevice.needs : 'the Zollify Android app' }}, so there is nothing to connect from here. Open Zollify on your till device and finish under <strong>Settings → Card terminal</strong> - the steps above are what it needs.
       <template v-if="androidApp"><br /><a :href="androidApp" download>Download the Android app</a>, or scan this with the phone or tablet:</template>
     </p>
     <QrCode v-if="androidApp && (way === 'sumup' || way === 'mypos') && providerId && providerId !== 'sumup-cloud' && !usable" :value="androidApp" :size="120" label="Android app download QR code" />

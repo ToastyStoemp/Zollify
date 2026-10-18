@@ -44,7 +44,8 @@ export const VAT_RATES: Record<string, { standard: number; reduced: number[] }> 
   SK: { standard: 23, reduced: [19, 5] },
   SI: { standard: 22, reduced: [9.5, 5] },
   ES: { standard: 21, reduced: [10, 4] },
-  SE: { standard: 25, reduced: [12, 6] },
+  // Books, newspapers and art prints are 6%; 12% is food and hotels - the first reduced rate is what "Reduced" products take, and a seller's reduced goods are nearly always print.
+  SE: { standard: 25, reduced: [6, 12] },
   // Outside the EU, where booths commonly travel.
   CH: { standard: 8.1, reduced: [2.6] },
   LI: { standard: 8.1, reduced: [2.6] },
@@ -186,6 +187,11 @@ const HOME_NOTES: Record<string, string> = {
   DE: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.',
   AT: 'Umsatzsteuerbefreit - Kleinunternehmer gem. § 6 Abs. 1 Z 27 UStG',
   FR: 'TVA non applicable, art. 293 B du CGI',
+  // Belgium's wording is bilingual on purpose: a Ghent receipt and a Liège one carry the same line.
+  BE: 'Bijzondere vrijstellingsregeling kleine ondernemingen / Régime particulier de franchise des petites entreprises',
+  NL: 'Vrijgesteld van btw - kleineondernemersregeling (KOR)',
+  IT: 'Operazione senza applicazione dell\'IVA - regime forfettario',
+  ES: 'Operación exenta de IVA - régimen de franquicia',
 };
 const GENERIC_HOME_NOTE = 'VAT exempt - small business scheme';
 const CROSS_BORDER_NOTE = 'VAT exempt under the EU SME scheme';

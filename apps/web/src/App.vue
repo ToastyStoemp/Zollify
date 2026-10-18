@@ -65,12 +65,14 @@ interface Entry { routeName: string; label: string; icon: string; group: Group; 
  * module's screen sits inside the section for the job it belongs to; the
  * seller never sees the word "module".
  */
-const SECTIONS: { id: Group; icon: string }[] = [
+const SECTIONS: { id: Group; icon: string; label?: string }[] = [
   { id: 'selling', icon: 'shopping-cart' },
   { id: 'stock', icon: 'package' },
   { id: 'events', icon: 'calendar' },
   { id: 'stores', icon: 'store' },
-  { id: 'books', icon: 'book' },
+  // Several unrelated module pages share this one; it keeps its own name rather than
+  // taking its first page's, which once made the whole section read "Costs".
+  { id: 'books', icon: 'book', label: 'Books' },
   { id: 'suppliers', icon: 'truck' },
   { id: 'addons', icon: 'puzzle' },
 ];
@@ -86,7 +88,7 @@ const coreNav: Entry[] = [
   { routeName: 'stores', label: 'Stores', icon: 'store', group: 'stores', order: 10 },
 ];
 
-interface Section { id: Group; icon: string; head: Entry; children: Entry[] }
+interface Section { id: Group; icon: string; head: Entry; /** What the sidebar calls it. */ title: string; children: Entry[] }
 
 /**
  * Each section's first page is the section itself: clicking "Selling" opens
@@ -113,9 +115,13 @@ const allNav = computed<Entry[]>(() => {
 const sections = computed<Section[]>(() => {
   const all = allNav.value;
   return SECTIONS.flatMap((sec) => {
-    const [head, ...children] = all.filter((e) => e.group === sec.id);
+    const pages = all.filter((e) => e.group === sec.id);
+    const [head, ...rest] = pages;
     if (!head) return [];
-    return [{ id: sec.id, icon: head.icon || sec.icon, head, children }];
+    // A named section with several pages lists them all beneath its own name; otherwise
+    // the first page is the section and the others hang below it.
+    const named = Boolean(sec.label) && rest.length > 0;
+    return [{ id: sec.id, icon: named ? sec.icon : head.icon || sec.icon, head, title: named ? sec.label! : head.label, children: named ? pages : rest }];
   });
 });
 
@@ -248,7 +254,7 @@ const fmtAgo = (ms: number): string => {
 
           <div v-for="sec in sections" :key="sec.id" :class="['section', { open: inSection(sec) }]">
             <router-link :to="{ name: sec.head.routeName }" class="item top" :class="{ 'router-link-active': inSection(sec) && sec.head.routeName !== route.name }">
-              <Icon :name="sec.icon" /><span>{{ sec.head.label }}</span>
+              <Icon :name="sec.icon" /><span>{{ sec.title }}</span>
             </router-link>
             <div v-if="sec.children.length && inSection(sec)" class="children">
               <router-link v-for="item in sec.children" :key="item.routeName" :to="{ name: item.routeName }" class="item sub">
@@ -338,7 +344,7 @@ const fmtAgo = (ms: number): string => {
       </div>
       <div class="tabs">
         <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>
-        <router-link v-for="sec in tabSections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.head.label }}</span></router-link>
+        <router-link v-for="sec in tabSections" :key="sec.id" :to="{ name: sec.head.routeName }" class="tab" :class="{ 'router-link-active': inSection(sec) }"><Icon :name="sec.icon" :size="20" /><span>{{ sec.title }}</span></router-link>
         <button v-if="tabOverflow" type="button" class="tab" :class="{ 'router-link-active': overflowActive }" @click="menuOpen = !menuOpen"><Icon name="menu" :size="20" /><span>More</span><i v-if="pendingCount || unreadNotifications" class="badge"></i></button>
         <router-link v-else :to="{ name: 'settings' }" class="tab"><Icon name="settings" :size="20" /><span>Settings</span><i v-if="pendingCount || unreadNotifications || openProblemErrors" class="badge"></i></router-link>
       </div>

@@ -66,7 +66,7 @@ export const isConverting = computed(
 );
 
 /**
- * "Charge cards in the base currency" (Settings → Payments). At an event that
+ * "Charge cards in the base currency" (Settings → Card terminal). At an event that
  * prices in a local currency, cards are still taken in the base currency, at
  * today's market rate - a German booth in Switzerland sells a 30 € painting
  * for 30 CHF, and the card is charged 32.15 EUR. Cash stays in the local
@@ -456,7 +456,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       const onCard = pay.terminal.amount ?? charged;
       const onCardSettled = cardSettlement(onCard);
       if (cardInBase.value && !onCardSettled) {
-        return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Payments.` };
+        return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Card terminal.` };
       }
       // In test mode every card goes to the pretend terminal, whatever is configured.
       const provider = testMode.value ? testTerminalProvider : getProvider(pay.terminal.providerId as never);

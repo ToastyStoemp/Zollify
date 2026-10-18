@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue';
 import { COUNTRY_BY_CODE, EU_COUNTRIES, VAT_RATES, VAT_RATES_AS_OF, countryCodeOf, defaultExemptionNotes, fmtRate } from '@zollify/shared';
-import { sdk } from '../runtime';
+import { currentAccount, updateProfile } from '@zollify/platform';
 
 /**
  * Where the business is exempt under a small-business scheme, the EX number
- * those receipts need abroad, and the wording printed on them. The till reads
- * all of this from the account profile for every sale, so it is saved there.
+ * those receipts need abroad, and the line printed on them. The till reads
+ * all of this from the account profile for every sale.
  *
- * Two uses: the module's settings panel (Save button), and its first-run
- * setup step, where `autosave` saves each change as it happens, since setup's
- * Continue button belongs to the shell and cannot save for us. In setup the
- * home country starts ticked: the person has just said they are on a scheme,
- * and nearly always that means at home.
+ * Two uses: inside Settings → VAT (Save button), and as a first-run setup
+ * stage, where `autosave` saves each change as it happens, since setup's
+ * Continue button is the wizard's. In setup the home country starts ticked:
+ * the person has just said they are on a scheme, and nearly always that
+ * means at home.
  */
 const props = defineProps<{ autosave?: boolean }>();
 
-const account = sdk().account();
+const account = currentAccount.value;
 const canEdit = account?.role === 'owner' || account?.role === 'admin';
 const stored = account?.profile.vat;
 const home = countryCodeOf(account?.profile.artist.countryOfOrigin);
@@ -64,13 +64,13 @@ async function save(): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    await sdk().updateVatProfile({
+    await updateProfile({ vat: {
       scheme: 'sme',
       exemptCountries: [...exempt.value].sort(),
       exNumber: exNumber.value.trim(),
       homeNote: homeNote.value.trim(),
       crossBorderNote: crossBorderNote.value.trim(),
-    });
+    } });
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
   } catch (err) {
@@ -90,12 +90,10 @@ onUnmounted(() => {
 
 <template>
   <form class="sme-exempt" @submit.prevent="save">
-    <h2 v-if="!autosave">Small-business exemption</h2>
     <p class="hint">
-      Tick every country where you are exempt - at home, and abroad under the EU SME scheme. Sales there print
+      Tick every country where you are exempt - at home, and abroad under the EU small-business (SME) scheme. Sales there print
       the exemption instead of VAT; everywhere else charges the country's VAT.
     </p>
-    <p v-if="!canEdit" class="hint">Only an owner or admin can change these.</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <fieldset :disabled="!canEdit">
@@ -108,7 +106,8 @@ onUnmounted(() => {
           <small>{{ rates(c) }}</small>
         </label>
       </div>
-      <h3>Elsewhere</h3>
+      <h3>Outside the EU</h3>
+      <p class="hint">The EU scheme does not reach these. Tick one only if that country's own rules exempt you (Switzerland, for example, below CHF 100,000 worldwide turnover).</p>
       <div class="countries">
         <label v-for="c in other" :key="c">
           <input type="checkbox" :checked="exempt.has(c)" @change="toggle(c, ($event.target as HTMLInputElement).checked)" />
@@ -130,14 +129,14 @@ onUnmounted(() => {
         </small>
       </label>
       <label>
-        <span>Note at home</span>
+        <span>Receipt line at home{{ home ? ` (${name(home)})` : '' }}</span>
         <input v-model="homeNote" type="text" :placeholder="defaults.home" @input="changed" />
-        <small>Leave blank for the default shown.</small>
+        <small>Printed instead of VAT on sales at home. Default: "{{ defaults.home }}" - leave blank to use it.</small>
       </label>
       <label>
-        <span>Note abroad</span>
+        <span>Receipt line in other EU countries</span>
         <input v-model="crossBorderNote" type="text" :placeholder="defaults.crossBorder" @input="changed" />
-        <small>Leave blank for the default shown - the EU scheme asks receipts to say the sale is exempt under it.</small>
+        <small>The EU scheme asks receipts to say the sale is exempt under it. Default: "{{ defaults.crossBorder }}".</small>
       </label>
     </fieldset>
 

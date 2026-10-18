@@ -7,10 +7,9 @@ import { clearSdk, setSdk } from './runtime';
  * The quarterly report lists what the booth sold in each country: exempt
  * sales in full, VAT-charged sales without their VAT. See engine/report.ts.
  *
- * The exemption itself (countries, EX number, receipt wording) is set here,
- * under Settings → SME exemption and as a first-run setup step, but saved in
- * the account profile: the till decides every sale's VAT from it whether or
- * not this module is on. Core's VAT settings show a summary of it.
+ * The exemption itself (countries, EX number, receipt line) is core's:
+ * Settings → VAT, and a setup stage when the business says it is on a scheme.
+ * The till decides every sale's VAT from it whether or not this module is on.
  */
 export default defineModule({
   id: 'sme-scheme',
@@ -26,9 +25,6 @@ export default defineModule({
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'SME report', component: () => import('./views/QuarterReportView.vue') });
     sdk.nav.add({ routeName: 'index', group: 'books', label: 'SME report', icon: 'book', order: 225 });
-    sdk.settings.panel({ id: 'exemption', label: 'SME exemption', component: () => import('./views/SmeExemption.vue'), minRole: 'admin', order: 95 });
-    // Switched on in setup because the business said it is on a scheme: ask where, right away.
-    sdk.setup.step({ id: 'exemption', title: 'SME exemption', component: () => import('./views/SmeSetupStep.vue'), minRole: 'admin', order: 90 });
     sdk.log.info('sme-scheme module ready');
   },
 

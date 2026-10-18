@@ -39,6 +39,9 @@ const corePanels: Omit<Panel, 'group'>[] = [
   {
     id: 'core.data',
     label: 'Backup & restore',
+    // The export holds every sale with its amount, and restore overwrites the
+    // business - not for staff, who may not even see the day's totals.
+    minRole: 'admin',
     component: () => import('./DataSettings.vue'),
   },
   {

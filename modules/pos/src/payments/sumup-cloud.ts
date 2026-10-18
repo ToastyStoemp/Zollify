@@ -8,7 +8,7 @@ import { sdk } from '../runtime';
  * the customer pays there, and the till asks the server for the outcome until
  * it has it. Nothing pairs with this device, so it works in a browser too -
  * the Solo only has to be online (Wi-Fi or its own SIM). The account connects
- * its SumUp login once; each till picks its Solo under Settings → Payments.
+ * its SumUp login once; each till picks its Solo under Settings → Card terminal.
  */
 
 export const SUMUP_READER_SETTING = 'sumup.cloudReader';
@@ -93,7 +93,7 @@ export const sumupCloudProvider: PaymentProvider = {
 
   async startPayment(req: PaymentRequest): Promise<PaymentResult> {
     const reader = await thisTillsReader();
-    if (!reader) return { approved: false, provider: 'sumup-cloud', error: 'No Solo picked for this till - choose one under Settings → Payments.' };
+    if (!reader) return { approved: false, provider: 'sumup-cloud', error: 'No Solo picked for this till - choose one under Settings → Card terminal.' };
     const run = { ref: null as string | null, stopped: false };
     current = run;
     try {

@@ -288,7 +288,8 @@ export async function seedOwner(db: Database.Database): Promise<void> {
 
 export interface AuthHooks {
   /** A new account was created with an invite code (not on joining an existing one). */
-  accountCreated?(e: { accountId: string; userId: string; inviteCode: string }): void;
+  /** A new account (not a user joining an existing one). `inviteCode` is set when an invite created it. */
+  accountCreated?(e: { accountId: string; userId: string; inviteCode?: string }): void;
   /** An account is being deleted; runs inside the deleting transaction so modules drop their rows with it. */
   accountDeleted?(accountId: string): void;
 }
@@ -407,11 +408,13 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     }
 
     const user: UserRow = { id: userId, accountId: accountId!, email: emailLc, passwordHash, role };
-    if (invite && !invite.accountId) {
+    // A brand-new account, whether from an open sign-up, the first user or an invite that
+    // was not for an existing business: give it its starting modules and let modules react.
+    if (!invite?.accountId) {
       try {
-        hooks.accountCreated?.({ accountId: accountId!, userId, inviteCode: invite.code });
+        hooks.accountCreated?.({ accountId: accountId!, userId, ...(invite ? { inviteCode: invite.code } : {}) });
       } catch (err) {
-        req.log.error({ err }, 'setting up a new account from its invite failed');
+        req.log.error({ err }, 'setting up a new account failed');
       }
     }
     return { ok: true, user };

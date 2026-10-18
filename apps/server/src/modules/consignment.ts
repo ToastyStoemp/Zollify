@@ -317,6 +317,7 @@ export const consignmentArtistServerModule: ServerModule = {
    */
   onAccountCreated: (svc, e) => {
     const { db } = svc;
+    if (!e.inviteCode) return;
     const row = db.prepare('SELECT * FROM consignors WHERE inviteCode = ? AND linkExpiresAt > ?').get(e.inviteCode, Date.now()) as ConsignorRow | undefined;
     if (!row) return;
     db.prepare('UPDATE consignors SET offerAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL, inviteCode = NULL WHERE accountId = ? AND id = ?').run(e.accountId, row.accountId, row.id);

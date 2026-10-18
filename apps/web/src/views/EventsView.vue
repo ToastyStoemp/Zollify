@@ -192,15 +192,16 @@ const closeMenu = (): void => {
 onMounted(() => window.addEventListener('click', closeMenu));
 
 /**
- * New event starts in Find events when the shared pool is there: most
- * conventions are already in it, with dates and address. Find events sends
- * people back here (?new=1, with what they searched as the name) for one
- * that is not.
+ * New event opens the form. The shared pool (Find events) is offered inside
+ * it when the module is on: it used to be the other way round, and everyone
+ * who pressed "New event" thought they had clicked the wrong thing. Find
+ * events still sends people back here (?new=1, with what they searched as
+ * the name) for a convention that is not in it.
  */
 const route = useRoute();
+const canFind = computed(() => hasRoute('public-events:find'));
 function newEvent(): void {
-  if (hasRoute('public-events:find')) void router.push({ name: 'public-events:find' });
-  else openNew('event');
+  openNew('event');
 }
 onMounted(() => {
   if (route.query.new !== '1' || !canEdit.value) return;
@@ -602,6 +603,9 @@ async function save(): Promise<void> {
     <ModalShell v-if="editing" :title="`${editId ? 'Edit' : 'New'} ${kindLabel}`" @close="editing = false">
       <div class="form">
         <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="!editId && editKind === 'event' && canFind" class="hint">
+          Going to a convention other sellers already share? <router-link :to="{ name: 'public-events:find' }">Find it</router-link> and its dates and address fill in for you.
+        </p>
         <label><span>Name</span><input v-model="form.name" type="text" required /></label>
         <label v-if="editKind === 'event'"><span>Dates</span><DateRangePicker v-model:start="form.dateStart" v-model:end="form.dateEnd" /><small v-if="formDays > 14" class="warn">That is {{ formDays }} days - check the end date.</small></label>
         <p v-else class="hint">A store is open until you close it - no dates. Its stock claims reserve what is on its shelves, and it sells through the till like an event.</p>

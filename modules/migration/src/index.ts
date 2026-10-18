@@ -15,8 +15,9 @@ export default defineModule({
   title: 'Migration',
   description: 'Import a ZollTool backup into this account. Run once, then switch off.',
   requires: ['catalog'],
-  // Rewriting the catalogue wholesale is an owner's decision.
-  minRole: 'owner',
+  // Rewriting the catalogue wholesale is the account holder's decision. 'admin', not 'owner':
+  // only the first user on a server is owner, so an owner-only module is invisible to every customer.
+  minRole: 'admin',
 
   setup(sdk: Sdk) {
     setSdk(sdk);

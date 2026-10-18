@@ -114,6 +114,12 @@ const sellerOptions = computed(() => {
   for (const tx of scoped.value) if (tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
   return [...seen.entries()].map(([id, email]) => ({ id, email })).sort((a, b) => a.email.localeCompare(b.email));
 });
+/**
+ * Name the seller on each row as soon as the account has more than one person,
+ * not only once two different people have sold: the owner wants to see that the
+ * new hire's first sale was theirs, which is exactly when the old rule hid it.
+ */
+const showSeller = computed(() => sellerOptions.value.length > 1 || sellerOptions.value.some((s) => s.id !== currentAccount.value?.userId));
 const showReverted = ref(false);
 const txSearch = ref('');
 const methodOptions = computed(() => {
@@ -534,7 +540,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <span v-if="allMode" class="chip">{{ eventName(tx.eventId) }}</span>
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
-          <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && sellerOptions.length > 1"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
+          <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && showSeller"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
           <router-link v-if="hasRoute('pos:receipt')" :to="{ name: 'pos:receipt', params: { saleId: tx.id } }" class="quiet icon" aria-label="Receipt"><Icon name="printer" :size="16" /></router-link>
           <button v-if="canRevert && !tx.revertedAt" type="button" class="quiet danger" @click="revertId = tx.id">Revert</button>
         </div>

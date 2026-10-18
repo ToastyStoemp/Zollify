@@ -94,9 +94,12 @@ const corePanels: Omit<Panel, 'group'>[] = [
 const GROUPS = ['Business', 'Selling', 'Books & paperwork', 'Connections', 'Data & devices', 'Advanced', 'More'];
 const GROUP_OF: [RegExp, string][] = [
   [/^core\.(profile|team|security)$/, 'Business'],
-  [/^core\.vat$|^sme-scheme\.|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
+  // The Photoshop plugin is a Price cards extra for designers, not a selling setting.
+  [/^price-cards\.plugin$/, 'Advanced'],
+  [/^core\.vat$|^pos\.|^public-events\.|^label-printer\.|^price-cards\./, 'Selling'],
   [/^(customs-[a-z]+|peppol-be|economic|tax|tax-deadlines|consignment|costs)\./, 'Books & paperwork'],
-  [/^core\.webhooks$|^shopify-sync\./, 'Connections'],
+  [/^core\.webhooks$/, 'Advanced'],
+  [/^shopify-sync\./, 'Connections'],
   [/^core\.(data|device)$/, 'Data & devices'],
   [/^core\.(problems|modules|admin)$/, 'Advanced'],
 ];

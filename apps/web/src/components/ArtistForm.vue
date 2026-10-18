@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import { EMPTY_PROFILE_LINKS, hasProfileLinks, isBelgium, vatFromEnterpriseNumber, type ArtistDetails, type ProfileLinks } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, countryCodeOf, hasProfileLinks, isBelgium, vatIdLabel, vatFromEnterpriseNumber, type ArtistDetails, type ProfileLinks } from '@zollify/shared';
 import { CountryPicker, CurrencyPicker } from '@zollify/ui';
 
 /**
@@ -25,6 +25,23 @@ const currency = defineModel<string>('currency', { default: 'CHF' });
 const links = defineModel<ProfileLinks>('links', { default: () => ({ ...EMPTY_PROFILE_LINKS }) });
 
 const belgian = computed(() => isBelgium(model.value.countryOfOrigin) || !!model.value.enterpriseNumber);
+/**
+ * Examples follow the country picked, not Switzerland for everyone: a Belgian
+ * typing into "8000 Zürich" and "DE123456789" wondered whose form this was.
+ */
+const EXAMPLES: Record<string, { city: string; vat: string }> = {
+  CH: { city: '8000 Zürich', vat: 'CHE-123.456.789 MWST' },
+  DE: { city: '04107 Leipzig', vat: 'DE123456789' },
+  AT: { city: '1010 Wien', vat: 'ATU12345678' },
+  BE: { city: '9000 Gent', vat: 'BE0123.456.749' },
+  NL: { city: '1012 AB Amsterdam', vat: 'NL123456789B01' },
+  DK: { city: '8000 Aarhus C', vat: '12345678' },
+  SE: { city: '111 20 Stockholm', vat: 'SE123456789001' },
+  FR: { city: '75001 Paris', vat: 'FR12345678901' },
+};
+const code = computed(() => countryCodeOf(model.value.countryOfOrigin));
+const example = computed(() => EXAMPLES[code.value] ?? { city: 'Postcode and city', vat: 'Your VAT or tax number' });
+const vatLabel = computed(() => (code.value ? `${vatIdLabel(code.value)} number` : 'VAT / tax ID'));
 const linksOpen = computed(() => hasProfileLinks(links.value));
 
 /** A valid enterprise number is also the Belgian VAT number, unless one is already given. */
@@ -45,13 +62,13 @@ function fillVat(): void {
     <div v-if="props.compact" class="grid">
       <label>
         <span>Country</span>
-        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Switzerland" />
-        <small>Decides the VAT and paperwork your events start with.</small>
+        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Country" />
+        <small>Decides the VAT and paperwork your events and stores start with.</small>
       </label>
       <label>
         <span>Currency</span>
         <CurrencyPicker v-model="currency" />
-        <small>Your books are kept in this. New events start with it.</small>
+        <small>Your books are kept in this. New events and stores start with it.</small>
       </label>
     </div>
 
@@ -72,11 +89,11 @@ function fillVat(): void {
       </label>
       <label>
         <span>Postcode and city</span>
-        <input v-model="model.postCodeCity" type="text" placeholder="8000 Zürich" />
+        <input v-model="model.postCodeCity" type="text" :placeholder="example.city" />
       </label>
       <label v-if="!props.compact">
         <span>Country</span>
-        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Switzerland" />
+        <CountryPicker v-model="model.countryOfOrigin" store="name" placeholder="Country" />
       </label>
       <label>
         <span>Phone</span>
@@ -87,8 +104,8 @@ function fillVat(): void {
         <input v-model="model.email" type="email" autocomplete="email" />
       </label>
       <label>
-        <span>VAT / tax ID</span>
-        <input v-model="model.vatId" type="text" class="mono" placeholder="DE123456789" />
+        <span>{{ vatLabel }}</span>
+        <input v-model="model.vatId" type="text" class="mono" :placeholder="example.vat" />
       </label>
       <label v-if="belgian">
         <span>Enterprise number (Belgium)</span>
@@ -98,12 +115,12 @@ function fillVat(): void {
       <label v-if="props.showEori">
         <span>EORI number</span>
         <input v-model="model.eori" type="text" class="mono" />
-        <small>Required on EU export declarations - Germany, not Switzerland.</small>
+        <small>For customs declarations when you take stock out of the EU (to Switzerland, say). Not needed inside the EU.</small>
       </label>
       <label v-if="!props.compact">
         <span>Currency</span>
         <CurrencyPicker v-model="currency" />
-        <small>Your books are kept in this. New events start with it.</small>
+        <small>Your books are kept in this. New events and stores start with it.</small>
       </label>
     </div>
     </component>

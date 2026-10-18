@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, EU_COUNTRIES as EU_COUNTRIES_FOR_SME, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -361,18 +361,55 @@ const CUSTOMS: { id: string; label: string }[] = [
 const TITLES: Record<string, string> = { pos: 'Till' };
 const customsChoices = computed(() => CUSTOMS.filter((c) => modules.value.some((m) => m.moduleId === c.id)));
 const customsWanted = computed(() => CUSTOMS.some((c) => wanted.value.has(c.id)));
+/**
+ * Modules that only make sense for one country's businesses. Anyone else
+ * sees them folded under "Other countries" rather than beside the till: a
+ * Belgian store was offered Danish bookkeeping and German Lexware books, and
+ * ticked the wrong ones.
+ */
+const COUNTRY_ONLY: Record<string, string[]> = {
+  'peppol-be': ['BE'],
+  economic: ['DK'],
+  tax: ['DE'],
+  'tax-deadlines': ['DE', ...EU_COUNTRIES_FOR_SME],
+};
+const homeCode = computed(() => countryCodeOf(artist.value.countryOfOrigin));
+/** Shown in its group, or folded away: the business is in a country the module serves, or has it on already. */
+const fitsCountry = (id: string): boolean => {
+  if (wanted.value.has(id)) return true;
+  // The SME report is for businesses on the scheme; "I charge VAT" folds it away.
+  if (id === 'sme-scheme' && scheme.value !== 'sme') return false;
+  const only = COUNTRY_ONLY[id];
+  return !only || !homeCode.value || only.includes(homeCode.value);
+};
+const showOther = ref(false);
 const moduleGroups = computed(() => {
   const byId = new Map(modules.value.map((m) => [m.moduleId, m]));
   const placed = new Set(['customs', 'customs-hub', ...CUSTOMS.map((c) => c.id)]);
-  const groups = GROUPS.map((g) => ({
-    title: g.title,
-    items: g.ids.filter((id) => (id === 'customs' ? customsChoices.value.length > 0 : byId.has(id))).map((id) => {
-      placed.add(id);
-      return id === 'customs' ? { id, mod: null } : { id, mod: byId.get(id)! };
-    }),
-  }));
-  const other = modules.value.filter((m) => !placed.has(m.moduleId)).map((m) => ({ id: m.moduleId, mod: m }));
-  return [...groups, { title: 'Other', items: other }].filter((g) => g.items.length);
+  const folded: { id: string; mod: AvailableModule }[] = [];
+  const groups = GROUPS
+    // The Events block is for events, the Stores block for stores: a stores-only shop
+    // was shown Public events as RECOMMENDED and the whole convention toolkit.
+    .filter((g) => (g.title !== 'Events' || runsEvents.value) && (g.title !== 'Stores' || runsStores.value))
+    .map((g) => ({
+      title: g.title,
+      items: g.ids
+        .filter((id) => (id === 'customs' ? customsChoices.value.length > 0 : byId.has(id)))
+        .flatMap((id) => {
+          placed.add(id);
+          if (id === 'customs') return [{ id, mod: null as AvailableModule | null }];
+          const mod = byId.get(id)!;
+          if (!fitsCountry(id)) {
+            folded.push({ id, mod });
+            return [];
+          }
+          return [{ id, mod }];
+        }),
+    }));
+  // Stores-only: the event modules still exist, under Other, for the day they are wanted.
+  for (const id of GROUPS.flatMap((g) => g.ids)) if (!placed.has(id) && byId.has(id)) { placed.add(id); folded.push({ id, mod: byId.get(id)! }); }
+  const other = [...modules.value.filter((m) => !placed.has(m.moduleId)).map((m) => ({ id: m.moduleId, mod: m as AvailableModule | null })), ...folded];
+  return [...groups, { title: 'Other countries and setups', items: other, folded: true }].filter((g) => g.items.length);
 });
 function setCustoms(id: string, on: boolean): void {
   const next = new Set(wanted.value);
@@ -505,7 +542,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
     <form v-if="step === 1" class="card" @submit.prevent="saveWho">
       <h1>Welcome to Zollify</h1>
       <p class="lede">
-        One app for your business: the till, stock, events and paperwork. First, who is behind the
+        One app for your business: the till, stock, {{ runsStores && !runsEvents ? "your store" : runsStores ? "events, stores" : "events" }} and paperwork. First, who is behind the
         table? Your name, country and currency are enough to start; the rest can wait until a receipt
         or a customs form needs it, under Settings → Business profile.
       </p>
@@ -603,8 +640,9 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
       </p>
 
       <section v-for="g in moduleGroups" :key="g.title" class="mgroup">
-        <h2>{{ g.title }}</h2>
-        <ul class="modules">
+        <h2 v-if="!('folded' in g)">{{ g.title }}</h2>
+        <button v-else type="button" class="quiet fold" :aria-expanded="showOther" @click="showOther = !showOther">{{ showOther ? 'Hide' : 'Show' }} {{ g.items.length }} more - other countries, events or stores</button>
+        <ul v-if="!('folded' in g) || showOther" class="modules">
           <li v-for="item in g.items" :key="item.id">
             <template v-if="item.mod">
               <label>
@@ -701,7 +739,7 @@ async function finish(to: { name: string; query?: Record<string, string> } = { n
         </li>
         <li>
           <strong>Invite helpers</strong>
-          <span>Give someone the till for one event without handing over the whole account.</span>
+          <span>{{ runsStores ? "Give staff the till without handing over the whole account - they ring up sales, you see the totals." : "Give someone the till for one event without handing over the whole account." }}</span>
           <button type="button" :disabled="busy" @click="finish({ name: 'settings', query: { panel: 'core.team' } })">Open Team</button>
         </li>
       </ol>
@@ -755,6 +793,7 @@ h1 { margin: 0; font-size: 1.5rem; letter-spacing: -.01em; text-wrap: balance; }
 .actions { display: flex; justify-content: space-between; gap: .5rem; padding-top: .5rem; border-top: 1px solid var(--zfy-line); }
 .mgroup { display: flex; flex-direction: column; gap: .5rem; }
 .mgroup h2 { margin: .4rem 0 0; font-size: .78rem; text-transform: uppercase; letter-spacing: .08em; color: var(--zfy-muted); }
+.fold { align-self: flex-start; font-size: .85rem; color: var(--zfy-muted); padding: .3rem 0; }
 .customs { border: 1px solid var(--zfy-line); border-radius: 10px; }
 .customs > label { border: 0 !important; }
 .countries { display: flex; flex-direction: column; gap: .35rem; padding: 0 .9rem .75rem 2.6rem; }

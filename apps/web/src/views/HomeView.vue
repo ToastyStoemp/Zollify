@@ -319,7 +319,8 @@ const syncLine = computed(() => {
       </article>
 
       <!-- ── Calendar ────────────────────────────────────────────────────── -->
-      <article class="card wide">
+      <!-- A stores-only business has no dated events; the month is only shown once something lands on it (a module's deadline, a delivery). -->
+      <article v-if="runs.events || moduleEntries.length" class="card wide">
         <header class="chead cal-head">
           <h2>{{ calMonthLabel }}</h2>
           <div class="cal-nav">

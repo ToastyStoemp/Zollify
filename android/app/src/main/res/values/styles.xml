@@ -18,10 +18,21 @@
         <item name="android:windowLightNavigationBar">false</item>
     </style>
 
+    <!-- The running theme. Capacitor's BridgeActivity switches to it with
+         setTheme() after the activity has already started on the launch theme
+         below, and a late setTheme() layers this style over the launch one
+         instead of replacing it: anything not set here is kept. The launch
+         theme's android:background (the splash image) was kept that way, and a
+         background set on a theme is the default background of every view the
+         activity inflates - including the native dialog Android shows for an
+         HTML <select>. Every dropdown opened as a box with the Zollify logo in
+         each row, rows blown up to the image's size and the options hidden.
+         Clearing it here puts the views back to their own backgrounds. -->
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowBackground">#0F172A</item>
+        <item name="android:background">@null</item>
     </style>
 
 

@@ -20,6 +20,49 @@ export const urgentNotifications = computed(() => notifications.value.filter((n)
 /** Anything unread at all, low-level news included. */
 export const anyUnreadNotifications = computed(() => notifications.value.some((n) => n.readAt == null));
 
+// ── What this device asks to be told, on its own screen ─────────────────────
+/**
+ * Categories (WEBHOOK_EVENTS ids) this device wants as a toast, and as a
+ * system notification where the browser has them. Kept on the device, and
+ * told to the server, which raises the reminders (yesterday's sales, a month
+ * closing) only for accounts where some device asked.
+ */
+const KINDS_KEY = 'core.notifyKinds';
+const readKinds = (): string[] => {
+  try {
+    return (JSON.parse(localStorage.getItem(KINDS_KEY) ?? '[]') as string[]) ?? [];
+  } catch {
+    return [];
+  }
+};
+export const notifyKinds = ref<string[]>(readKinds());
+
+/** Saves the choice here and on the server, and asks the browser for permission the first time something is on. */
+export async function setNotifyKinds(kinds: string[]): Promise<void> {
+  notifyKinds.value = kinds;
+  try {
+    localStorage.setItem(KINDS_KEY, JSON.stringify(kinds));
+  } catch {
+    /* no storage: the server copy still steers the reminders */
+  }
+  if (kinds.length && typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission().catch(() => undefined);
+  await authFetch('/devices/me/notifications', { method: 'PUT', body: JSON.stringify({ kinds, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }) });
+}
+
+/** Whether the browser will show system notifications for this device: granted, denied, or not asked (null where it has none). */
+export const systemNotificationState = (): NotificationPermission | null => (typeof Notification !== 'undefined' ? Notification.permission : null);
+
+function showOnScreen(n: AppNotification): void {
+  createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
+  // A system notification only while the app is in the background: in front, the toast already said it.
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || document.visibilityState === 'visible') return;
+  try {
+    new Notification(n.title, { body: n.body, tag: n.id });
+  } catch {
+    /* some browsers only allow these from a service worker */
+  }
+}
+
 let loading: Promise<void> | null = null;
 
 /** Fetches the list; `announce` toasts what arrived since the last fetch. */
@@ -29,10 +72,11 @@ export function loadNotifications(announce = false): Promise<void> {
     try {
       const known = new Set(notifications.value.map((n) => n.id));
       const res = (await authFetch('/notifications')) as { notifications: AppNotification[] };
-      // Low-level news never pops up; it waits in the list.
-      const fresh = res.notifications.filter((n) => !known.has(n.id) && n.readAt == null && n.level !== 'low');
+      // Low-level news never pops up unless this device asked for its kind; it waits in the list.
+      const asked = new Set(notifyKinds.value);
+      const fresh = res.notifications.filter((n) => !known.has(n.id) && n.readAt == null && (n.level !== 'low' || (n.kind && asked.has(n.kind))));
       notifications.value = res.notifications;
-      if (announce) for (const n of fresh.slice(0, 3)) createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
+      if (announce) for (const n of fresh.slice(0, 3)) showOnScreen(n);
     } catch {
       /* offline: the bell keeps what it had */
     } finally {

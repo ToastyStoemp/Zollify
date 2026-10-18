@@ -53,6 +53,18 @@ export interface Webhook extends WebhookInput {
   failures: number;
 }
 
+/**
+ * What a device may ask to be told about on its own screen (a toast, and a
+ * system notification where the platform has them): the same categories the
+ * webhooks post, since a reminder and a chat message are the same news.
+ */
+export const DEVICE_NOTIFICATION_KINDS = WEBHOOK_EVENTS.filter((e) => e.id !== 'other');
+export const DeviceNotificationsSchema = z.object({
+  kinds: z.array(z.enum(EVENT_IDS)).max(EVENT_IDS.length),
+  /** Where the device's days start: when "yesterday" is for its daily report. */
+  timeZone: z.string().min(1).max(64).default('UTC'),
+});
+
 /** What a delivery says, before it is shaped for Discord, Slack or JSON. */
 export interface WebhookMessage {
   title: string;

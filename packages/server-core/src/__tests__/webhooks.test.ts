@@ -160,6 +160,47 @@ describe('webhooks', () => {
   });
 });
 
+describe('what a device asks to be told', () => {
+  const bell = async (token: string) => (await app.inject({ method: 'GET', url: '/api/notifications', headers: { authorization: `Bearer ${token}` } })).json().notifications as { title: string; kind: string | null; level: string }[];
+
+  it('rings the bell for sales and the daily summary once a device wants them', async () => {
+    // A sign-in that names no device cannot ask for anything.
+    expect((await app.inject({ method: 'PUT', url: '/api/devices/me/notifications', headers: auth(), payload: { kinds: ['sale'] } })).statusCode).toBe(400);
+    const till = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: 'owner@hooks.test', password: PASSWORD, deviceId: 'till-1' } })).json().accessToken as string;
+    const tillAuth = { authorization: `Bearer ${till}` };
+    expect((await app.inject({ method: 'PUT', url: '/api/devices/me/notifications', headers: tillAuth, payload: { kinds: ['sale', 'bogus'] } })).statusCode).toBe(400);
+    const set = await app.inject({ method: 'PUT', url: '/api/devices/me/notifications', headers: tillAuth, payload: { kinds: ['sale', 'report.daily'], timeZone: 'Europe/Zurich' } });
+    expect(set.statusCode).toBe(200);
+    const me = (await app.inject({ method: 'GET', url: '/api/devices', headers: tillAuth })).json().find((d: { id: string }) => d.id === 'till-1');
+    expect(me.notifyKinds).toEqual(['sale', 'report.daily']);
+
+    const before = (await bell(till)).length;
+    await push([sale(12)]);
+    await settle();
+    const notes = await bell(till);
+    expect(notes[0]).toMatchObject({ title: 'Sale: CHF 12.00', kind: 'sale', level: 'low' });
+    expect(notes.length).toBe(before + 1);
+    expect(received).toHaveLength(0); // no webhook listens: the bell alone
+
+    // First look remembers the day; the day after, yesterday's summary once.
+    const feb1 = Date.parse('2026-02-01T09:00:00Z');
+    await app.zollify.webhooks.sendDueReports(feb1);
+    expect((await bell(till)).some((n) => n.kind === 'report.daily')).toBe(false);
+    await app.zollify.webhooks.sendDueReports(feb1 + 86_400_000);
+    await app.zollify.webhooks.sendDueReports(feb1 + 86_400_000);
+    const after = await bell(till);
+    expect(after.filter((n) => n.kind === 'report.daily')).toHaveLength(1);
+    expect(after.find((n) => n.kind === 'report.daily')!.title).toMatch(/^Yesterday: /);
+
+    // Switching everything off stops the bell.
+    await app.inject({ method: 'PUT', url: '/api/devices/me/notifications', headers: tillAuth, payload: { kinds: [] } });
+    const quiet = (await bell(till)).length;
+    await push([sale(13)]);
+    await settle();
+    expect((await bell(till)).length).toBe(quiet);
+  });
+});
+
 describe('where webhooks may point', () => {
   it('refuses private networks and plain http unless allowed', async () => {
     delete process.env.WEBHOOK_ALLOW_PRIVATE;

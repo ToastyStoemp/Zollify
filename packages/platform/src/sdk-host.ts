@@ -278,6 +278,13 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
 
+    catalog: {
+      consignors(source) {
+        guard();
+        services.contributions.addConsignorSource(moduleId, source);
+      },
+    },
+
     events: {
       on(name, handler) {
         guard();

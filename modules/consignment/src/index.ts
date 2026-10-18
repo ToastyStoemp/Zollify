@@ -2,14 +2,15 @@ import { defineComponent, h } from 'vue';
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { isStore } from '@zollify/shared';
 import { clearSdk, setSdk } from './runtime';
-import { loadPlanner, loadProgramme } from './api';
+import { consignors, loadConsignors, loaded, loadPlanner, loadProgramme } from './api';
 import type { Page } from './views/ConsignmentView.vue';
 
 /**
  * Consignment - selling artists' work in your stores.
  *
- * The store owner keeps artists, tags their items, plans space and setups,
- * runs store events and settles what each artist is owed per store. Artists
+ * The store owner keeps artists, tags their items, rents out shelf space and
+ * plans setups, features artists and runs workshops, and settles what each
+ * artist is owed per store. Artists
  * invited here get the separate "My stores" module (consignment-artist) on
  * their own account. Artists, invites and payouts live server-side; the
  * items are ordinary catalogue products, so the till sells them like
@@ -32,15 +33,28 @@ export default defineModule({
     const page = (p: Page) => () => import('./views/ConsignmentView.vue').then((m) => defineComponent({ name: `Consignment-${p}`, render: () => h(m.default, { page: p }) }));
     const PAGES: { page: Page; path: string; name: string; label: string; icon: string }[] = [
       { page: 'artists', path: '', name: 'index', label: 'Artists', icon: 'users' },
-      { page: 'items', path: 'items', name: 'items', label: 'Consigned items', icon: 'package' },
-      { page: 'planner', path: 'planner', name: 'planner', label: 'Planner', icon: 'calendar' },
-      { page: 'programme', path: 'events', name: 'events', label: 'Store events', icon: 'sparkles' },
+      { page: 'items', path: 'items', name: 'items', label: "Artists' items", icon: 'package' },
+      { page: 'planner', path: 'planner', name: 'planner', label: 'Shelf rental', icon: 'calendar' },
+      { page: 'programme', path: 'events', name: 'events', label: 'Featured artists & workshops', icon: 'sparkles' },
       { page: 'statement', path: 'statement', name: 'statement', label: 'Statement', icon: 'file-text' },
       { page: 'reports', path: 'reports', name: 'reports', label: 'Reports', icon: 'book' },
     ];
     PAGES.forEach((p, i) => {
       sdk.routes.add({ path: p.path, name: p.name, title: p.label, minRole: 'admin', component: page(p.page) });
       sdk.nav.add({ routeName: p.name, group: 'stores', label: p.label, icon: p.icon, order: 200 + i * 10, minRole: 'admin' });
+    });
+    // The Products page tags a product with an artist from this list. It is
+    // read when the editor opens, so the artists are fetched on first use
+    // rather than at every start - and only for someone the server would
+    // answer (the artist records are admin-only).
+    let fetching = false;
+    sdk.catalog?.consignors(() => {
+      const role = sdk.account()?.role;
+      if (!loaded.value && !fetching && role && role !== 'member') {
+        fetching = true;
+        loadConsignors().catch(() => {}).finally(() => (fetching = false));
+      }
+      return consignors.value.filter((c) => !c.archived).map((c) => ({ id: c.id, name: c.name }));
     });
     // An artist's label scanned at a store: share the item there if the artist has not yet.
     sdk.till.onLookup(async (code) => {
@@ -53,7 +67,7 @@ export default defineModule({
         return null;
       }
       if (!found.priced) {
-        sdk.ui.toast(`That is ${found.consignorName}'s item, now shared here - give it a price in your currency first (Consignment → Items → Prices).`, { kind: 'warning', timeoutMs: 8000 });
+        sdk.ui.toast(`That is ${found.consignorName}'s item, now shared here - give it a price in your currency first (Stores → Artists' items → Prices).`, { kind: 'warning', timeoutMs: 8000 });
         return null;
       }
       return {

@@ -157,6 +157,13 @@ export interface ConsignmentLine {
   artistShare: number;
   /** The artist's part of what card payment cost, when the store passes card costs on. */
   cardFees?: number;
+  /**
+   * The VAT rate the sale charged on this line, as a percent; null when the
+   * sale was exempt or recorded without VAT. `gross`, `commission` and
+   * `artistShare` all include it - see `vatSplit` for the net figures a
+   * VAT-registered artist's statement needs.
+   */
+  taxRate?: number | null;
 }
 
 const toMinor = (n: number): number => Math.round(n * 100);
@@ -211,6 +218,8 @@ export function consignmentLines(
       const grossMinor = lineGross[n]!;
       const commissionMinor = Math.round((grossMinor * pct) / 100);
       const feeMinor = txFee && txGross > 0 ? Math.round((((txFee * grossMinor) / txGross) * (100 - pct)) / 100) : 0;
+      // Snapshotted like the commission: the rate the receipt actually showed, not today's.
+      const taxRate = tx.tax && !tx.tax.exempt ? (tx.tax.rates[n] ?? null) : null;
       out.push({
         txId: tx.id,
         at: tx.timestamp,
@@ -227,10 +236,42 @@ export function consignmentLines(
         commission: commissionMinor / 100,
         artistShare: (grossMinor - commissionMinor) / 100,
         ...(feeMinor ? { cardFees: feeMinor / 100 } : {}),
+        taxRate,
       });
     }
   }
   return out.sort((a, b) => b.at - a.at);
+}
+
+/** One VAT rate's part of an amount: what it comes to, the VAT inside it and the rest. */
+export interface VatSplitRow {
+  /** Percent; null for lines sold without VAT. */
+  rate: number | null;
+  gross: number;
+  net: number;
+  vat: number;
+}
+
+/**
+ * An amount on the lines - the artist's share, say - split by the VAT rate
+ * each line sold at. Needed for a VAT-registered artist: under self-billing
+ * the store writes their invoice, and an invoice must show net and VAT.
+ * Summed in minor units per rate; the VAT is rounded once per rate, the way
+ * the receipts and the store report round it.
+ */
+export function vatSplit<T extends Pick<ConsignmentLine, 'taxRate'>>(lines: T[], amountOf: (line: T) => number): VatSplitRow[] {
+  const byRate = new Map<number | null, number>();
+  for (const l of lines) {
+    const rate = l.taxRate ?? null;
+    byRate.set(rate, (byRate.get(rate) ?? 0) + toMinor(amountOf(l)));
+  }
+  return [...byRate.entries()]
+    .filter(([, gross]) => gross !== 0)
+    .map(([rate, gross]) => {
+      const vat = rate ? Math.round((gross * rate) / (100 + rate)) : 0;
+      return { rate, gross: gross / 100, net: (gross - vat) / 100, vat: vat / 100 };
+    })
+    .sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1));
 }
 
 export interface StoreTotals {

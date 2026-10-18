@@ -64,7 +64,7 @@ function charge(r: TillRental): void {
     <template v-else>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <p v-if="!rows && !error" class="hint">Loading…</p>
-      <p v-else-if="rows && !rows.length" class="hint">No spaces rented at {{ store.name }}. Rentals are booked in Consignment → Planner.</p>
+      <p v-else-if="rows && !rows.length" class="hint">No spaces rented at {{ store.name }}. Rentals are booked under Stores → Shelf rental.</p>
       <article v-for="r in rows ?? []" :key="r.id" class="rental">
         <header>
           <strong>{{ r.consignorName }}</strong>

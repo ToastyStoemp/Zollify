@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { FEE_REASONS, fmtPrice, journalCsv, reportCsv, type ArtistInvoice, type BooksSettings, type FeeReason, type ReportPeriod, type StoreReport } from '@zollify/shared';
+import { FEE_REASONS, fmtPrice, journalCsv, paymentFilePreview, reportCsv, type ArtistInvoice, type BooksSettings, type FeeReason, type PaymentPreview, type ReportPeriod, type StoreReport } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import { consignors, errorText, issueInvoices, loadConsignors, loadInvoices, loadReport, loadReports, payReport, paymentFile, saveBooksSettings, today } from '../api';
 import { sdk } from '../runtime';
@@ -104,8 +104,24 @@ async function downloadJournal(): Promise<void> {
   if (!report.value || !settings.value) return;
   await sdk().ui.saveFile(`journal-${report.value.period.from}.csv`, journalCsv(invoices.value, settings.value.accounting), 'text/csv');
 }
-async function downloadPayments(): Promise<void> {
+/**
+ * Who the file would pay, shown before it is made: the server leaves out
+ * anyone without a valid IBAN, and a file whose total is short of what is
+ * owed must not go to the bank unnoticed. Worked out from the artists on
+ * record here; the server's own answer is still the one that counts.
+ */
+const preview = ref<PaymentPreview | null>(null);
+const previewing = ref(false);
+function openPayments(): void {
   if (!report.value) return;
+  const rows = owed.value.filter((a) => !picked.value.size || picked.value.has(a.consignorId)).map((a) => ({ consignorId: a.consignorId, name: a.name, amount: a.balance, currency: a.currency }));
+  preview.value = paymentFilePreview(rows, (id) => consignors.value.find((c) => c.id === id)?.iban);
+  previewing.value = true;
+}
+const skipText = (s: PaymentPreview['skipped'][number]): string => (s.reason === 'no_iban' ? `${s.name} has no IBAN - not in the file` : `${s.name}'s IBAN is not valid - not in the file`);
+async function downloadPayments(): Promise<void> {
+  if (!report.value || !preview.value) return;
+  previewing.value = false;
   try {
     const res = await paymentFile(report.value.period.from, payDate.value, picked.value.size ? [...picked.value] : undefined);
     if (res.xml && res.filename) await sdk().ui.saveFile(res.filename, res.xml, 'application/xml');
@@ -223,8 +239,8 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           <div><span>Cash</span><strong>{{ fmtPrice(t.cash, t.currency) }}</strong></div>
           <div><span>Card</span><strong>{{ fmtPrice(t.card, t.currency) }}</strong><small v-if="t.other">other {{ fmtPrice(t.other, t.currency) }}</small></div>
           <div v-if="t.cardFees"><span>Card costs</span><strong>{{ fmtPrice(t.cardFees, t.currency) }}</strong><small v-if="t.cardFeesPassed">{{ fmtPrice(t.cardFeesPassed, t.currency) }} on artists</small></div>
-          <div><span>Artists' work</span><strong>{{ fmtPrice(t.consigned, t.currency) }}</strong><small>theirs {{ fmtPrice(t.artistShare, t.currency) }}</small></div>
-          <div class="keep"><span>Commission</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong></div>
+          <div><span>Artists' work</span><strong>{{ fmtPrice(t.consigned, t.currency) }}</strong><small>artists' share {{ fmtPrice(t.artistShare, t.currency) }}, incl. VAT</small></div>
+          <div class="keep"><span>Commission</span><strong>{{ fmtPrice(t.commission, t.currency) }}</strong><small>incl. VAT</small></div>
           <div><span>Own stock</span><strong>{{ fmtPrice(t.own, t.currency) }}</strong></div>
         </div>
         <p v-if="!t.cardFees && t.card" class="hint">Card costs are not counted - set your terminal's rate under Settings.</p>
@@ -243,7 +259,7 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           <table class="artists">
             <thead>
               <tr>
-                <th></th><th>Artist</th><th class="num">Sold</th><th class="num">Commission</th><th class="num">Share</th>
+                <th></th><th>Artist</th><th class="num">Sold<small>incl. VAT</small></th><th class="num">Commission<small>incl. VAT</small></th><th class="num">Share<small>incl. VAT</small></th>
                 <th class="num">Card</th><th class="num">Rent</th><th class="num">Fees</th><th class="num">Earned</th><th class="num">Paid</th><th class="num">Owed</th>
               </tr>
             </thead>
@@ -269,11 +285,11 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
           <span class="grow" />
           <button type="button" :disabled="isOpen" :title="isOpen ? 'Invoice a period once it has closed' : ''" @click="issue"><Icon name="file-text" :size="14" /> Issue invoices</button>
           <button type="button" :disabled="!invoices.length" @click="downloadJournal"><Icon name="download" :size="14" /> Journal CSV</button>
-          <button type="button" :disabled="!owed.length" @click="downloadPayments"><Icon name="banknote" :size="14" /> Bank payment file</button>
+          <button type="button" :disabled="!owed.length" @click="openPayments"><Icon name="banknote" :size="14" /> Bank payment file</button>
         </div>
         <p v-if="unagreed.length" class="warn">No self-billing agreement on file for {{ unagreed.join(', ') }} - their statements are not valid invoices until there is one (Artists → edit).</p>
         <p v-if="invoices.length" class="hint">{{ invoices.length }} invoice{{ invoices.length === 1 ? '' : 's' }} issued: {{ invoices[0]!.number }}<template v-if="invoices.length > 1"> to {{ invoices[invoices.length - 1]!.number }}</template>. Issued invoices never change. The payment file (ISO 20022 pain.001) uses the invoice number as each transfer's reference, so the bank statement matches back to it.</p>
-        <p class="hint">Earned is the period's share less card costs, rent and fees. Owed is everything unpaid as of {{ fmtDay(report.period.to) }} - what a payout settles. Paying never pays the same money twice.</p>
+        <p class="hint">Sold, Commission and Share are taken from what customers paid, VAT included; the Statement splits a VAT-registered artist's share into net and VAT. Earned is the period's share less card costs, rent and fees. Owed is everything unpaid as of {{ fmtDay(report.period.to) }} - what a payout settles. Paying never pays the same money twice.</p>
       </section>
 
       <div class="cols">
@@ -311,6 +327,34 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
         </section>
       </div>
     </template>
+
+    <ModalShell v-if="previewing && preview" title="Bank payment file" @close="previewing = false">
+      <div class="form">
+        <p class="hint">An ISO 20022 (pain.001) file to upload in your bank, paying what is owed as of {{ report ? fmtDay(report.period.to) : '' }}, dated {{ payDate }}.</p>
+        <div v-if="preview.skipped.length" class="left-out" role="alert">
+          <p v-for="s in preview.skipped" :key="s.consignorId"><Icon name="alert-triangle" :size="14" /> {{ skipText(s) }} ({{ fmtPrice(s.amount, s.currency) }}). Add it under Artists → edit.</p>
+        </div>
+        <table v-if="preview.included.length">
+          <thead><tr><th>In the file</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            <tr v-for="r in preview.included" :key="r.consignorId"><td>{{ r.name }}</td><td class="num">{{ fmtPrice(r.amount, r.currency) }}</td></tr>
+          </tbody>
+        </table>
+        <p v-else class="warn">Nobody owed money has a valid IBAN on file, so there is nothing to put in the file.</p>
+        <div class="tiles">
+          <template v-for="t in preview.totals" :key="t.currency">
+            <div><span>File total</span><strong>{{ fmtPrice(t.inFile, t.currency) }}</strong></div>
+            <div :class="{ short: t.inFile < t.owed }"><span>Owed in all</span><strong>{{ fmtPrice(t.owed, t.currency) }}</strong><small v-if="t.inFile < t.owed">{{ fmtPrice(t.owed - t.inFile, t.currency) }} not in the file</small></div>
+          </template>
+        </div>
+      </div>
+      <template #footer>
+        <div class="footer">
+          <button type="button" @click="previewing = false">Cancel</button>
+          <button type="button" class="primary" :disabled="!preview.included.length" @click="downloadPayments"><Icon name="download" :size="14" /> Download file</button>
+        </div>
+      </template>
+    </ModalShell>
 
     <ModalShell v-if="editing" title="Reports, fees and discounts" @close="editing = false">
       <div class="form">
@@ -395,6 +439,10 @@ const accountCurrency = computed(() => sdk().account()?.profile.defaultCurrency 
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
 .warn { margin: 0; color: var(--zfy-danger, #c6512f); font-size: .84rem; }
+th small { display: block; font-weight: 400; text-transform: none; letter-spacing: 0; font-size: .64rem; }
+.left-out { display: flex; flex-direction: column; gap: .3rem; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #c08a2e); background: color-mix(in srgb, var(--zfy-warning, #c08a2e) 10%, transparent); }
+.left-out p { margin: 0; font-size: .85rem; display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.tiles .short { background: color-mix(in srgb, var(--zfy-warning, #c08a2e) 14%, transparent); }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .card { display: flex; flex-direction: column; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); min-width: 0; }

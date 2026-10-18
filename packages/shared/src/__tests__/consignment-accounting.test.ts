@@ -1,5 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { invoiceLines, invoiceNumber, invoiceTotal, isValidIban, normalizeIban, pain001, sepaText } from '../consignment-accounting';
+import { invoiceLines, invoiceNumber, invoiceTotal, isValidIban, normalizeIban, pain001, paymentFilePreview, sepaText } from '../consignment-accounting';
+
+describe('payment file preview', () => {
+  const owed = [
+    { consignorId: 'lotte', name: 'Lotte', amount: 24.5, currency: 'EUR' },
+    { consignorId: 'youssef', name: 'Youssef', amount: 15.12, currency: 'EUR' },
+    { consignorId: 'anneke', name: 'Anneke Claes', amount: 18, currency: 'EUR' },
+    { consignorId: 'paid', name: 'Paid up', amount: 0, currency: 'EUR' },
+  ];
+  const ibans: Record<string, string> = { lotte: 'DE89 3704 0044 0532 0130 00', youssef: 'DK5000400440116243', anneke: '' };
+
+  it('names who is left out and shows the file total against what is owed', () => {
+    const p = paymentFilePreview(owed, (id) => ibans[id]);
+    expect(p.included.map((r) => r.name)).toEqual(['Lotte', 'Youssef']);
+    expect(p.skipped).toEqual([{ consignorId: 'anneke', name: 'Anneke Claes', amount: 18, currency: 'EUR', reason: 'no_iban' }]);
+    expect(p.totals).toEqual([{ currency: 'EUR', inFile: 39.62, owed: 57.62 }]);
+  });
+
+  it('tells a missing IBAN from a wrong one, and keeps currencies apart', () => {
+    const p = paymentFilePreview(
+      [...owed, { consignorId: 'bad', name: 'Bad digits', amount: 10, currency: 'CHF' }],
+      (id) => (id === 'bad' ? 'DE89 3704 0044 0532 0130 01' : ibans[id]),
+    );
+    expect(p.skipped.map((s) => [s.name, s.reason])).toEqual([['Anneke Claes', 'no_iban'], ['Bad digits', 'bad_iban']]);
+    expect(p.totals).toEqual([
+      { currency: 'CHF', inFile: 0, owed: 10 },
+      { currency: 'EUR', inFile: 39.62, owed: 57.62 },
+    ]);
+  });
+});
 
 describe('IBAN', () => {
   it('accepts real IBANs with or without spaces and rejects a changed digit', () => {

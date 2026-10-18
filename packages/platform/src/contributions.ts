@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import type { CalendarSource, HomeCard, NavItem, Role, RouteDef, SettingsPanel, SetupStep, TillAction } from '@zollify/sdk';
+import type { CalendarSource, CatalogConsignor, ConsignorSource, HomeCard, NavItem, Role, RouteDef, SettingsPanel, SetupStep, TillAction } from '@zollify/sdk';
 import { roleAtLeast } from '@zollify/sdk';
 
 export interface OwnedRoute extends RouteDef {
@@ -36,6 +36,7 @@ export class ContributionRegistry {
   readonly tillActions = reactive<(TillAction & { moduleId: string })[]>([]);
   readonly calendarSources = reactive<{ moduleId: string; source: CalendarSource }[]>([]);
   readonly homeCards = reactive<(HomeCard & { moduleId: string })[]>([]);
+  readonly consignorSources = reactive<{ moduleId: string; source: ConsignorSource }[]>([]);
 
   private sink: RouteSink | null = null;
 
@@ -96,6 +97,26 @@ export class ContributionRegistry {
     this.calendarSources.push({ moduleId, source });
   }
 
+  addConsignorSource(moduleId: string, source: ConsignorSource): void {
+    this.consignorSources.push({ moduleId, source });
+  }
+
+  /**
+   * Everyone a product can be tagged as consigned by, name-sorted. A source
+   * that throws is left out rather than taking the product editor down with it.
+   */
+  consignors(): CatalogConsignor[] {
+    const out: CatalogConsignor[] = [];
+    for (const { source } of this.consignorSources) {
+      try {
+        out.push(...source());
+      } catch {
+        /* one module's failure must not hide the others' artists */
+      }
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   addSettingsPanel(moduleId: string, panel: SettingsPanel): void {
     this.settingsPanels.push({ ...panel, moduleId, id: `${moduleId}.${panel.id}` });
   }
@@ -116,6 +137,7 @@ export class ContributionRegistry {
     spliceWhere(this.tillActions, (a) => a.moduleId === moduleId);
     spliceWhere(this.calendarSources, (c) => c.moduleId === moduleId);
     spliceWhere(this.homeCards, (c) => c.moduleId === moduleId);
+    spliceWhere(this.consignorSources, (c) => c.moduleId === moduleId);
   }
 
   /**

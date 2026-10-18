@@ -528,6 +528,22 @@ export interface HomeCard {
 /** Asked for the days on screen, `from` to `to` inclusive (YYYY-MM-DD). Throwing just leaves the source out. */
 export type CalendarSource = (range: { from: string; to: string }) => Promise<CalendarEntry[]>;
 
+// ── The catalogue ───────────────────────────────────────────────────────────
+
+/** Someone whose items the catalogue holds on their behalf - a consignment artist - as `Product.consignorId` names them. */
+export interface CatalogConsignor {
+  id: string;
+  name: string;
+}
+/**
+ * Who a product can be tagged as belonging to. Read synchronously each time
+ * core's product editor opens, so return the module's current list (a Vue
+ * ref read inside keeps the editor in step with it); an empty list hides
+ * the picker. Core only writes `consignorId` and `consignorName` on the
+ * product - the module owns everything else about the artist.
+ */
+export type ConsignorSource = () => CatalogConsignor[];
+
 // ── The SDK surface ─────────────────────────────────────────────────────────
 
 /**
@@ -549,6 +565,11 @@ export interface Sdk {
   calendar: { source(source: CalendarSource): void };
   /** Adds a card to the home screen (low stock at the stores you consign with, say). */
   home: { card(card: HomeCard): void };
+  /**
+   * Names the people core's Products page may tag a product as consigned by
+   * (see ConsignorSource). Absent on older shells, so call it guarded.
+   */
+  catalog?: { consignors(source: ConsignorSource): void };
 
   events: EventBus;
   http: HttpClient;

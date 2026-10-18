@@ -5,6 +5,7 @@ import Dexie from 'dexie';
 import { authFetch } from '../session';
 import { getAccount } from '../session';
 import { toPlain } from './plain';
+import { leaveOnPurpose } from '../leave-guard';
 import { loadCatalog, resetCatalogCache } from './catalog';
 import { loadSalesEvents, resetSalesEventCache } from './sales-events';
 import { loadTransactions, resetTransactionCache } from './transactions';
@@ -419,5 +420,6 @@ export async function wipeAccountData(options: { archived?: boolean } = {}): Pro
   const mine = (await listZollifyDbs()).filter((n) => n.includes(account.accountId.replace(/[^A-Za-z0-9_-]/g, '_')));
   for (const name of mine) await Dexie.delete(name);
   await openCoreDb(account.accountId).settings.bulkPut(keep);
+  leaveOnPurpose();
   window.location.reload();
 }

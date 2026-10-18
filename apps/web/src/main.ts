@@ -22,6 +22,7 @@ import {
   refreshAccessToken,
   refreshPendingCount,
   resumeOffline,
+  guardUnsyncedOnClose,
   startAutoSync,
   startAutoEvents,
   startRealtime,
@@ -97,6 +98,9 @@ async function boot(): Promise<void> {
     return [];
   });
 
+  // Closing the tab with changes not yet on the server asks first. Installed whether
+  // or not anyone is signed in yet: a sign-in on this page starts the outbox too.
+  guardUnsyncedOnClose();
   // Started after modules mount so the first pull's reload reaches a shell that
   // can actually render what arrives.
   if (getAccount()) {

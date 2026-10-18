@@ -1,6 +1,6 @@
 import { booted, whenBooted } from './boot';
 import { createRouter, createWebHashHistory, type Router } from 'vue-router';
-import { getAccount, isAuthenticated } from '@zollify/platform';
+import { getAccount, isAuthenticated, leaveOnPurpose } from '@zollify/platform';
 import { roleAtLeast, type Role } from '@zollify/sdk';
 
 /**
@@ -121,5 +121,7 @@ router.onError((err, to) => {
     /* ignore */
   }
   if (to?.fullPath) window.location.hash = to.fullPath;
+  // A new version: the outbox survives the reload, so no leave prompt.
+  leaveOnPurpose();
   window.location.reload();
 });

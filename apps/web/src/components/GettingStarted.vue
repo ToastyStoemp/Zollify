@@ -3,6 +3,8 @@ import { computed, ref } from 'vue';
 import { allProducts, currentAccount, inventoryRows, recentTransactions, visibleEvents } from '@zollify/platform';
 import { isStore, sellsAt } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
+import { useRouter } from 'vue-router';
+import { contributions } from '../boot';
 
 /**
  * Getting started, on Home: the few things a new business does before its
@@ -12,6 +14,9 @@ import { Icon } from '@zollify/ui';
  */
 const account = currentAccount;
 const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
+const router = useRouter();
+/** A module lists consignment artists (the consignment module, when it is on). */
+const hasArtists = computed(() => contributions.consignorSources.length > 0 && account.value?.role !== 'member');
 
 interface Step {
   id: string;
@@ -58,6 +63,18 @@ const steps = computed<Step[]>(() => {
   }
   if (runs.value.stores) {
     list.push({ id: 'store', title: 'Set up your store', text: 'Its VAT, artists and reports.', done: live.some((e) => isStore(e)), to: { name: 'stores' }, action: 'Set up' });
+  }
+  // A store selling artists' work: the artists come before their items can be tagged or paid out.
+  // Only when the consignment module is on and this person can see its artist list (admins).
+  if (hasArtists.value && router.hasRoute('consignment:index')) {
+    list.push({
+      id: 'artists',
+      title: 'Add your artists',
+      text: 'Who you sell for and their commission - their items, statements and payouts hang on this.',
+      done: contributions.consignors().length > 0,
+      to: { name: 'consignment:index' },
+      action: 'Add artists',
+    });
   }
   list.push({
     id: 'card',

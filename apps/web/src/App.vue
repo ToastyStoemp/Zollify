@@ -189,10 +189,26 @@ const syncPct = computed(() => {
  */
 const syncLabel = computed(() => {
   if (syncState.value === 'syncing') return 'Syncing…';
-  if (syncState.value === 'offline') return pendingCount.value ? `Offline · ${pendingCount.value} waiting` : 'Offline';
-  if (syncState.value === 'error') return 'Sync failed - tap to retry';
-  return pendingCount.value ? `${pendingCount.value} to sync` : 'Synced';
+  const n = pendingCount.value;
+  const changes = `${n} change${n === 1 ? '' : 's'}`;
+  if (syncState.value === 'offline') return n ? `Offline · ${changes} on this device only` : 'Offline';
+  if (syncState.value === 'error') return n ? `Sync failed · ${changes} waiting - tap to retry` : 'Sync failed - tap to retry';
+  return n ? `${changes} to sync` : 'Synced';
 });
+/**
+ * The same, written out under the sidebar's icons - but only when there is
+ * something to know. A tester never hovered the sync icon and took a product
+ * that had not synced yet for lost.
+ */
+const syncNotice = computed(() => {
+  const n = pendingCount.value;
+  if (syncState.value === 'error') return syncLabel.value;
+  if (syncState.value === 'offline') return n ? syncLabel.value : 'Offline';
+  if (syncState.value === 'syncing') return n ? 'Syncing…' : '';
+  return n ? `${n} change${n === 1 ? '' : 's'} not synced yet` : '';
+});
+/** The words Team and the invite form use, not the role's internal name. */
+const ROLE_NAME: Record<string, string> = { owner: 'Owner', admin: 'Admin', member: 'Staff' };
 
 
 // ── Notifications ──────────────────────────────────────────────────────────
@@ -283,7 +299,7 @@ const fmtAgo = (ms: number): string => {
               <button
                 type="button"
                 class="quiet sync"
-                :class="syncState"
+                :class="[syncState, { pending: pendingCount > 0 }]"
                 :disabled="syncState === 'syncing'"
                 :title="syncLabel"
                 :aria-label="`Sync now. ${syncLabel}`"
@@ -292,13 +308,17 @@ const fmtAgo = (ms: number): string => {
                 <Icon name="refresh-cw" /><i class="dot" aria-hidden="true"></i>
               </button>
             </div>
+            <!-- Said in words, not only a dot's colour: work that is on this device only. -->
+            <button v-if="syncNotice" type="button" class="sync-notice" :class="syncState" :disabled="syncState === 'syncing'" @click="syncNow()">
+              {{ syncNotice }}
+            </button>
             <div class="row">
               <button type="button" class="item top grow feedback" @click="feedbackOpen = true"><Icon name="message-square" /><span>Send feedback</span></button>
               <a v-if="discordUrl" :href="discordUrl" target="_blank" rel="noopener noreferrer" class="quiet discord" title="Zollify on Discord" aria-label="Join Zollify on Discord"><Icon name="discord" /></a>
             </div>
             <div class="who">
               <div class="name">{{ account.accountName }}</div>
-              <div class="role">{{ account.email }} · {{ account.role }}</div>
+              <div class="role">{{ account.email }} · {{ ROLE_NAME[account.role] ?? account.role }}</div>
               <div v-if="canLockTill()" class="till-row">
                 <button type="button" class="quiet switch" @click="lockTill()"><Icon name="lock" :size="13" /> Lock till</button>
                 <span v-if="account.userId !== getDeviceAccount()?.userId" class="hint">on {{ getDeviceAccount()?.email }}'s device</span>
@@ -312,7 +332,7 @@ const fmtAgo = (ms: number): string => {
         <!-- Only shown when the bottom tab bar has no "More" tab of its own
              (few enough sections that they all fit as tabs) - otherwise this
              and the bottom tab would be two buttons opening the same drawer. -->
-        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="syncState" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b></button>
+        <button v-if="!tabOverflow" type="button" class="quiet burger" :class="[syncState, { pending: pendingCount > 0 }]" :aria-expanded="menuOpen" aria-controls="main-nav" aria-label="Menu" @click="menuOpen = !menuOpen"><Icon :name="menuOpen ? 'x' : 'menu'" /><i class="dot" aria-hidden="true"></i><b v-if="unreadNotifications" :class="['count', { urgent: urgentNotifications }]" aria-hidden="true">{{ unreadNotifications > 9 ? '9+' : unreadNotifications }}</b></button>
       </template>
     </aside>
 
@@ -457,6 +477,9 @@ nav { flex: 1; }
 .offline .dot { background: var(--zfy-muted); }
 .error .dot { background: var(--zfy-danger); }
 .syncing .dot { background: var(--zfy-warning); }
+.sync.pending:not(.error) .dot, .burger.pending:not(.error) .dot { background: var(--zfy-warning); }
+.sync-notice { align-self: stretch; text-align: left; min-height: 0; padding: .3rem .55rem; border: 1px solid var(--zfy-warning); border-radius: 8px; background: transparent; color: var(--zfy-warning-ink); font-size: .76rem; font-weight: 600; cursor: pointer; }
+.sync-notice.error { border-color: var(--zfy-danger); color: var(--zfy-danger); background: transparent; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .who { font-size: .8rem; color: var(--zfy-muted); display: flex; flex-direction: column; gap: .15rem; }
 .who .name { font-weight: 600; color: var(--zfy-ink); }

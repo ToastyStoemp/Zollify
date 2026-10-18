@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, deviceId, shellConfirm, signOut } from '@zollify/platform';
+import { authFetch, currentAccount, deviceId, leaveOnPurpose, shellConfirm, signOut } from '@zollify/platform';
 import { signOutAndReload } from '../boot';
 import { Icon } from '@zollify/ui';
 
@@ -147,6 +147,7 @@ async function confirmDelete(): Promise<void> {
   try {
     await authFetch(isAdmin.value ? '/account/delete' : '/users/me/delete', { method: 'POST', body: JSON.stringify({ password: password.value, code: deleteCode.value.trim() || undefined }) });
     await signOut();
+    leaveOnPurpose();
     location.reload();
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not delete.';
@@ -156,7 +157,7 @@ async function confirmDelete(): Promise<void> {
 }
 
 /** Everything in memory belongs to the account that just left, so the cleanest teardown is a fresh boot. */
-const leave = signOutAndReload;
+const leave = (): Promise<boolean> => signOutAndReload();
 
 onMounted(async () => {
   myDevice.value = await deviceId();
@@ -223,7 +224,7 @@ onMounted(async () => {
       <h3>Danger zone</h3>
       <p class="hint">
         <template v-if="isAdmin">Permanently delete this account and <strong>all</strong> of its data - events, products, sales, images and every user. This cannot be undone.</template>
-        <template v-else>Permanently delete your own login. The account's shared data stays for the other members.</template>
+        <template v-else>Permanently delete your own login. The account's shared data stays for the rest of the team.</template>
       </p>
       <button v-if="!showDanger" type="button" class="danger" @click="showDanger = true">{{ isAdmin ? 'Delete account & all data…' : 'Delete my login…' }}</button>
       <form v-else class="form" @submit.prevent="confirmDelete">

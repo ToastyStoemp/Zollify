@@ -12,7 +12,12 @@ import {
   getAccount,
   getServerUrl,
   isNative,
+  leaveOnPurpose,
   noteSale,
+  pendingCount,
+  shellConfirm,
+  syncNow,
+  syncState,
   onAccountChange,
   recordSale,
   signOut,
@@ -138,14 +143,39 @@ export const loader = new ModuleLoader({
  * belongs to exactly one account and there is nothing to switch to without
  * signing out of this one first.
  */
-export async function signOutAndReload(): Promise<void> {
+/**
+ * Signs this device out - but not past work that has not reached the server
+ * without saying so. Changes made here wait in this device's outbox: they
+ * survive the sign-out and go up the next time anyone signs in on this
+ * browser, yet until then no other phone or laptop sees them. A tester
+ * signed in elsewhere straight after adding a product and took it for lost.
+ * So: try a sync first, and if anything is still waiting, ask.
+ * Resolves false when the person chose to stay signed in.
+ */
+export async function signOutAndReload(): Promise<boolean> {
+  if (pendingCount.value > 0) {
+    if (typeof navigator === 'undefined' || navigator.onLine !== false) await syncNow().catch(() => undefined);
+    const left = pendingCount.value;
+    if (left > 0) {
+      const one = left === 1;
+      const ok = await shellConfirm(
+        `${left} change${one ? '' : 's'} made on this device ${one ? 'has' : 'have'} not reached the server yet${
+          syncState.value === 'offline' ? ' - you are offline' : ''
+        }. ${one ? 'It stays' : 'They stay'} here and ${one ? 'is' : 'are'} sent the next time someone signs in on this device, but other devices will not see ${one ? 'it' : 'them'} until then.\n\nSign out anyway?`,
+        'Not synced yet',
+      );
+      if (!ok) return false;
+    }
+  }
   stopAutoSync();
   stopAutoEvents();
   stopRealtime();
   await loader.unloadAll();
   await signOut();
+  leaveOnPurpose();
   window.location.hash = '#/login';
   window.location.reload();
+  return true;
 }
 
 interface ManifestResponse {

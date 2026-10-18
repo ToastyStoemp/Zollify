@@ -541,7 +541,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
           <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && showSeller"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
-          <router-link v-if="hasRoute('pos:receipt')" :to="{ name: 'pos:receipt', params: { saleId: tx.id } }" class="quiet icon" aria-label="Receipt"><Icon name="printer" :size="16" /></router-link>
+          <router-link v-if="hasRoute('pos:receipt')" :to="{ name: 'pos:receipt', params: { saleId: tx.id } }" class="quiet icon" title="Show, print or send the receipt"><Icon name="printer" :size="16" /><span>Receipt</span></router-link>
           <button v-if="canRevert && !tx.revertedAt" type="button" class="quiet danger" @click="revertId = tx.id">Revert</button>
         </div>
         <ul class="lines">
@@ -630,7 +630,7 @@ label.inline { display: flex; align-items: center; gap: .4rem; font-size: .8rem;
 .chip.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); font-weight: 600; }
 .time { font-size: .75rem; }
 .txhead .quiet { min-height: 2.2rem; padding: .1rem .5rem; font-size: .78rem; }
-.icon { display: inline-flex; align-items: center; color: var(--zfy-muted, #5a6472); }
+.icon { display: inline-flex; align-items: center; gap: .3rem; color: var(--zfy-muted, #5a6472); text-decoration: none; }
 .lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; font-size: .78rem; color: var(--zfy-muted, #5a6472); }
 .lines li { display: flex; justify-content: space-between; gap: .5rem; }
 .body { margin: 0; font-size: .9rem; }

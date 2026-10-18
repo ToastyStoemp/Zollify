@@ -63,6 +63,38 @@ export function guessCountry(device: { timeZone?: string; languages?: readonly s
 /** The currency a country sells in; '' when this list does not know it. */
 export const currencyOf = (country: string): string => COUNTRY_CURRENCY[country] ?? '';
 
+/** ISO country → the language its dates are usually written in, for the countries a seller here is likely in. */
+const COUNTRY_LANGUAGE: Record<string, string> = {
+  AT: 'de', BE: 'nl', BG: 'bg', HR: 'hr', CY: 'el', CZ: 'cs', DK: 'da', EE: 'et', FI: 'fi', FR: 'fr', DE: 'de',
+  GR: 'el', HU: 'hu', IE: 'en', IT: 'it', LV: 'lv', LT: 'lt', LU: 'fr', MT: 'en', NL: 'nl', PL: 'pl', PT: 'pt',
+  RO: 'ro', SK: 'sk', SI: 'sl', ES: 'es', SE: 'sv', CH: 'de', LI: 'de', NO: 'nb', IS: 'is', GB: 'en',
+  US: 'en', CA: 'en', AU: 'en', NZ: 'en', JP: 'ja',
+};
+
+/**
+ * The locale a receipt's date and time are written in: the country's own
+ * ("18.10.2026" in Germany, "18/10/2026" in Belgium), not the browser's - a
+ * laptop set to English otherwise prints US month-first dates on a receipt
+ * handed over in Ghent. Takes an ISO code or a country name. Unknown
+ * countries get en-GB: day first, 24-hour clock, the European default.
+ */
+export function dateLocaleOf(country: string | undefined | null): string {
+  const raw = (country ?? '').trim();
+  const code = raw.length === 2 ? raw.toUpperCase() : (COUNTRIES.find((c) => c.name.toLowerCase() === raw.toLowerCase())?.code ?? '');
+  const lang = COUNTRY_LANGUAGE[code];
+  return lang ? `${lang}-${code}` : 'en-GB';
+}
+
+/** A receipt's date and time in its country's numeric style: "18.10.2026, 14:05". */
+export function receiptDateTime(timestamp: number, country: string | undefined | null): { date: string; time: string } {
+  const locale = dateLocaleOf(country);
+  const d = new Date(timestamp);
+  return {
+    date: d.toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' }),
+    time: d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
 /** The guess for the device this runs on, with the country's name as the profile stores it. */
 export function guessFromDevice(): { code: string; name: string; currency: string } | null {
   let timeZone: string | undefined;

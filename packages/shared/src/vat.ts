@@ -209,6 +209,18 @@ export function vatNumberFor(
   return hit?.number ?? profile?.artist?.vatId?.trim() ?? '';
 }
 
+/**
+ * The organisationsnummer inside a Swedish VAT number ("SE556016272701" is
+ * 556016-2727 plus the fixed "01"), or '' when the number is not Swedish. A
+ * Swedish kassakvitto must name the organisationsnummer whatever the VAT
+ * position (SKVFS 2014:9, 7 kap. 1 §); on a taxable sale it is inside the
+ * Momsreg.nr line, on an exempt sale it has to stand on its own.
+ */
+export function swedishOrgNumber(vatNumber: string | undefined | null): string {
+  const m = /^SE\s?(\d{10})\s?01$/i.exec((vatNumber ?? '').trim());
+  return m ? `${m[1]!.slice(0, 6)}-${m[1]!.slice(6)}` : '';
+}
+
 /** Per-event VAT, set on the event form. Absent fields fall back to the country and the business profile. */
 export interface EventVat {
   /** 'auto' (default) = exempt if the profile lists the country, else charge the country's rates. */

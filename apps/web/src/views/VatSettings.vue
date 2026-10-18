@@ -81,6 +81,9 @@ async function save(): Promise<void> {
       "Reduced" in the catalogue (rates checked {{ VAT_RATES_AS_OF }}, and adjustable per event).
     </p>
     <p v-if="!canEdit" class="hint">Only an owner or admin can change these.</p>
+    <p v-if="home === 'SE'" class="warn">
+      Sweden requires a certified cash register (kassaregister with a control unit) once cash and card sales pass four price base amounts a year (SEK 236,800 in 2026), market and fair trade included. Zollify is not a certified kassaregister: below that line it can be your till, above it you need one that is, unless Skatteverket grants an exemption. See docs/sweden-compliance.md.
+    </p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <fieldset :disabled="!canEdit" class="choice">

@@ -64,6 +64,7 @@ const p = computed(() => form.value!.profile);
 /** The deadlines' VAT status disagrees with Settings → VAT: say so, the reminders would be for the wrong returns. */
 const mismatch = computed(() => (form.value ? vatMismatch(form.value.profile, sdk().account()?.profile) : null));
 const isDE = computed(() => p.value.country === 'DE');
+const isSE = computed(() => p.value.country === 'SE');
 const inEU = computed(() => EU_COUNTRIES.includes(p.value.country));
 const known = computed(() => hasCountryRules(p.value.country));
 const rules = computed(() => (form.value ? rulesFor(form.value.profile) : []));
@@ -119,6 +120,10 @@ async function save(): Promise<void> {
     // Settings that do not apply are cleared, so the profile reads true later.
     const profile = { ...f.profile };
     if (profile.country !== 'DE') profile.region = '';
+    if (profile.country !== 'SE') {
+      profile.euTrade = false;
+      profile.largeBusiness = false;
+    }
     if (!EU_COUNTRIES.includes(profile.country)) profile.euSmeScheme = false;
     if (profile.vat !== 'regular') profile.extension = false;
     if (!profile.tradeTax) profile.tradeTaxPrepayments = false;
@@ -160,7 +165,7 @@ async function save(): Promise<void> {
       </div>
       <p v-if="!known" class="note">
         <Icon name="alert-triangle" :size="14" />
-        Zollify knows Germany's tax calendar so far. For {{ countryName }} you get {{ inEU ? 'the EU SME scheme report and ' : '' }}the deadlines you add below.
+        Zollify knows the tax calendars of Germany and Sweden so far. For {{ countryName }} you get {{ inEU ? 'the EU SME scheme report and ' : '' }}the deadlines you add below.
       </p>
       <p v-if="mismatch" class="note"><Icon name="alert-triangle" :size="14" /> {{ mismatch }}</p>
 
@@ -207,6 +212,57 @@ async function save(): Promise<void> {
           <button type="button" :class="{ on: p.ecSalesListFrequency === 'monthly' }" @click="p.ecSalesListFrequency = 'monthly'">Monthly</button>
           <button type="button" :class="{ on: p.ecSalesListFrequency === 'quarterly' }" @click="p.ecSalesListFrequency = 'quarterly'">Quarterly</button>
         </div>
+      </template>
+
+      <template v-if="isSE">
+        <div class="field">
+          <span>Legal form</span>
+          <div class="seg">
+            <button type="button" :class="{ on: p.legalForm === 'sole' }" @click="p.legalForm = 'sole'">Enskild firma</button>
+            <button type="button" :class="{ on: p.legalForm === 'company' }" @click="p.legalForm = 'company'">Aktiebolag</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <span>VAT (moms)</span>
+          <div class="seg">
+            <button type="button" :class="{ on: p.vat === 'regular' }" @click="p.vat = 'regular'">I charge VAT</button>
+            <button type="button" :class="{ on: p.vat === 'small-business' }" @click="p.vat = 'small-business'">Exempt (momsbefriad)</button>
+            <button type="button" :class="{ on: p.vat === 'none' }" @click="p.vat = 'none'">No VAT</button>
+          </div>
+          <small class="hint">Exempt: turnover under SEK 120,000 a year, or an artist selling only their own works for under SEK 300,000 - no VAT return to file.</small>
+        </div>
+
+        <template v-if="p.vat === 'regular'">
+          <div class="field">
+            <span>VAT returns</span>
+            <div class="seg">
+              <button type="button" :class="{ on: p.vatFrequency === 'monthly' }" @click="p.vatFrequency = 'monthly'">Monthly</button>
+              <button type="button" :class="{ on: p.vatFrequency === 'quarterly' }" @click="p.vatFrequency = 'quarterly'">Quarterly</button>
+              <button type="button" :class="{ on: p.vatFrequency === 'yearly' }" @click="p.vatFrequency = 'yearly'">Yearly</button>
+            </div>
+            <small class="hint">By your taxable base: yearly up to SEK 1 million, quarterly up to SEK 40 million (monthly on request), monthly above that. Skatteverket's registration says which.</small>
+          </div>
+          <label v-if="p.vatFrequency === 'monthly'" class="check">
+            <input v-model="p.largeBusiness" type="checkbox" />
+            <span>Taxable base over SEK 40 million<small>: returns due the 26th of the next month</small></span>
+          </label>
+          <label v-if="p.vatFrequency === 'yearly'" class="check">
+            <input v-model="p.euTrade" type="checkbox" />
+            <span>I buy or sell with other EU countries<small>: the yearly return is then due 26 February</small></span>
+          </label>
+        </template>
+
+        <label class="check"><input v-model="p.incomeTaxPrepayments" type="checkbox" /><span>Debited preliminary tax (F-skatt) each month<small> (the 12th; the 17th in January and August)</small></span></label>
+        <label class="check"><input v-model="p.ecSalesList" type="checkbox" /><span>EC Sales List (periodisk sammanställning)<small> for VAT-free sales to businesses in other EU countries</small></span></label>
+        <div v-if="p.ecSalesList" class="seg indent">
+          <button type="button" :class="{ on: p.ecSalesListFrequency === 'monthly' }" @click="p.ecSalesListFrequency = 'monthly'">Monthly (goods)</button>
+          <button type="button" :class="{ on: p.ecSalesListFrequency === 'quarterly' }" @click="p.ecSalesListFrequency = 'quarterly'">Quarterly (services only)</button>
+        </div>
+        <p class="note">
+          <Icon name="alert-triangle" :size="14" />
+          Sweden requires a certified cash register (kassaregister with a control unit) once cash and card sales pass four price base amounts a year (SEK 236,800 in 2026). Zollify is not a certified kassaregister: below that line it can be your till, above it you need one that is, unless Skatteverket grants an exemption.
+        </p>
       </template>
 
       <label v-if="inEU" class="check">

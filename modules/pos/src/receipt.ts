@@ -1,7 +1,7 @@
 import type { PaymentLeg, Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
+import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterLinks, swedishOrgNumber, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
 import { receiptQrPng } from './lib/after-sale';
@@ -252,6 +252,13 @@ export function sellerLines(
   if (show.email && artist.email) out.push({ text: artist.email });
   const vat = tx.tax?.exempt || !show.vatNumber ? '' : resolveVatNumber(artist, eventCountry);
   if (vat) out.push({ text: `${vatIdLabel(vatCountry(artist, eventCountry))}: ${vat}` });
+  // A Swedish seller's exempt sale still names the organisationsnummer - a
+  // kassakvitto must, whatever the VAT position - read from the Swedish VAT
+  // number, since nothing else on the profile holds it.
+  if (tx.tax?.exempt && countryCodeOf(artist.countryOfOrigin ?? '') === 'SE') {
+    const org = swedishOrgNumber(resolveVatNumber(artist, 'SE'));
+    if (org) out.push({ text: `Org.nr: ${org}` });
+  }
   return out;
 }
 

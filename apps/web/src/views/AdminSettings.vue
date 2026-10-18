@@ -236,7 +236,7 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
           <button type="button" :disabled="inviteBusy" @click="invite(true)">New-account invite</button>
           <button v-if="inviteCode" type="button" class="quiet code" title="Copy" @click="copy(inviteCode)"><code>{{ inviteCode }}</code> <Icon name="copy" :size="14" /></button>
         </div>
-        <p class="hint">Codes are single-use and valid for 14 days. Members and helpers are invited under Settings → Team.</p>
+        <p class="hint">Codes are single-use and valid for 14 days. Staff and helpers are invited under Settings → Team.</p>
       </article>
 
       <article class="card">

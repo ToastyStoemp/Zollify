@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { COUNTRIES } from '../countries';
 import { CURRENCIES } from '../currencies';
-import { currencyOf, guessCountry } from '../locale-guess';
+import { currencyOf, dateLocaleOf, guessCountry, receiptDateTime } from '../locale-guess';
 
 describe('guessCountry', () => {
   it('goes by the time zone first, even with an English phone', () => {
@@ -34,5 +34,20 @@ describe('currencyOf', () => {
       expect(countries.has(code), code).toBe(true);
       expect(currencies.has(currencyOf(code)), currencyOf(code)).toBe(true);
     }
+  });
+});
+
+describe('receipt dates', () => {
+  const at = new Date(2026, 9, 18, 14, 5).getTime();
+  it('writes the date the way the country does, not the browser', () => {
+    expect(receiptDateTime(at, 'DE')).toEqual({ date: '18.10.2026', time: '14:05' });
+    expect(receiptDateTime(at, 'Belgium').date).toBe('18/10/2026');
+    expect(receiptDateTime(at, 'DK').date).toBe('18.10.2026');
+    expect(receiptDateTime(at, 'US').date).toBe('10/18/2026');
+  });
+  it('falls back to day-first for an unknown country', () => {
+    expect(dateLocaleOf('')).toBe('en-GB');
+    expect(dateLocaleOf('Atlantis')).toBe('en-GB');
+    expect(receiptDateTime(at, undefined).date).toBe('18/10/2026');
   });
 });

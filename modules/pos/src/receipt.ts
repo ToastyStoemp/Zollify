@@ -1,7 +1,7 @@
 import type { PaymentLeg, Transaction } from '@zollify/shared';
 import { getSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
-import { countryCodeOf, fmtPrice, printableLink, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
+import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
 import { receiptQrPng } from './lib/after-sale';
@@ -276,9 +276,10 @@ export function buildReceiptLines(
   for (const s of sellerLines(tx, config, eventCountry)) lines.push(s.heading ? { ...center(s.text), doubleHeight: true } : center(s.text));
 
   lines.push({ kind: 'text', text: DIVIDER });
-  const when = new Date(tx.timestamp);
-  lines.push({ kind: 'text', text: row(eventName, when.toLocaleDateString('de-CH')) });
-  lines.push({ kind: 'text', text: row('', when.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' })) });
+  // In the style of the country the sale was made in (the business's own when the event has none).
+  const when = receiptDateTime(tx.timestamp, eventCountry || config.artist.countryOfOrigin);
+  lines.push({ kind: 'text', text: row(eventName, when.date) });
+  lines.push({ kind: 'text', text: row('', when.time) });
   lines.push({ kind: 'text', text: DIVIDER });
 
   // ── Items ──

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { fmtPrice } from '@zollify/shared';
+import { fmtPrice, receiptDateTime } from '@zollify/shared';
 import { paymentLabel, receiptAmounts, receiptSeller, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import { QrCode, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
@@ -73,10 +73,20 @@ const letterFor = (i: number): string => {
 };
 /** The customer's online receipt, for one who asks after the fact. A cancelled sale gets none. */
 const receiptUrl = computed(() => (QrCode && !tx.value?.revertedAt && receiptUrlFor(tx.value?.receiptToken)) || '');
+/**
+ * Dates as the country of the sale writes them, as on the printed copy - not
+ * the browser's locale, which put US month-first dates on receipts in Europe.
+ */
+const saleCountry = computed(
+  () => tx.value?.tax?.country || event.value?.venue?.country || sdk().account()?.profile.artist?.countryOfOrigin,
+);
+const stamp = (ts: number): string => {
+  const { date, time } = receiptDateTime(ts, saleCountry.value);
+  return `${date}, ${time}`;
+};
 const caption = computed(() => {
   if (!tx.value) return '';
-  const when = new Date(tx.value.timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  return [eventName.value, when].filter(Boolean).join(' · ');
+  return [eventName.value, stamp(tx.value.timestamp)].filter(Boolean).join(' · ');
 });
 
 function closeCard(): void {
@@ -163,7 +173,7 @@ async function print(): Promise<void> {
         <p v-for="(s, i) in seller" :key="i" :class="{ heading: s.heading }">{{ s.text }}</p>
       </div>
       <p class="event">{{ eventName || 'No event' }}</p>
-      <p class="when">{{ new Date(tx.timestamp).toLocaleString() }}</p>
+      <p class="when">{{ stamp(tx.timestamp) }}</p>
 
       <ul class="items">
         <li v-for="(item, i) in lines" :key="i">
@@ -195,7 +205,7 @@ async function print(): Promise<void> {
       <p v-if="tx.tax?.exempt && tx.tax.exNumber" class="exempt">EX: {{ tx.tax.exNumber }}</p>
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
-      <p v-if="tx.revertedAt" class="reverted">Reverted {{ new Date(tx.revertedAt).toLocaleString() }}</p>
+      <p v-if="tx.revertedAt" class="reverted">Reverted {{ stamp(tx.revertedAt) }}</p>
       <p class="ref">Receipt {{ tx.receiptNumber ?? tx.id.slice(-8) }}</p>
     </article>
 

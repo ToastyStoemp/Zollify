@@ -101,13 +101,35 @@ async function setScope(user: TeamUser, eventIds: string[]): Promise<void> {
   }
 }
 
-function scopeLabel(user: TeamUser): string {
-  if (user.role !== 'member') return 'Full access';
+/** What someone is on the team, in the words the invite form uses: Owner, Admin, Staff or Helper. */
+function scopeLabel(user: Pick<TeamUser, 'role' | 'allowedEventIds'>): string {
+  if (user.role === 'owner') return 'Owner · full access';
+  if (user.role === 'admin') return 'Admin · full access';
   if (!user.allowedEventIds?.length) return 'Staff · sells, counts own cash';
   const names = user.allowedEventIds.map(
     (id) => visibleEvents.value.find((e) => e.id === id)?.name ?? 'removed event',
   );
   return `Helper · ${names.join(', ')}`;
+}
+
+function inviteLabel(invite: Invite): string {
+  if (invite.role === 'admin') return 'Admin';
+  const n = invite.allowedEventIds?.length ?? 0;
+  return n ? `Helper · ${n} event${n === 1 ? '' : 's'}` : 'Staff';
+}
+
+// Copying a code: the person passes it on by message, so one tap beats selecting by hand.
+const copied = ref<string | null>(null);
+async function copyCode(code: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(code);
+    copied.value = code;
+    setTimeout(() => {
+      if (copied.value === code) copied.value = null;
+    }, 2000);
+  } catch {
+    /* clipboard blocked - the code is on screen */
+  }
 }
 
 function when(ts: number | null): string {
@@ -161,7 +183,7 @@ async function setStaffTotals(on: boolean): Promise<void> {
       <li v-for="user in users" :key="user.id">
         <div class="meta">
           <strong>{{ user.email }}</strong>
-          <span>{{ user.role }} · {{ scopeLabel(user) }} · last seen {{ when(user.lastLoginAt) }}</span>
+          <span>{{ scopeLabel(user) }} · last seen {{ when(user.lastLoginAt) }}</span>
         </div>
         <button v-if="canBadge(user)" type="button" @click="badgeFor = user">Badge</button>
         <button
@@ -203,6 +225,7 @@ async function setStaffTotals(on: boolean): Promise<void> {
 
     <p v-if="newCode" class="code" role="status">
       Invite code: <strong>{{ newCode }}</strong> - valid for 14 days.
+      <button type="button" class="copy" @click="copyCode(newCode)">{{ copied === newCode ? 'Copied' : 'Copy' }}</button>
     </p>
 
     <template v-if="invites.length">
@@ -212,13 +235,13 @@ async function setStaffTotals(on: boolean): Promise<void> {
           <div class="meta">
             <strong>{{ invite.code }}</strong>
             <span>
-              {{ invite.role }}
-              <template v-if="invite.allowedEventIds?.length">
-                · helper, {{ invite.allowedEventIds.length }} event(s)
-              </template>
+              {{ inviteLabel(invite) }}
               · {{ invite.usedBy ? 'used' : `expires ${when(invite.expiresAt)}` }}
             </span>
           </div>
+          <button v-if="!invite.usedBy" type="button" @click="copyCode(invite.code)">
+            {{ copied === invite.code ? 'Copied' : 'Copy' }}
+          </button>
         </li>
       </ul>
     </template>
@@ -237,6 +260,7 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; }
 .code { margin: 0; font-size: .9rem; color: var(--zfy-accent-ink, #0a5a4a); }
 .code strong { font-family: ui-monospace, monospace; letter-spacing: .08em; }
+.code .copy { margin-left: .4rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .6rem .8rem; background: var(--zfy-surface, #fff); }
 .list.muted li { opacity: .8; }

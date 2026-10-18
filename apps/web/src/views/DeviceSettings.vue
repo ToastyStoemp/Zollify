@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
-import type { DeviceSummary } from '@zollify/shared';
+import { DEVICE_NOTIFICATION_KINDS, type DeviceSummary } from '@zollify/shared';
 import {
   authFetch,
   getApiBase,
@@ -27,7 +27,10 @@ import {
   deviceName,
   lastSyncAt,
   lastSyncError,
+  notifyKinds,
   pendingCount,
+  setNotifyKinds,
+  systemNotificationState,
   sendDiagnosticLog,
   setDeviceName,
   shellConfirm,
@@ -192,6 +195,21 @@ async function removeDevice(d: DeviceSummary): Promise<void> {
   }
 }
 import SharedTillSettings from './SharedTillSettings.vue';
+
+// ── Notifications on this device ────────────────────────────────────────────
+const notifyError = ref<string | null>(null);
+const systemState = ref(systemNotificationState());
+async function toggleKind(kind: string, on: boolean): Promise<void> {
+  notifyError.value = null;
+  const kinds = on ? [...new Set([...notifyKinds.value, kind])] : notifyKinds.value.filter((k) => k !== kind);
+  try {
+    await setNotifyKinds(kinds);
+  } catch (err) {
+    notifyError.value = err instanceof Error ? err.message : 'Could not save that.';
+  } finally {
+    systemState.value = systemNotificationState();
+  }
+}
 </script>
 
 <template>
@@ -226,6 +244,17 @@ import SharedTillSettings from './SharedTillSettings.vue';
       <label>
         <input type="checkbox" :checked="afterSalePrefs.receiptQr" @change="setAfterSalePrefs({ receiptQr: ($event.target as HTMLInputElement).checked })" />
         <span class="body"><span class="label">Receipt QR code</span><span class="sub">The customer scans it for their receipt online. Shows the receipt only - never other sales or your stock.</span></span>
+      </label>
+    </div>
+
+    <h3>Notifications on this device</h3>
+    <p class="hint">What this screen pops up as it happens - the same categories a webhook can post. Sales and summaries land in the bell as quiet notes, so other devices are not interrupted. Reminders go out once the account's first device asks for them.</p>
+    <p v-if="notifyError" class="error" role="alert">{{ notifyError }}</p>
+    <p v-else-if="notifyKinds.length && systemState === 'denied'" class="warn">The browser blocks system notifications for this site - you still get them inside the app.</p>
+    <div class="toggles">
+      <label v-for="k in DEVICE_NOTIFICATION_KINDS" :key="k.id">
+        <input type="checkbox" :checked="notifyKinds.includes(k.id)" @change="toggleKind(k.id, ($event.target as HTMLInputElement).checked)" />
+        <span class="body"><span class="label">{{ k.label }}</span><span class="sub">{{ k.hint }}</span></span>
       </label>
     </div>
 

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import type { DeviceSummary } from '@zollify/shared';
+import { DeviceNotificationsSchema, isTimeZone, type DeviceSummary } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
 
 /**
@@ -19,15 +19,29 @@ import type { JwtClaims } from '../auth';
 export function registerDeviceRoutes(app: FastifyInstance, db: Database.Database): void {
   app.get('/api/devices', { preHandler: app.authenticate }, async (req): Promise<DeviceSummary[]> => {
     const claims = req.user as JwtClaims;
-    return db
+    return (db
       .prepare(
-        `SELECT d.id, d.name, d.flavor, d.device, d.userId, u.email AS userEmail, d.lastSeenAt, d.createdAt,
+        `SELECT d.id, d.name, d.flavor, d.device, d.userId, u.email AS userEmail, d.lastSeenAt, d.createdAt, d.notifyKinds,
                 (SELECT COUNT(*) FROM refresh_tokens r WHERE r.deviceId = d.id AND r.expiresAt > ? AND r.rotatedAt IS NULL
                    AND r.userId IN (SELECT id FROM users WHERE accountId = d.accountId)) AS sessions
          FROM devices d LEFT JOIN users u ON u.id = d.userId
          WHERE d.accountId = ? ORDER BY d.lastSeenAt DESC`,
       )
-      .all(Date.now(), claims.accountId) as DeviceSummary[];
+      .all(Date.now(), claims.accountId) as (Omit<DeviceSummary, 'notifyKinds'> & { notifyKinds: string | null })[])
+      .map((d) => ({ ...d, notifyKinds: d.notifyKinds ? (JSON.parse(d.notifyKinds) as string[]) : [] }));
+  });
+
+  /** What this device wants told on its own screen; the server raises the reminders (yesterday's sales, a month closing) only for accounts where some device asked. */
+  app.put('/api/devices/me/notifications', { preHandler: app.authenticate }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    if (!claims.dev) return reply.code(400).send({ error: 'This sign-in named no device.' });
+    const parsed = DeviceNotificationsSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues[0]?.message ?? 'Check the categories.' });
+    if (!isTimeZone(parsed.data.timeZone)) return reply.code(400).send({ error: 'Unknown time zone.' });
+    const kinds = [...new Set(parsed.data.kinds)];
+    const info = db.prepare('UPDATE devices SET notifyKinds = ?, timeZone = ? WHERE accountId = ? AND id = ?').run(kinds.length ? JSON.stringify(kinds) : null, parsed.data.timeZone, claims.accountId, claims.dev);
+    if (!info.changes) return reply.code(404).send({ error: 'Device not found' });
+    return { kinds };
   });
 
   /** Remove a device from the account and sign it out. Admins may remove any; a member only one they signed in. */

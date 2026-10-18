@@ -62,6 +62,8 @@ export interface DeviceSummary {
   sessions: number;
   lastSeenAt: number;
   createdAt: number;
+  /** Categories it asked to be told about on its own screen (see DEVICE_NOTIFICATION_KINDS). */
+  notifyKinds: string[];
 }
 
 export interface PushResponse {
@@ -262,6 +264,8 @@ export interface AppNotification {
   createdAt: number;
   readAt: number | null;
   level: NotificationLevel;
+  /** Its category (a WEBHOOK_EVENTS id), so a device can pick which to show on its screen. */
+  kind: string | null;
 }
 
 /**

@@ -49,6 +49,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- System notifications for the categories this device picked in Settings -> Device
+         (@capacitor/local-notifications). Android 13+ asks the user the first time a kind is on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Product photos are taken straight from the catalogue on a phone. Optional,
          so devices without a camera still install. -->
     <uses-permission android:name="android.permission.CAMERA" />

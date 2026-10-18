@@ -53,7 +53,7 @@ const safeLink = (link: string | undefined): string | null =>
 
 export function createNotifier(db: Database.Database, rooms: Rooms): Notify {
   const insert = db.prepare(
-    'INSERT INTO notifications (id, accountId, moduleId, minRole, title, body, link, createdAt, level, groupKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO notifications (id, accountId, moduleId, minRole, title, body, link, createdAt, level, groupKey, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
   );
   const regroup = db.prepare(
     'UPDATE notifications SET title = ?, body = ?, link = ?, createdAt = ?, level = ? WHERE accountId = ? AND groupKey = ? AND readAt IS NULL',
@@ -68,7 +68,7 @@ export function createNotifier(db: Database.Database, rooms: Rooms): Notify {
     const body = (n.body ?? '').slice(0, 1000);
     const groupKey = n.groupKey ? n.groupKey.slice(0, 200) : null;
     const replaced = groupKey ? regroup.run(title, body, safeLink(n.link), Date.now(), level, accountId, groupKey).changes > 0 : false;
-    if (!replaced) insert.run(randomUUID(), accountId, n.moduleId ?? null, n.minRole ?? 'member', title, body, safeLink(n.link), Date.now(), level, groupKey);
+    if (!replaced) insert.run(randomUUID(), accountId, n.moduleId ?? null, n.minRole ?? 'member', title, body, safeLink(n.link), Date.now(), level, groupKey, n.kind?.slice(0, 40) ?? null);
     trim.run(accountId, accountId, KEEP);
     rooms.notify(accountId);
   };
@@ -82,7 +82,7 @@ export function registerNotificationRoutes(app: FastifyInstance, db: Database.Da
     const roles = visible(claims.role);
     const rows = db
       .prepare(
-        `SELECT id, moduleId, title, body, link, createdAt, readAt, level FROM notifications
+        `SELECT id, moduleId, title, body, link, createdAt, readAt, level, kind FROM notifications
          WHERE accountId = ? AND minRole IN (${roles.map(() => '?').join(',')}) ORDER BY createdAt DESC LIMIT 50`,
       )
       .all(claims.accountId, ...roles) as AppNotification[];

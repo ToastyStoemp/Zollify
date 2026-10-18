@@ -313,6 +313,21 @@ const MIGRATIONS: string[] = [
     updatedAt  INTEGER NOT NULL
   );
   `,
+  // v21 - notifications carry their category, a device says which categories
+  // it wants on its own screen (and in which time zone its day ends), and the
+  // reminders raised for those (yesterday's sales, a month closing) remember
+  // the last day they went out, so each goes once.
+  `
+  ALTER TABLE notifications ADD COLUMN kind TEXT;
+  ALTER TABLE devices ADD COLUMN notifyKinds TEXT;
+  ALTER TABLE devices ADD COLUMN timeZone TEXT;
+  CREATE TABLE reminders (
+    accountId TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    key       TEXT NOT NULL,
+    lastDay   TEXT NOT NULL,
+    PRIMARY KEY (accountId, key)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

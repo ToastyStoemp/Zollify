@@ -201,16 +201,19 @@ export interface Webhooks {
   onOps(accountId: string, ops: WireOp[]): void;
   /** Sends one test message, and says how it went. */
   test(hook: Webhook, accountId: string): Promise<{ ok: boolean; status: number | null; error: string | null }>;
-  /** Daily and weekly summaries whose day has come. */
+  /** Daily and weekly summaries whose day has come, and the reminders devices asked for. */
   sendDueReports(now?: number): Promise<number>;
   stop(): void;
 }
 
 const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 'sharing', 'discounts', 'fees', 'reports', 'tax-deadlines']);
 
+/** A note for the bell only: the webhooks that want the same news get it through `emit`, not by hearing the bell. */
+type BellNote = { title: string; body?: string; link?: string; minRole?: 'admin'; kind?: string; level?: 'low' | 'normal' };
+
 export function createWebhooks(
   db: Database.Database,
-  deps: { notify(accountId: string, n: { title: string; body?: string; link?: string; minRole?: 'admin' }): void; contributors: () => ReportContributor[]; problems?: ModuleProblems; log?: (err: unknown) => void },
+  deps: { notify(accountId: string, n: BellNote): void; contributors: () => ReportContributor[]; problems?: ModuleProblems; log?: (err: unknown) => void },
 ): Webhooks {
   const rows = (accountId: string): Webhook[] =>
     (db.prepare('SELECT doc FROM webhooks WHERE accountId = ?').all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as Webhook);
@@ -293,10 +296,32 @@ export function createWebhooks(
   const RECENT_MS = 24 * 3600 * 1000;
   const PER_PUSH = 10;
   function onOps(accountId: string, ops: WireOp[]): void {
-    if (!rows(accountId).some((h) => h.enabled && h.events.includes('sale'))) return;
+    const toHooks = rows(accountId).some((h) => h.enabled && h.events.includes('sale'));
+    const toBell = wanted(accountId).kinds.has('sale');
+    if (!toHooks && !toBell) return;
     const sales = ops.filter((o) => o.type === 'tx.create').map((o) => o.payload as Transaction).filter((t) => t && Date.now() - t.timestamp < RECENT_MS);
-    for (const tx of sales.slice(0, PER_PUSH)) emit(accountId, 'sale', saleMessage(tx, eventName(accountId, tx.eventId)));
-    if (sales.length > PER_PUSH) emit(accountId, 'sale', { title: `…and ${sales.length - PER_PUSH} more sales`, body: 'They synced together; see History in Zollify.', tone: 'info' });
+    for (const tx of sales.slice(0, PER_PUSH)) {
+      const msg = saleMessage(tx, eventName(accountId, tx.eventId));
+      if (toHooks) emit(accountId, 'sale', msg);
+      if (toBell) deps.notify(accountId, { title: msg.title, body: msg.body, link: '/history', kind: 'sale', level: 'low' });
+    }
+    const more = sales.length - PER_PUSH;
+    if (more > 0) {
+      if (toHooks) emit(accountId, 'sale', { title: `…and ${more} more sales`, body: 'They synced together; see History in Zollify.', tone: 'info' });
+      if (toBell) deps.notify(accountId, { title: `…and ${more} more sales`, body: 'They synced together.', link: '/history', kind: 'sale', level: 'low' });
+    }
+  }
+
+  // ── What the account's devices want on their screens ──────────────────────
+  /** The categories any device of the account asked for, and the time zone of the one seen last. */
+  function wanted(accountId: string): { kinds: Set<string>; timeZone: string } {
+    const kinds = new Set<string>();
+    let timeZone = '';
+    for (const d of db.prepare('SELECT notifyKinds, timeZone FROM devices WHERE accountId = ? AND notifyKinds IS NOT NULL ORDER BY lastSeenAt DESC').all(accountId) as { notifyKinds: string; timeZone: string | null }[]) {
+      for (const k of JSON.parse(d.notifyKinds) as string[]) kinds.add(k);
+      if (!timeZone && d.timeZone && isTimeZone(d.timeZone)) timeZone = d.timeZone;
+    }
+    return { kinds, timeZone: timeZone || 'UTC' };
   }
 
   // ── Summaries ─────────────────────────────────────────────────────────────
@@ -349,8 +374,50 @@ export function createWebhooks(
   /** Monday of the week a day is in. */
   const monday = (d: string): string => plus(d, -((new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7));
 
-  async function sendDueReports(now = Date.now()): Promise<number> {
+  /** The fields of a summary as one line each, for a note that has no fields of its own. */
+  const flat = (msg: WebhookMessage): string => [msg.body, ...(msg.fields ?? []).filter((f) => f.value).map((f) => `${f.name}: ${f.value}`)].filter(Boolean).join('\n');
+
+  /**
+   * True once per account and key per day. The first look only remembers the
+   * day, so a device that switches a reminder on today is not told about a
+   * day it already lived through.
+   */
+  function due(accountId: string, key: string, day: string): boolean {
+    const last = (db.prepare('SELECT lastDay FROM reminders WHERE accountId = ? AND key = ?').get(accountId, key) as { lastDay: string } | undefined)?.lastDay;
+    if (last !== undefined && last >= day) return false;
+    db.prepare('INSERT INTO reminders (accountId, key, lastDay) VALUES (?, ?, ?) ON CONFLICT (accountId, key) DO UPDATE SET lastDay = excluded.lastDay').run(accountId, key, day);
+    return last !== undefined;
+  }
+
+  /** Reminders to the bell for the accounts whose devices asked: yesterday's and last week's sales. */
+  function sendDueReminders(now: number): number {
     let sent = 0;
+    const accounts = db.prepare('SELECT DISTINCT accountId FROM devices WHERE notifyKinds IS NOT NULL').all() as { accountId: string }[];
+    for (const { accountId } of accounts) {
+      try {
+        const { kinds, timeZone } = wanted(accountId);
+        const today = localDay(now, timeZone);
+        const yesterday = plus(today, -1);
+        if (kinds.has('report.daily') && due(accountId, 'report.daily', yesterday)) {
+          const msg = summary(accountId, yesterday, yesterday, timeZone, 'Yesterday');
+          deps.notify(accountId, { title: msg.title, body: flat(msg), link: '/history', kind: 'report.daily', level: 'low' });
+          sent++;
+        }
+        const lastWeek = plus(monday(today), -7);
+        if (kinds.has('report.weekly') && due(accountId, 'report.weekly', lastWeek)) {
+          const msg = summary(accountId, lastWeek, plus(lastWeek, 6), timeZone, 'Last week');
+          deps.notify(accountId, { title: msg.title, body: flat(msg), link: '/history', kind: 'report.weekly', level: 'low' });
+          sent++;
+        }
+      } catch (err) {
+        deps.log?.(err);
+      }
+    }
+    return sent;
+  }
+
+  async function sendDueReports(now = Date.now()): Promise<number> {
+    let sent = sendDueReminders(now);
     const all = db.prepare('SELECT accountId, doc FROM webhooks').all() as { accountId: string; doc: string }[];
     for (const row of all) {
     try {

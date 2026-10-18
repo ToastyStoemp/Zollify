@@ -88,7 +88,7 @@ const coreNav: Entry[] = [
   { routeName: 'stores', label: 'Stores', icon: 'store', group: 'stores', order: 10 },
 ];
 
-interface Section { id: Group; icon: string; head: Entry; /** What the sidebar calls it. */ title: string; children: Entry[] }
+interface Section { id: Group; icon: string; head: Entry; /** What the sidebar calls it. */ title: string; /** Listed under the title in the sidebar. */ children: Entry[]; /** Every page, once - for the phone's chip row. */ pages: Entry[] }
 
 /**
  * Each section's first page is the section itself: clicking "Selling" opens
@@ -121,7 +121,7 @@ const sections = computed<Section[]>(() => {
     // A named section with several pages lists them all beneath its own name; otherwise
     // the first page is the section and the others hang below it.
     const named = Boolean(sec.label) && rest.length > 0;
-    return [{ id: sec.id, icon: named ? sec.icon : head.icon || sec.icon, head, title: named ? sec.label! : head.label, children: named ? pages : rest }];
+    return [{ id: sec.id, icon: named ? sec.icon : head.icon || sec.icon, head, title: named ? sec.label! : head.label, children: named ? pages : rest, pages }];
   });
 });
 
@@ -360,7 +360,7 @@ const fmtAgo = (ms: number): string => {
          instead, on the one screen a booth stares at all day. -->
     <nav v-if="account && !settingUp && route.name !== 'pos:index'" ref="bottomNav" class="bottom" aria-label="Main">
       <div v-if="openSection?.children.length" class="subrow">
-        <router-link v-for="item in [openSection.head, ...openSection.children]" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
+        <router-link v-for="item in openSection.pages" :key="item.routeName" :to="{ name: item.routeName }" class="chip" exact-active-class="on">{{ item.label }}</router-link>
       </div>
       <div class="tabs">
         <router-link :to="{ name: 'home' }" class="tab"><Icon name="home" :size="20" /><span>Home</span></router-link>

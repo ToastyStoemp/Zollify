@@ -68,6 +68,11 @@ input, select, textarea {
   color: inherit;
 }
 input[type='checkbox'], input[type='radio'] { min-height: 0; accent-color: var(--zfy-accent); width: 1.05rem; height: 1.05rem; }
+/* A field in a form grid may shrink below the browser's built-in input
+   width (about 10rem): otherwise two columns of them overflow a phone, and
+   the City and Country fields run off the right edge of the event form. */
+label { min-width: 0; }
+label > input:not([type='checkbox']):not([type='radio']), label > select, label > textarea { max-width: 100%; min-width: 0; }
 input[type='file'] { border: 0; padding: 0; background: none; }
 
 /* Wide things scroll inside themselves; the page never scrolls sideways. */
@@ -99,7 +104,53 @@ button .zfy-icon { margin-right: .1rem; }
    inside .table-scroll instead of crushing every column. */
 .table-scroll table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 12px; overflow: hidden; }
 
+/* ── Figures at the top of a page ──────────────────────────────────────
+   <ul class="stats"><li class="lead"><span class="label">To report</span><strong>EUR 1,680.67</strong></li>…</ul>
+   Tiles side by side where there is room; on a phone one figure per line,
+   label left and value right, so five figures take five short rows instead
+   of a ragged grid of boxes. .lead marks the one that matters most. */
+.stats { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr)); gap: .6rem; }
+.stats li { display: flex; flex-direction: column; gap: .1rem; min-width: 0; padding: .55rem .8rem; border: 1px solid var(--zfy-line); border-radius: 10px; background: var(--zfy-surface); }
+.stats li.lead { border-color: var(--zfy-accent); }
+.stats .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted); }
+.stats strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* A data table that becomes a stack of cards on a phone instead of
+   scrolling sideways: <div class="table-scroll stack">. Each cell says what
+   it is through data-label; a cell with none (a name, a status tag) shows
+   as it is. Pages that want their own card layout set the grid on tr.row. */
+.stack td[data-label]::before { content: attr(data-label); display: none; font-size: .7rem; letter-spacing: .05em; text-transform: uppercase; color: var(--zfy-muted); }
+
 @media (max-width: 720px) {
+  .stats { grid-template-columns: 1fr; gap: .35rem; }
+  .stats li { flex-direction: row; align-items: baseline; justify-content: space-between; gap: .8rem; padding: .45rem .75rem; }
+  .stats strong { font-size: 1rem; }
+  /* The older tile lists (ul.totals on Inventory, Cash up, Event profit, Card
+     statements) get the same one-per-line treatment. The class is doubled
+     to outrank each page's own scoped .totals li rule. */
+  ul.totals.totals { display: grid; grid-template-columns: 1fr; gap: .35rem; }
+  ul.totals.totals li { flex-direction: row; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 .8rem; min-width: 0; padding: .45rem .75rem; }
+  ul.totals.totals li strong { font-size: 1rem; }
+  ul.totals.totals li .sub, ul.totals.totals li small { flex-basis: 100%; }
+
+  /* Doubled selectors on purpose: they must beat a module's own scoped
+     td/th rules (same specificity, injected later), or nowrap and the
+     cell borders come back. */
+  .table-scroll.stack { margin: 0; padding: 0; overflow: visible; }
+  .table-scroll.stack table { min-width: 0; width: 100%; border: 0; background: transparent; border-radius: 0; overflow: visible; }
+  .table-scroll.stack thead { display: none; }
+  .table-scroll.stack table, .table-scroll.stack tbody, .table-scroll.stack tr, .table-scroll.stack td { display: block; }
+  .table-scroll.stack tr.row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .25rem .6rem; padding: .6rem .75rem; margin-bottom: .5rem; border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); }
+  .table-scroll.stack tr.row + tr.detail { margin: -.5rem 0 .5rem; padding: .5rem .75rem; border: 1px solid var(--zfy-line); border-top: 0; border-radius: 0 0 12px 12px; background: var(--zfy-surface-2); }
+  .table-scroll.stack tr.row + tr.detail td { padding: 0; border: 0; background: transparent; }
+  .table-scroll.stack tr.row[aria-expanded='true'] { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
+  .table-scroll.stack td { padding: 0; border: 0; white-space: normal; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+  .table-scroll.stack td[data-label]::before { display: block; }
+  .table-scroll.stack td.num { text-align: left; }
+  .table-scroll.stack td.span { grid-column: 1 / -1; }
+  .table-scroll.stack td.wide { grid-column: span 2; }
+  .table-scroll.stack td.end { justify-self: end; }
+
   /* Title and its buttons share the first row; a search or a segmented
      switch takes the full width of its own row underneath. */
   .page > header .tools { flex: 1; justify-content: flex-end; }

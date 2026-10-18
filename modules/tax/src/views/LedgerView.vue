@@ -197,7 +197,7 @@ async function openInvoice(e: Expense): Promise<void> {
     <header class="top">
       <div>
         <button v-if="current" type="button" class="quiet back" @click="back"><Icon name="arrow-left" :size="14" /> All events</button>
-        <h1>{{ current ? current.name : 'Ledger' }}</h1>
+        <h1>{{ current ? current.name : 'Event profit' }}</h1>
         <p class="lede">
           <template v-if="current">{{ current.country }}{{ current.start ? ` · ${current.start}` : '' }} - revenue from the till against the costs of doing the event.</template>
           <template v-else>Per-event profit and loss. Revenue is live from your sales; add booth, travel and hotel costs and attach the invoices.</template>
@@ -216,19 +216,19 @@ async function openInvoice(e: Expense): Promise<void> {
       </ul>
       <p v-if="totals.vat" class="hint">Revenue is what customers paid without the VAT charged ({{ fmt(totals.vat, totals.currency) }} in all), since that goes to the tax office. Exempt sales count in full.</p>
       <p v-if="!rows.length" class="empty">No events yet.</p>
-      <div v-else class="table-scroll">
+      <div v-else class="table-scroll stack">
         <table>
           <thead>
             <tr><th>Event</th><th>When</th><th class="num">Revenue <small>excl. VAT</small></th><th class="num">Expenses</th><th class="num">Margin</th><th>Items</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in rows" :key="r.eventId" class="row" role="button" tabindex="0" @click="openEvent(r)" @keydown.enter="openEvent(r)" @keydown.space.prevent="openEvent(r)">
-              <td><strong>{{ r.name }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
-              <td class="mono">{{ r.start || '-' }}</td>
-              <td class="num good">{{ fmt(r.revenue, r.currency) }}</td>
-              <td class="num bad">{{ rowMixed(r) ? 'mixed currencies' : r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
-              <td :class="['num', r.margin >= 0 ? 'good' : 'bad']">{{ rowMixed(r) ? '-' : fmt(r.margin, r.currency) }}</td>
-              <td class="sub">{{ r.expenseCount }} expense{{ r.expenseCount === 1 ? '' : 's' }}{{ lexware && r.unbooked ? ` · ${r.unbooked} not yet in Lexware` : '' }}{{ rowMixed(r) ? ' · mixed currencies' : '' }}</td>
+              <td class="wide"><strong>{{ r.name }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
+              <td class="mono end">{{ r.start || '-' }}</td>
+              <td class="num good" data-label="Revenue excl. VAT">{{ fmt(r.revenue, r.currency) }}</td>
+              <td class="num bad" data-label="Expenses">{{ rowMixed(r) ? 'mixed currencies' : r.expenses ? '−' + fmt(r.expenses, r.currency) : '-' }}</td>
+              <td :class="['num', r.margin >= 0 ? 'good' : 'bad']" data-label="Margin">{{ rowMixed(r) ? '-' : fmt(r.margin, r.currency) }}</td>
+              <td class="sub span">{{ r.expenseCount }} expense{{ r.expenseCount === 1 ? '' : 's' }}{{ lexware && r.unbooked ? ` · ${r.unbooked} not yet in Lexware` : '' }}{{ rowMixed(r) ? ' · mixed currencies' : '' }}</td>
             </tr>
           </tbody>
         </table>

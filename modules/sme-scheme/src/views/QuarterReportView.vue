@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { COUNTRY_BY_CODE, fmtRate } from '@zollify/shared';
 import {
   buildSmeReport,
@@ -19,8 +20,23 @@ import { sdk } from '../runtime';
  */
 
 const now = quarterOf(Date.now());
-// The quarter to report is usually the one that just ended.
-const selected = ref<QuarterRef>(previousQuarter(now));
+// The quarter to report is usually the one that just ended - unless a link (a tax deadline) names one.
+const route = useRoute();
+function fromQuery(): QuarterRef | null {
+  const y = Number(route.query.year);
+  const q = Number(route.query.quarter);
+  return Number.isInteger(y) && y > 2000 && [1, 2, 3, 4].includes(q) ? { year: y, quarter: q as Quarter } : null;
+}
+const selected = ref<QuarterRef>(fromQuery() ?? previousQuarter(now));
+watch(() => [route.query.year, route.query.quarter], () => {
+  const q = fromQuery();
+  if (q) selected.value = q;
+});
+/** The scheme's due date: the last day of the month after the quarter, filed in the home country. */
+const dueBy = computed(() => {
+  const { year, quarter: q } = selected.value;
+  return new Date(year, q * 3 + 1, 0).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+});
 const year = computed({
   get: () => selected.value.year,
   set: (y: number) => (selected.value = { ...selected.value, year: y }),
@@ -43,6 +59,7 @@ const report = computed(() =>
     transactions: transactions.value,
     eventOf: (id) => sdk().data.events.get(id),
     profile: sdk().account()?.profile,
+    currency: sdk().account()?.profile.defaultCurrency,
   }),
 );
 const eu = computed(() => report.value.rows.filter((r) => r.eu));
@@ -72,7 +89,7 @@ async function exportCsv(): Promise<void> {
         <h1>SME report</h1>
         <p class="lede">
           Sales per country for {{ quarterLabel(selected) }}. Exempt sales count in full; where VAT was charged, the
-          amount without VAT.
+          amount without VAT. Due by {{ dueBy }}, filed in your home country.
         </p>
       </div>
       <div class="pick">

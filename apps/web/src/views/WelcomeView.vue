@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -54,6 +54,10 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
   },
   'sme-scheme': {
     forWhom: 'For small businesses exempt from VAT: where you are exempt, the EX number for the EU SME scheme, and a quarterly report of sales per country.',
+    recommended: false,
+  },
+  'tax-deadlines': {
+    forWhom: 'Reminders before each filing and payment date, worked out from your VAT answers here - Germany in full, the EU SME scheme report anywhere in the EU, and your own dates.',
     recommended: false,
   },
   economic: { forWhom: 'Danish books: each day of sales goes into your e-conomic journal with its VAT codes, renters’ shares kept apart, for your accountant to post.', recommended: false },
@@ -215,6 +219,8 @@ function guideFor(mod: AvailableModule) {
   const g = GUIDE[mod.moduleId] ?? { forWhom: mod.description ?? '', recommended: false };
   if (mod.moduleId === 'consignment') return { ...g, recommended: runsStores.value };
   if (mod.moduleId === 'sme-scheme') return { ...g, recommended: scheme.value === 'sme' };
+  // On the scheme there is a quarterly report to file; in Germany, a full calendar of returns.
+  if (mod.moduleId === 'tax-deadlines') return { ...g, recommended: scheme.value === 'sme' || countryCodeOf(artist.value.countryOfOrigin) === 'DE' };
   return g;
 }
 

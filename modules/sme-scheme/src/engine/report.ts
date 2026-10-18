@@ -89,6 +89,18 @@ export interface ReportInput {
   transactions: Transaction[];
   eventOf: (id: string) => Pick<SalesEvent, 'venue'> & { vat?: SalesEvent['vat'] } | undefined;
   profile: { vat?: Partial<VatProfile>; artist?: { countryOfOrigin?: string } } | null | undefined;
+  /** Book currency for the zero rows of countries with no sales. Defaults to EUR, the scheme's currency. */
+  currency?: string;
+}
+
+/**
+ * The EU countries the quarterly report must cover: every one the business is
+ * exempt in under the scheme, home included. Each gets a row, zero where
+ * nothing sold - the scheme asks for that, so a blank is not mistaken for
+ * a missing figure.
+ */
+export function reportedCountries(profile: ReportInput['profile']): string[] {
+  return (profile?.vat?.exemptCountries ?? []).filter((c) => EU_COUNTRIES.includes(c));
 }
 
 const toMinor = (n: number): number => Math.round(n * 100);
@@ -163,6 +175,13 @@ export function buildSmeReport(input: ReportInput): SmeReport {
         acc!.byRate.set(rate, (acc!.byRate.get(rate) ?? 0) + m);
       });
     }
+  }
+
+  // Zero rows for the countries the scheme covers that saw no sale in this book currency.
+  const zeroCurrency = input.currency || 'EUR';
+  for (const country of reportedCountries(input.profile)) {
+    if ([...accs.values()].some((a) => a.country === country)) continue;
+    accs.set(`${country}|${zeroCurrency}`, { country, currency: zeroCurrency, sales: 0, exemptMinor: 0, byRate: new Map(), exemptSales: 0, chargedSales: 0 });
   }
 
   const rows: CountryRow[] = [...accs.values()].map((a) => {

@@ -109,6 +109,14 @@ describe('buildSmeReport', () => {
   });
 });
 
+describe('countries with no sales', () => {
+  it('lists every EU country the business is exempt in, at zero', () => {
+    const r = build([sale(300, exempt('BE'))], { vat: { exemptCountries: ['BE', 'NL', 'CH'] } });
+    expect(r.rows.map((x) => [x.country, x.reported, x.sales])).toEqual([['BE', 300, 1], ['NL', 0, 0]]);
+    expect(r.rows[1]).toMatchObject({ status: 'exempt', eu: true, currency: 'EUR' });
+  });
+});
+
 describe('reportCsv', () => {
   it('writes one semicolon row per country', () => {
     const csv = reportCsv(build([sale(2000, charged('DE', 19))]), (c) => (c === 'DE' ? 'Germany' : c));

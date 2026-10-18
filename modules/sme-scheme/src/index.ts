@@ -25,7 +25,7 @@ export default defineModule({
   setup(sdk: Sdk) {
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'SME report', component: () => import('./views/QuarterReportView.vue') });
-    sdk.nav.add({ routeName: 'index', group: 'books', label: 'SME report', icon: 'book', order: 220 });
+    sdk.nav.add({ routeName: 'index', group: 'books', label: 'SME report', icon: 'book', order: 225 });
     sdk.settings.panel({ id: 'exemption', label: 'SME exemption', component: () => import('./views/SmeExemption.vue'), minRole: 'admin', order: 95 });
     // Switched on in setup because the business said it is on a scheme: ask where, right away.
     sdk.setup.step({ id: 'exemption', title: 'SME exemption', component: () => import('./views/SmeSetupStep.vue'), minRole: 'admin', order: 90 });

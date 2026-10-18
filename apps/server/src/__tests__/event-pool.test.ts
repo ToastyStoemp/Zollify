@@ -60,6 +60,7 @@ const iso = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_00
 const convention = (id: string, over: Record<string, unknown> = {}) => ({
   id,
   name: 'Harbour Con',
+  edition: 'Spring 2099',
   dateStart: '2099-05-01',
   dateEnd: '2099-05-03',
   venue: { street: '1 Dock Rd', postcode: '8000', city: 'Zürich', country: 'Switzerland' },
@@ -147,7 +148,7 @@ describe('shared event pool', () => {
     expect(seen).toEqual({
       id: expect.any(String),
       name: 'Harbour Con',
-      edition: '',
+      edition: 'Spring 2099',
       venueName: '',
       street: '1 Dock Rd',
       postcode: '8000',

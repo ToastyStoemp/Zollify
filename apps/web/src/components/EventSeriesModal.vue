@@ -96,6 +96,10 @@ watch(editions, (list) => {
 });
 
 const next = ref({ label: '', dateStart: '', dateEnd: '', stock: 'none' as 'none' | 'same' });
+/** A one-off becoming the first edition needs a name of its own too ("2026"); prefilled from its dates. */
+const firstEdition = computed(() => editions.value.length <= 1);
+const thisLabel = ref(event.value ? editionLabelOf(event.value) : '');
+const canCreate = computed(() => Boolean(next.value.label.trim()) && (!firstEdition.value || Boolean(thisLabel.value.trim())));
 const suggestions = computed(() => (source.value ? suggestEditionLabels(source.value, next.value.dateStart) : []));
 let lastAuto = '';
 watch(
@@ -114,7 +118,7 @@ const sourceHasClaims = computed(() => Boolean(source.value) && claimsForEvent(s
 const create = () =>
   guard(async () => {
     if (!source.value) return;
-    const created = await createNextEdition(source.value.id, { label: next.value.label, dateStart: next.value.dateStart, dateEnd: next.value.dateEnd, stock: next.value.stock });
+    const created = await createNextEdition(source.value.id, { label: next.value.label, dateStart: next.value.dateStart, dateEnd: next.value.dateEnd, stock: next.value.stock, sourceLabel: firstEdition.value ? thisLabel.value : undefined });
     notice.value = `${created.name} ${created.edition} is on the Events page as Upcoming${next.value.dateStart ? '' : ' - add its dates when you know them'}.`;
     next.value = { label: '', dateStart: '', dateEnd: '', stock: 'none' };
     lastAuto = '';
@@ -206,10 +210,15 @@ async function guard(work: () => Promise<void>): Promise<void> {
               <option v-for="e in editions" :key="e.id" :value="e.id">{{ labelOf(e) }} · {{ fmtDates(e) }}</option>
             </select>
           </label>
+          <label v-if="firstEdition">
+            <span>Name for this edition</span>
+            <input v-model="thisLabel" type="text" placeholder="2026 or Spring 2026" aria-label="Name for the existing edition" />
+            <small>Each edition gets a name shown after the event's: {{ event.name }} <em>{{ thisLabel.trim() || '2026' }}</em>.{{ event.dateStart || event.dateEnd ? '' : ' This one has no dates, so pick one.' }}</small>
+          </label>
           <label>
-            <span>Edition name</span>
+            <span>{{ firstEdition ? 'Name for the new edition' : 'Edition name' }}</span>
             <input v-model="next.label" type="text" placeholder="2027 or Spring 2027" aria-label="New edition name" />
-            <small>Shown next to the event name - {{ event.name }} <em>{{ next.label.trim() || '2027' }}</em>.</small>
+            <small v-if="!firstEdition">Shown next to the event name - {{ event.name }} <em>{{ next.label.trim() || '2027' }}</em>.</small>
           </label>
           <div v-if="suggestions.length > 1" class="chips">
             <button v-for="s in suggestions" :key="s" type="button" class="chip" @click="next.label = s">{{ s }}</button>
@@ -221,7 +230,7 @@ async function guard(work: () => Promise<void>): Promise<void> {
             <label class="radio"><input v-model="next.stock" type="radio" value="same" /> Claim the same items as {{ source ? labelOf(source) : 'this edition' }}</label>
           </fieldset>
           <p v-if="next.stock === 'same' && sourceRunning" class="warn">{{ source ? labelOf(source) : 'That edition' }} is still running, so the same items would be held for both until it is over.</p>
-          <div class="row"><button type="button" class="primary" :disabled="busy || !next.label.trim()" @click="create">Create {{ event.name }} {{ next.label.trim() }}</button></div>
+          <div class="row"><button type="button" class="primary" :disabled="busy || !canCreate" @click="create">Create {{ event.name }} {{ next.label.trim() }}</button></div>
         </template>
 
         <template v-else>

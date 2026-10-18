@@ -2,6 +2,7 @@ import type { SalesEvent } from '@zollify/shared';
 import {
   capToFree,
   editionLabelOf,
+  joinSeries,
   planClaims,
   planKey,
   seriesEditions,
@@ -34,6 +35,8 @@ export interface NextEditionInput {
   dateEnd?: string;
   /** 'same' starts the new edition with the source's claims; 'none' starts it empty. */
   stock: 'none' | 'same';
+  /** A label for the source too, when it is a one-off becoming the first edition ("2026"). */
+  sourceLabel?: string;
 }
 
 /**
@@ -50,9 +53,9 @@ export async function createNextEdition(sourceId: string, input: NextEditionInpu
   if (!label) throw new Error('Give the new edition a label, like "2027" or "Spring 2027".');
 
   const seriesId = source.seriesId ?? crypto.randomUUID();
-  const sourceLabel = editionLabelOf(source);
-  if (source.seriesId !== seriesId || (!source.edition && sourceLabel)) {
-    await upsertSalesEvent({ ...source, seriesId, edition: source.edition || sourceLabel || undefined });
+  const sourceLabel = input.sourceLabel?.trim() || source.edition || editionLabelOf(source) || undefined;
+  if (source.seriesId !== seriesId || sourceLabel !== source.edition) {
+    await upsertSalesEvent({ ...source, seriesId, edition: sourceLabel });
   }
 
   const next: SalesEvent = {
@@ -87,9 +90,9 @@ export async function linkToSeries(eventId: string, otherId: string, label?: str
   const other = getSalesEvent(otherId);
   if (!event || !other) throw new Error('That event no longer exists.');
   if (event.id === other.id) throw new Error('Pick a different event to link to.');
-  const seriesId = other.seriesId ?? crypto.randomUUID();
-  if (!other.seriesId) await upsertSalesEvent({ ...other, seriesId, edition: other.edition || editionLabelOf(other) || undefined });
-  await upsertSalesEvent({ ...event, seriesId, edition: label?.trim() || event.edition || editionLabelOf(event) || undefined });
+  const joined = joinSeries(event, other, label);
+  if (joined.anchor) await upsertSalesEvent(joined.anchor);
+  await upsertSalesEvent(joined.event);
 }
 
 /** Takes an event out of its series; the other editions keep theirs. */

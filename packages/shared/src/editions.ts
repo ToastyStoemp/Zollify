@@ -47,6 +47,37 @@ export function suggestEditionLabels(source: Pick<SalesEvent, 'edition' | 'dateS
   return year ? [String(year)] : [];
 }
 
+/**
+ * The convention behind an event name, years and punctuation aside: "Comic
+ * Con 2026", "comic-con 2027" and "Comic Con" all read as one. Empty when
+ * nothing but a year is left.
+ */
+export function conventionKey(name: string): string {
+  return (name || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * The records to save so `event` becomes an edition of `anchor`'s series:
+ * the event itself, and the anchor too when it was a one-off until now
+ * (it starts the series, labelled by its year unless it already had a
+ * label). `label` names the joining event; blank falls back to its own
+ * label, then its year. Pure: nothing is written here.
+ */
+export function joinSeries(event: SalesEvent, anchor: SalesEvent, label?: string): { event: SalesEvent; anchor?: SalesEvent } {
+  const seriesId = anchor.seriesId ?? crypto.randomUUID();
+  const out: { event: SalesEvent; anchor?: SalesEvent } = {
+    event: { ...event, seriesId, edition: label?.trim() || event.edition || editionLabelOf(event) || undefined },
+  };
+  if (!anchor.seriesId) out.anchor = { ...anchor, seriesId, edition: anchor.edition || editionLabelOf(anchor) || undefined };
+  return out;
+}
+
 const dateKey = (e: Pick<SalesEvent, 'dateStart' | 'dateEnd'>): string => e.dateStart || e.dateEnd || '';
 
 /** Every edition of a series, oldest first (undated ones last). */

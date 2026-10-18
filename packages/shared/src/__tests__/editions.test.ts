@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { capToFree, editionLabelOf, planClaims, seriesEditions, suggestEditionLabels, type PlanEdition } from '../editions';
+import type { SalesEvent } from '../types';
+import { capToFree, conventionKey, editionLabelOf, joinSeries, planClaims, seriesEditions, suggestEditionLabels, type PlanEdition } from '../editions';
 
 describe('edition labels', () => {
   it('reads the label, falling back to the start year', () => {
@@ -90,5 +91,29 @@ describe('capToFree', () => {
       { key: 'c:', productId: 'c', variantId: '', suggested: 3 },
     ];
     expect(capToFree(rows, { 'a:': 6, 'b:x': 9 }).map((g) => [g.granted, g.short])).toEqual([[6, 4], [4, 0], [0, 3]]);
+  });
+});
+
+describe('joining a series', () => {
+  const ev = (id: string, name: string, dateStart?: string, extra: Partial<SalesEvent> = {}): SalesEvent =>
+    ({ id, name, dateStart, currency: 'EUR', status: 'planned', updatedAt: 0, ...extra }) as SalesEvent;
+
+  it('reads the convention behind a name, years aside', () => {
+    expect(conventionKey('Comic Con 2026')).toBe('comic con');
+    expect(conventionKey('comic-con')).toBe('comic con');
+    expect(conventionKey('Comic Con 2026')).toBe(conventionKey('COMIC CON 2027'));
+    expect(conventionKey('2026')).toBe('');
+  });
+
+  it('starts a series from a one-off, labelling both by year', () => {
+    const { event, anchor } = joinSeries(ev('b', 'Comic Con', '2027-03-01'), ev('a', 'Comic Con', '2026-03-01'));
+    expect(anchor).toMatchObject({ id: 'a', edition: '2026' });
+    expect(event).toMatchObject({ id: 'b', edition: '2027', seriesId: anchor!.seriesId });
+  });
+
+  it('joins an existing series without touching the anchor', () => {
+    const { event, anchor } = joinSeries(ev('b', 'Comic Con', '2027-03-01'), ev('a', 'Comic Con', '2026-03-01', { seriesId: 's1', edition: 'Spring 2026' }), 'Spring 2027');
+    expect(anchor).toBeUndefined();
+    expect(event).toMatchObject({ seriesId: 's1', edition: 'Spring 2027' });
   });
 });

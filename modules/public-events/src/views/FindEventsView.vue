@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import type { PoolListing, SalesEvent } from '@zollify/shared';
+import { conventionKey, editionLabelOf, joinSeries } from '@zollify/shared';
 import { api } from '../api';
 import { sdk } from '../runtime';
 import SharingCard from './SharingCard.vue';
@@ -72,10 +73,29 @@ async function quickAdd(l: PoolListing): Promise<void> {
       ...(l.url ? { booth: { link: l.url } } : {}),
       updatedAt: Date.now(),
     };
-    await sdk().data.events.upsert(event);
-    await api.pool.adopt(l.id, event.id);
+    // The same convention in another year is already in this account's
+    // events? Then the new one joins it as an edition, so the prep planner
+    // sees last year's sales. Editions are the account's own: the pool only
+    // carries each year's public facts, never which events belong together.
+    const key = conventionKey(l.name);
+    const earlier = key
+      ? sdk()
+          .data.events.list()
+          .filter((e) => (e.kind ?? 'event') === 'event' && conventionKey(e.name) === key)
+          .sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? ''))[0]
+      : undefined;
+    if (earlier) {
+      const joined = joinSeries(event, earlier, l.edition || undefined);
+      if (joined.anchor) await sdk().data.events.upsert(joined.anchor);
+      await sdk().data.events.upsert(joined.event);
+      await api.pool.adopt(l.id, event.id);
+      flash(`Added ${l.name} as the ${joined.event.edition ?? 'next'} edition, with ${editionLabelOf(earlier) || earlier.name}.`);
+    } else {
+      await sdk().data.events.upsert(event);
+      await api.pool.adopt(l.id, event.id);
+      flash(`Added ${l.name} to your events.`);
+    }
     listings.value = listings.value.filter((x) => x.id !== l.id);
-    flash(`Added ${l.name} to your events.`);
   } catch (err) {
     fail(err, 'Could not add the event.');
   } finally {

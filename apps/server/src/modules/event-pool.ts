@@ -168,7 +168,9 @@ function factsOf(ev: SalesEventLike, today: string): Facts | null {
   if (!city && !country) return null;
   return {
     name,
-    edition: '',
+    // The edition label ("2027", "Spring 2027") is part of how the event is
+    // called, so it travels; which events are editions of each other does not.
+    edition: clip(ev.edition, 40),
     venueName: '',
     street: clip(ev.venue?.street, 120),
     postcode: clip(ev.venue?.postcode, 20),

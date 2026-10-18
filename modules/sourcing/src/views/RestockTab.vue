@@ -13,7 +13,16 @@ import { sdk } from '../runtime';
  */
 const emit = defineEmits<{ error: [message: string] }>();
 const lens = ref<'cover' | 'events'>('cover');
-const onHand = (pid: string, vid: string) => sdk().data.inventory.onHand(pid, vid || null);
+/**
+ * What is here now - the last count less what sold since, not the count
+ * itself. A dossier saved without a variant covers the whole product, so a
+ * product with variants adds them up.
+ */
+const onHand = (pid: string, vid: string): number => {
+  const inv = sdk().data.inventory;
+  const variants = vid ? [] : (sdk().data.products.get(pid)?.variants ?? []);
+  return variants.length ? variants.reduce((n, v) => n + inv.inStock(pid, v.id), 0) : inv.inStock(pid, vid || null);
+};
 const restock = computed(() => computeRestock(snap.value.dossiers, sdk().data.transactions.recent(), onHand));
 const plan = computed(() => computeEventPlan(sdk().data.events.list(), snap.value.dossiers, sdk().data.transactions.recent(), onHand));
 const rows = computed(() => (lens.value === 'cover' ? restock.value : plan.value.rows));

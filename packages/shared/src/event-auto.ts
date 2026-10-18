@@ -1,6 +1,6 @@
 import type { SalesEvent } from './types';
 import { localDay } from './consignment-books';
-import { zoneOfCountry } from './locale-guess';
+import { westernmostZoneOfCountry, zoneOfCountry } from './locale-guess';
 import { countryCodeOf } from './vat';
 
 /**
@@ -44,24 +44,41 @@ export function autoEventChanges<T extends Dated>(events: Iterable<T>, today: st
 
 type Placed = Dated & { venue?: { country?: string } };
 
+const codeOf = (e: { venue?: { country?: string } }): string => {
+  const code = countryCodeOf(e.venue?.country) || (e.venue?.country ?? '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : '';
+};
+
 /** The time zone of an event's venue, when its country keeps a single one. */
 export function eventTimeZone(e: { venue?: { country?: string } }, at = Date.now()): string | undefined {
-  const code = countryCodeOf(e.venue?.country) || (e.venue?.country ?? '').trim().toUpperCase();
-  return /^[A-Z]{2}$/.test(code) ? zoneOfCountry(code, at) : undefined;
+  const code = codeOf(e);
+  return code ? zoneOfCountry(code, at) : undefined;
 }
 
 /**
- * As autoEventChanges, judged at the moment `now` on each event's own clock:
- * the venue's time zone where its country has one. Where it is not known an
- * event opens by the UTC date (a few hours early at worst - harmless) and
- * closes only once its last day is over everywhere (UTC-12), so a seller is
- * never closed while still selling on the last evening.
+ * The clock an event is judged by: its country's zone, or for a country over
+ * several zones (US, Canada, Australia, Brazil, Russia, Mexico) the one where
+ * a day starts last - so it never opens before its first day has begun
+ * anywhere in the country (which with Sell 🔒 would lock the event before it
+ * while still selling) and never closes before its last day is over there.
+ */
+export function eventClockZone(e: { venue?: { country?: string } }, at = Date.now()): string | undefined {
+  const code = codeOf(e);
+  return code ? (zoneOfCountry(code, at) ?? westernmostZoneOfCountry(code, at)) : undefined;
+}
+
+/**
+ * As autoEventChanges, judged at the moment `now` on each event's own clock
+ * (eventClockZone). Where the country is not known at all an event opens by
+ * the UTC date and closes only once its last day is over everywhere
+ * (UTC-12), so a seller is never closed while still selling on the last
+ * evening.
  */
 export function autoEventChangesAt<T extends Placed>(events: Iterable<T>, now: number, settings: AutoEventSettings): { open: T[]; close: T[] } {
   const open: T[] = [];
   const close: T[] = [];
   for (const e of events) {
-    const zone = eventTimeZone(e, now);
+    const zone = eventClockZone(e, now);
     const openDay = localDay(now, zone ?? 'UTC');
     const closeDay = zone ? openDay : localDay(now - 12 * 3600_000, 'UTC');
     open.push(...autoEventChanges([e], openDay, { open: settings.open, close: false }).open);

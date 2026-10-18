@@ -127,6 +127,9 @@ const eraseAll = (): Promise<void> =>
 
 const money = (n: number, cur: string): string => fmtPrice(n, cur);
 const detailCurrency = computed(() => detail.value?.commissions[0]?.currency ?? props.currency);
+/** Still to pay, one amount per currency ("EUR 200.00 + CHF 150.00"); '' when nothing is. */
+const owedText = (c: { owed: number; owedBy?: { currency: string; amount: number }[] }): string =>
+  c.owedBy ? c.owedBy.filter((o) => o.amount > 0).map((o) => money(o.amount, o.currency)).join(' + ') : c.owed > 0 ? money(c.owed, props.currency) : '';
 const canErase = computed(() => !!detail.value && detail.value.customer.openCount === 0);
 </script>
 
@@ -142,7 +145,7 @@ const canErase = computed(() => !!detail.value && detail.value.customer.openCoun
         <span class="main"><strong>{{ c.name }}</strong><span class="hint">{{ [c.email, c.phone].filter(Boolean).join(' · ') || 'No contact details' }}</span></span>
         <span class="side">
           <span class="hint">{{ c.commissionCount }} commission{{ c.commissionCount === 1 ? '' : 's' }}<template v-if="c.openCount"> · {{ c.openCount }} open</template></span>
-          <span v-if="c.owed > 0" class="owed">{{ money(c.owed, currency) }} to pay</span>
+          <span v-if="owedText(c)" class="owed">{{ owedText(c) }} to pay</span>
         </span>
       </button>
       <p class="hint">{{ retentionLine(days) }}</p>
@@ -174,7 +177,7 @@ const canErase = computed(() => !!detail.value && detail.value.customer.openCoun
         <p class="hint">{{ retentionLine(detail.keepCustomerDays) }} {{ erasureNote(detail.customer.erasesAt, detail.customer.openCount) }}</p>
         <dl class="money">
           <dt>Commissions</dt><dd>{{ detail.customer.commissionCount }} ({{ detail.customer.openCount }} open)</dd>
-          <dt>Still owed</dt><dd><strong>{{ money(detail.customer.owed, detailCurrency) }}</strong></dd>
+          <dt>Still owed</dt><dd><strong>{{ owedText(detail.customer) || money(0, detailCurrency) }}</strong></dd>
         </dl>
         <ul class="orders">
           <li v-for="c in detail.commissions" :key="c.id">

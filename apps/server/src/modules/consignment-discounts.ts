@@ -206,7 +206,7 @@ export function announceConsignedSales(svc: ModuleServices, storeAccountId: stri
       let share = 0;
       const lines = items.map((i) => {
         const gross = i.baseLineTotal ?? i.lineTotal;
-        const pct = typeof i.commissionPct === 'number' ? i.commissionPct : commissionFor(doc, tx.eventId);
+        const pct = typeof i.commissionPct === 'number' ? i.commissionPct : commissionFor(doc, tx.eventId, tx.timestamp);
         share += Math.round(gross * (100 - pct)) / 100;
         return `${i.qty} × ${i.title}${i.variantLabel ? ` (${i.variantLabel})` : ''} - ${fmtPrice(gross, currency)}`;
       });
@@ -248,7 +248,7 @@ export function consignmentSummary(svc: ModuleServices, accountId: string, perio
   for (const row of links) {
     if (!isEnabled(svc.db, row.accountId, MODULE_ID)) continue;
     const doc = parseDoc(row.doc);
-    const lines = consignmentLines(replay(svc.db, row.accountId).transactions, [{ id: row.id, commissionPct: doc.commissionPct, storeCommission: doc.storeCommission }]).filter((l) => inPeriod(l.at));
+    const lines = consignmentLines(replay(svc.db, row.accountId).transactions, [{ id: row.id, commissionPct: doc.commissionPct, storeCommission: doc.storeCommission, commissionHistory: doc.commissionHistory }]).filter((l) => inPeriod(l.at));
     if (!lines.length) continue;
     const units = lines.reduce((s, l) => s + l.qty, 0);
     const share = lines.reduce((s, l) => s + l.artistShare, 0);

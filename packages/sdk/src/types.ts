@@ -203,6 +203,8 @@ export interface SaleEvent {
   baseCurrency?: string;
   baseTotal?: number;
   exchangeRate?: number;
+  /** The day's market rate (base -> currency) the till had, so the sale's base value is what it was worth that day. */
+  marketRate?: { rate: number; at: number };
   lines: SaleLine[];
   /** Secret for the customer's online receipt; see @zollify/shared receipt-link. */
   receiptToken?: string;
@@ -353,7 +355,7 @@ export interface ItemAvailability {
   productId: string;
   variantId: string;
   label: string;
-  /** Total owned by the booth. */
+  /** The last count as entered - not less the sales since it. What is here now is `inventory.inStock()`. */
   onHand: number;
   /** This event's claim, or null when it sells from the shared pool. */
   claimed: number | null;
@@ -375,9 +377,14 @@ export interface InventoryApi {
   availability(eventId: string): ItemAvailability[];
   /** What this event can still sell of one item. */
   availableFor(eventId: string, productId: string, variantId?: string | null): number;
+  /** The last count as entered, before any sale since. For "how many are here" use `inStock`. */
   onHand(productId: string, variantId?: string | null): number;
   /** What is physically left: the last count minus every sale since. Claimed stock is still counted - it exists, it is only promised. */
   remaining(productId: string, variantId?: string | null): number;
+  /** Here now, as the Stock page shows it: `remaining`, or 0 for an item never counted (whose `remaining` would be minus its sales). */
+  inStock(productId: string, variantId?: string | null): number;
+  /** Whether anyone has counted this item yet; until then its stock is unknown. */
+  counted(productId: string, variantId?: string | null): boolean;
   setOnHand(productId: string, variantId: string | null, qty: number): Promise<void>;
   /** Reserve stock for an event. */
   claim(eventId: string, productId: string, variantId: string | null, qty: number): Promise<void>;
@@ -642,7 +649,11 @@ export interface Sdk {
    * last rate this device fetched when offline (`at` says when that was);
    * null when no rate was ever fetched. Never an event's own pricing rate.
    */
-  fx: { latest(from: string, to: string): Promise<{ rate: number; at: number } | null> };
+  fx: {
+    latest(from: string, to: string): Promise<{ rate: number; at: number } | null>;
+    /** Market rates for past days (ISO dates): 1 `from` = rate `to`. A day without a rate is left out. Absent on older shells. */
+    on?(from: string, to: string, dates: string[]): Promise<Record<string, number>>;
+  };
 
   /** Per-module, per-account key/value config. Small values only; synced settings live in core. */
   config: {

@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
-import type { CardSettlement } from '@zollify/shared';
+import type { CardSettlement, SalesEvent } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
@@ -94,10 +94,56 @@ export async function setTestMode(on: boolean): Promise<void> {
   await sdk().config.set(TEST_MODE_KEY, on);
 }
 export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
+/**
+ * The day's market rate for a converted sale (base -> charged), recorded with
+ * each sale so its base value is what the money was worth that day. Fetched
+ * with the card rate; a rate older than MARKET_RATE_MAX_AGE is not recorded -
+ * the sale is then valued at its date's rate later.
+ */
+export const marketFx = reactive({ rate: null as number | null, at: 0, pair: '' });
+const MARKET_RATE_MAX_AGE = 3 * 86400000;
+export async function loadMarketFx(): Promise<void> {
+  const pair = `${cart.baseCurrency}:${cart.currency}`;
+  // A rate for another currency pair must never be recorded with this one's sales.
+  if (marketFx.pair !== pair) Object.assign(marketFx, { rate: null, at: 0, pair });
+  if (!isConverting.value) return;
+  try {
+    const latest = await sdk().fx?.latest(cart.baseCurrency, cart.currency);
+    if (latest && marketFx.pair === pair) Object.assign(marketFx, latest);
+  } catch {
+    /* none - the sale is valued at its date's rate later */
+  }
+}
+const marketRateNow = (): { rate: number; at: number } | null =>
+  marketFx.pair === `${cart.baseCurrency}:${cart.currency}` && marketFx.rate && Date.now() - marketFx.at < MARKET_RATE_MAX_AGE
+    ? { rate: marketFx.rate, at: marketFx.at }
+    : null;
 export const cardInBase = computed(() => cardFx.enabled && isConverting.value);
+
+/**
+ * Points the cart at the till's event: where its sales are recorded, in which
+ * currency, at which rate and local prices. Called when POS opens and again
+ * whenever the till moves to another event (Sell at …, the automatic switch),
+ * so a sale is never filed under the event the till just left.
+ */
+export function setCartEvent(event: SalesEvent | null, fallbackCurrency: string): void {
+  const base = event?.currency ?? fallbackCurrency;
+  const converting = Boolean(event?.localCurrency && event.exchangeRate);
+  const currency = converting ? event!.localCurrency! : base;
+  // A card rate for another currency pair must not carry over.
+  if (currency !== cart.currency || base !== cart.baseCurrency) Object.assign(cardFx, { rate: null, at: 0 });
+  cart.eventId = event?.id ?? null;
+  cart.baseCurrency = base;
+  cart.currency = currency;
+  cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
+  cart.roundingIncrement = event?.roundingIncrement ?? 0;
+  cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
+  cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
+}
 
 /** Reads the setting and, when it applies, today's rate (or the last one this device saw, offline). */
 export async function loadCardFx(): Promise<void> {
+  void loadMarketFx();
   cardFx.enabled = (await sdk().config.get<boolean>(CARD_IN_BASE_KEY)) ?? false;
   if (!cardInBase.value) return;
   try {
@@ -388,6 +434,9 @@ export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
 export async function checkout(saleId: string, pay: CheckoutPayment): Promise<CheckoutOutcome> {
   if (isEmpty.value) return { approved: false, error: 'The cart is empty.' };
   if (cart.busy) return { approved: false, error: 'A payment is already in progress.' };
+  // Checked against the event the sale is recorded on, not only the banner's.
+  const lock = cart.eventId ? sdk().data.events.sellLock(cart.eventId) : null;
+  if (lock && !lock.forced) return { approved: false, error: `Sell 🔒 - ${lock.by.map((e) => e.name).join(', ')} took this event's leftovers.` };
 
   const charged = total.value;
   const base = baseTotal.value;
@@ -454,6 +503,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       baseCurrency: cart.baseCurrency,
       baseTotal: base,
       exchangeRate: cart.exchangeRate ?? undefined,
+      ...(isConverting.value && marketRateNow() ? { marketRate: marketRateNow()! } : {}),
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
       lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),

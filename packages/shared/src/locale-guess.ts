@@ -102,3 +102,19 @@ export function zoneOfCountry(code: string, at = Date.now()): string | undefined
   const offsets = new Set(zones.map((z) => offsetOf(z, at)));
   return offsets.size === 1 && !offsets.has(null) ? zones[0] : undefined;
 }
+
+/**
+ * For a country spread over several time zones, the one where a day starts
+ * last (the furthest west: Los Angeles for the US, Perth for Australia). A
+ * date there has begun everywhere in the country. Undefined for a country
+ * not listed.
+ */
+export function westernmostZoneOfCountry(code: string, at = Date.now()): string | undefined {
+  let best: { zone: string; offset: number } | undefined;
+  for (const [zone, c] of Object.entries(ZONE_COUNTRY)) {
+    if (c !== code) continue;
+    const offset = offsetOf(zone, at);
+    if (offset !== null && (!best || offset < best.offset)) best = { zone, offset };
+  }
+  return best?.zone;
+}

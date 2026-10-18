@@ -283,7 +283,7 @@ const GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Selling', ids: ['pos', 'price-cards', 'label-printer', 'commissions'] },
   { title: 'Events', ids: ['public-events', 'convention-checklist', 'customs'] },
   { title: 'Stores', ids: ['consignment', 'consignment-artist', 'multi-storage'] },
-  { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync'] },
+  { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync'] },
   { title: 'Moving in', ids: ['migration'] },
 ];
 const CUSTOMS: { id: string; label: string }[] = [

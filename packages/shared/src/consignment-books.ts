@@ -1,4 +1,5 @@
 import { csvCell } from './csv';
+import { bookLineTotals } from './charged-lines';
 import { AccountingSettingsSchema } from './consignment-accounting';
 import { z } from 'zod';
 import {
@@ -239,7 +240,7 @@ export interface ReportInput {
   period: ReportPeriod;
   settings: Pick<BooksSettings, 'timeZone' | 'cardFeePct' | 'cardFeeFixed' | 'passCardFees'>;
   transactions: Transaction[];
-  consignors: Pick<Consignor, 'id' | 'name' | 'commissionPct' | 'storeCommission'>[];
+  consignors: Pick<Consignor, 'id' | 'name' | 'commissionPct' | 'storeCommission' | 'commissionHistory'>[];
   payouts: Pick<ConsignmentPayout, 'consignorId' | 'amount' | 'currency' | 'date'>[];
   fees: Pick<ConsignmentFee, 'consignorId' | 'amount' | 'currency' | 'date' | 'status'>[];
   rentals: ConsignmentRental[];
@@ -262,10 +263,40 @@ export function storeReport(input: ReportInput): StoreReport {
   const cardFees: CardFees = { pct: settings.cardFeePct, fixed: settings.cardFeeFixed };
   const passed = cardFeesOf(settings);
 
-  const txs = input.transactions.filter((t) => !t.revertedAt && !t.revertedBy && inPeriod(localDay(t.timestamp, tz)));
-  const lines = consignmentLines(txs, input.consignors, passed);
-  const linesByTx = new Map<string, ConsignmentLine[]>();
-  for (const l of lines) linesByTx.set(l.txId, [...(linesByTx.get(l.txId) ?? []), l]);
+  // A reverted sale stays in the period it was made in and comes off again
+  // in the period it was reverted in (as e-conomic books it), so a report
+  // already sent never changes. A revert with no date falls back to never
+  // having counted.
+  const revertDay = (t: Transaction): string | null | undefined =>
+    t.revertedAt ? localDay(Math.max(t.revertedAt, t.timestamp), tz) : t.revertedBy ? undefined : null;
+  const asSold = (t: Transaction): Transaction => {
+    const { revertedAt: _a, revertedBy: _b, ...rest } = t;
+    return rest;
+  };
+  const entries: { tx: Transaction; sign: 1 | -1 }[] = [];
+  for (const t of input.transactions) {
+    const rd = revertDay(t);
+    if (rd === undefined) continue;
+    if (inPeriod(localDay(t.timestamp, tz))) entries.push({ tx: asSold(t), sign: 1 });
+    if (rd !== null && inPeriod(rd)) entries.push({ tx: asSold(t), sign: -1 });
+  }
+  const negate = (l: ConsignmentLine): ConsignmentLine => ({
+    ...l,
+    qty: -l.qty,
+    gross: -l.gross,
+    commission: -l.commission,
+    artistShare: -l.artistShare,
+    ...(l.cardFees ? { cardFees: -l.cardFees } : {}),
+  });
+  const sold = consignmentLines(entries.filter((e) => e.sign === 1).map((e) => e.tx), input.consignors, passed);
+  const undone = consignmentLines(entries.filter((e) => e.sign === -1).map((e) => e.tx), input.consignors, passed).map(negate);
+  const lines = [...sold, ...undone];
+  const linesBy = (sign: 1 | -1) => {
+    const out = new Map<string, ConsignmentLine[]>();
+    for (const l of sign === 1 ? sold : undone) out.set(l.txId, [...(out.get(l.txId) ?? []), l]);
+    return out;
+  };
+  const linesByTx = { 1: linesBy(1), [-1]: linesBy(-1) } as Record<1 | -1, Map<string, ConsignmentLine[]>>;
 
   // Minor units throughout.
   const totals = new Map<string, Tot>();
@@ -279,11 +310,12 @@ export function storeReport(input: ReportInput): StoreReport {
     return t;
   };
 
-  for (const tx of txs) {
+  for (const { tx, sign } of entries) {
     const currency = tx.baseCurrency ?? tx.currency;
     const f = baseFactor(tx);
     const rows = [add(totals, currency), add(stores, `${tx.eventId}|${currency}`)];
-    const gross = tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0);
+    const lineGross = bookLineTotals(tx).map(toMinor);
+    const gross = lineGross.reduce((s, g) => s + g, 0);
     const legs = tx.payments?.length ? tx.payments : [{ kind: tx.method === 'card' ? 'card' : tx.method === 'cash' ? 'cash' : 'other', amount: tx.total }];
     const paid = { cash: 0, card: 0, other: 0 };
     for (const l of legs) paid[l.kind === 'cash' || l.kind === 'card' ? l.kind : 'other'] += Math.round(l.amount * f * 100);
@@ -294,49 +326,59 @@ export function storeReport(input: ReportInput): StoreReport {
 
     let lineVat = 0;
     let lineDisc = 0;
+    const grossByRate = new Map<number, number>();
+    // A discount listed apart from the lines (an import): what came off them here.
+    const listed = (tx.discounts ?? []).length ? tx.items.reduce((s, i) => s + toMinor(i.baseLineTotal ?? i.lineTotal), 0) - gross : 0;
+    lineDisc += Math.max(0, listed);
     tx.items.forEach((item, i) => {
-      const g = toMinor(item.baseLineTotal ?? item.lineTotal);
-      const lf = item.lineTotal ? (item.baseLineTotal ?? item.lineTotal) / item.lineTotal : f;
+      const g = lineGross[i]!;
+      // Lines are kept in the books' currency, unit price included: no conversion
+      // (a free line used to be "converted" a second time).
+      const lf = item.baseLineTotal != null && item.lineTotal ? item.baseLineTotal / item.lineTotal : 1;
       const d = Math.max(0, Math.round((item.unitPrice * item.qty - item.lineTotal) * lf * 100));
       lineDisc += d;
-      if (item.consignorId) artistDisc.set(`${item.consignorId}|${currency}`, (artistDisc.get(`${item.consignorId}|${currency}`) ?? 0) + d);
+      if (item.consignorId) artistDisc.set(`${item.consignorId}|${currency}`, (artistDisc.get(`${item.consignorId}|${currency}`) ?? 0) + sign * d);
       const rate = tx.tax && !tx.tax.exempt ? tx.tax.rates[i] : null;
-      if (rate != null) {
-        const v = Math.round((g * rate) / (100 + rate));
-        lineVat += v;
-        const k = `${currency}|${rate}`;
-        const acc = vat.get(k) ?? { gross: 0, vat: 0 };
-        acc.gross += g;
-        acc.vat += v;
-        vat.set(k, acc);
-      }
+      if (rate != null) grossByRate.set(rate, (grossByRate.get(rate) ?? 0) + g);
     });
+    // VAT once per rate per sale, rounded the way the receipt rounds it
+    // (vatBreakdown), so the report and the receipts agree to the cent.
+    for (const [rate, g] of grossByRate) {
+      const v = Math.round((g * rate) / (100 + rate));
+      lineVat += v;
+      const k = `${currency}|${rate}`;
+      const acc = vat.get(k) ?? { gross: 0, vat: 0 };
+      acc.gross += sign * g;
+      acc.vat += sign * v;
+      vat.set(k, acc);
+    }
     for (const d of tx.discounts ?? []) {
       const k = `${d.name}|${currency}`;
       const acc = discounts.get(k) ?? { amount: 0, sales: new Set<string>() };
-      acc.amount += Math.round(d.amount * f * 100);
-      acc.sales.add(tx.id);
+      acc.amount += sign * Math.round(d.amount * f * 100);
+      if (sign === 1) acc.sales.add(tx.id);
       discounts.set(k, acc);
     }
 
-    const own = linesByTx.get(tx.id) ?? [];
+    const own = linesByTx[sign].get(tx.id) ?? [];
     const consigned = own.reduce((s, l) => s + toMinor(l.gross), 0);
     for (const t of rows) {
-      t.sales += 1;
-      t.units += tx.items.reduce((s, i) => s + i.qty, 0);
-      t.gross += gross;
-      t.discounts += lineDisc;
-      t.vat += lineVat;
-      t.net += gross - lineVat;
-      t.cash += paid.cash;
-      t.card += paid.card;
-      t.other += paid.other;
-      t.cardFees += fee;
+      // `own` lines of a reversal are already negative; everything else takes the sign.
+      t.sales += sign;
+      t.units += sign * tx.items.reduce((s, i) => s + i.qty, 0);
+      t.gross += sign * gross;
+      t.discounts += sign * lineDisc;
+      t.vat += sign * lineVat;
+      t.net += sign * (gross - lineVat);
+      t.cash += sign * paid.cash;
+      t.card += sign * paid.card;
+      t.other += sign * paid.other;
+      t.cardFees += sign * fee;
       t.consigned += consigned;
       t.commission += own.reduce((s, l) => s + toMinor(l.commission), 0);
       t.artistShare += own.reduce((s, l) => s + toMinor(l.artistShare), 0);
       t.cardFeesPassed += own.reduce((s, l) => s + toMinor(l.cardFees ?? 0), 0);
-      t.own += gross - consigned;
+      t.own += sign * gross - consigned;
     }
   }
 
@@ -348,7 +390,8 @@ export function storeReport(input: ReportInput): StoreReport {
 
   // Artists: the period's activity, and the balance at its end.
   // Rent paid at the till in the period comes off the rent charged in it.
-  const paidInPeriod = rentPaidAtTill(txs);
+  const paidInPeriod = rentPaidAtTill(entries.filter((e) => e.sign === 1).map((e) => e.tx));
+  for (const [id, amount] of rentPaidAtTill(entries.filter((e) => e.sign === -1).map((e) => e.tx))) paidInPeriod.set(id, (paidInPeriod.get(id) ?? 0) - amount);
   const rentIn = input.rentals
     .filter((r) => r.deductFromSales)
     .flatMap((r) => [
@@ -359,7 +402,13 @@ export function storeReport(input: ReportInput): StoreReport {
   const paidIn = input.payouts.filter((p) => inPeriod(p.date));
   const periodStatements = consignmentStatements(lines, paidIn, [], rentIn, feesIn);
 
-  const upToEnd = input.transactions.filter((t) => localDay(t.timestamp, tz) <= period.to);
+  // As the books stood at the period's end: a revert after it does not count yet.
+  const upToEnd = input.transactions
+    .filter((t) => localDay(t.timestamp, tz) <= period.to)
+    .map((t) => {
+      const rd = revertDay(t);
+      return rd && rd > period.to ? asSold(t) : t;
+    });
   const allLines = consignmentLines(
     upToEnd,
     input.consignors,

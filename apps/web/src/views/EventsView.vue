@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { SalesEvent, SalesEventKind } from '@zollify/shared';
-import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, resolveEventVat, seesSalesTotals, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
+import { BOOTH_LIMITS, eventDays, guessFromDevice, fmtDayRange, boothFieldsForDuplicate, boothLayoutLabel, cleanBooth, safeHttpsUrl, sanitizeBoothLayout, VAT_RATES, countryCodeOf, fmtPrice, isStore, fmtRate, localIsoDay, baseValueOf, resolveEventVat, seesSalesTotals, statusOnClose, toLocalPrice, type BoothLayout, type EventVat } from '@zollify/shared';
 import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
@@ -53,7 +53,7 @@ const props = withDefaults(defineProps<{ mode?: 'events' | 'stores' }>(), { mode
 const storesPage = computed(() => props.mode === 'stores');
 const canEdit = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 
-// ── Automatic opening and closing (account-wide; applied by owner and admin devices) ──
+// ── Automatic opening and closing (account-wide; the server applies it - server-core auto-events.ts) ──
 onMounted(() => void loadAutoEventSettings().catch(() => undefined));
 onMounted(() => void loadSellLockSettings().catch(() => undefined));
 /** Sell 🔒: an open event took over this one's leftovers (sell-lock.ts). */
@@ -103,14 +103,14 @@ const finished = computed(() =>
   visibleEvents.value.filter((e) => !isStore(e) && e.status === 'closed').sort((a, b) => dateKey(b).localeCompare(dateKey(a)) || b.updatedAt - a.updatedAt),
 );
 
-/** Sales and revenue per event, in the event's base currency. */
+/** Sales and revenue per event, in the event's base currency at each sale's day rate (booked-base.ts). */
 const statsById = computed(() => {
   const map = new Map<string, { count: number; revenue: number; currency: string }>();
   for (const tx of recentTransactions.value) {
     if (tx.revertedAt) continue;
     const cur = map.get(tx.eventId) ?? { count: 0, revenue: 0, currency: tx.baseCurrency ?? tx.currency };
     cur.count++;
-    cur.revenue += tx.baseTotal ?? tx.total;
+    cur.revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
     map.set(tx.eventId, cur);
   }
   return map;
@@ -147,7 +147,10 @@ async function guard(work: () => Promise<void>): Promise<void> {
 }
 const activate = (e: SalesEvent) =>
   guard(async () => {
-    if (e.status !== 'active') await upsertSalesEvent({ ...e, status: 'active' });
+    if (e.status !== 'active') {
+      if (!canEdit.value) throw new Error('Only an owner or admin can open this event.');
+      await upsertSalesEvent({ ...e, status: 'active' });
+    }
     await setActiveEvent(e.id);
   });
 const sell = (e: SalesEvent) =>
@@ -161,10 +164,7 @@ async function close(e: SalesEvent): Promise<void> {
     : await shellConfirm('Closing stops sales for this event. Nothing is deleted - history and exports stay, and you can reopen it any time.', 'Close event?');
   if (!ok) return;
   await guard(async () => {
-    const end = e.dateEnd || e.dateStart;
-    const today = localIsoDay();
-    // An event that has not happened yet parks back to planned rather than finishing.
-    await upsertSalesEvent({ ...e, status: end && end > today ? 'planned' : 'closed' });
+    await upsertSalesEvent({ ...e, status: statusOnClose(e) });
     if (activeEventId.value === e.id) await setActiveEvent(null);
   });
 }
@@ -527,7 +527,7 @@ async function save(): Promise<void> {
       <summary>Automatic: {{ autoEventSettings.open && autoEventSettings.close ? 'open and close by date' : autoEventSettings.open ? 'open by date' : autoEventSettings.close ? 'close by date' : 'off' }}</summary>
       <label class="check"><input type="checkbox" :checked="autoEventSettings.open" @change="toggleAuto('open', ($event.target as HTMLInputElement).checked)" /> <span>Open each event on its first day, and switch the till to it when it is the only one running</span></label>
       <label class="check"><input type="checkbox" :checked="autoEventSettings.close" @change="toggleAuto('close', ($event.target as HTMLInputElement).checked)" /> <span>Close each event the day after its last day</span></label>
-      <p class="hint">For the whole account. The server does it at midnight where the event is held, whether or not a device is on; tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
+      <p class="hint">For the whole account. The server checks every hour, at five past, whether or not a device is on: an event opens in the first hour of its first day where it is held, and closes in the first hour of the day after its last. In a country with several time zones it goes by the westernmost one, so nothing opens or closes early. Tills follow when they next sync. Events without dates and stores are never closed this way, and you can still open or close any event by hand.</p>
     </details>
     <details v-if="canEdit && !storesPage" class="auto">
       <summary>Sell 🔒: {{ sellLockSettings.allowForce ? 'owners and admins can force sales' : 'no forcing' }}</summary>
@@ -558,9 +558,10 @@ async function save(): Promise<void> {
           <p v-if="layoutNote(e)" class="layout-note"><Icon name="layers" :size="12" /> Layout: {{ layoutNote(e) }}</p>
           <p v-if="canEdit && pill(e).cls === 'ended'" class="ended-note">Ended {{ fmtDayRange(e.dateEnd || e.dateStart) }} but still open. <button type="button" class="linkbtn" @click="close(e)">Close it</button> to finish its books.</p>
           <div class="actions">
-            <button v-if="e.status === 'planned'" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
+            <!-- Opening and reopening change the event for everyone, which only owners and admins may do (the server keeps staff to sales). -->
+            <button v-if="e.status === 'planned' && canEdit" type="button" class="primary" @click="sell(e)"><Icon name="door-open" :size="14" /> Open</button>
             <button v-else-if="e.status === 'active' && posOn()" type="button" class="primary" @click="sell(e)"><Icon name="shopping-cart" :size="14" /> Sell</button>
-            <button v-else-if="e.status === 'closed'" type="button" @click="sell(e)">Reopen</button>
+            <button v-else-if="e.status === 'closed' && canEdit" type="button" @click="sell(e)">Reopen</button>
             <router-link :to="{ name: 'history', query: { event: e.id } }" class="btn"><Icon name="bar-chart" :size="14" /> History</router-link>
             <div v-if="hasMore(e)" class="more" @click.stop>
               <button type="button" :aria-expanded="menuFor === e.id" aria-haspopup="menu" aria-label="More actions" @click="menuFor = menuFor === e.id ? null : e.id"><Icon name="more" :size="16" /></button>

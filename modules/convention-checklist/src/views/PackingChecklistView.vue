@@ -69,7 +69,9 @@ const stockByType = computed(() => {
   for (const a of sdk().data.inventory.availability(selectedEvent.value.id)) {
     const type = byId.get(a.productId)?.type;
     if (!type) continue;
-    totals.set(type, (totals.get(type) ?? 0) + (a.claimed ?? a.onHand));
+    // What this event can still sell: its claim less what it sold, or for an
+    // unclaimed item what is here and not promised to another event.
+    totals.set(type, (totals.get(type) ?? 0) + Math.max(0, a.available));
   }
   return totals;
 });

@@ -10,8 +10,9 @@ import { activeEvent, setActiveEvent, visibleEvents } from './sales-events';
  * auto-events.ts) - devices on or not - and every device pulls that like any
  * other edit. What only a device can do is move its own till: when its event
  * has closed or ended and exactly one event is running today, it switches to
- * that one. That runs at start-up, every quarter of an hour and whenever the
- * app comes back to the front, for any role.
+ * that one - only while automatic opening is on. That runs at start-up,
+ * every quarter of an hour and whenever the app comes back to the front, for
+ * any role.
  */
 
 const KEY = 'events.auto';
@@ -24,7 +25,7 @@ export async function loadAutoEventSettings(): Promise<AutoEventSettings> {
   return { ...autoEventSettings };
 }
 
-/** Saved for the whole account; the server acts on it within a quarter of an hour. */
+/** Saved for the whole account; the server acts on it at its next hourly check (five past the hour). */
 export async function setAutoEventSettings(next: Partial<AutoEventSettings>): Promise<void> {
   Object.assign(autoEventSettings, next);
   await setSyncedSetting(KEY, { ...autoEventSettings });

@@ -168,3 +168,21 @@ describe('file parsing', () => {
     ]);
   });
 });
+
+describe('one currency per booking', () => {
+  it('takes the till cash in the cards’ currency, never another one added as if it were the same', () => {
+    const [c] = eng.clusterTxns([{ ...pay('2026-03-06', 1000), currency: 'CHF' }]);
+    // The event keeps its books in EUR; the till took CHF 500 cash.
+    expect(eng.cashInCardCurrency(c!, { cash: 526.32, currency: 'EUR', taken: { CHF: 500 } })).toBe(500);
+    expect(eng.cashInCardCurrency(c!, { cash: 526.32, currency: 'EUR', taken: { SEK: 5000 } })).toBeNull();
+    expect(eng.cashInCardCurrency(c!, { cash: 300, currency: 'CHF' })).toBe(300);
+  });
+
+  it('a cluster with cards in two currencies is not ready to book', () => {
+    const [c] = eng.clusterTxns([pay('2026-03-06', 10), { ...pay('2026-03-06', 20), currency: 'CHF' }]);
+    const named = { ...c!, customName: 'Con' };
+    expect(eng.mixedCurrencies(named)).toBe(true);
+    expect(eng.ready(named)).toBe(false);
+    expect(eng.clusterCurrency(named)).toBeNull();
+  });
+});

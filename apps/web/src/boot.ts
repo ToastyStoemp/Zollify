@@ -51,6 +51,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   commissions: () => import('@zollify/commissions'),
   'peppol-be': () => import('@zollify/peppol-be'),
   economic: () => import('@zollify/economic'),
+  'tax-deadlines': () => import('@zollify/tax-deadlines'),
   'sme-scheme': () => import('@zollify/sme-scheme'),
 };
 

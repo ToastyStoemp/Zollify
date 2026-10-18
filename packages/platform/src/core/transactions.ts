@@ -132,6 +132,7 @@ export function saleToTransaction(
           baseCurrency: sale.baseCurrency,
           baseTotal: sale.baseTotal,
           exchangeRate: sale.exchangeRate,
+          ...(sale.marketRate && sale.marketRate.rate > 0 ? { marketRate: { rate: sale.marketRate.rate, at: sale.marketRate.at } } : {}),
         }
       : {}),
   };

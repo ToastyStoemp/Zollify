@@ -31,7 +31,9 @@ function requireAccountId(): string {
 export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise<void> {
   const map = buildMergeMap([merge]);
   if (!map.size) return;
-  const now = Date.now();
+  // Rows keep the time of their last real change, not this device's clock:
+  // every device materialises the merge on its own, and a fresh timestamp
+  // would make one that pulls it late reject later edits as "older".
 
   for (const tx of await db.transactions.toArray()) {
     const items = remapTxItems(tx.items, map);
@@ -45,7 +47,20 @@ export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise
     await db.eventStock.delete([row.eventId, row.productId, row.variantId]);
     const key: [string, string, string] = [row.eventId, t.pid, t.vid ?? ''];
     const existing = await db.eventStock.get(key);
-    await db.eventStock.put({ eventId: row.eventId, productId: t.pid, variantId: t.vid ?? '', broughtQty: (existing?.broughtQty ?? 0) + row.broughtQty, updatedAt: now });
+    // Leftovers taken over from another event stay recorded (Sell 🔒 and what
+    // each event still holds depend on it).
+    const carried =
+      row.carried && existing?.carried && existing.carried.from === row.carried.from
+        ? { from: row.carried.from, qty: existing.carried.qty + row.carried.qty }
+        : (row.carried ?? existing?.carried);
+    await db.eventStock.put({
+      eventId: row.eventId,
+      productId: t.pid,
+      variantId: t.vid ?? '',
+      broughtQty: (existing?.broughtQty ?? 0) + row.broughtQty,
+      updatedAt: Math.max(existing?.updatedAt ?? 0, row.updatedAt),
+      ...(carried ? { carried } : {}),
+    });
   }
   for (const row of await db.inventory.toArray()) {
     const t = resolveMergedRef(map, row.productId, row.variantId || null);
@@ -78,7 +93,7 @@ export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise
         variantIds.add(mergeKey(t.pid, t.vid));
       }
     }
-    if (changed) await db.discounts.put({ ...rule, productIds, variantIds: [...variantIds], updatedAt: now });
+    if (changed) await db.discounts.put({ ...rule, productIds, variantIds: [...variantIds] });
   }
 
   for (const event of await db.events.toArray()) {
@@ -93,7 +108,8 @@ export async function materializeMerge(db: CoreDb, merge: ProductMerge): Promise
         next[mergeKey(t.pid, t.vid)] = v;
       } else next[k] = v;
     }
-    if (changed) await db.events.put({ ...event, localPriceOverrides: next, updatedAt: now });
+    // (localTierOverrides are keyed by discount rule and tier, not by product: nothing to remap.)
+    if (changed) await db.events.put({ ...event, localPriceOverrides: next });
   }
 }
 

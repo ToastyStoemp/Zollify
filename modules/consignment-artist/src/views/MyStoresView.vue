@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { ArtistConsignment, ConsignmentFee } from '@zollify/shared';
 import type { SetupMoment } from '@zollify/shared';
-import { FEE_REASONS, commissionFor, fmtPrice, rentalEnd, rentalStatus } from '@zollify/shared';
+import { FEE_REASONS, commissionFor, fmtPrice, localIsoDay, rentalEnd, rentalStatus } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
 import ShareItems from './ShareItems.vue';
 import StockDialog from './StockDialog.vue';
@@ -32,7 +32,58 @@ async function refresh(): Promise<void> {
   } catch (err) {
     emit('error', errorText(err, 'Could not load your stores.'));
   }
+  void loadRates();
 }
+
+/**
+ * A store reports in its own currency, and that is what the artist is paid.
+ * An artist who works in another one also sees an estimate in theirs: a sale,
+ * payout or fee at the market rate of its own day, totals and balances at
+ * today's. Only shown when a rate is known.
+ */
+const ownCurrency = computed(() => sdk().account()?.profile.defaultCurrency ?? '');
+const rates = ref<Record<string, number>>({});
+const TODAY = '';
+const rateKey = (currency: string, day: string): string => `${currency}|${day}`;
+async function loadRates(): Promise<void> {
+  const own = ownCurrency.value;
+  if (!own || !links.value) return;
+  const days = new Map<string, Set<string>>();
+  const want = (currency: string, day: string): void => {
+    if (!currency || currency === own) return;
+    (days.get(currency) ?? days.set(currency, new Set()).get(currency)!).add(day);
+  };
+  for (const l of links.value) {
+    want(l.currency, TODAY);
+    for (const t of l.statement.totals) want(t.currency, TODAY);
+    for (const s of l.lines) want(s.currency, localIsoDay(s.at));
+    for (const p of l.payouts) want(p.currency, p.date);
+    for (const f of l.fees ?? []) want(f.currency, f.date);
+  }
+  const next: Record<string, number> = {};
+  await Promise.all(
+    [...days].map(async ([currency, set]) => {
+      try {
+        const latest = await sdk().fx?.latest(currency, own);
+        if (latest) next[rateKey(currency, TODAY)] = latest.rate;
+        const past = [...set].filter((d) => d !== TODAY);
+        if (past.length && sdk().fx?.on) for (const [day, rate] of Object.entries(await sdk().fx.on!(currency, own, past))) next[rateKey(currency, day)] = rate;
+      } catch {
+        /* no rate - no estimate */
+      }
+    }),
+  );
+  rates.value = next;
+}
+/** "≈ EUR 10.33", or '' when it is the artist's own currency or no rate is known. A past day without its rate uses today's. */
+function est(amount: number, currency: string, day: string = TODAY): string {
+  const own = ownCurrency.value;
+  if (!own || currency === own) return '';
+  const rate = rates.value[rateKey(currency, day)] ?? rates.value[rateKey(currency, TODAY)];
+  return rate ? `≈ ${fmtPrice(Math.round(amount * rate * 100) / 100, own)}` : '';
+}
+const dayOf = (ms: number): string => localIsoDay(ms);
+const showsEstimates = (l: ArtistConsignment): boolean => !!ownCurrency.value && l.currency !== ownCurrency.value && Object.keys(rates.value).length > 0;
 onMounted(refresh);
 
 async function answerInvite(o: Offer, accept: boolean): Promise<void> {
@@ -213,14 +264,15 @@ function commissionLine(l: ArtistConsignment): string {
           <span><strong>{{ r.spaceName }}</strong> at {{ venueName(l, r.storeId) }} · {{ r.startDate }} to {{ rentalEnd(r) }} · {{ fmtPrice(r.monthlyFee, r.currency) }}/month{{ r.deductFromSales ? ', taken off your sales' : '' }}<template v-if="rentalStatus(r, now) === 'upcoming'"> · starts {{ r.startDate }}</template></span>
         </p>
 
+        <p v-if="showsEstimates(l)" class="hint">{{ l.storeAccountName }} reports in {{ l.currency }}, and that is what you are paid. ≈ is an estimate in {{ ownCurrency }}: a sale, payout or fee at its day's market rate, totals at today's.</p>
         <div v-for="t in l.statement.totals" :key="t.currency" class="totals">
           <div><span>Sold</span><strong>{{ t.units }}</strong></div>
-          <div><span>Your share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong></div>
+          <div><span>Your share</span><strong>{{ fmtPrice(t.artistShare, t.currency) }}</strong><small v-if="est(t.artistShare, t.currency)" class="est">{{ est(t.artistShare, t.currency) }}</small></div>
           <div v-if="t.cardFees"><span>Card costs</span><strong>{{ fmtPrice(t.cardFees, t.currency) }}</strong></div>
           <div v-if="t.rent"><span>Space rent</span><strong>{{ fmtPrice(t.rent, t.currency) }}</strong></div>
           <div v-if="t.fees"><span>Fees</span><strong>{{ fmtPrice(t.fees, t.currency) }}</strong></div>
-          <div><span>Paid to you</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong></div>
-          <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Still owed' : 'You owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong></div>
+          <div><span>Paid to you</span><strong>{{ fmtPrice(t.paid, t.currency) }}</strong><small v-if="est(t.paid, t.currency)" class="est">{{ est(t.paid, t.currency) }}</small></div>
+          <div :class="['owed', { due: t.balance > 0 }]"><span>{{ t.balance >= 0 ? 'Still owed' : 'You owe' }}</span><strong>{{ fmtPrice(Math.abs(t.balance), t.currency) }}</strong><small v-if="est(Math.abs(t.balance), t.currency)" class="est">{{ est(Math.abs(t.balance), t.currency) }}</small></div>
         </div>
 
         <details v-if="l.items.length" open>
@@ -230,7 +282,7 @@ function commissionLine(l: ArtistConsignment): string {
             <tbody>
               <tr v-for="i in l.items" :key="`${i.productId}:${i.variantId}`">
                 <td>{{ i.title }}<template v-if="i.variantLabel"> · {{ i.variantLabel }}</template><span v-if="i.sku" class="hint"> · {{ i.sku }}</span></td>
-                <td class="num">{{ fmtPrice(i.price, l.currency) }}</td>
+                <td class="num">{{ fmtPrice(i.price, l.currency) }}<small v-if="est(i.price, l.currency)" class="est">{{ est(i.price, l.currency) }}</small></td>
                 <td class="num">{{ i.sold }}</td>
                 <td class="num" :title="i.remaining == null ? 'The store has not counted this item' : ''">{{ i.remaining ?? '-' }}</td>
               </tr>
@@ -259,7 +311,7 @@ function commissionLine(l: ArtistConsignment): string {
                 <td>{{ fmtDate(s.at) }}</td>
                 <td>{{ s.title }}<template v-if="s.variantLabel"> · {{ s.variantLabel }}</template><template v-if="s.qty > 1"> × {{ s.qty }}</template></td>
                 <td class="hint">{{ venueName(l, s.storeId) }}</td>
-                <td class="num">{{ fmtPrice(s.artistShare, s.currency) }}</td>
+                <td class="num">{{ fmtPrice(s.artistShare, s.currency) }}<small v-if="est(s.artistShare, s.currency, dayOf(s.at))" class="est">{{ est(s.artistShare, s.currency, dayOf(s.at)) }}</small></td>
               </tr>
             </tbody>
           </table>
@@ -270,7 +322,7 @@ function commissionLine(l: ArtistConsignment): string {
           <ul class="fees">
             <li v-for="f in l.fees" :key="f.id" :class="{ waived: f.status === 'waived' }">
               <span>{{ f.date }}</span>
-              <strong>{{ fmtPrice(f.amount, f.currency) }}</strong>
+              <strong>{{ fmtPrice(f.amount, f.currency) }}</strong><small v-if="est(f.amount, f.currency, f.date)" class="est">{{ est(f.amount, f.currency, f.date) }}</small>
               <span class="hint grow">{{ FEE_REASONS[f.reason] }}<template v-if="f.note"> · {{ f.note }}</template><template v-if="f.status === 'waived'"> · waived<template v-if="f.waiveNote"> - {{ f.waiveNote }}</template></template></span>
               <span v-if="f.dispute && f.status === 'charged'" class="hint">You objected</span>
               <button v-else-if="f.status === 'charged'" type="button" class="quiet" @click="objecting = { link: l, fee: f }; objection = ''">Object</button>
@@ -284,7 +336,7 @@ function commissionLine(l: ArtistConsignment): string {
             <tbody>
               <tr v-for="p in l.payouts" :key="p.id">
                 <td>{{ p.date }}</td>
-                <td class="num">{{ fmtPrice(p.amount, p.currency) }}</td>
+                <td class="num">{{ fmtPrice(p.amount, p.currency) }}<small v-if="est(p.amount, p.currency, p.date)" class="est">{{ est(p.amount, p.currency, p.date) }}</small></td>
                 <td class="hint">{{ p.storeId ? venueName(l, p.storeId) : 'All stores' }}<template v-if="p.note"> · {{ p.note }}</template></td>
               </tr>
             </tbody>
@@ -339,6 +391,7 @@ h1 { margin: 0; font-size: 1.35rem; }
 .link button { min-height: 2.4rem; display: inline-flex; align-items: center; gap: .35rem; }
 .link .hint { flex-basis: 100%; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .82rem; }
+.est { display: block; color: var(--zfy-muted, #5a6472); font-size: .75rem; font-weight: 400; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); font-size: .85rem; margin: 0; }
 .empty { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1.5rem; text-align: center; border: 1px dashed var(--zfy-line, #d6dde4); border-radius: 12px; }
 .card { display: flex; flex-direction: column; gap: .6rem; padding: .9rem 1rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); }

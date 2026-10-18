@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { fmtPrice, localIsoDay, round2, seesSalesTotals } from '@zollify/shared';
+import { chargedLineTotals, fmtPrice, localIsoDay, needsRateLookup, round2, seesSalesTotals, toBaseFactor } from '@zollify/shared';
 import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
@@ -55,7 +55,9 @@ const currency = computed(() => scopeEvent.value?.localCurrency || scopeEvent.va
  */
 const revenueMode = ref<'local' | 'base'>('local');
 const showCurrencyToggle = computed(() => !allMode.value && currency.value !== baseCurrency.value);
-const displayCurrency = computed(() => (revenueMode.value === 'local' ? currency.value : baseCurrency.value));
+/** Across events there is no one local currency: always base, so francs and kronor are never added up as one. */
+const mode = computed<'local' | 'base'>(() => (allMode.value ? 'base' : revenueMode.value));
+const displayCurrency = computed(() => (mode.value === 'local' ? currency.value : baseCurrency.value));
 
 /**
  * Staff see totals only when the owner allows it (Settings → Team). Without,
@@ -76,10 +78,11 @@ const eventName = (id: string): string => (id ? (getSalesEvent(id)?.name ?? 'Rem
  * `tx.baseTotal`/`item.baseLineTotal` are the sum of catalog base-currency
  * prices, not a conversion of what was actually charged - at a deliberately
  * round pricing rate (e.g. 1:1) they equal the local total by construction,
- * regardless of the real exchange rate that day. For bookkeeping, "base
- * currency" figures instead convert the real charged amount using the real
- * market rate for the transaction's own date, fetched per date below; those
- * fields remain only as the fallback while a rate is loading or unavailable.
+ * regardless of the real exchange rate that day. "Base currency" figures
+ * instead convert the real charged amount at the day's market rate: the one
+ * the till recorded with the sale, or for an older sale the rate for its own
+ * date, fetched below; the catalogue figures remain only as the fallback while
+ * a rate is loading or unavailable.
  */
 const txDate = (tx: Transaction): string => localIsoDay(tx.timestamp);
 const fxKey = (date: string, fromCurrency: string): string => `${date}:${fromCurrency}`;
@@ -90,17 +93,17 @@ const fxKey = (date: string, fromCurrency: string): string => `${date}:${fromCur
  * with a different local currency, and each needs its own rate lookups.
  */
 const fxRates = ref<Map<string, number>>(new Map());
-const realBase = (localAmount: number, tx: Transaction, fallback: number): number => {
-  const rate = fxRates.value.get(fxKey(txDate(tx), tx.currency));
-  return rate != null ? round2(localAmount * rate) : fallback;
-};
+/** Charged currency to base: the day's rate the till recorded, else the one looked up for the sale's date (booked-base.ts). */
+const factorOf = (tx: Transaction): number => toBaseFactor(tx, baseCurrency.value, fxRates.value.get(fxKey(txDate(tx), tx.currency)));
 
-const amountOf = (tx: Transaction): number => (revenueMode.value === 'local' ? tx.total : realBase(tx.total, tx, tx.baseTotal ?? tx.total));
-const currencyOf = (tx: Transaction): string => (revenueMode.value === 'local' ? tx.currency : baseCurrency.value);
-const itemAmountOf = (item: TxItem, tx: Transaction): number =>
-  revenueMode.value === 'local' ? item.lineTotal : realBase(item.lineTotal, tx, item.baseLineTotal ?? item.lineTotal);
-const discountAmountOf = (d: TxDiscount, tx: Transaction): number =>
-  revenueMode.value === 'local' ? d.amount : realBase(d.amount, tx, tx.exchangeRate ? round2(d.amount / tx.exchangeRate) : d.amount);
+/** Every amount starts from what the customer paid (the charged currency); base is that at the day's rate. */
+const inMode = (charged: number, tx: Transaction, m = mode.value): number => (m === 'local' ? charged : round2(charged * factorOf(tx)));
+const amountOf = (tx: Transaction, m = mode.value): number => inMode(tx.total, tx, m);
+const currencyOf = (tx: Transaction): string => (mode.value === 'local' ? tx.currency : baseCurrency.value);
+/** Line amounts are stored in the books' currency; what the customer paid per line is scaled from the total. */
+const chargedOf = (tx: Transaction): number[] => chargedLineTotals(tx);
+const itemAmountOf = (item: TxItem, tx: Transaction): number => inMode(chargedOf(tx)[tx.items.indexOf(item)] ?? item.lineTotal, tx);
+const discountAmountOf = (d: TxDiscount, tx: Transaction): number => inMode(d.amount, tx);
 
 // ── Filters ─────────────────────────────────────────────────────────────────
 const methodFilter = ref('all');
@@ -144,8 +147,8 @@ const stats = computed(() => {
     revenue += amountOf(t);
     for (const i of t.items) items += i.qty;
     for (const p of t.payments) {
-      // Legs are in the charge currency; across events they are shown in base.
-      const amount = allMode.value && t.exchangeRate ? p.amount / t.exchangeRate : p.amount;
+      // Legs are in the charge currency, shown like everything else on the page.
+      const amount = inMode(p.amount, t);
       if (p.kind === 'cash') cash += amount;
       else card += amount;
     }
@@ -168,10 +171,10 @@ watch(scope, () => { compareName.value = ''; });
  * different local currency, and each needs its own rate lookups.
  */
 async function refreshFxRates(): Promise<void> {
-  if (revenueMode.value !== 'base') return;
+  if (mode.value !== 'base' && !compareId.value) return;
   const byCurrency = new Map<string, Set<string>>();
   const collect = (t: Transaction): void => {
-    if (t.currency === baseCurrency.value) return;
+    if (!needsRateLookup(t, baseCurrency.value)) return;
     const dates = byCurrency.get(t.currency) ?? new Set<string>();
     dates.add(txDate(t));
     byCurrency.set(t.currency, dates);
@@ -185,11 +188,12 @@ async function refreshFxRates(): Promise<void> {
   for (const [cur, rates] of perCurrency) for (const [date, rate] of rates) merged.set(fxKey(date, cur), rate);
   fxRates.value = merged;
 }
-watch([scoped, revenueMode, baseCurrency, compareId, allMode], refreshFxRates, { immediate: true });
+watch([scoped, mode, baseCurrency, compareId, allMode], refreshFxRates, { immediate: true });
 
 function eventStats(eventId: string) {
   const txs = recentTransactions.value.filter((t) => t.eventId === eventId && !t.revertedAt);
-  const revenue = txs.reduce((s, t) => s + amountOf(t), 0);
+  // Two events can charge in different currencies: compared in base, at each sale's day rate.
+  const revenue = txs.reduce((s, t) => s + amountOf(t, 'base'), 0);
   const items = txs.reduce((s, t) => s + t.items.reduce((si, i) => si + i.qty, 0), 0);
   const days = new Set(txs.map((t) => localIsoDay(t.timestamp))).size || 1;
   return { revenue, count: txs.length, items, days };
@@ -427,8 +431,8 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <tbody>
             <tr v-for="m in comparison.metrics" :key="m.label">
               <td class="muted">{{ m.label }}</td>
-              <td>{{ m.money ? money(m.cur, displayCurrency) : m.cur }}</td>
-              <td class="muted">{{ m.money ? money(m.other, displayCurrency) : m.other }}</td>
+              <td>{{ m.money ? money(m.cur, baseCurrency) : m.cur }}</td>
+              <td class="muted">{{ m.money ? money(m.other, baseCurrency) : m.other }}</td>
               <td :class="m.delta == null ? 'muted' : m.delta > 0 ? 'good' : m.delta < 0 ? 'bad' : 'muted'">{{ m.delta == null ? '-' : (m.delta > 0 ? '+' : '') + m.delta + '%' }}</td>
             </tr>
           </tbody>

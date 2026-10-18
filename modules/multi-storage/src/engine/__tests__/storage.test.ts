@@ -74,7 +74,7 @@ describe('stock by place', () => {
 
 describe('selling from a device location', () => {
   const live = new Set(['unit', 'van']);
-  const noClaims = (_eventId: string, _key: string): boolean => false;
+  const noClaims = (_eventId: string, _key: string): number | null => null;
   const entries = [{ productId: 'p', variantId: '', label: 'Print' }];
   const rowFor = (remaining: number, sales: SaleRecord[], homes: [string, DeviceHome][], allocs: Allocation[], hasClaim = noClaims) =>
     storageRows(entries, {
@@ -106,10 +106,21 @@ describe('selling from a device location', () => {
     expect(row.home).toBe(48);
   });
 
-  it('leaves out sales a count already reflects, reverted sales and claimed items', () => {
+  it('leaves out sales a count already reflects, reverted sales and what a claim covered', () => {
     const sales = [sale('tablet', 10, 2), sale('tablet', 30, 1, { revertedAt: 31 }), sale('tablet', 40, 5, { eventId: 'claimed' })];
-    const row = rowFor(100, sales, [home('tablet', ['van', 0])], [alloc('van', 20, 15)], (eventId: string) => eventId === 'claimed');
+    const row = rowFor(100, sales, [home('tablet', ['van', 0])], [alloc('van', 20, 15)], (eventId: string) => (eventId === 'claimed' ? 5 : null));
     expect(row.stored.get('van')).toBe(20);
+  });
+
+  it('takes sales past a claim off the location: claim 5, 8 sold, the last 3 came from the van', () => {
+    const sales = [sale('tablet', 10, 4, { eventId: 'con' }), sale('tablet', 20, 4, { eventId: 'con' })];
+    const row = rowFor(92, sales, [home('tablet', ['van', 0])], [alloc('van', 20, 1)], (eventId: string) => (eventId === 'con' ? 5 : null));
+    expect(row.stored.get('van')).toBe(17);
+  });
+
+  it('a claim of 0 covers nothing', () => {
+    const row = rowFor(98, [sale('tablet', 10, 2, { eventId: 'con' })], [home('tablet', ['van', 0])], [alloc('van', 20, 1)], () => 0);
+    expect(row.stored.get('van')).toBe(18);
   });
 
   it('can go negative, which the screen flags', () => {

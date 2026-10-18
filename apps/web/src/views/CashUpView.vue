@@ -85,13 +85,21 @@ const hasCounted = computed(() => counted.value.size > 0 || float.value > 0);
 const takings = computed(() => {
   let cash = 0;
   let card = 0;
+  /** What the terminal settled, per currency, for cards charged in another currency than the sale (cards in base). */
+  const settled = new Map<string, number>();
   for (const tx of sales.value) {
     for (const leg of tx.payments) {
       if (leg.kind === 'cash') cash += leg.amount;
       else card += leg.amount;
+      if (leg.kind !== 'cash' && leg.settled) settled.set(leg.settled.currency, (settled.get(leg.settled.currency) ?? 0) + leg.settled.amount);
     }
   }
-  return { cash: round2(cash), card: round2(card), total: round2(cash + card) };
+  return {
+    cash: round2(cash),
+    card: round2(card),
+    total: round2(cash + card),
+    settled: [...settled].map(([cur, amount]) => fmtPrice(round2(amount), cur)).join(' + '),
+  };
 });
 
 const reverted = computed(() =>
@@ -172,7 +180,7 @@ function isCoin(value: number): boolean {
         <li>
           <span class="label">Card taken</span>
           <strong>{{ fmtPrice(takings.card, currency) }}</strong>
-          <span class="sub">settled by the terminal</span>
+          <span class="sub">{{ takings.settled ? `the terminal settled ${takings.settled} - compare with its end-of-day slip` : 'settled by the terminal' }}</span>
         </li>
         <li>
           <span class="label">Total</span>

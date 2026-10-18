@@ -102,6 +102,13 @@ export function totalOwed(commissions: readonly { status: CommissionStatus; bala
   return round2(commissions.reduce((sum, c) => sum + (c.status === 'cancelled' ? 0 : c.balance), 0));
 }
 
+/** The same per currency - commissions priced in euros and in francs are never added up as one. */
+export function owedByCurrency(commissions: readonly { status: CommissionStatus; balance: number; currency: string }[]): { currency: string; amount: number }[] {
+  const by = new Map<string, number>();
+  for (const c of commissions) if (c.status !== 'cancelled') by.set(c.currency, (by.get(c.currency) ?? 0) + c.balance);
+  return [...by].map(([currency, amount]) => ({ currency, amount: round2(amount) })).filter((o) => o.amount !== 0).sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
 /**
  * The commission with everything personal cleared, and what the books need
  * kept. Cleared: internal notes, the free-text details, and the messages

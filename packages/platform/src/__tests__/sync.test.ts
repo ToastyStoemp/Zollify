@@ -299,3 +299,69 @@ describe('sync', () => {
     expect(rec?.full).toBe(rec?.thumb);
   });
 });
+
+describe('sales the server refuses', () => {
+  it('are marked synced (no endless retry) but kept on record, and can be dismissed', async () => {
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'tx-ok', eventId: 'A', total: 10, currency: 'CHF', timestamp: 5 } });
+    await outbox.queueOp({ type: 'tx.create', payload: { id: 'tx-refused', eventId: 'B', total: 25, currency: 'EUR', timestamp: 6 } });
+    const pending = await outbox.unsyncedOps();
+    const refusedOp = pending.find((op) => (op.payload as { id: string }).id === 'tx-refused')!;
+    pushResponse = { accepted: 1, duplicates: 0, latestSeq: 1, refused: [refusedOp.opId] };
+    await sync.syncNow();
+    expect(await outbox.unsyncedOps()).toHaveLength(0);
+    expect(sync.refusedSales.value).toEqual([{ txId: 'tx-refused', eventId: 'B', total: 25, currency: 'EUR', at: 6 }]);
+    // Survives a restart.
+    sync.refusedSales.value = [];
+    await sync.loadRefusedSales();
+    expect(sync.refusedSales.value.map((r) => r.txId)).toEqual(['tx-refused']);
+    await sync.dismissRefusedSales();
+    await sync.loadRefusedSales();
+    expect(sync.refusedSales.value).toEqual([]);
+  });
+});
+
+describe('a helper whose event was taken away', () => {
+  it('is not put back on it at start-up, and the till has no event', async () => {
+    const db = openCoreDb(account.accountId);
+    for (const id of ['A', 'B']) await db.events.put({ id, name: id, venue: {}, currency: 'CHF', status: 'active', updatedAt: 1 } as never);
+    await db.settings.put({ key: 'core.activeEventId', value: 'A' });
+    account.allowedEventIds = ['B'];
+    try {
+      events.resetSalesEventCache();
+      await events.loadSalesEvents();
+      expect(events.activeEventId.value).not.toBe('A');
+      expect(events.activeEvent.value).toBeNull();
+    } finally {
+      account.allowedEventIds = null;
+    }
+  });
+});
+
+describe('last change wins, as on the server', () => {
+  const op = (n: number, type: string, payload: unknown) => ({ opId: String(n).padStart(16, '0'), deviceId: 'other', ts: 1, serverSeq: n, type, payload });
+
+  it('a delete made before an edit does not delete the edited product, whichever arrives first', async () => {
+    pullResponses = [{ ops: [op(1, 'product.upsert', product('p1', 'Edited at 10:05', 1005)), op(2, 'product.delete', { id: 'p1', deletedAt: 1000 })], latestSeq: 2 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).products.get('p1'))?.deletedAt).toBeUndefined();
+  });
+
+  it('a delete made after the last edit deletes it', async () => {
+    pullResponses = [{ ops: [op(1, 'product.upsert', product('p1', 'Print', 1000)), op(2, 'product.delete', { id: 'p1', deletedAt: 1005 })], latestSeq: 2 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).products.get('p1'))?.deletedAt).toBe(1005);
+  });
+
+  it('a cleared claim stays cleared when an older claim from an offline device syncs in later', async () => {
+    const claim = (qty: number, at: number) => ({ eventId: 'A', productId: 'p1', variantId: '', broughtQty: qty, updatedAt: at });
+    pullResponses = [{ ops: [op(1, 'stock.set', claim(5, 1000)), op(2, 'stock.set', claim(-1, 1100))], latestSeq: 2 }];
+    await sync.syncNow();
+    pullResponses = [{ ops: [op(3, 'stock.set', claim(7, 1050))], latestSeq: 3 }];
+    await sync.syncNow();
+    expect(await openCoreDb(account.accountId).eventStock.get(['A', 'p1', ''])).toBeUndefined();
+    // A newer claim after the clear does count.
+    pullResponses = [{ ops: [op(4, 'stock.set', claim(3, 1200))], latestSeq: 4 }];
+    await sync.syncNow();
+    expect((await openCoreDb(account.accountId).eventStock.get(['A', 'p1', '']))?.broughtQty).toBe(3);
+  });
+});

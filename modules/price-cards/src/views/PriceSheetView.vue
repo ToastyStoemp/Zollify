@@ -23,8 +23,14 @@ const currency = computed(() => sdk().data.events.active()?.currency ?? sdk().ac
 function inStock(units: { pid: string; vid: string }[]): boolean {
   const ev = sdk().data.events.active();
   if (!ev) return true;
-  const avail = sdk().data.inventory.availability(ev.id);
-  return units.some((u) => (avail.find((a) => a.productId === u.pid && a.variantId === (u.vid || ''))?.available ?? 0) > 0);
+  const inv = sdk().data.inventory;
+  const avail = inv.availability(ev.id);
+  return units.some((u) => {
+    const a = avail.find((r) => r.productId === u.pid && r.variantId === (u.vid || ''));
+    // Never counted and not claimed: its stock is unknown, so it stays on the sheet.
+    if (a && a.source !== 'claim' && !inv.counted(u.pid, u.vid || null)) return true;
+    return (a?.available ?? 0) > 0;
+  });
 }
 
 onMounted(() => {

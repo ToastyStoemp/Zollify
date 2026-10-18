@@ -48,7 +48,8 @@ const rows = computed<Row[]>(() =>
 
 // ── Stock ───────────────────────────────────────────────────────────────────
 const inv = () => sdk().data.inventory;
-const onHand = (r: Row): number => inv().onHand(r.product.id, r.variantId || null);
+/** Here now: the last count less what sold since (typing a number is a fresh count). */
+const onHand = (r: Row): number => inv().inStock(r.product.id, r.variantId || null);
 /** This store's claim on an item, or null when the store sells it from the shared pool. */
 const claims = computed(() => {
   const map = new Map<string, number | null>();

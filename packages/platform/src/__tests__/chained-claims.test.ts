@@ -158,3 +158,28 @@ describe('the Stock page row', () => {
     expect(row()).toMatchObject({ onHand: 93, claimed: 0, free: 93 });
   });
 });
+
+describe('"held by other events"', () => {
+  it('is what the other events still hold, not their claims as written', async () => {
+    // A claimed 30 and sold 20: from B's side, 10 are held elsewhere, not 30.
+    await sell('A', 20);
+    expect(avail('B').reservedElsewhere).toBe(10);
+    // A hands its 10 leftovers to B: nothing is held by another event for A or B.
+    await inv.claimUnsoldFrom('A', 'B');
+    expect(avail('B').reservedElsewhere).toBe(0);
+    expect(avail('A').reservedElsewhere).toBe(10);
+  });
+});
+
+describe('a product that got variants after it was counted', () => {
+  it('keeps its old count on the Stock page instead of dropping it from every total', async () => {
+    await catalog.upsertProduct({ id: P, title: 'Print', price: 1, forSale: true, unlisted: false, variants: [{ id: 'a4', name: 'A4' }, { id: 'a5', name: 'A5' }], sortOrder: 0, updatedAt: Date.now() });
+    const rows = inv.inventoryRows().filter((r) => r.productId === P);
+    expect(rows.map((r) => r.variantId)).toEqual(['a4', 'a5', '']);
+    expect(rows.find((r) => r.variantId === '')).toMatchObject({ onHand: 100, label: expect.stringContaining('not a variant') });
+    // Recounted to 0 and no claim left on it: the row goes.
+    await setStatus('A', 'closed');
+    await inv.setOnHand(P, '', 0);
+    expect(inv.inventoryRows().filter((r) => r.productId === P).map((r) => r.variantId)).toEqual(['a4', 'a5']);
+  });
+});

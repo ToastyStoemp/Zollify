@@ -21,7 +21,7 @@ import { loadSalesEvents } from './sales-events';
 import { loadTransactions } from './transactions';
 import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
-import { loadInventory } from './inventory';
+import { claimClearedAt, loadInventory, rememberClaimCleared } from './inventory';
 import { loadSellLockSettings } from './sell-lock';
 import { base64ToBlob } from './images';
 
@@ -49,6 +49,51 @@ export const syncProgress = ref<{ done: number; total: number } | null>(null);
 const BACKLOG_OPS = 300;
 export const lastSyncAt = ref(0);
 export const lastSyncError = ref<string | null>(null);
+
+/** A sale made on this device that the server refused (PushResponse.refused). */
+export interface RefusedSale {
+  txId: string;
+  eventId: string | null;
+  total: number;
+  currency: string;
+  at: number;
+}
+const REFUSED_KEY = 'sync.refusedSales';
+/**
+ * Sales the server would not take - a helper selling at an event they no
+ * longer have. They stay in this device's history, but nowhere else, so the
+ * device says so until someone deals with them (Home).
+ */
+export const refusedSales = ref<RefusedSale[]>([]);
+
+export async function loadRefusedSales(): Promise<void> {
+  if (!getAccount()) return;
+  const row = await openCoreDb(getAccount()!.accountId).settings.get(REFUSED_KEY);
+  refusedSales.value = Array.isArray(row?.value) ? (row.value as RefusedSale[]) : [];
+}
+
+async function recordRefused(batch: OutboxOp[], refused: string[]): Promise<void> {
+  const ids = new Set(refused);
+  const sales = batch
+    .filter((op) => op.type === 'tx.create' && ids.has(op.opId))
+    .map((op) => {
+      const tx = op.payload as Pick<Transaction, 'id' | 'eventId' | 'total' | 'currency' | 'timestamp'>;
+      return { txId: tx.id, eventId: tx.eventId ?? null, total: tx.total, currency: tx.currency, at: tx.timestamp ?? op.ts };
+    });
+  if (!sales.length) return;
+  await loadRefusedSales();
+  const known = new Set(refusedSales.value.map((r) => r.txId));
+  refusedSales.value = [...refusedSales.value, ...sales.filter((r) => !known.has(r.txId))];
+  await openCoreDb(getAccount()!.accountId).settings.put({ key: REFUSED_KEY, value: toPlainList(refusedSales.value) });
+}
+
+/** Dealt with (exported, re-entered by an admin): stop warning. The sales stay in this device's history. */
+export async function dismissRefusedSales(): Promise<void> {
+  refusedSales.value = [];
+  if (getAccount()) await openCoreDb(getAccount()!.accountId).settings.put({ key: REFUSED_KEY, value: [] });
+}
+
+const toPlainList = (rows: RefusedSale[]): RefusedSale[] => rows.map((r) => ({ ...r }));
 
 let inFlight: Promise<SyncResult> | null = null;
 
@@ -128,9 +173,14 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'product.delete': {
-      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
+      // Last change wins, as on the server (reduceProducts): a delete older
+      // than an edit that already arrived is ignored, whatever order the two
+      // reach this device in. Older payloads were { productId, updatedAt }.
+      const d = op.payload as { id?: string; deletedAt?: number; productId?: string; updatedAt?: number };
+      const id = d.id ?? d.productId ?? '';
+      const deletedAt = d.deletedAt ?? d.updatedAt ?? 0;
       const existing = await db.products.get(id);
-      if (existing) {
+      if (existing && deletedAt >= (existing.updatedAt ?? 0)) {
         await db.products.put({ ...existing, deletedAt, updatedAt: deletedAt });
         return 1;
       }
@@ -180,9 +230,12 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       return 0;
     }
     case 'discount.delete': {
-      const { id, deletedAt } = op.payload as { id: string; deletedAt: number };
-      const existing = await db.discounts.get(id);
-      if (existing) {
+      // Last change wins, as on the server (reduceDiscounts). Older payloads were { ruleId, updatedAt }.
+      const d = op.payload as { id?: string; deletedAt?: number; ruleId?: string; updatedAt?: number };
+      const id = d.id ?? d.ruleId ?? '';
+      const deletedAt = d.deletedAt ?? d.updatedAt ?? 0;
+      const existing = (await db.discounts.get(id)) as (DiscountRule & { updatedAt?: number }) | undefined;
+      if (existing && deletedAt >= (existing.updatedAt ?? 0)) {
         await db.discounts.put({ ...existing, deletedAt, updatedAt: deletedAt } as never);
         return 1;
       }
@@ -207,12 +260,15 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       ];
       const existing = await db.eventStock.get(key);
       if (existing && (incoming.updatedAt ?? 0) < (existing.updatedAt ?? 0)) return 0;
+      // Cleared after this was set: an older claim arriving late stays cleared.
+      if (!existing && (incoming.updatedAt ?? 0) < (await claimClearedAt(db, key))) return 0;
 
       // A negative quantity is the tombstone for a dropped claim: the protocol
       // has no stock.delete, and the event must fall back to the shared pool
       // rather than keep a stale reservation.
       if (incoming.broughtQty < 0) {
         await db.eventStock.delete(key);
+        await rememberClaimCleared(db, key, incoming.updatedAt ?? 0);
         return 1;
       }
 
@@ -308,6 +364,9 @@ async function push(): Promise<number> {
       throw err;
     }
 
+    // A refused op is marked synced too - retrying would only be refused
+    // again - but a refused sale is kept on record so the device can say so.
+    if (res.refused?.length) await recordRefused(batch, res.refused);
     // Marked synced whether accepted or duplicate: a duplicate means the server
     // already has it, which is exactly what we were trying to achieve.
     await markSynced(batch.map((op) => op.seq!).filter((seq) => typeof seq === 'number'));

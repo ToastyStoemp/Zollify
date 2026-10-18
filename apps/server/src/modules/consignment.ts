@@ -4,6 +4,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   ConsignorInputSchema,
+  nextCommissionHistory,
   PayoutInputSchema,
   cardFeesOf,
   feesDue,
@@ -355,12 +356,16 @@ function registerStoreSide(app: FastifyInstance, ctx: ModuleContext): void {
     const body = ConsignorInputSchema.safeParse(req.body);
     if (!id.success || !body.success) return reply.code(400).send({ error: 'invalid_request', message: 'That artist is not valid.' });
     const before = consignorRow(db, who.accountId, id.data);
-    const renamed = !!before && parseDoc(before.doc).name !== body.data.name;
+    const prior = before ? parseDoc(before.doc) : null;
+    const renamed = !!prior && prior.name !== body.data.name;
     const now = Date.now();
+    // The history is the server's: what a client sends is ignored, and the old
+    // rates are kept when they change, so past sales keep the rate they had.
+    const doc = { ...body.data, commissionHistory: prior ? nextCommissionHistory(prior, body.data, now) : [] };
     db.prepare(
       `INSERT INTO consignors (accountId, id, doc, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(accountId, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
-    ).run(who.accountId, id.data, JSON.stringify(body.data), now, now);
+    ).run(who.accountId, id.data, JSON.stringify(doc), now, now);
     const saved = consignorRow(db, who.accountId, id.data)!;
     // Shared items carry the artist's name; a rename follows them.
     if (renamed) syncShared(ctx, who.accountId, saved);
@@ -635,7 +640,7 @@ function artistView(
       const own = lines.filter((l) => l.productId === p.id && (l.variantId ?? '') === r.variantId);
       const count = inventory.get(`${p.id}:${r.variantId}`);
       // Same rule as the till: a count already includes what sold before it.
-      const soldSince = count ? own.filter((l) => l.at > count.updatedAt).reduce((s, l) => s + l.qty, 0) : 0;
+      const soldSince = count ? own.filter((l) => l.at >= count.updatedAt).reduce((s, l) => s + l.qty, 0) : 0;
       items.push({
         productId: p.id,
         variantId: r.variantId,

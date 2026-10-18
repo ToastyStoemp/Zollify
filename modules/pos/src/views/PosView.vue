@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
+import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -27,6 +27,9 @@ import {
   isConverting,
   itemCount,
   loadCardFx,
+  loadMarketFx,
+  marketFx,
+  setCartEvent,
   setCustomDiscount,
   setQty,
   subtotal,
@@ -73,9 +76,21 @@ const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`
 const sellLock = computed(() => (activeEvent.value ? sdk().data.events.sellLock(activeEvent.value.id) : null));
 const sellBlocked = computed(() => !!sellLock.value && !sellLock.value.forced);
 const lockedBy = computed(() => sellLock.value?.by.map((e) => e.name).join(', ') ?? '');
+/** The one event that took the leftovers, when this user may sell there (a helper may not see it). */
+const takerToSell = computed(() => {
+  const by = sellLock.value?.by ?? [];
+  if (by.length !== 1) return null;
+  return sdk().data.events.list().some((e) => e.id === by[0]!.id) ? by[0]! : null;
+});
+async function switchTo(id: string): Promise<void> {
+  try {
+    await sdk().data.events.setActive(id);
+  } catch (err) {
+    toast(err instanceof Error ? err.message : String(err), 'bad');
+  }
+}
 async function sellAtTaker(): Promise<void> {
-  const e = sellLock.value?.by[0];
-  if (e) await sdk().data.events.setActive(e.id);
+  if (takerToSell.value) await switchTo(takerToSell.value.id);
 }
 async function forceSell(on: boolean): Promise<void> {
   const e = activeEvent.value;
@@ -86,9 +101,23 @@ async function forceSell(on: boolean): Promise<void> {
     toast(err instanceof Error ? err.message : String(err), 'bad');
   }
 }
+/**
+ * The cart follows the till's event. A payment already under way finishes on
+ * the event it was rung up at; the switch lands as soon as it is done.
+ */
+let eventPending = false;
+function followTillEvent(): void {
+  if (payment.phase !== 'idle' || cart.busy) {
+    eventPending = true;
+    return;
+  }
+  eventPending = false;
+  setCartEvent(activeEvent.value, sdk().account()?.profile.defaultCurrency ?? 'CHF');
+  void loadCardFx();
+}
 async function sellAtToday(): Promise<void> {
   const e = tillCheck.value.runningToday;
-  if (e) await sdk().data.events.setActive(e.id);
+  if (e) await switchTo(e.id);
 }
 const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
@@ -125,17 +154,7 @@ onMounted(async () => {
   void loadTestMode();
   customMethods.value = (await sdk().config.get<string[]>('customMethods')) ?? [];
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
-  const event = activeEvent.value;
-  cart.eventId = event?.id ?? null;
-  const base = event?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'CHF';
-  cart.baseCurrency = base;
-  const converting = Boolean(event?.localCurrency && event.exchangeRate);
-  cart.currency = converting ? event!.localCurrency! : base;
-  cart.exchangeRate = converting ? (event!.exchangeRate ?? null) : null;
-  cart.roundingIncrement = event?.roundingIncrement ?? 0;
-  cart.priceOverrides = { ...(event?.localPriceOverrides ?? {}) };
-  cart.tierOverrides = { ...(event?.localTierOverrides ?? {}) };
-  void loadCardFx();
+  followTillEvent();
   void refreshTerminalStatus();
   statusTimer = setInterval(() => void refreshTerminalStatus(), 5000);
 });
@@ -164,7 +183,15 @@ const cardRateLabel = computed(() => {
 const availability = computed(() => {
   const event = activeEvent.value;
   if (!event) return new Map<string, number>();
-  return new Map(sdk().data.inventory.availability(event.id).map((r) => [`${r.productId}:${r.variantId}`, r.available]));
+  const inv = sdk().data.inventory;
+  // An item never counted and not claimed has no known stock: no figure rather
+  // than "3 over stock" for every sale of it.
+  return new Map(
+    inv
+      .availability(event.id)
+      .filter((r) => r.source === 'claim' || inv.counted(r.productId, r.variantId))
+      .map((r) => [`${r.productId}:${r.variantId}`, r.available]),
+  );
 });
 function remaining(pid: string, vid: string | null): number | null {
   if (!activeEvent.value) return null;
@@ -674,7 +701,7 @@ const today = computed(() => {
   for (const tx of sdk().data.transactions.recent()) {
     if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
     count++;
-    revenue += tx.baseTotal ?? tx.total;
+    revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
   }
   return { count, revenue };
 });
@@ -695,6 +722,15 @@ function receipt(): void {
 // ── Payment ─────────────────────────────────────────────────────────────────
 type Phase = 'idle' | 'confirm' | 'terminal' | 'failed' | 'needsLogin';
 const payment = reactive({ phase: 'idle' as Phase, method: 'cash' as string, total: 0, cashReceived: '', splitCash: '', splitCard: '', error: '' });
+watch(activeEvent, (next, prev) => {
+  if (next === prev) return;
+  const moved = (next?.id ?? null) !== cart.eventId;
+  followTillEvent();
+  if (moved && !eventPending && next && cart.lines.length) toast(`Now selling at ${next.name} - the cart is priced for it.`);
+});
+watch(() => payment.phase === 'idle' && !cart.busy, (free) => {
+  if (free && eventPending) followTillEvent();
+});
 
 const cashShortcuts = computed(() => (payment.method === 'cash' ? cashShortcutAmounts(payment.total, currency.value) : []));
 const splitCashShortcuts = computed(() => splitCashPortionAmounts(Math.max(0, payment.total - (Number(payment.splitCard) || 0)), currency.value));
@@ -727,6 +763,8 @@ function startPayment(method: string): void {
   logSent.value = false;
   // Keep the card rate current through a long day; a stale one still works offline.
   if (method === 'card' && cardInBase.value && Date.now() - cardFx.at > 3_600_000) void loadCardFx();
+  // The day's rate recorded with the sale: kept fresh through a long day too.
+  if (isConverting.value && Date.now() - marketFx.at > 3_600_000) void loadMarketFx();
   if (method === 'card' && hasTerminal.value) {
     void beginCardPayment();
     return;
@@ -1006,7 +1044,8 @@ function lockTill(): void {
       <div v-if="sellLock && !sellLock.forced" class="stale locked" role="alert">
         <Icon name="lock" :size="16" />
         <span><strong>Sell 🔒 {{ activeEvent?.name }}.</strong> {{ lockedBy }} took over what was left here, so sales here would come out of its stock.</span>
-        <button v-if="sellLock.by.length === 1" type="button" class="primary" @click="sellAtTaker">Sell at {{ sellLock.by[0]!.name }}</button>
+        <button v-if="takerToSell" type="button" class="primary" @click="sellAtTaker">Sell at {{ takerToSell.name }}</button>
+        <span v-else-if="sellLock.by.length === 1" class="hint">Ask an admin for access to {{ sellLock.by[0]!.name }}.</span>
         <button v-if="sellLock.canForce" type="button" class="danger" @click="forceSell(true)">Force sales</button>
       </div>
       <div v-else-if="sellLock?.forced" class="stale" role="status">

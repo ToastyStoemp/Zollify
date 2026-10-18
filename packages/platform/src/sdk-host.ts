@@ -34,7 +34,7 @@ import { getTransaction, importTransactions, recentTransactions, revertTransacti
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
-import { fetchLatestRate } from './core/exchange-rate';
+import { fetchHistoricalRates, fetchLatestRate } from './core/exchange-rate';
 import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import { canForceSell, forceSell, sellLockFor } from './core/sell-lock';
@@ -43,6 +43,8 @@ import {
   clearClaim,
   onHandFor,
   remainingFor,
+  inStockFor,
+  countedAt,
   setClaim,
   setOnHand,
 } from './core/inventory';
@@ -162,6 +164,8 @@ const coreData: import('@zollify/sdk').DataApi = {
       )?.available ?? 0,
     onHand: (productId, variantId) => onHandFor(productId, variantId ?? ''),
     remaining: (productId, variantId) => remainingFor(productId, variantId ?? ''),
+    inStock: (productId, variantId) => inStockFor(productId, variantId ?? ''),
+    counted: (productId, variantId) => countedAt(productId, variantId ?? '') > 0,
     setOnHand: (productId, variantId, qty) => setOnHand(productId, variantId, qty),
     claim: (eventId, productId, variantId, qty) => setClaim(eventId, productId, variantId, qty),
     clearClaim: (eventId, productId, variantId) => clearClaim(eventId, productId, variantId),
@@ -399,7 +403,10 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       },
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
-    fx: { latest: (from, to) => fetchLatestRate(from, to) },
+    fx: {
+      latest: (from, to) => fetchLatestRate(from, to),
+      on: async (from, to, dates) => Object.fromEntries(await fetchHistoricalRates(from, to, dates)),
+    },
 
     config: {
       async get<T>(key: string): Promise<T | undefined> {

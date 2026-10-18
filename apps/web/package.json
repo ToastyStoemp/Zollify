@@ -33,6 +33,7 @@
     "@zollify/shopify-sync": "*",
     "@zollify/sourcing": "*",
     "@zollify/tax": "*",
+    "@zollify/tax-deadlines": "*",
     "@zollify/ui": "*",
     "dexie": "^4.2.0",
     "jsbarcode": "^3.12.3",

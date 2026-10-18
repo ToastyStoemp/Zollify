@@ -301,7 +301,30 @@ export function autoMergeAndMatch(clusters: Cluster[], events: MatchedEvent[]): 
 
 /** Bookable once it is online, matched, or simply named - dates always exist. */
 export function ready(c: Cluster): boolean {
-  return Boolean(c.isOnlineCluster || c.matchedEvent || c.customName.trim());
+  return Boolean((c.isOnlineCluster || c.matchedEvent || c.customName.trim()) && !mixedCurrencies(c));
+}
+
+/** The one currency a cluster's card money is in, or null when its transactions mix currencies. */
+export function clusterCurrency(c: Pick<Cluster, 'txns'>): string | null {
+  const set = new Set(c.txns.map((t) => t.currency).filter(Boolean));
+  return set.size <= 1 ? ([...set][0] ?? null) : null;
+}
+
+/** Card money in more than one currency: a booking would add them as if they were one. */
+export function mixedCurrencies(c: Pick<Cluster, 'txns'>): boolean {
+  return new Set(c.txns.map((t) => t.currency).filter(Boolean)).size > 1;
+}
+
+/**
+ * The till's cash for a cluster, in the cluster's card currency - never a
+ * figure in another currency added as if it were the same. Null when the till
+ * took no cash in that currency's terms (cash in SEK, cards settled in EUR).
+ */
+export function cashInCardCurrency(c: Pick<Cluster, 'txns'>, d: { cash: number; currency: string; taken?: Record<string, number> }): number | null {
+  const cur = clusterCurrency(c);
+  if (!cur || d.currency === cur) return d.cash;
+  const taken = d.taken?.[cur];
+  return typeof taken === 'number' ? taken : null;
 }
 
 // ── Lexware templates ───────────────────────────────────────────────────────

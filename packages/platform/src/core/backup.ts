@@ -10,7 +10,8 @@ import { loadSalesEvents, resetSalesEventCache } from './sales-events';
 import { loadTransactions, resetTransactionCache } from './transactions';
 import { loadInventory, resetInventoryCache } from './inventory';
 import { queueOp } from './outbox';
-import { base64ToBlob, blobToBase64, importProductImage } from './images';
+import { Zip, ZipDeflate, ZipPassThrough, strFromU8, strToU8, unzipSync } from 'fflate';
+import { base64ToBlob, importProductImage } from './images';
 
 /**
  * Local backup and restore.
@@ -22,18 +23,31 @@ import { base64ToBlob, blobToBase64, importProductImage } from './images';
  * convenience one.
  */
 
-export const BACKUP_VERSION = 1;
+/**
+ * 2: a .zip - the data as `zollify-backup.json`, each photo as its own file
+ * under `images/`. 1: one JSON file with the photos base64-encoded in it,
+ * still read on restore; it was what made a large export run out of memory.
+ */
+export const BACKUP_VERSION = 2;
+const READABLE_VERSIONS = [1, 2];
 
-/** An image, blobs base64-encoded so the whole backup is one JSON file. */
+/** A photo in a backup: a file beside the data (version 2), or base64 inside it (version 1). */
 export interface BackupImage {
   id: string;
   productId: string;
   updatedAt: number;
-  fullB64: string;
   fullType: string;
-  thumbB64: string;
   thumbType: string;
+  /** Path of the full-size photo in the zip. */
+  file?: string;
+  /** Path of the thumbnail in the zip. */
+  thumbFile?: string;
+  fullB64?: string;
+  thumbB64?: string;
 }
+
+/** The data file inside a backup zip. */
+export const BACKUP_DATA_FILE = 'zollify-backup.json';
 
 export interface ZollifyBackup {
   format: 'zollify-backup';
@@ -100,7 +114,7 @@ function requireAccount() {
  * (`file.products ?? []` etc.), so an old, pre-options backup restores the
  * same way it always did.
  */
-export async function createBackup(options?: BackupOptions): Promise<ZollifyBackup> {
+async function collectBackup(options?: BackupOptions) {
   const include = { ...ALL_INCLUDED, ...options };
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
@@ -134,19 +148,7 @@ export async function createBackup(options?: BackupOptions): Promise<ZollifyBack
   }
   imageRecs = imageRecs.filter((rec) => referenced.has(rec.id));
 
-  const images: BackupImage[] = await Promise.all(
-    imageRecs.map(async (rec) => ({
-      id: rec.id,
-      productId: rec.productId,
-      updatedAt: rec.updatedAt,
-      fullB64: await blobToBase64(rec.full),
-      fullType: rec.full.type,
-      thumbB64: await blobToBase64(rec.thumb),
-      thumbType: rec.thumb.type,
-    })),
-  );
-
-  return {
+  const backup: ZollifyBackup = {
     format: 'zollify-backup',
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -157,8 +159,106 @@ export async function createBackup(options?: BackupOptions): Promise<ZollifyBack
     inventory,
     eventStock,
     transactions,
-    images,
+    images: [],
   };
+  return { backup, imageRecs };
+}
+
+/** The data alone, without the photos (those only travel in the zip - createBackupZip). */
+export async function createBackup(options?: BackupOptions): Promise<ZollifyBackup> {
+  return (await collectBackup(options)).backup;
+}
+
+const EXT: Record<string, string> = { 'image/webp': 'webp', 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif' };
+const slug = (text: string): string =>
+  text
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase()
+    .slice(0, 60) || 'photo';
+
+/**
+ * The export: a .zip with the data as JSON and every photo as a file of its
+ * own, named after its product ("fox-print-a4-1a2b3c4d.webp") so the folder
+ * makes sense opened by hand. Built in pieces - one photo in memory at a
+ * time, stored as it is (photos do not compress) - and handed out as a Blob,
+ * never as one giant string: base64 photos inside one JSON file is what used
+ * to make a full export crash the app.
+ */
+export async function createBackupZip(options?: BackupOptions): Promise<{ blob: Blob; backup: ZollifyBackup; filename: string }> {
+  const { backup, imageRecs } = await collectBackup(options);
+
+  // Who each photo belongs to, for a readable file name.
+  const labels = new Map<string, string>();
+  for (const p of backup.products) {
+    if (p.deletedAt) continue;
+    if (p.imageId) labels.set(p.imageId, p.title);
+    for (const v of p.variants ?? []) if (v.imageId && !labels.has(v.imageId)) labels.set(v.imageId, `${p.title} ${v.name}`);
+  }
+
+  const parts: BlobPart[] = [];
+  let failure: Error | null = null;
+  const zip = new Zip((err, chunk) => {
+    if (err) failure = err;
+    else parts.push(chunk as BlobPart);
+  });
+  const store = async (path: string, blob: Blob): Promise<void> => {
+    const entry = new ZipPassThrough(path);
+    zip.add(entry);
+    entry.push(new Uint8Array(await blob.arrayBuffer()), true);
+  };
+
+  const used = new Set<string>();
+  for (const rec of imageRecs) {
+    let name = `${slug(labels.get(rec.id) ?? 'photo')}-${rec.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 8)}`;
+    while (used.has(name)) name += '-1';
+    used.add(name);
+    const file = `images/${name}.${EXT[rec.full.type] ?? 'bin'}`;
+    const thumbFile = `images/thumbs/${name}.${EXT[rec.thumb.type] ?? 'bin'}`;
+    await store(file, rec.full);
+    await store(thumbFile, rec.thumb);
+    backup.images!.push({ id: rec.id, productId: rec.productId, updatedAt: rec.updatedAt, fullType: rec.full.type, thumbType: rec.thumb.type, file, thumbFile });
+  }
+
+  const data = new ZipDeflate(BACKUP_DATA_FILE, { level: 6 });
+  zip.add(data);
+  data.push(strToU8(JSON.stringify(backup, null, 2)), true);
+  zip.end();
+  if (failure) throw failure;
+  return { blob: new Blob(parts, { type: 'application/zip' }), backup, filename: backupFilename(backup) };
+}
+
+/** A backup read from a file: the data, and the zip's other files (the photos) when it was a zip. */
+export interface LoadedBackup {
+  raw: unknown;
+  files?: Record<string, Uint8Array>;
+}
+
+/** Reads a picked backup file: a .zip (version 2) or a .json (version 1). */
+export async function readBackupFile(file: Blob): Promise<LoadedBackup> {
+  const head = new Uint8Array(await file.slice(0, 2).arrayBuffer());
+  if (head[0] === 0x50 && head[1] === 0x4b) {
+    let files: Record<string, Uint8Array>;
+    try {
+      files = unzipSync(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      throw new RestoreError('That zip could not be opened.');
+    }
+    const data = files[BACKUP_DATA_FILE];
+    if (!data) throw new RestoreError('That zip is not a Zollify backup.');
+    try {
+      return { raw: JSON.parse(strFromU8(data)) as unknown, files };
+    } catch {
+      throw new RestoreError('The data in that backup could not be read.');
+    }
+  }
+  try {
+    return { raw: JSON.parse(await file.text()) as unknown };
+  } catch {
+    throw new RestoreError("That file isn't a Zollify backup.");
+  }
 }
 
 export interface BackupSummary {
@@ -188,9 +288,9 @@ export function inspectBackup(raw: unknown): BackupSummary {
   if (file.format !== 'zollify-backup') {
     throw new RestoreError('That file is not a Zollify backup.');
   }
-  if (file.version !== BACKUP_VERSION) {
+  if (!READABLE_VERSIONS.includes(file.version as number)) {
     throw new RestoreError(
-      `This app reads backup version ${BACKUP_VERSION}; the file is version ${String(file.version)}.`,
+      `This app reads backup versions ${READABLE_VERSIONS.join(' and ')}; the file is version ${String(file.version)}. Update the app first.`,
     );
   }
 
@@ -226,7 +326,7 @@ export interface RestoreResult {
  * export would turn a partial loss into a total one. Ops are recorded so the
  * restored rows reach the other devices too.
  */
-export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
+export async function restoreBackup(raw: unknown, files: Record<string, Uint8Array> = {}): Promise<RestoreResult> {
   const summary = inspectBackup(raw);
   const file = raw as ZollifyBackup;
   const account = requireAccount();
@@ -259,14 +359,20 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
   // Images go through the same path a fresh photo does, one at a time - each
   // one queues its own thumbnail op, and there is no bulk equivalent worth
   // building for something that runs once per restore.
+  let restoredImages = 0;
   for (const image of file.images ?? []) {
-    await importProductImage({
-      id: image.id,
-      productId: image.productId,
-      updatedAt: image.updatedAt,
-      full: base64ToBlob(image.fullB64, image.fullType),
-      thumb: base64ToBlob(image.thumbB64, image.thumbType),
-    });
+    const blobOf = (path: string | undefined, b64: string | undefined, type: string): Blob | null => {
+      if (path) {
+        const bytes = files[path];
+        return bytes ? new Blob([bytes as BlobPart], { type }) : null;
+      }
+      return b64 ? base64ToBlob(b64, type) : null;
+    };
+    const full = blobOf(image.file, image.fullB64, image.fullType);
+    if (!full) continue; // a photo missing from the zip: the rest still restores
+    const thumb = blobOf(image.thumbFile, image.thumbB64, image.thumbType) ?? full;
+    await importProductImage({ id: image.id, productId: image.productId, updatedAt: image.updatedAt, full, thumb });
+    restoredImages++;
   }
 
   // Rebuilt rather than patched - a restore touches everything, and reloading
@@ -283,7 +389,7 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
     inventory: summary.inventory,
     eventStock: summary.eventStock,
     transactions: summary.transactions,
-    images: summary.images,
+    images: restoredImages,
   };
 }
 
@@ -291,7 +397,7 @@ export async function restoreBackup(raw: unknown): Promise<RestoreResult> {
 export function backupFilename(backup: ZollifyBackup): string {
   const stamp = backup.exportedAt.replace(/[:.]/g, '-').replace('T', '_').slice(0, 19);
   const account = backup.accountName.replace(/[^A-Za-z0-9-]+/g, '-').toLowerCase();
-  return `zollify-${account}-${stamp}.json`;
+  return `zollify-${account}-${stamp}.zip`;
 }
 
 /**

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { fmtDayRange, localIsoDay } from '@zollify/shared';
+import { computed, onUnmounted, ref } from 'vue';
+import type { SalesEvent } from '@zollify/shared';
+import { eventHasEnded, fmtDayRange, localIsoDay } from '@zollify/shared';
 import { sdk } from '../runtime';
 
 /**
@@ -10,17 +11,23 @@ import { sdk } from '../runtime';
 const events = computed(() => sdk().data.events.list());
 const activeId = computed(() => sdk().data.events.active()?.id ?? null);
 
-/** Same rule as inventory reservations: closed, or its last day has passed. */
-const today = localIsoDay();
-const isOver = (e: { status: string; dateStart?: string; dateEnd?: string }): boolean =>
-  e.status === 'closed' || Boolean((e.dateEnd || e.dateStart || '') && (e.dateEnd || e.dateStart || '') < today);
+/**
+ * Same rule as inventory reservations (eventHasEnded): closed, or its last day
+ * has passed - judged on today's date each time, so a screen left open past
+ * midnight moves yesterday's event to Past.
+ */
+const today = ref(localIsoDay());
+const tick = setInterval(() => (today.value = localIsoDay()), 60_000);
+onUnmounted(() => clearInterval(tick));
+const isOver = (e: SalesEvent): boolean => eventHasEnded(e, today.value);
 const dateKey = (e: { dateStart?: string; dateEnd?: string }): string => e.dateStart || e.dateEnd || '';
 const upcoming = computed(() => events.value.filter((e) => !isOver(e)).sort((a, b) => dateKey(a).localeCompare(dateKey(b))));
 const past = computed(() => events.value.filter((e) => isOver(e)).sort((a, b) => dateKey(b).localeCompare(dateKey(a))));
 
 function when(event: { dateStart?: string; dateEnd?: string }): string {
-  if (!event.dateStart) return 'No dates yet';
-  return fmtDayRange(event.dateStart, event.dateEnd);
+  const start = event.dateStart || event.dateEnd;
+  if (!start) return 'No dates yet';
+  return fmtDayRange(start, event.dateEnd);
 }
 </script>
 

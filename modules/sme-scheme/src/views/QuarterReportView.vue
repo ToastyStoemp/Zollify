@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { COUNTRY_BY_CODE, countryCodeOf, fmtRate, receiptDateTime } from '@zollify/shared';
+import { COUNTRY_BY_CODE, buildSmeYear, countryCodeOf, fmtRate, receiptDateTime, thresholdRatePairs, thresholdWarnings, type ThresholdWarning } from '@zollify/shared';
 import {
   buildSmeReport,
   previousQuarter,
@@ -77,6 +77,34 @@ const report = computed(() =>
     currency: sdk().account()?.profile.defaultCurrency,
   }),
 );
+/**
+ * Threshold warnings for this calendar year and last: the national ones for
+ * each exempt country, and the EU-wide EUR 100,000. A threshold in another
+ * currency waits for that rate; without one the country is left out.
+ */
+const yearNow = new Date().getFullYear();
+const yearReports = computed(() => {
+  const input = { transactions: transactions.value, eventOf: (id: string) => sdk().data.events.get(id), profile: profile.value, currency: profile.value?.defaultCurrency };
+  return { thisYear: buildSmeYear(yearNow, input), lastYear: buildSmeYear(yearNow - 1, input) };
+});
+const rates = ref(new Map<string, number>());
+watch(
+  () => thresholdRatePairs([yearReports.value.thisYear, yearReports.value.lastYear], profile.value).map((p) => p.join('>')).join(','),
+  async (keys) => {
+    for (const key of keys ? keys.split(',') : []) {
+      if (rates.value.has(key)) continue;
+      const [from, to] = key.split('>') as [string, string];
+      const r = await sdk().fx.latest(from, to).catch(() => null);
+      if (r) rates.value = new Map(rates.value).set(key, r.rate);
+    }
+  },
+  { immediate: true },
+);
+const warnings = computed<ThresholdWarning[]>(() =>
+  thresholdWarnings({ ...yearReports.value, profile: profile.value, home: home.value, rate: (f, t) => rates.value.get(`${f}>${t}`) ?? null }),
+);
+const tone = (w: ThresholdWarning): string => (w.level === 'near' || w.level === 'over-year-end' ? 'near' : 'over');
+
 const eu = computed(() => report.value.rows.filter((r) => r.eu));
 const other = computed(() => report.value.rows.filter((r) => !r.eu));
 const open = ref<Set<string>>(new Set());
@@ -126,6 +154,18 @@ async function exportCsv(): Promise<void> {
     <p v-if="!applies" class="warn" role="note">
       You have no EX number, so there is nothing to file - this report matters once you are exempt in another EU country.
     </p>
+
+    <section v-if="warnings.length" class="thresholds" aria-label="Thresholds">
+      <article v-for="w in warnings" :key="`${w.country}-${w.level}`" :class="['tw', tone(w)]" :role="tone(w) === 'over' ? 'alert' : 'note'">
+        <strong>{{ w.title }}</strong>
+        <div v-if="w.limit" class="bar" aria-hidden="true"><span :style="{ width: `${Math.min(100, w.share * 100)}%` }"></span></div>
+        <p>{{ w.text }}</p>
+        <p class="src">
+          <a :href="w.source" target="_blank" rel="noopener noreferrer">{{ w.country === 'EU' ? 'EU SME scheme rules' : 'Official rules for this country' }}</a>
+          <template v-if="w.unverified"> · threshold from published 2026 figures; set your own under Settings → VAT</template>
+        </p>
+      </article>
+    </section>
 
     <template v-for="t in report.totals" :key="t.currency">
       <h2 v-if="report.totals.length > 1" class="cur">{{ t.currency }}</h2>
@@ -203,6 +243,17 @@ tr.detail ul { margin: 0; padding-left: 1.1rem; font-size: .85rem; display: flex
 .tag { font-size: .72rem; padding: .1rem .45rem; border-radius: 4px; background: var(--zfy-surface-2, #e9edf1); white-space: nowrap; }
 .tag.exempt { background: var(--zfy-accent-soft, #dff1ec); color: var(--zfy-accent-ink, #0a5a4a); }
 .tag.mixed { color: var(--zfy-warning-ink, #8a5a00); }
+.thresholds { display: flex; flex-direction: column; gap: .5rem; }
+.tw { display: flex; flex-direction: column; gap: .35rem; padding: .7rem .85rem; border-radius: 12px; border: 1px solid var(--zfy-warning, #c08a2e); background: var(--zfy-surface, #fff); }
+.tw.over { border-color: var(--zfy-danger, #c6512f); }
+.tw strong { font-size: .92rem; color: var(--zfy-warning-ink, #8a5a00); }
+.tw.over strong { color: var(--zfy-danger, #c6512f); }
+.tw p { margin: 0; font-size: .85rem; }
+.tw .src { font-size: .78rem; color: var(--zfy-muted, #5a6472); }
+.tw .src a { color: var(--zfy-accent-ink, #0a5a4a); }
+.bar { height: 6px; border-radius: 999px; background: var(--zfy-line, #d6dde4); overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--zfy-warning, #c08a2e); }
+.over .bar span { background: var(--zfy-danger, #c6512f); }
 @media (max-width: 720px) {
   /* The selects share a row; Export CSV takes its own underneath, full width. */
   .page > header .tools { flex-basis: 100%; order: 1; }

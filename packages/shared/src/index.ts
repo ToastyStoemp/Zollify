@@ -43,3 +43,5 @@ export * from './event-auto';
 export * from './sell-lock';
 export * from './booked-base';
 export * from './tax-deadlines';
+export * from './sme-report';
+export * from './sme-thresholds';

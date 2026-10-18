@@ -121,9 +121,15 @@ describe('account profile', () => {
     expect((await put({ homeNote: 'Kleinunternehmer' })).statusCode).toBe(200);
 
     const profile = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
-    expect(profile.vat).toEqual({ scheme: '', vatNumbers: [], exemptCountries: ['DE', 'NL'], exNumber: 'DE123456789EX', homeNote: 'Kleinunternehmer', crossBorderNote: '' });
+    expect(profile.vat).toEqual({ scheme: '', vatNumbers: [], exemptCountries: ['DE', 'NL'], exNumber: 'DE123456789EX', homeNote: 'Kleinunternehmer', crossBorderNote: '', thresholds: {} });
 
     expect((await put({ exemptCountries: ['Germany'] })).statusCode).toBe(400);
+
+    // Own thresholds per country: kept, and a bad one refused rather than stored.
+    expect((await put({ thresholds: { DE: 22000 } })).statusCode).toBe(200);
+    const again = (await app.inject({ method: 'GET', url: '/api/account/profile', headers: auth() })).json();
+    expect(again.vat).toMatchObject({ thresholds: { DE: 22000 }, exemptCountries: ['DE', 'NL'] });
+    expect((await put({ thresholds: { DE: -5 } })).statusCode).toBe(400);
   });
 
   it('keeps the VAT scheme answer and the VAT numbers per country, without touching the exemption', async () => {

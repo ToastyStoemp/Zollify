@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue';
-import { COUNTRY_BY_CODE, EU_COUNTRIES, VAT_RATES, VAT_RATES_AS_OF, countryCodeOf, defaultExemptionNotes, fmtRate } from '@zollify/shared';
+import { COUNTRY_BY_CODE, EU_COUNTRIES, NO_SME_EXEMPTION, SME_THRESHOLDS, VAT_RATES, VAT_RATES_AS_OF, countryCodeOf, defaultExemptionNotes, fmtRate, smeRulesUrl } from '@zollify/shared';
 import { currentAccount, updateProfile } from '@zollify/platform';
+import ThresholdWarnings from './ThresholdWarnings.vue';
+import { useThresholdWarnings } from '../composables/thresholds';
 
 /**
  * Where the business is exempt under a small-business scheme, the EX number
@@ -25,6 +27,22 @@ const exempt = ref<Set<string>>(new Set(startExempt));
 const exNumber = ref(stored?.exNumber ?? '');
 const homeNote = ref(stored?.homeNote ?? '');
 const crossBorderNote = ref(stored?.crossBorderNote ?? '');
+/** Own thresholds per country, as typed; blank = the built-in figure. */
+const ownThreshold = ref<Record<string, string>>(
+  Object.fromEntries(Object.entries(stored?.thresholds ?? {}).map(([c, n]) => [c, String(n)])),
+);
+const { warnings, thisYearBy } = useThresholdWarnings();
+/** EU countries ticked as exempt, in name order: the ones with a threshold to watch. */
+const exemptEu = computed(() => [...exempt.value].filter((c) => EU_COUNTRIES.includes(c)).sort(byName));
+const money = (n: number, cur: string): string => `${cur} ${Math.round(n).toLocaleString('en-GB')}`;
+function thresholdsToSave(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [c, v] of Object.entries(ownThreshold.value)) {
+    const n = Number(String(v).replace(/[\s,']/g, ''));
+    if (exempt.value.has(c) && Number.isFinite(n) && n > 0 && n !== SME_THRESHOLDS[c]?.amount) out[c] = n;
+  }
+  return out;
+}
 const saved = ref(false);
 const error = ref<string | null>(null);
 const busy = ref(false);
@@ -70,6 +88,7 @@ async function save(): Promise<void> {
       exNumber: exNumber.value.trim(),
       homeNote: homeNote.value.trim(),
       crossBorderNote: crossBorderNote.value.trim(),
+      thresholds: thresholdsToSave(),
     } });
     saved.value = true;
     setTimeout(() => (saved.value = false), 2500);
@@ -116,6 +135,32 @@ onUnmounted(() => {
         </label>
       </div>
       <p class="hint">Rates checked {{ VAT_RATES_AS_OF }}. Standard rate first, then the reduced rates.</p>
+    </fieldset>
+
+    <fieldset v-if="!autosave && exemptEu.length" :disabled="!canEdit" class="thresholds">
+      <legend>Thresholds</legend>
+      <p class="hint">
+        The exemption only lasts while your sales in a country stay under its threshold, and across the EU under EUR 100,000 once you
+        use it abroad. Zollify warns on Home from 80%. The figures are the published 2026 ones and change: check yours and type your own
+        where it differs.
+      </p>
+      <ThresholdWarnings :warnings="warnings" />
+      <div v-for="c in exemptEu" :key="c" class="th-row">
+        <span class="th-name">
+          <strong>{{ name(c) }}</strong>
+          <small v-if="thisYearBy.get(c)">{{ money(thisYearBy.get(c)!.amount, thisYearBy.get(c)!.currency) }} this year</small>
+          <small v-else>No sales there this year</small>
+        </span>
+        <template v-if="SME_THRESHOLDS[c]">
+          <label class="th-input">
+            <span class="sr-only">Threshold in {{ name(c) }}</span>
+            <input v-model="ownThreshold[c]" type="number" min="0" inputmode="numeric" :placeholder="String(SME_THRESHOLDS[c]!.amount)" @input="changed" />
+            <small>{{ SME_THRESHOLDS[c]!.currency }}</small>
+          </label>
+          <a :href="smeRulesUrl(c)" target="_blank" rel="noopener noreferrer" class="th-src">Rules</a>
+        </template>
+        <small v-else-if="NO_SME_EXEMPTION.includes(c)" class="warn">No small-business exemption here</small>
+      </div>
     </fieldset>
 
     <fieldset :disabled="!canEdit">
@@ -165,4 +210,12 @@ small.warn { color: var(--zfy-warning-ink); }
 .row { display: flex; align-items: center; gap: .75rem; }
 .ok { color: var(--zfy-success); margin: 0; }
 .error { color: var(--zfy-danger); margin: 0; }
+.th-row { display: grid; grid-template-columns: 1fr minmax(0, 9.5rem) auto; align-items: center; gap: .6rem; padding: .35rem 0; border-top: 1px solid var(--zfy-line); }
+.th-name { display: flex; flex-direction: column; min-width: 0; font-size: .875rem; }
+.th-name small { color: var(--zfy-muted); font-size: .76rem; }
+.th-input { display: flex; align-items: center; gap: .35rem; }
+.th-input input { width: 100%; min-width: 0; }
+.th-input small { color: var(--zfy-muted); font-size: .76rem; }
+.th-src { font-size: .78rem; color: var(--zfy-accent-ink); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>

@@ -21,6 +21,8 @@ import {
 import { fmtDayRange, fmtPrice, isStore, localIsoDay, seesSalesTotals, sellsAt, tillEventCheck } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import GettingStarted from '../components/GettingStarted.vue';
+import ThresholdWarnings from '../components/ThresholdWarnings.vue';
+import { useThresholdWarnings } from '../composables/thresholds';
 
 /**
  * Home is the booth's morning glance: where you are selling, how today is
@@ -34,6 +36,8 @@ const account = currentAccount;
 const hasRoute = (name: string): boolean => router.hasRoute(name);
 const canSell = computed(() => hasRoute('pos:index'));
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
+/** Close to or past a small-business threshold: said on Home, where it is seen before the next sale. */
+const { warnings: thresholdWarnings } = useThresholdWarnings();
 /** Events, stores or both - what the account runs decides the shortcuts here. */
 const runs = computed(() => sellsAt(account.value?.profile, visibleEvents.value.some((e) => isStore(e))));
 /** Where the active event or store is managed. */
@@ -281,6 +285,8 @@ const syncLine = computed(() => {
     </p>
 
     <div class="grid">
+      <!-- Turnover per country is the owner's business, not a helper's. -->
+      <ThresholdWarnings v-if="isAdmin && thresholdWarnings.length" class="wide" :warnings="thresholdWarnings" settings-link />
       <GettingStarted v-if="isAdmin" />
       <!-- ── Today ───────────────────────────────────────────────────────── -->
       <article class="card wide today-card">
@@ -440,6 +446,7 @@ h2 { margin: 0; font-size: 1rem; }
 }
 .card { border: 1px solid var(--zfy-line); border-radius: 12px; background: var(--zfy-surface); padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
 .card.wide { grid-column: 1 / -1; }
+.grid > .thresholds { grid-column: 1 / -1; }
 .chead { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .sub { color: var(--zfy-muted); font-size: .85rem; text-decoration: none; display: inline-flex; align-items: center; gap: .3rem; }
 .sub.warn { color: var(--zfy-warning-ink); }

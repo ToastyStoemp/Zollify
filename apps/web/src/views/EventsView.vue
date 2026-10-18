@@ -242,6 +242,12 @@ function openPlanner(id: string): void {
   seriesFor.value = null;
   void router.push({ name: 'event-plan', params: { eventId: id } });
 }
+/** "Edit details" in the editions sheet: the ordinary event editor for that edition. */
+function editEdition(id: string): void {
+  seriesFor.value = null;
+  const e = visibleEvents.value.find((x) => x.id === id);
+  if (e) openEdit(e);
+}
 /** Whether a card has anything to read, so a helper only gets the button when there is. */
 const notesBadge = (e: SalesEvent): string => {
   const files = e.attachments?.length ?? 0;
@@ -637,7 +643,7 @@ async function save(): Promise<void> {
     </template>
 
     <StoreSetupWizard v-if="settingUp" @close="settingUp = false" />
-    <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" />
+    <EventSeriesModal v-if="seriesFor" :event-id="seriesFor" :can-edit="canEdit" @close="seriesFor = null" @planner="openPlanner" @edit="editEdition" />
     <EventNotesModal v-if="notesFor" :event-id="notesFor" :can-edit="canEdit" @close="notesFor = null" />
     <BoothLayoutModal v-if="layoutFor" :event-id="layoutFor" :can-edit="canEdit" @close="layoutFor = null" />
 
@@ -806,6 +812,13 @@ header button { display: inline-flex; align-items: center; gap: .4rem; }
 .menu button, .menu a { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.4rem; padding: .3rem .6rem; border: 0; border-radius: 6px; background: none; color: var(--zfy-ink, #1a2230); font-size: .85rem; text-align: left; text-decoration: none; cursor: pointer; }
 .menu button:hover, .menu a:hover { background: var(--zfy-bg, #f1f4f6); }
 .menu .danger { color: var(--zfy-danger, #c6512f); }
+/* On a phone the menu is a sheet above the bottom nav bar: dropped under the
+   card it slid behind the fixed bar (z-index 6), so the last items - Editions,
+   Close, Delete - could not be tapped on the lowest card in view. */
+@media (max-width: 900px) {
+  .menu { position: fixed; left: .75rem; right: .75rem; top: auto; bottom: calc(.5rem + var(--zfy-bottom-nav, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))); z-index: 7; padding: .5rem; border-radius: 14px; }
+  .menu button, .menu a { min-height: 2.8rem; font-size: .95rem; }
+}
 .form { display: flex; flex-direction: column; gap: .7rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 label.check { flex-direction: row; align-items: center; gap: .5rem; }

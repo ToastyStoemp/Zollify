@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import { COUNTRY_BY_CODE, countryCodeOf, fmtRate } from '@zollify/shared';
+import { COUNTRY_BY_CODE, countryCodeOf, fmtRate, receiptDateTime } from '@zollify/shared';
 import {
   buildSmeReport,
   previousQuarter,
@@ -48,7 +48,9 @@ watch(() => [route.query.year, route.query.quarter], () => {
 /** The scheme's due date: the last day of the month after the quarter, filed in the home country. */
 const dueBy = computed(() => {
   const { year, quarter: q } = selected.value;
-  return new Date(year, q * 3 + 1, 0).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+  // Numeric, the way the home country writes it (31/01/2027 in Belgium, 31.01.2027 in Germany): the
+  // browser's own locale put US month-first dates here, and a spelled-out month comes out in Dutch.
+  return receiptDateTime(new Date(year, q * 3 + 1, 0).getTime(), home.value).date;
 });
 const year = computed({
   get: () => selected.value.year,
@@ -98,27 +100,17 @@ async function exportCsv(): Promise<void> {
 </script>
 
 <template>
-  <section class="sme">
-    <header class="top">
-      <div>
-        <h1>SME report</h1>
-        <p class="lede">
-          Sales per country for {{ quarterLabel(selected) }}. Exempt sales count in full; where VAT was charged, the
-          amount without VAT. Due by {{ dueBy }}, filed in your home country.
-        </p>
-        <p v-if="!applies" class="warn" role="note">
-          You have no EX number, so there is nothing to file - this report matters once you are exempt in another EU country.
-        </p>
-        <p v-if="isDueNext" class="hint">Showing {{ quarterLabel(selected) }}, the quarter due next. Pick another quarter on the right.</p>
-      </div>
-      <div class="pick">
-        <label>
+  <section class="page sme">
+    <header>
+      <h1>SME report</h1>
+      <div class="tools">
+        <label class="pick">
           <span>Year</span>
           <select v-model.number="year">
             <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
           </select>
         </label>
-        <label>
+        <label class="pick">
           <span>Quarter</span>
           <select v-model.number="quarter">
             <option v-for="q in [1, 2, 3, 4]" :key="q" :value="q">Q{{ q }}</option>
@@ -127,14 +119,24 @@ async function exportCsv(): Promise<void> {
         <button type="button" :disabled="!report.rows.length" @click="exportCsv">Export CSV</button>
       </div>
     </header>
+    <p class="lede">
+      What you sold in each country in {{ quarterLabel(selected) }}<template v-if="isDueNext">, the quarter due next</template>:
+      exempt sales in full, VAT-charged sales without the VAT. File it in your home country by {{ dueBy }}.
+    </p>
+    <p v-if="!applies" class="warn" role="note">
+      You have no EX number, so there is nothing to file - this report matters once you are exempt in another EU country.
+    </p>
 
-    <ul v-for="t in report.totals" :key="t.currency" class="totals">
-      <li><span class="label">To report (EU)</span><strong>{{ fmt(t.euReported, t.currency) }}</strong></li>
-      <li><span class="label">To report (all)</span><strong>{{ fmt(t.reported, t.currency) }}</strong></li>
-      <li><span class="label">Customers paid</span><strong>{{ fmt(t.gross, t.currency) }}</strong></li>
-      <li><span class="label">VAT inside</span><strong>{{ fmt(t.vat, t.currency) }}</strong></li>
-      <li><span class="label">Sales</span><strong>{{ t.sales }}</strong></li>
-    </ul>
+    <template v-for="t in report.totals" :key="t.currency">
+      <h2 v-if="report.totals.length > 1" class="cur">{{ t.currency }}</h2>
+      <ul class="stats">
+        <li class="lead"><span class="label">To report (EU)</span><strong>{{ fmt(t.euReported, t.currency) }}</strong></li>
+        <li><span class="label">To report (all)</span><strong>{{ fmt(t.reported, t.currency) }}</strong></li>
+        <li><span class="label">Customers paid</span><strong>{{ fmt(t.gross, t.currency) }}</strong></li>
+        <li><span class="label">VAT inside</span><strong>{{ fmt(t.vat, t.currency) }}</strong></li>
+        <li><span class="label">Sales</span><strong>{{ t.sales }}</strong></li>
+      </ul>
+    </template>
 
     <p v-if="report.estimated" class="warn" role="note">
       {{ report.estimated }} sale{{ report.estimated === 1 ? '' : 's' }} in this quarter {{ report.estimated === 1 ? 'was' : 'were' }}
@@ -145,7 +147,7 @@ async function exportCsv(): Promise<void> {
     <p v-if="!report.rows.length" class="empty">No sales in {{ quarterLabel(selected) }}.</p>
 
     <template v-for="group in [{ title: 'EU', rows: eu }, { title: 'Outside the EU', rows: other }]" :key="group.title">
-      <div v-if="group.rows.length" class="table-scroll">
+      <div v-if="group.rows.length" class="table-scroll stack">
         <h2>{{ group.title }}</h2>
         <table>
           <thead>
@@ -156,12 +158,12 @@ async function exportCsv(): Promise<void> {
           <tbody>
             <template v-for="r in group.rows" :key="keyOf(r)">
               <tr class="row" role="button" tabindex="0" :aria-expanded="open.has(keyOf(r))" @click="toggle(r)" @keydown.enter="toggle(r)" @keydown.space.prevent="toggle(r)">
-                <td><strong>{{ name(r.country) }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
-                <td><span :class="['tag', r.status]">{{ STATUS[r.status] }}</span></td>
-                <td class="num">{{ r.sales }}</td>
-                <td class="num">{{ fmt(r.exemptGross + r.chargedGross, r.currency) }}</td>
-                <td class="num">{{ r.vat ? fmt(r.vat, r.currency) : '-' }}</td>
-                <td class="num"><strong>{{ fmt(r.reported, r.currency) }}</strong></td>
+                <td class="wide country"><strong>{{ name(r.country) }}</strong><span v-if="r.country" class="sub"> · {{ r.country }}</span></td>
+                <td class="end"><span :class="['tag', r.status]">{{ STATUS[r.status] }}</span></td>
+                <td class="num" data-label="Sales">{{ r.sales }}</td>
+                <td class="num" data-label="Customers paid">{{ fmt(r.exemptGross + r.chargedGross, r.currency) }}</td>
+                <td class="num" data-label="VAT">{{ r.vat ? fmt(r.vat, r.currency) : '-' }}</td>
+                <td class="num span reported" data-label="To report"><strong>{{ fmt(r.reported, r.currency) }}</strong></td>
               </tr>
               <tr v-if="open.has(keyOf(r))" class="detail">
                 <td colspan="6">
@@ -185,21 +187,10 @@ async function exportCsv(): Promise<void> {
 </template>
 
 <style scoped>
-.sme { display: flex; flex-direction: column; gap: 1rem; }
-.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
-h1 { margin: 0; font-size: 1.35rem; }
 h2 { margin: 0 0 .4rem; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
-.lede, .hint, .empty { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .9rem; max-width: 64ch; }
+h2.cur { margin: .4rem 0 -.4rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a00); margin: 0; font-size: .875rem; max-width: 64ch; }
-.pick { display: flex; align-items: flex-end; gap: .5rem; flex-wrap: wrap; }
-.pick label { display: flex; flex-direction: column; gap: .2rem; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
-.totals { list-style: none; margin: 0; padding: 0; display: flex; gap: .6rem; flex-wrap: wrap; }
-.totals li { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; padding: .5rem .8rem; background: var(--zfy-surface, #fff); display: flex; flex-direction: column; min-width: 8rem; }
-.totals li:first-child { border-color: var(--zfy-accent, #0f7a64); }
-.totals .label { font-size: .7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--zfy-muted, #5a6472); }
-.totals strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
-.table-scroll { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; overflow: hidden; }
+.pick { display: flex; flex-direction: column; gap: .2rem; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; white-space: nowrap; }
 th { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--zfy-muted, #5a6472); }
 tbody tr:last-child td { border-bottom: 0; }
@@ -209,7 +200,16 @@ tr.detail td { background: var(--zfy-surface-2, #e9edf1); white-space: normal; }
 tr.detail ul { margin: 0; padding-left: 1.1rem; font-size: .85rem; display: flex; flex-direction: column; gap: .15rem; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
 .sub { color: var(--zfy-muted, #5a6472); font-size: .82rem; }
-.tag { font-size: .72rem; padding: .1rem .45rem; border-radius: 4px; background: var(--zfy-surface-2, #e9edf1); }
+.tag { font-size: .72rem; padding: .1rem .45rem; border-radius: 4px; background: var(--zfy-surface-2, #e9edf1); white-space: nowrap; }
 .tag.exempt { background: var(--zfy-accent-soft, #dff1ec); color: var(--zfy-accent-ink, #0a5a4a); }
 .tag.mixed { color: var(--zfy-warning-ink, #8a5a00); }
+@media (max-width: 720px) {
+  /* The selects share a row; Export CSV takes its own underneath, full width. */
+  .page > header .tools { flex-basis: 100%; order: 1; }
+  .pick { flex: 1; }
+  .pick select { width: 100%; }
+  .tools > button { flex-basis: 100%; }
+  .reported strong { font-size: 1.15rem; }
+  tr.row:hover { background: var(--zfy-surface, #fff); }
+}
 </style>

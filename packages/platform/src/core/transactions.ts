@@ -121,15 +121,17 @@ export function saleToTransaction(
     items,
     discounts: [],
     total: sale.total,
-    currency: sale.currency,
+    // ISO codes are upper case; an event whose currency was once typed as
+    // "Eur" split every per-currency total in two ("EUR" and "Eur").
+    currency: sale.currency.toUpperCase(),
     ...(sale.receiptToken ? { receiptToken: sale.receiptToken } : {}),
     ...(sale.asCharged && sale.asCharged.listTotals.length === items.length ? { asCharged: asChargedFor(sale.asCharged, items.length) } : {}),
     ...(sale.tax && sale.tax.rates.length === items.length ? { tax: sale.tax } : {}),
     // Only set when the sale was converted; an unconverted sale leaves these
     // absent rather than duplicating its own currency into them.
-    ...(sale.baseCurrency && sale.baseCurrency !== sale.currency
+    ...(sale.baseCurrency && sale.baseCurrency.toUpperCase() !== sale.currency.toUpperCase()
       ? {
-          baseCurrency: sale.baseCurrency,
+          baseCurrency: sale.baseCurrency.toUpperCase(),
           baseTotal: sale.baseTotal,
           exchangeRate: sale.exchangeRate,
           ...(sale.marketRate && sale.marketRate.rate > 0 ? { marketRate: { rate: sale.marketRate.rate, at: sale.marketRate.at } } : {}),

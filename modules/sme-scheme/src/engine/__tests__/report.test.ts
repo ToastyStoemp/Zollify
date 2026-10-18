@@ -102,6 +102,13 @@ describe('buildSmeReport', () => {
     expect(ex.rows[0]).toMatchObject({ status: 'exempt', reported: 119 });
   });
 
+  it('adds up a sale whose currency was typed as "Eur" with the EUR ones', () => {
+    const r = build([sale(100, exempt('BE')), sale(50, exempt('BE'), { currency: 'Eur' } as Partial<Transaction>)]);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({ currency: 'EUR', sales: 2, reported: 150 });
+    expect(r.totals).toHaveLength(1);
+  });
+
   it('puts the EU first and totals per currency', () => {
     const r = build([sale(500, charged('CH', 8.1)), sale(100, exempt('FR')), sale(238, charged('DE', 19))]);
     expect(r.rows.map((x) => x.country)).toEqual(['DE', 'FR', 'CH']);

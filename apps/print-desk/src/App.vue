@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
-import { paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import { isPrintFile, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -265,11 +265,46 @@ async function detectSizes(): Promise<void> {
     (noDriver ? ` ${noDriver} lost their driver settings (printerSettings), which were for another paper.` : '') +
     (unsized.length ? ` No size in the name: ${unsized.slice(0, 5).join(', ')}${unsized.length > 5 ? ` and ${unsized.length - 5} more` : ''}.` : '');
 }
+async function linkFile(row: CatalogRow, file: string): Promise<void> {
+  await saveLink(row.key, { file, params: links.value[row.key]?.params ?? defaultParams() });
+}
 async function pickFile(row: CatalogRow): Promise<void> {
   const file = await api.pickFile();
-  if (!file) return;
-  const cur = links.value[row.key];
-  await saveLink(row.key, { file, params: cur?.params ?? defaultParams() });
+  if (file) await linkFile(row, file);
+}
+
+// ── Drag a file from Explorer onto a row to link it ──
+/** The row a file is being dragged over. */
+const dropRow = ref<string | null>(null);
+const carriesFiles = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files');
+function dragOver(row: CatalogRow, e: DragEvent): void {
+  if (!carriesFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer!.dropEffect = 'link';
+  dropRow.value = row.key;
+}
+function dragLeave(row: CatalogRow, e: DragEvent): void {
+  // Moving onto a cell or button inside the row also fires dragleave on the row.
+  if (dropRow.value === row.key && !(e.currentTarget as Node).contains(e.relatedTarget as Node | null)) dropRow.value = null;
+}
+async function drop(row: CatalogRow, e: DragEvent): Promise<void> {
+  dropRow.value = null;
+  const files = e.dataTransfer?.files;
+  if (!files?.length) return;
+  e.preventDefault();
+  error.value = '';
+  const file = files[0]!;
+  const path = api.pathOf(file);
+  if (!path) {
+    error.value = `Could not tell where ${file.name} is on this computer. Drop it from File Explorer, or click "Link a file".`;
+    return;
+  }
+  if (!isPrintFile(path)) {
+    error.value = `${file.name} is not an image PhotoCraft prints: use a PSD, PNG, JPG, TIFF or WebP file.`;
+    return;
+  }
+  await linkFile(row, path);
+  notice.value = `Linked ${file.name} to ${row.variant ? `${row.title} ${row.variant}` : row.title}.${files.length > 1 ? ` Only the first of the ${files.length} files was used.` : ''}`;
 }
 function defaultParams(): Record<string, unknown> {
   const def = printers.value.find((p) => p.default)?.name;
@@ -383,12 +418,12 @@ async function printAll(): Promise<void> {
       </thead>
       <tbody>
         <template v-for="row in shown" :key="row.key">
-          <tr>
+          <tr :class="{ drop: dropRow === row.key }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
             <td>
-              <button type="button" class="quiet" :title="links[row.key]?.file" @click="pickFile(row)">{{ links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
+              <button type="button" class="quiet" :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`" @click="pickFile(row)">{{ dropRow === row.key ? 'Drop to link' : links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
             </td>
             <td>
               <span v-if="links[row.key]">{{ links[row.key]!.params.printer || 'default printer' }}, {{ paperLabel(links[row.key]!.params.paper) }} {{ links[row.key]!.params.orientation || '' }}</span>
@@ -442,6 +477,8 @@ table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); 
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }
 tr.settings td { background: var(--zfy-bg); }
+tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
+tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
 .notice { margin: 0; padding: .5rem .75rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); }
 .notice button { padding: 0 .4rem; }

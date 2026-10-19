@@ -11,6 +11,8 @@ declare module '*.vue' {
 export interface PrintDeskApi {
   settings: { get(): Promise<Settings>; set(patch: Partial<Settings>): Promise<Settings> };
   pickFile(): Promise<string | null>;
+  /** The path of a dropped file, '' when it has none. */
+  pathOf(file: File): string;
   pickExe(): Promise<string | null>;
   zollify: {
     resume(): Promise<Session | null>;

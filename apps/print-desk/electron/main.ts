@@ -2,7 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'e
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findExe, print, printers } from './photocraft.js';
-import type { CopyProgress, PrintJob, PrintResult, Settings } from './shared.js';
+import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
 import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
@@ -60,7 +60,7 @@ void app.whenReady().then(() => {
     return store.settings();
   });
   ipcMain.handle('pick:file', async (e) => {
-    const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], filters: [{ name: 'Images', extensions: ['psd', 'psb', 'pcraft', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'webp'] }] });
+    const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], filters: [{ name: 'Images', extensions: [...PRINT_FILE_EXTENSIONS] }] });
     return r.canceled ? null : (r.filePaths[0] ?? null);
   });
   ipcMain.handle('pick:exe', async (e) => {

@@ -68,6 +68,10 @@ export interface Printer {
   default: boolean;
 }
 
+/** Files a product can be linked to: what PhotoCraft opens and prints. */
+export const PRINT_FILE_EXTENSIONS = ['psd', 'psb', 'pcraft', 'png', 'jpg', 'jpeg', 'tif', 'tiff', 'webp'] as const;
+export const isPrintFile = (path: string): boolean => (PRINT_FILE_EXTENSIONS as readonly string[]).includes(path.split('.').pop()?.toLowerCase() ?? '');
+
 // ── Paper sizes ──────────────────────────────────────────────────────────────
 
 /** Papers PhotoCraft knows by name; any other size goes to it as [width, height] in points. */

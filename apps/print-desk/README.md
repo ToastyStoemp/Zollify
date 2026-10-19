@@ -56,11 +56,13 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   profile included, read from PhotoCraft's preferences.json the way PhotoCraft
   finds it. Save it, or apply it to all items of that size: set a print up once
   in PhotoCraft per size, no copy and paste.
-- Under the JSON box, the **driver settings** are read out by name: paper, orientation,
-  media type, paper source, quality, colour and colour management, with the
-  printer's own names for its codes (asked from its driver, Windows only). What a
-  driver keeps in its private data, such as borderless or Canon's quality level,
-  can't be read; it is kept and sent as it is.
+- Under the JSON box, the **colour and driver settings** are read out by name:
+  the ICC profile and intent PhotoCraft converts with (when PhotoCraft manages
+  colour), then paper, orientation, borderless, media type, paper source,
+  quality, the driver's colour correction and Windows colour management. The
+  printer's own names come from its driver (Windows only): its catalog for the
+  codes, and its PrintTicket for what it keeps in its private data, such as
+  borderless. A driver without a PrintTicket shows the public fields only.
 - **Detect sizes** sets each item's paper from an A0-A6 size in its variant
   name, else its product name ("A3", "Poster a4"; not "A3+"). A3-A5 go to
   PhotoCraft by name, the other A sizes as points.

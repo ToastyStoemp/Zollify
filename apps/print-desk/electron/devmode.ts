@@ -99,13 +99,25 @@ const QUALITY: Record<number, string> = { [-1]: 'draft', [-2]: 'low', [-3]: 'med
 const ICM_METHOD: Record<number, string> = { 1: 'off (the application manages colour)', 2: 'Windows', 3: 'the driver', 4: 'the printer' };
 const ICM_INTENT: Record<number, string> = { 1: 'saturation', 2: 'perceptual', 3: 'relative colorimetric', 4: 'absolute colorimetric' };
 
+/** "ns0000:HighDensityFineArtPaper" → "High Density Fine Art Paper", "Level_2" → "Level 2". */
+export const optionName = (q: string): string =>
+  q.replace(/^[^:]*:/, '').replace(/_/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+
+/** A driver option by feature, whatever namespace prefix the driver's ticket gave it. */
+const pick = (options: Record<string, string>, feature: string): string | undefined =>
+  Object.entries(options).find(([k]) => k.replace(/^[^:]*:/, '') === feature)?.[1];
+
 export interface DevModeSummary {
   label: string;
   value: string;
 }
 
-/** The settings as label/value lines, naming driver codes from `caps` when given. */
-export function describeDevMode(dm: DevMode, caps?: PrinterCaps): DevModeSummary[] {
+/**
+ * The settings as label/value lines, naming driver codes from `caps` when given. `options` is the
+ * driver's own reading (printercaps.ts driverOptions): it adds what only the driver's private data
+ * holds, such as borderless, and its quality and colour correction replace the coarse public ones.
+ */
+export function describeDevMode(dm: DevMode, caps?: PrinterCaps, options: Record<string, string> = {}): DevModeSummary[] {
   const named = (list: { id: number; name: string }[] | undefined, id: number): string => list?.find((x) => x.id === id)?.name ?? `code ${id}`;
   const lines: DevModeSummary[] = [{ label: 'Printer', value: dm.device }];
   if (dm.paper !== null) {
@@ -115,13 +127,23 @@ export function describeDevMode(dm: DevMode, caps?: PrinterCaps): DevModeSummary
     lines.push({ label: 'Paper', value: dm.formName });
   }
   if (dm.orientation) lines.push({ label: 'Orientation', value: dm.orientation });
+  const borderless = pick(options, 'PageBorderless');
+  if (borderless) {
+    const level = pick(options, 'PageBorderlessExpandLevel');
+    const on = optionName(borderless) === 'Borderless';
+    lines.push({ label: 'Borderless', value: on ? (level ? `on, extension ${optionName(level).toLowerCase()}` : 'on') : 'off' });
+  }
   if (dm.mediaType !== null) lines.push({ label: 'Media type', value: named(caps?.mediaTypes, dm.mediaType) });
   if (dm.source !== null) lines.push({ label: 'Paper source', value: named(caps?.sources, dm.source) });
-  if (dm.quality !== null) lines.push({ label: 'Quality', value: dm.quality > 0 ? `${dm.quality} dpi` : (QUALITY[dm.quality] ?? `code ${dm.quality}`) });
+  const quality = pick(options, 'PageOutputQuality');
+  if (quality) lines.push({ label: 'Quality', value: optionName(quality) });
+  else if (dm.quality !== null) lines.push({ label: 'Quality', value: dm.quality > 0 ? `${dm.quality} dpi` : (QUALITY[dm.quality] ?? `code ${dm.quality}`) });
   if (dm.color) lines.push({ label: 'Colour', value: dm.color });
-  if (dm.icmMethod !== null) lines.push({ label: 'Colour management', value: ICM_METHOD[dm.icmMethod] ?? `the driver's mode ${dm.icmMethod}` });
+  if (dm.icmMethod !== null) lines.push({ label: 'Windows colour management', value: ICM_METHOD[dm.icmMethod] ?? `the driver's mode ${dm.icmMethod}` });
+  const correction = pick(options, 'PageColorCorrection');
+  if (correction) lines.push({ label: 'Driver colour correction', value: optionName(correction) });
   if (dm.icmIntent !== null) lines.push({ label: 'Rendering intent', value: ICM_INTENT[dm.icmIntent] ?? `code ${dm.icmIntent}` });
   if (dm.duplex && dm.duplex !== 'simplex') lines.push({ label: 'Two-sided', value: dm.duplex });
-  lines.push({ label: 'Driver data', value: `${dm.privateBytes} bytes only the driver reads (its own options, such as borderless)` });
+  if (!borderless) lines.push({ label: 'Driver data', value: `${dm.privateBytes} bytes only the driver reads (its own options, such as borderless)` });
   return lines;
 }

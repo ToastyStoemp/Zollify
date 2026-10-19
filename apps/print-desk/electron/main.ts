@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
 import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
-import { printerCaps } from './printercaps.js';
+import { driverOptions, printerCaps } from './printercaps.js';
 import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
@@ -93,12 +93,12 @@ void app.whenReady().then(() => {
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
   ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));
   ipcMain.handle('photocraft:lastPrint', () => lastPrint(store.data.photocraft).catch(fail));
-  // Driver settings hex as names; the printer's own names when its driver answers, codes otherwise.
+  // Driver settings hex as names; the printer's own names and options when its driver answers, codes otherwise.
   ipcMain.handle('photocraft:describeSettings', async (_e, hex: string): Promise<DevModeSummary[] | null> => {
     const dm = decodeDevMode(String(hex));
     if (!dm) return null;
-    const caps = await printerCaps(dm.device).catch(() => undefined);
-    return describeDevMode(dm, caps);
+    const [caps, options] = await Promise.all([printerCaps(dm.device).catch(() => undefined), driverOptions(dm.device, String(hex)).catch(() => ({}))]);
+    return describeDevMode(dm, caps, options);
   });
   // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
   const tracked = new Map<string, { printer: string; id: number; copies: number }>();

@@ -43,16 +43,30 @@ async function loadFromPhotoCraft(): Promise<void> {
   }
 }
 
-/** The driver settings in the JSON box, read out by name. */
-const driver = ref<DevModeSummary[] | null>(null);
-const driverHex = computed((): string => {
+/** The JSON box, {} while it doesn't parse. */
+const extraJson = computed((): Record<string, unknown> => {
   try {
-    const hex = (JSON.parse(extra.value || '{}') as Record<string, unknown>).printerSettings;
-    return typeof hex === 'string' ? hex : '';
+    const v: unknown = JSON.parse(extra.value || '{}');
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   } catch {
-    return '';
+    return {};
   }
 });
+/** The ICC profile PhotoCraft converts with, when it manages colour. */
+const profile = computed((): DevModeSummary[] => {
+  const p = extraJson.value;
+  if (form.value.colorHandling !== 'photocraftManages') return [];
+  const file = typeof p.printerProfile === 'string' ? p.printerProfile.split(/[\\/]/).pop() : '';
+  const intent = typeof p.intent === 'string' ? p.intent : 'relative';
+  return [
+    { label: 'ICC profile', value: file || 'none set (PhotoCraft needs printerProfile)' },
+    { label: 'Profile intent', value: `${intent}${p.bpc === false ? '' : ', black point compensation'}` },
+  ];
+});
+/** The driver settings in the JSON box, read out by name. */
+const driver = ref<DevModeSummary[] | null>(null);
+const driverHex = computed((): string => (typeof extraJson.value.printerSettings === 'string' ? extraJson.value.printerSettings : ''));
+const readout = computed((): DevModeSummary[] => [...profile.value, ...(driver.value ?? [])]);
 watch(
   driverHex,
   async (hex) => {
@@ -186,8 +200,8 @@ function apply(scope: 'all' | 'size'): void {
       <span>Extra PhotoCraft print settings (JSON): printerSettings, printerProfile, intent, cornerCropMarks...</span>
       <textarea v-model="extra" rows="3" spellcheck="false" placeholder='{"printerSettings": "…hex from PhotoCraft Print Settings…"}'></textarea>
     </label>
-    <dl v-if="driver" class="driver wide" aria-label="Driver settings">
-      <template v-for="l in driver" :key="l.label"><dt>{{ l.label }}</dt><dd>{{ l.value }}</dd></template>
+    <dl v-if="readout.length" class="driver wide" aria-label="Colour and driver settings">
+      <template v-for="l in readout" :key="l.label"><dt>{{ l.label }}</dt><dd>{{ l.value }}</dd></template>
     </dl>
     <p v-if="extraError" class="error">{{ extraError }}</p>
     <p v-if="loaded" class="loaded" role="status">{{ loaded }}</p>

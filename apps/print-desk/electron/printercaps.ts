@@ -76,6 +76,44 @@ export function parseCaps(raw: RawCaps): PrinterCaps {
   };
 }
 
+/**
+ * The driver's own reading of driver settings: Windows asks the driver to turn the settings into a
+ * PrintTicket, which names every option, the private ones (borderless, Canon's colour correction)
+ * included. Read-only.
+ */
+const TICKET = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName ReachFramework, System.Printing
+$hex = $args[1]
+$bytes = New-Object byte[] ($hex.Length / 2)
+for ($i = 0; $i -lt $bytes.Length; $i++) { $bytes[$i] = [Convert]::ToByte($hex.Substring($i * 2, 2), 16) }
+$conv = New-Object System.Printing.Interop.PrintTicketConverter($args[0], 1)
+$t = $conv.ConvertDevModeToPrintTicket($bytes, [System.Printing.PrintTicketScope]::JobScope)
+(New-Object IO.StreamReader($t.GetXmlStream())).ReadToEnd()
+`;
+
+/** A PrintTicket's chosen option per feature, by qualified name ("psk:PageBorderless": "psk:Borderless"). */
+export function parseTicket(xml: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const m of xml.matchAll(/<psf:Feature name="([^"]+)"[^>]*>\s*<psf:Option name="([^"]+)"/g)) out[m[1]!] = m[2]!;
+  return out;
+}
+
+const tickets = new Map<string, Record<string, string>>();
+
+/** The driver's options for these settings ({} off Windows); asked once per settings per run. */
+export async function driverOptions(printer: string, hex: string): Promise<Record<string, string>> {
+  if (process.platform !== 'win32' || !/^[0-9a-f]+$/i.test(hex)) return {};
+  const key = `${printer}\n${hex}`;
+  const hit = tickets.get(key);
+  if (hit) return hit;
+  // The hex is checked to be hex above, so it is safe in the command line (up to ~16 KB of settings).
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `& { ${TICKET} } '${printer.replace(/'/g, "''")}' '${hex}'`], { windowsHide: true, timeout: 60_000, maxBuffer: 16 * 1024 * 1024 });
+  const options = parseTicket(stdout);
+  tickets.set(key, options);
+  return options;
+}
+
 const cache = new Map<string, PrinterCaps>();
 
 /** The printer's catalog, asked once per printer per run (drivers can be slow to answer). */

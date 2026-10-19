@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { decodeDevMode, describeDevMode } from './devmode.js';
-import { parseCaps } from './printercaps.js';
+import { decodeDevMode, describeDevMode, optionName } from './devmode.js';
+import { parseCaps, parseTicket } from './printercaps.js';
 
 // The public part of a Canon PRO-1000 driver's settings as PhotoCraft remembers them (A3 portrait,
 // Highest Density Fine Art Paper, Manual Feed, high quality, colour management off), followed by
@@ -98,7 +98,7 @@ describe('describeDevMode', () => {
       'Paper source': 'Manual Feed',
       Quality: 'high',
       Colour: 'color',
-      'Colour management': 'off (the application manages colour)',
+      'Windows colour management': 'off (the application manages colour)',
       'Rendering intent': 'relative colorimetric',
       'Driver data': '3796 bytes only the driver reads (its own options, such as borderless)',
     });
@@ -108,5 +108,75 @@ describe('describeDevMode', () => {
     expect(l.Paper).toBe('A3');
     expect(l['Media type']).toBe('code 331');
     expect(l['Paper source']).toBe('code 277');
+  });
+});
+
+// Excerpt of the PrintTicket the PRO-1000 driver gives for those settings.
+const TICKET = `<psf:PrintTicket xmlns:psf="x" version="1">
+  <psf:Feature name="psk:PageMediaType">
+    <psf:Option name="ns0000:HighDensityFineArtPaper">
+      <psf:ScoredProperty name="ns0000:MediaTypeId"><psf:Value xsi:type="xsd:integer">79</psf:Value></psf:ScoredProperty>
+    </psf:Option>
+  </psf:Feature>
+  <psf:Feature name="psk:PageOutputQuality">
+    <psf:Option name="psk:High" />
+  </psf:Feature>
+  <psf:Feature name="ns0000:PageColorCorrection">
+    <psf:Option name="ns0000:None" />
+  </psf:Feature>
+  <psf:ParameterInit name="ns0000:PageContrast"><psf:Value xsi:type="xsd:integer">0</psf:Value></psf:ParameterInit>
+  <psf:Feature name="psk:PageBorderless">
+    <psf:Option name="psk:Borderless" />
+  </psf:Feature>
+  <psf:Feature name="ns0000:PageBorderlessExpandLevel">
+    <psf:Option name="ns0000:Level_2" />
+  </psf:Feature>
+  <psf:Feature name="psk:JobNUpAllDocumentsContiguously">
+    <psf:Option name="ns0000:None"><psf:ScoredProperty name="psk:PagesPerSheet"><psf:Value>1</psf:Value></psf:ScoredProperty></psf:Option>
+    <psf:Feature name="psk:PresentationDirection">
+      <psf:Option name="ns0000:Right_or_Bottom" />
+    </psf:Feature>
+  </psf:Feature>
+</psf:PrintTicket>`;
+
+describe('parseTicket', () => {
+  it('reads the chosen option of each feature, nested ones included', () => {
+    expect(parseTicket(TICKET)).toEqual({
+      'psk:PageMediaType': 'ns0000:HighDensityFineArtPaper',
+      'psk:PageOutputQuality': 'psk:High',
+      'ns0000:PageColorCorrection': 'ns0000:None',
+      'psk:PageBorderless': 'psk:Borderless',
+      'ns0000:PageBorderlessExpandLevel': 'ns0000:Level_2',
+      'psk:JobNUpAllDocumentsContiguously': 'ns0000:None',
+      'psk:PresentationDirection': 'ns0000:Right_or_Bottom',
+    });
+  });
+});
+
+describe('optionName', () => {
+  it('drops the namespace and spaces out words', () => {
+    expect(optionName('ns0000:HighDensityFineArtPaper')).toBe('High Density Fine Art Paper');
+    expect(optionName('ns0000:Level_2')).toBe('Level 2');
+    expect(optionName('psk:High')).toBe('High');
+  });
+});
+
+describe('describeDevMode with the driver options', () => {
+  const lines = (options: Record<string, string>) => Object.fromEntries(describeDevMode(decodeDevMode(PRO1000)!, CAPS, options).map((l) => [l.label, l.value]));
+  it('adds borderless and colour correction, and takes the driver quality', () => {
+    const l = lines(parseTicket(TICKET));
+    expect(l.Borderless).toBe('on, extension level 2');
+    expect(l.Quality).toBe('High');
+    expect(l['Driver colour correction']).toBe('None');
+    expect(l['Driver data']).toBeUndefined();
+  });
+  it('says off for a bordered print, under any namespace prefix', () => {
+    expect(lines({ 'x:PageBorderless': 'x:None' }).Borderless).toBe('off');
+  });
+  it('keeps the public quality and the driver data note without a ticket', () => {
+    const l = lines({});
+    expect(l.Borderless).toBeUndefined();
+    expect(l.Quality).toBe('high');
+    expect(l['Driver data']).toMatch(/^3796 bytes/);
   });
 });

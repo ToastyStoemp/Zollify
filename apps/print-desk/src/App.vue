@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
-import { PAPERS } from '../electron/shared';
+import { paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -17,6 +17,8 @@ const progress = reactive<Record<string, CopyProgress>>({});
 const open = ref<string | null>(null);
 const busy = ref('');
 const error = ref('');
+/** What the last bulk change did, e.g. "Paper set for 12 items". */
+const notice = ref('');
 const filter = ref('');
 
 const login = reactive({ server: '', email: '', password: '', code: '', needs2fa: false });
@@ -175,11 +177,93 @@ async function signOut(): Promise<void> {
   rows.value = [];
 }
 
-async function saveLink(key: string, link: PrintLink): Promise<void> {
+/**
+ * Writes this account's links: `change` gets a plain copy to edit. Plain
+ * because IPC cannot clone Vue's reactive proxies ("An object could not be
+ * cloned"), and the links are JSON on disk anyway.
+ */
+async function writeLinks(change: (mine: Record<string, PrintLink>) => void): Promise<void> {
   if (!settings.value || !session.value) return;
   const acc = session.value.accountId;
-  const all = { ...settings.value.links, [acc]: { ...(settings.value.links[acc] ?? {}), [key]: link } };
-  settings.value = await api.settings.set({ links: all });
+  const all = JSON.parse(JSON.stringify(settings.value.links)) as Settings['links'];
+  const mine = (all[acc] ??= {});
+  change(mine);
+  try {
+    settings.value = await api.settings.set({ links: all });
+  } catch (err) {
+    error.value = `Could not save the print settings: ${err instanceof Error ? err.message : String(err)}`;
+    throw err;
+  }
+}
+async function saveLink(key: string, link: PrintLink): Promise<void> {
+  await writeLinks((mine) => {
+    mine[key] = link;
+  });
+}
+/** An item's print settings, or the defaults when it has none yet. File '' = settings without a linked file. */
+const paramsOf = (key: string): Record<string, unknown> => links.value[key]?.params ?? defaultParams();
+const sizeOf = (row: CatalogRow): string | null => sizeFromName(row.variant, row.title);
+const paperLabel = (paper: unknown): string => {
+  const name = paperName(paper ?? 'letter');
+  return name ? (/^a\d$/.test(name) ? name.toUpperCase() : name) : 'custom paper';
+};
+
+/** "Apply to all (A3) items": these settings for every other item, or every other item of this one's size. */
+async function applySettings(source: CatalogRow, params: Record<string, unknown>, scope: 'all' | 'size'): Promise<void> {
+  const size = sizeOf(source);
+  const targets = rows.value.filter((r) => r.key !== source.key && (scope === 'all' || sizeOf(r) === size));
+  const what = `${scope === 'size' ? `${size!.toUpperCase()} ` : ''}${targets.length === 1 ? 'item' : 'items'}`;
+  if (!targets.length) {
+    notice.value = `There are no other ${scope === 'size' ? `${size!.toUpperCase()} ` : ''}items.`;
+    return;
+  }
+  if (!window.confirm(`Use these print settings for ${targets.length} other ${what}? Their own print settings are replaced. Linked files stay as they are.`)) return;
+  let noDriver = 0;
+  await writeLinks((mine) => {
+    mine[source.key] = { file: mine[source.key]?.file ?? '', params };
+    for (const t of targets) {
+      const next = settingsFor(params, size, sizeOf(t));
+      if (params.printerSettings && !next.printerSettings) noDriver++;
+      mine[t.key] = { file: mine[t.key]?.file ?? '', params: next };
+    }
+  });
+  notice.value =
+    `Print settings applied to ${targets.length} ${what}.` +
+    (noDriver ? ` ${noDriver} of another size kept their own paper and got no driver settings (printerSettings): set those once per size and use "Apply to all A… items".` : '');
+}
+
+/** "Detect sizes": the paper of every item whose name says A0-A6. */
+async function detectSizes(): Promise<void> {
+  let changed = 0;
+  let same = 0;
+  let noDriver = 0;
+  const unsized: string[] = [];
+  await writeLinks((mine) => {
+    for (const r of rows.value) {
+      const size = sizeOf(r);
+      if (!size) {
+        unsized.push(r.variant ? `${r.title} ${r.variant}` : r.title);
+        continue;
+      }
+      const cur = mine[r.key];
+      const params = cur?.params ?? defaultParams();
+      if (paperName(params.paper) === size) {
+        same++;
+        continue;
+      }
+      // The driver settings were made for the old paper; PhotoCraft would refuse the mismatch.
+      const { printerSettings, ...rest } = params;
+      if (printerSettings) noDriver++;
+      mine[r.key] = { file: cur?.file ?? '', params: { ...rest, paper: paperParam(size) } };
+      changed++;
+    }
+  });
+  notice.value =
+    `Paper set from the name for ${changed} ${changed === 1 ? 'item' : 'items'}` +
+    (same ? `, ${same} already matched` : '') +
+    '.' +
+    (noDriver ? ` ${noDriver} lost their driver settings (printerSettings), which were for another paper.` : '') +
+    (unsized.length ? ` No size in the name: ${unsized.slice(0, 5).join(', ')}${unsized.length > 5 ? ` and ${unsized.length - 5} more` : ''}.` : '');
 }
 async function pickFile(row: CatalogRow): Promise<void> {
   const file = await api.pickFile();
@@ -282,9 +366,11 @@ async function printAll(): Promise<void> {
     </header>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="notice" class="notice" role="status">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
 
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
+      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
       <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>
@@ -305,8 +391,8 @@ async function printAll(): Promise<void> {
               <button type="button" class="quiet" :title="links[row.key]?.file" @click="pickFile(row)">{{ links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
             </td>
             <td>
-              <span v-if="links[row.key]">{{ links[row.key]!.params.printer || 'default printer' }}, {{ links[row.key]!.params.paper || 'letter' }} {{ links[row.key]!.params.orientation || '' }}</span>
-              <button v-if="links[row.key]" type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
+              <span v-if="links[row.key]">{{ links[row.key]!.params.printer || 'default printer' }}, {{ paperLabel(links[row.key]!.params.paper) }} {{ links[row.key]!.params.orientation || '' }}</span>
+              <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file" /></td>
             <td>
@@ -320,9 +406,15 @@ async function printAll(): Promise<void> {
               </template>
             </td>
           </tr>
-          <tr v-if="open === row.key && links[row.key]" class="settings">
+          <tr v-if="open === row.key" class="settings">
             <td :colspan="hasSku ? 7 : 6">
-              <PrintSettings :params="links[row.key]!.params" :printers="printers" :papers="PAPERS" @update="saveLink(row.key, { file: links[row.key]!.file, params: $event })" />
+              <PrintSettings
+                :params="paramsOf(row.key)"
+                :printers="printers"
+                :size="sizeOf(row)"
+                @update="saveLink(row.key, { file: links[row.key]?.file ?? '', params: $event })"
+                @apply="(params, scope) => applySettings(row, params, scope)"
+              />
             </td>
           </tr>
         </template>
@@ -351,5 +443,7 @@ th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }
 tr.settings td { background: var(--zfy-bg); }
 .queue { margin: 0; }
+.notice { margin: 0; padding: .5rem .75rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); }
+.notice button { padding: 0 .4rem; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { Printer } from '../electron/shared';
+import { PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
 
 /**
  * One item's PhotoCraft `file.print` params. The common ones are fields; the
  * rest (printerSettings from PhotoCraft's Print Settings dialog, position,
  * marks, profile...) go in the JSON box and are merged in as they are.
+ *
+ * `size` is the A size the item's name says, when it says one: it offers
+ * "apply to all items of this size" next to "apply to all items".
  */
-const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; papers: readonly string[] }>();
-const emit = defineEmits<{ update: [params: Record<string, unknown>] }>();
+const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; size: string | null }>();
+const emit = defineEmits<{ update: [params: Record<string, unknown>]; apply: [params: Record<string, unknown>, scope: 'all' | 'size'] }>();
 
 const FIELDS = ['printer', 'paper', 'orientation', 'scaleToFit', 'scale', 'center', 'top', 'left', 'colorHandling', 'emulsionDown'] as const;
 
@@ -20,16 +24,20 @@ const form = ref(fromParams(props.params));
 const extra = ref(extraOf(props.params));
 const extraError = ref('');
 
-watch(() => props.params, (p) => {
-  form.value = fromParams(p);
-  extra.value = extraOf(p);
-});
+// By content: an item without settings gets fresh defaults on every render, which must not wipe the form.
+watch(
+  () => JSON.stringify(props.params),
+  () => {
+    form.value = fromParams(props.params);
+    extra.value = extraOf(props.params);
+  },
+);
 
 function fromParams(p: Record<string, unknown>) {
   return {
     printer: String(p.printer ?? ''),
-    paper: Array.isArray(p.paper) ? 'custom' : String(p.paper ?? 'letter'),
-    customPaper: Array.isArray(p.paper) ? (p.paper as number[]).join(', ') : '',
+    paper: paperName(p.paper ?? 'letter') ?? 'custom',
+    customPaper: Array.isArray(p.paper) && !paperName(p.paper) ? (p.paper as number[]).join(', ') : '',
     orientation: String(p.orientation ?? 'portrait'),
     scaleToFit: p.scaleToFit === true,
     scale: Number(p.scale ?? 100),
@@ -51,7 +59,8 @@ const customPaper = computed(() => {
   return nums.length === 2 ? nums : null;
 });
 
-function save(): void {
+/** The form as `file.print` params, or null (with the reason on screen) when it does not add up. */
+function collect(): Record<string, unknown> | null {
   let rest: Record<string, unknown> = {};
   extraError.value = '';
   if (extra.value.trim()) {
@@ -59,16 +68,16 @@ function save(): void {
       rest = JSON.parse(extra.value) as Record<string, unknown>;
     } catch (err) {
       extraError.value = `Extra settings are not valid JSON: ${err instanceof Error ? err.message : String(err)}`;
-      return;
+      return null;
     }
   }
   const f = form.value;
-  const paper = f.paper === 'custom' ? customPaper.value : f.paper;
+  const paper = f.paper === 'custom' ? customPaper.value : paperParam(f.paper);
   if (!paper) {
     extraError.value = 'Custom paper needs a width and a height in points, e.g. 420, 595';
-    return;
+    return null;
   }
-  emit('update', {
+  return {
     ...rest,
     ...(f.printer ? { printer: f.printer } : {}),
     paper,
@@ -79,7 +88,15 @@ function save(): void {
     ...(f.center ? {} : { top: Math.max(0, f.topMm || 0) / MM_PER_IN, left: Math.max(0, f.leftMm || 0) / MM_PER_IN }),
     colorHandling: f.colorHandling,
     ...(f.emulsionDown ? { emulsionDown: true } : {}),
-  });
+  };
+}
+function save(): void {
+  const params = collect();
+  if (params) emit('update', params);
+}
+function apply(scope: 'all' | 'size'): void {
+  const params = collect();
+  if (params) emit('apply', params, scope);
 }
 </script>
 
@@ -96,7 +113,7 @@ function save(): void {
     <label>
       <span>Paper</span>
       <select v-model="form.paper">
-        <option v-for="p in papers" :key="p" :value="p">{{ p }}</option>
+        <option v-for="p in PAPER_OPTIONS" :key="p" :value="p">{{ /^a\d$/.test(p) ? p.toUpperCase() : p }}</option>
         <option value="custom">Custom (points)</option>
       </select>
     </label>
@@ -126,12 +143,17 @@ function save(): void {
       <textarea v-model="extra" rows="3" spellcheck="false" placeholder='{"printerSettings": "…hex from PhotoCraft Print Settings…"}'></textarea>
     </label>
     <p v-if="extraError" class="error">{{ extraError }}</p>
-    <div><button type="submit" class="primary">Save settings</button></div>
+    <div class="actions">
+      <button type="submit" class="primary">Save settings</button>
+      <button v-if="size" type="button" @click="apply('size')">Apply to all {{ size.toUpperCase() }} items</button>
+      <button type="button" @click="apply('all')">Apply to all items</button>
+    </div>
   </form>
 </template>
 
 <style scoped>
 .settings { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .6rem .9rem; align-items: end; padding: .3rem 0; }
-.wide { grid-column: 1 / -1; }
+.wide, .actions { grid-column: 1 / -1; }
+.actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 textarea { font-family: ui-monospace, monospace; font-size: .8rem; }
 </style>

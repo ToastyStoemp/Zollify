@@ -43,6 +43,15 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   a row's settings takes any further PhotoCraft print param as it is, including
   `printerSettings` (the Windows driver settings PhotoCraft's Print Settings
   dialog gives you) and `printerProfile`.
+- **Detect sizes** sets each item's paper from an A0-A6 size in its variant
+  name, else its product name ("A3", "Poster a4"; not "A3+"). A3-A5 go to
+  PhotoCraft by name, the other A sizes as points.
+- A row's settings can be applied to **all items of its size** (everything,
+  driver settings included) or to **all items**: there, items of another size
+  keep their own paper and get no `printerSettings`, because those carry the
+  driver's paper and PhotoCraft refuses a driver paper that differs from the
+  layout. So: set one item per size up with its driver settings, then apply
+  it to that size. Linked files are never touched.
 - **Print all** runs one `file.print` per queued row with `copies` set, then
   pushes an `inventory.set` op per printed row with the old count plus the
   copies - the same op a stock count in the web app makes. Stock counts what

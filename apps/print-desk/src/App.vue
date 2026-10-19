@@ -22,6 +22,8 @@ const filter = ref('');
 const login = reactive({ server: '', email: '', password: '', code: '', needs2fa: false });
 
 const links = computed<Record<string, PrintLink>>(() => (session.value && settings.value ? (settings.value.links[session.value.accountId] ?? {}) : {}));
+/** Over the whole catalogue, not the filtered rows, so the column does not come and go while typing a filter. */
+const hasSku = computed(() => rows.value.some((r) => r.sku));
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
   return q ? rows.value.filter((r) => `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)) : rows.value;
@@ -291,13 +293,13 @@ async function printAll(): Promise<void> {
 
     <table>
       <thead>
-        <tr><th>Product</th><th>SKU</th><th>On hand</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
+        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
       </thead>
       <tbody>
         <template v-for="row in shown" :key="row.key">
           <tr>
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
-            <td><code>{{ row.sku }}</code></td>
+            <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
             <td>
               <button type="button" class="quiet" :title="links[row.key]?.file" @click="pickFile(row)">{{ links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
@@ -319,7 +321,7 @@ async function printAll(): Promise<void> {
             </td>
           </tr>
           <tr v-if="open === row.key && links[row.key]" class="settings">
-            <td colspan="7">
+            <td :colspan="hasSku ? 7 : 6">
               <PrintSettings :params="links[row.key]!.params" :printers="printers" :papers="PAPERS" @update="saveLink(row.key, { file: links[row.key]!.file, params: $event })" />
             </td>
           </tr>

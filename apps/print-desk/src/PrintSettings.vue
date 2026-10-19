@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import type { DevModeSummary } from '../electron/devmode';
 import type { Printer } from '../electron/shared';
 import { PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
 
@@ -41,6 +42,27 @@ async function loadFromPhotoCraft(): Promise<void> {
     extraError.value = err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err);
   }
 }
+
+/** The driver settings in the JSON box, read out by name. */
+const driver = ref<DevModeSummary[] | null>(null);
+const driverHex = computed((): string => {
+  try {
+    const hex = (JSON.parse(extra.value || '{}') as Record<string, unknown>).printerSettings;
+    return typeof hex === 'string' ? hex : '';
+  } catch {
+    return '';
+  }
+});
+watch(
+  driverHex,
+  async (hex) => {
+    driver.value = null;
+    if (!hex) return;
+    const lines = await window.printDesk.photocraft.describeSettings(hex).catch(() => null);
+    if (hex === driverHex.value) driver.value = lines ?? [{ label: 'Driver settings', value: 'not readable as Windows driver settings' }];
+  },
+  { immediate: true },
+);
 
 // By content: an item without settings gets fresh defaults on every render, which must not wipe the form.
 watch(
@@ -164,6 +186,9 @@ function apply(scope: 'all' | 'size'): void {
       <span>Extra PhotoCraft print settings (JSON): printerSettings, printerProfile, intent, cornerCropMarks...</span>
       <textarea v-model="extra" rows="3" spellcheck="false" placeholder='{"printerSettings": "…hex from PhotoCraft Print Settings…"}'></textarea>
     </label>
+    <dl v-if="driver" class="driver wide" aria-label="Driver settings">
+      <template v-for="l in driver" :key="l.label"><dt>{{ l.label }}</dt><dd>{{ l.value }}</dd></template>
+    </dl>
     <p v-if="extraError" class="error">{{ extraError }}</p>
     <p v-if="loaded" class="loaded" role="status">{{ loaded }}</p>
     <div class="actions">
@@ -181,5 +206,8 @@ function apply(scope: 'all' | 'size'): void {
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .loaded, .error { grid-column: 1 / -1; margin: 0; }
 .loaded { color: var(--zfy-success); }
+.driver { display: grid; grid-template-columns: max-content 1fr; gap: .15rem .8rem; margin: 0; font-size: .85rem; }
+.driver dt { color: var(--zfy-muted); }
+.driver dd { margin: 0; }
 textarea { font-family: ui-monospace, monospace; font-size: .8rem; }
 </style>

@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('printDesk', {
     printers: invoke('photocraft:printers'),
     size: invoke('photocraft:size'),
     lastPrint: invoke('photocraft:lastPrint'),
+    describeSettings: invoke('photocraft:describeSettings'),
     print: invoke('photocraft:print'),
     onQueue: (cb) => {
       const handler = (_e, progress) => cb(progress);

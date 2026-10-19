@@ -1,4 +1,5 @@
 import type { CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
+import type { DevModeSummary } from '../electron/devmode';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
 declare module '*.vue' {
@@ -29,6 +30,8 @@ export interface PrintDeskApi {
     size(file: string): Promise<{ width: number; height: number }>;
     /** The settings of PhotoCraft's last print (File › Print), as an item's print params. */
     lastPrint(): Promise<Record<string, unknown>>;
+    /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */
+    describeSettings(hex: string): Promise<DevModeSummary[] | null>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
     /** Copies left per item, from the print queue, until each job leaves it. */
     onQueue(cb: (progress: CopyProgress) => void): () => void;

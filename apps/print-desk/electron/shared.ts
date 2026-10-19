@@ -117,6 +117,20 @@ export function sizeFromName(...names: string[]): string | null {
 }
 
 /**
+ * Settings turned to the orientation of the image they print: landscape when
+ * it is wider than tall, portrait when taller, unchanged when square. A turn
+ * drops the Windows driver settings, which carry their own orientation that
+ * PhotoCraft would refuse as a mismatch. `turned` says whether anything changed.
+ */
+export function orientFor(params: Record<string, unknown>, width: number, height: number): { params: Record<string, unknown>; turned: boolean; orientation: string } {
+  const current = params.orientation === 'landscape' ? 'landscape' : 'portrait';
+  const orientation = width > height ? 'landscape' : height > width ? 'portrait' : current;
+  if (orientation === current) return { params, turned: false, orientation };
+  const { printerSettings: _driver, ...rest } = params;
+  return { params: { ...rest, orientation }, turned: true, orientation };
+}
+
+/**
  * One item's settings copied onto another. Same size (or a target with no
  * size in its name): everything. Another size: the target keeps its own paper,
  * and the Windows driver settings (printerSettings) stay behind, because they

@@ -25,6 +25,8 @@ export interface PrintDeskApi {
   };
   photocraft: {
     printers(): Promise<Printer[]>;
+    /** An image's size in pixels, read by photocraft-cli. */
+    size(file: string): Promise<{ width: number; height: number }>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
     /** Copies left per item, from the print queue, until each job leaves it. */
     onQueue(cb: (progress: CopyProgress) => void): () => void;

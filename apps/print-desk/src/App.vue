@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
-import { isPrintFile, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import { isPrintFile, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -267,12 +267,36 @@ async function detectSizes(): Promise<void> {
     (noDriver ? ` ${noDriver} lost their driver settings (printerSettings), which were for another paper.` : '') +
     (unsized.length ? ` No size in the name: ${unsized.slice(0, 5).join(', ')}${unsized.length > 5 ? ` and ${unsized.length - 5} more` : ''}.` : '');
 }
-async function linkFile(row: CatalogRow, file: string): Promise<void> {
-  await saveLink(row.key, { file, params: links.value[row.key]?.params ?? defaultParams() });
+/**
+ * Links `file` to the row and turns its settings to the image's orientation
+ * (read by PhotoCraft). Returns what to tell the user about the orientation.
+ */
+async function linkFile(row: CatalogRow, file: string): Promise<string> {
+  const name = file.split(/[\\/]/).pop();
+  let params = links.value[row.key]?.params ?? defaultParams();
+  let note = '';
+  busy.value = `Reading ${name}`;
+  try {
+    const { width, height } = await api.photocraft.size(file);
+    const o = orientFor(params, width, height);
+    params = o.params;
+    if (o.turned) {
+      note = ` It is ${o.orientation} (${width} × ${height} px), so the print is now ${o.orientation}.`;
+      if (links.value[row.key]?.params.printerSettings) note += ' Its driver settings (printerSettings) were for the other orientation and were removed: set them again for this one.';
+    }
+  } catch (err) {
+    note = ` Could not read its size, so the orientation was left as it was (${err instanceof Error ? err.message : String(err)}).`;
+  } finally {
+    busy.value = '';
+  }
+  await saveLink(row.key, { file, params });
+  return note;
 }
 async function pickFile(row: CatalogRow): Promise<void> {
   const file = await api.pickFile();
-  if (file) await linkFile(row, file);
+  if (!file) return;
+  const note = await linkFile(row, file);
+  notice.value = note ? `Linked ${file.split(/[\\/]/).pop()}.${note}` : '';
 }
 
 // ── Drag a file from Explorer onto a row to link it ──
@@ -305,8 +329,8 @@ async function drop(row: CatalogRow, e: DragEvent): Promise<void> {
     error.value = `${file.name} is not an image PhotoCraft prints: use a PSD, PNG, JPG, TIFF or WebP file.`;
     return;
   }
-  await linkFile(row, path);
-  notice.value = `Linked ${file.name} to ${row.variant ? `${row.title} ${row.variant}` : row.title}.${files.length > 1 ? ` Only the first of the ${files.length} files was used.` : ''}`;
+  const note = await linkFile(row, path);
+  notice.value = `Linked ${file.name} to ${row.variant ? `${row.title} ${row.variant}` : row.title}.${note}${files.length > 1 ? ` Only the first of the ${files.length} files was used.` : ''}`;
 }
 function defaultParams(): Record<string, unknown> {
   const def = printers.value.find((p) => p.default)?.name;

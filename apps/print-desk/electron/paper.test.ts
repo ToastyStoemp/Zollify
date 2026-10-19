@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { paperName, paperParam, settingsFor, sizeFromName } from './shared.js';
+import { orientFor, paperName, paperParam, settingsFor, sizeFromName } from './shared.js';
+
+describe('orientFor', () => {
+  const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
+  it('turns to landscape for a wide image and drops the driver settings', () => {
+    expect(orientFor(portrait, 3000, 2000)).toEqual({ params: { paper: 'a3', orientation: 'landscape' }, turned: true, orientation: 'landscape' });
+  });
+  it('leaves matching or square images alone, driver settings included', () => {
+    expect(orientFor(portrait, 2000, 3000)).toEqual({ params: portrait, turned: false, orientation: 'portrait' });
+    expect(orientFor(portrait, 2000, 2000).turned).toBe(false);
+    expect(orientFor({ paper: 'a4' }, 2000, 3000).turned).toBe(false);
+  });
+});
 
 describe('sizeFromName', () => {
   it('reads A0-A6 as a whole word, variant before title', () => {

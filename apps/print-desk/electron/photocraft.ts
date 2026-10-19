@@ -23,7 +23,8 @@ async function cli(exe: string, args: string[], timeout = 0): Promise<Record<str
   if (!exe) throw new Error('Set the path to photocraft-cli first (it is installed with PhotoCraft).');
   let stdout: string;
   try {
-    ({ stdout } = await run(exe, args, { maxBuffer: 8 * 1024 * 1024, windowsHide: true, timeout }));
+    // info lists every layer: a big PSD's JSON can run to many megabytes.
+    ({ stdout } = await run(exe, args, { maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout }));
   } catch (err) {
     const e = err as { stderr?: string; message?: string; killed?: boolean };
     if (e.killed) throw new Error(`photocraft-cli did not answer within ${timeout / 1000} s`);
@@ -45,6 +46,15 @@ export async function printers(exe: string): Promise<Printer[]> {
   const out = await cli(exe, ['run', '--new', '{"width":8,"height":8}', '--cmd', 'file.print.printers'], 20_000);
   const result = out.result as { printers?: Printer[] } | undefined;
   return result?.printers ?? [];
+}
+
+/** An image's size in pixels, from `photocraft-cli info` (any file PhotoCraft opens, PSD included). */
+export async function imageSize(exe: string, file: string): Promise<{ width: number; height: number }> {
+  const out = await cli(exe, ['info', file, '--compact'], 60_000);
+  const width = Number(out.width);
+  const height = Number(out.height);
+  if (!(width > 0 && height > 0)) throw new Error('PhotoCraft did not report the image size');
+  return { width, height };
 }
 
 /** Prints one job through `file.print`; never throws, the outcome is the result. */

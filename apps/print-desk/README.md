@@ -39,7 +39,9 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
 - The catalogue is the account's op log (`/api/sync/pull`), reduced to one row
   per product or variant with its counted stock (`inventory.set`).
 - A file is linked with **Link a file**, or by dragging it from File Explorer
-  onto the row (PSD, PSB, PCRAFT, PNG, JPG, TIFF, WebP).
+  onto the row (PSD, PSB, PCRAFT, PNG, JPG, TIFF, WebP). Linking reads the
+  image size (`photocraft-cli info`) and sets portrait or landscape to match;
+  a turn drops `printerSettings`, which hold the old orientation.
 - Each row's file and `file.print` params live in `print-desk.json` in the app's
   user-data folder, keyed by account and `productId:variantId`. The JSON box in
   a row's settings takes any further PhotoCraft print param as it is, including

@@ -1,0 +1,38 @@
+:root {
+  --zfy-bg: #f1f4f6;
+  --zfy-surface: #fff;
+  --zfy-ink: #1c232b;
+  --zfy-muted: #5a6472;
+  --zfy-line: #d9dee4;
+  --zfy-primary: #2b6cb0;
+  --zfy-danger: #c6512f;
+  --zfy-success: #2f855a;
+  color-scheme: light dark;
+}
+/* Electron's nativeTheme drives this: the device's choice, or the one picked in the app. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --zfy-bg: #14181d;
+    --zfy-surface: #1e242b;
+    --zfy-ink: #e6eaee;
+    --zfy-muted: #9aa5b1;
+    --zfy-line: #333c46;
+    --zfy-primary: #4a8fd8;
+    --zfy-danger: #f08a6c;
+    --zfy-success: #5cc48d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--zfy-ink); background: var(--zfy-bg); }
+button { font: inherit; padding: .4rem .8rem; border-radius: 8px; border: 1px solid var(--zfy-line); background: var(--zfy-surface); color: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--zfy-primary); border-color: var(--zfy-primary); color: #fff; }
+button.quiet { border-color: transparent; background: transparent; }
+input, select, textarea { font: inherit; padding: .35rem .5rem; border-radius: 6px; border: 1px solid var(--zfy-line); background: var(--zfy-surface); color: inherit; }
+input[type='number'] { width: 4.5rem; }
+label { display: flex; flex-direction: column; gap: .25rem; font-size: .85rem; }
+label.inline { flex-direction: row; align-items: center; gap: .4rem; }
+code { font-family: ui-monospace, monospace; font-size: .8rem; }
+.muted { color: var(--zfy-muted); }
+.error { color: var(--zfy-danger); }
+.ok { color: var(--zfy-success); }

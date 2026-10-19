@@ -10,7 +10,11 @@ import type { Printer } from '../electron/shared';
 const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; papers: readonly string[] }>();
 const emit = defineEmits<{ update: [params: Record<string, unknown>] }>();
 
-const FIELDS = ['printer', 'paper', 'orientation', 'scaleToFit', 'scale', 'colorHandling', 'emulsionDown'] as const;
+const FIELDS = ['printer', 'paper', 'orientation', 'scaleToFit', 'scale', 'center', 'top', 'left', 'colorHandling', 'emulsionDown'] as const;
+
+/** PhotoCraft takes top/left in inches from the paper's top-left corner; the form shows millimetres. */
+const MM_PER_IN = 25.4;
+const toMm = (inches: unknown): number => Math.round((Number(inches) || 0) * MM_PER_IN * 10) / 10;
 
 const form = ref(fromParams(props.params));
 const extra = ref(extraOf(props.params));
@@ -29,6 +33,10 @@ function fromParams(p: Record<string, unknown>) {
     orientation: String(p.orientation ?? 'portrait'),
     scaleToFit: p.scaleToFit === true,
     scale: Number(p.scale ?? 100),
+    // PhotoCraft centres unless told otherwise.
+    center: p.center !== false,
+    topMm: toMm(p.top),
+    leftMm: toMm(p.left),
     colorHandling: String(p.colorHandling ?? 'printerManages'),
     emulsionDown: p.emulsionDown === true,
   };
@@ -67,6 +75,8 @@ function save(): void {
     orientation: f.orientation,
     scaleToFit: f.scaleToFit,
     ...(f.scaleToFit ? {} : { scale: f.scale > 0 ? f.scale : 100 }),
+    center: f.center,
+    ...(f.center ? {} : { top: Math.max(0, f.topMm || 0) / MM_PER_IN, left: Math.max(0, f.leftMm || 0) / MM_PER_IN }),
     colorHandling: f.colorHandling,
     ...(f.emulsionDown ? { emulsionDown: true } : {}),
   });
@@ -97,6 +107,11 @@ function save(): void {
     </label>
     <label class="inline"><input v-model="form.scaleToFit" type="checkbox" /> Scale to fit</label>
     <label v-if="!form.scaleToFit"><span>Scale %</span><input v-model.number="form.scale" type="number" min="1" max="1000" /></label>
+    <label class="inline"><input v-model="form.center" type="checkbox" /> Center on paper</label>
+    <template v-if="!form.center">
+      <label><span>From top (mm)</span><input v-model.number="form.topMm" type="number" min="0" step="0.5" /></label>
+      <label><span>From left (mm)</span><input v-model.number="form.leftMm" type="number" min="0" step="0.5" /></label>
+    </template>
     <label>
       <span>Colour</span>
       <select v-model="form.colorHandling">
@@ -107,7 +122,7 @@ function save(): void {
     </label>
     <label class="inline"><input v-model="form.emulsionDown" type="checkbox" /> Mirror (emulsion down)</label>
     <label class="wide">
-      <span>Extra PhotoCraft print settings (JSON): printerSettings, printerProfile, intent, top/left, cornerCropMarks...</span>
+      <span>Extra PhotoCraft print settings (JSON): printerSettings, printerProfile, intent, cornerCropMarks...</span>
       <textarea v-model="extra" rows="3" spellcheck="false" placeholder='{"printerSettings": "…hex from PhotoCraft Print Settings…"}'></textarea>
     </label>
     <p v-if="extraError" class="error">{{ extraError }}</p>

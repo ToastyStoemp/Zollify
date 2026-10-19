@@ -47,6 +47,11 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   a row's settings takes any further PhotoCraft print param as it is, including
   `printerSettings` (the Windows driver settings PhotoCraft's Print Settings
   dialog gives you) and `printerProfile`.
+- **Load from PhotoCraft**, in a row's settings, fills the form with the settings
+  of your last print in PhotoCraft (File › Print), driver settings and printer
+  profile included, read from PhotoCraft's preferences.json the way PhotoCraft
+  finds it. Save it, or apply it to all items of that size: set a print up once
+  in PhotoCraft per size, no copy and paste.
 - **Detect sizes** sets each item's paper from an A0-A6 size in its variant
   name, else its product name ("A3", "Poster a4"; not "A3+"). A3-A5 go to
   PhotoCraft by name, the other A sizes as points.

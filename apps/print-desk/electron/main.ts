@@ -1,7 +1,7 @@
 import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'electron';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findExe, imageSize, print, printers } from './photocraft.js';
+import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
 import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
@@ -90,6 +90,7 @@ void app.whenReady().then(() => {
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
   ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));
+  ipcMain.handle('photocraft:lastPrint', () => lastPrint(store.data.photocraft).catch(fail));
   // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
   const tracked = new Map<string, { printer: string; id: number; copies: number }>();
   let watcher: ReturnType<typeof setInterval> | undefined;

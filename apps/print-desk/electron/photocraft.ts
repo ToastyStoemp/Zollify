@@ -1,5 +1,8 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { PrintJob, PrintResult, Printer } from './shared.js';
 import { printParams } from './shared.js';
@@ -16,6 +19,65 @@ export function findExe(): string {
     '/usr/bin/photocraft-cli',
   ];
   return candidates.find((c) => existsSync(c)) ?? '';
+}
+
+// ── PhotoCraft's last print settings ──
+
+/**
+ * PhotoCraft's settings folder, picked the way PhotoCraft picks it (apps/photocraft/src/app_dirs.rs):
+ * PHOTOCRAFT_CONFIG_DIR, then a portable copy's PhotoCraftData beside the executable, then the
+ * platform folder.
+ */
+export function photocraftConfigDir(exe: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string {
+  if (env.PHOTOCRAFT_CONFIG_DIR) return env.PHOTOCRAFT_CONFIG_DIR;
+  const exeDir = exe ? dirname(exe) : '';
+  if (exeDir && ['portable.txt', 'PhotoCraft.portable'].some((m) => existsSync(join(exeDir, m)))) return join(exeDir, 'PhotoCraftData');
+  if (platform === 'win32') return join(env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), 'Photocraft');
+  if (platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'Photocraft');
+  return join(env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'photocraft');
+}
+
+/** Keys of PhotoCraft's remembered print that are not print settings of an item. */
+const NOT_SETTINGS = ['copies', 'units', 'output', 'dryRun', 'send', 'printable'];
+
+/**
+ * The settings of PhotoCraft's last print (File › Print remembers them in its preferences), as an
+ * item's `file.print` params: copies and dialog-only keys dropped. PhotoCraft's Windows dialog takes
+ * the paper from the driver already turned, with orientation "portrait"; a wider-than-tall paper is
+ * stored here as the portrait paper with orientation "landscape", the same page, so the paper picker
+ * still names it ("A3", not a custom size).
+ */
+export function printSettingsFrom(preferences: unknown): Record<string, unknown> | null {
+  const dialogs = (preferences as { dialogs?: Record<string, unknown> } | null)?.dialogs;
+  const last = dialogs?.['file.print'];
+  if (!last || typeof last !== 'object' || Array.isArray(last)) return null;
+  const params = Object.fromEntries(Object.entries(last as Record<string, unknown>).filter(([k]) => !NOT_SETTINGS.includes(k)));
+  const paper = params.paper;
+  if (Array.isArray(paper) && paper.length === 2 && Number(paper[0]) > Number(paper[1]) && params.orientation !== 'landscape') {
+    params.paper = [paper[1], paper[0]];
+    params.orientation = 'landscape';
+  }
+  return params;
+}
+
+/** PhotoCraft's last print settings, or an error that says how to get some. */
+export async function lastPrint(exe: string): Promise<Record<string, unknown>> {
+  const file = join(photocraftConfigDir(exe), 'preferences.json');
+  let text: string;
+  try {
+    text = await readFile(file, 'utf8');
+  } catch {
+    throw new Error(`PhotoCraft's settings were not found at ${file}. Print once from PhotoCraft (File › Print) first.`);
+  }
+  let prefs: unknown;
+  try {
+    prefs = JSON.parse(text);
+  } catch {
+    throw new Error(`PhotoCraft's settings file could not be read (${file}).`);
+  }
+  const params = printSettingsFrom(prefs);
+  if (!params) throw new Error('PhotoCraft has no print settings yet. Set up a print in PhotoCraft (File › Print) and print it once; PhotoCraft then remembers those settings.');
+  return params;
 }
 
 /** `photocraft-cli run` with one command; its JSON result, or the CLI's error text. */

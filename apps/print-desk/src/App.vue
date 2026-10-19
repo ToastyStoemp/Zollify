@@ -97,9 +97,22 @@ function stopQr(): void {
   pollTimer = undefined;
   link = null;
 }
+/** An http(s) address with a host: localhost and bare IPs included. */
+function serverOk(s: string): boolean {
+  try {
+    const u = new URL(s.trim());
+    return (u.protocol === 'https:' || u.protocol === 'http:') && !!u.hostname;
+  } catch {
+    return false;
+  }
+}
 async function startQr(): Promise<void> {
   stopQr();
   error.value = '';
+  if (!serverOk(login.server)) {
+    error.value = 'Enter your Zollify server address first, e.g. https://zollify.example.com';
+    return;
+  }
   qr.mode = true;
   qr.state = 'waiting';
   qr.value = '';
@@ -240,7 +253,7 @@ async function printAll(): Promise<void> {
       <label v-if="login.needs2fa"><span>Authenticator code</span><input v-model="login.code" inputmode="numeric" autocomplete="one-time-code" /></label>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <button type="submit" class="primary" :disabled="!!busy">{{ busy || 'Sign in' }}</button>
-      <button type="button" class="quiet" :disabled="!!busy || !/^https?:\/\/\S+\.\S+/.test(login.server)" @click="startQr">Sign in from another device with a QR code</button>
+      <button type="button" class="quiet" :disabled="!!busy" @click="startQr">Sign in from another device with a QR code</button>
     </form>
   </main>
 

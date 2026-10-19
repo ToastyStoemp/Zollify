@@ -19,13 +19,14 @@ export function findExe(): string {
 }
 
 /** `photocraft-cli run` with one command; its JSON result, or the CLI's error text. */
-async function cli(exe: string, args: string[]): Promise<Record<string, unknown>> {
+async function cli(exe: string, args: string[], timeout = 0): Promise<Record<string, unknown>> {
   if (!exe) throw new Error('Set the path to photocraft-cli first (it is installed with PhotoCraft).');
   let stdout: string;
   try {
-    ({ stdout } = await run(exe, args, { maxBuffer: 8 * 1024 * 1024, windowsHide: true }));
+    ({ stdout } = await run(exe, args, { maxBuffer: 8 * 1024 * 1024, windowsHide: true, timeout }));
   } catch (err) {
-    const e = err as { stderr?: string; message?: string };
+    const e = err as { stderr?: string; message?: string; killed?: boolean };
+    if (e.killed) throw new Error(`photocraft-cli did not answer within ${timeout / 1000} s`);
     const text = (e.stderr || e.message || 'photocraft-cli failed').trim();
     const line = text.split('\n').find((l) => l.startsWith('error:'));
     throw new Error(line ? line.replace(/^error:\s*/, '') : text);
@@ -40,7 +41,8 @@ async function cli(exe: string, args: string[]): Promise<Record<string, unknown>
 }
 
 export async function printers(exe: string): Promise<Printer[]> {
-  const out = await cli(exe, ['run', '--new', '{"width":8,"height":8}', '--cmd', 'file.printers']);
+  // file.print.printers, not file.printers: on Windows (PhotoCraft 0.10.0) file.printers hangs, this one asks the spooler directly.
+  const out = await cli(exe, ['run', '--new', '{"width":8,"height":8}', '--cmd', 'file.print.printers'], 20_000);
   const result = out.result as { printers?: Printer[] } | undefined;
   return result?.printers ?? [];
 }

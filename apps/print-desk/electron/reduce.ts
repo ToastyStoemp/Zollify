@@ -1,13 +1,21 @@
 import type { InventoryItem, Product } from '@zollify/shared';
 import { stockKey, type CatalogRow } from './shared.js';
 
+/**
+ * Print Desk only prints art prints. Same rule as customs' isArtwork
+ * (modules/customs-ch/src/lib/artwork.ts): case-insensitive, plural and a
+ * missing space allowed. A copy, because @zollify/shared is TS source the
+ * Electron main process cannot load at runtime.
+ */
+export const isArtPrint = (type?: string | null): boolean => /^art\s*prints?$/i.test((type ?? '').trim());
+
 export interface PulledOp {
   type: string;
   payload: unknown;
 }
 
 /**
- * The live catalogue and inventory from an account's op log: product.upsert /
+ * The live art prints and their inventory from an account's op log: product.upsert /
  * product.delete and inventory.set, last writer wins by updatedAt - the same
  * rules the server and the web app apply.
  */
@@ -34,7 +42,7 @@ export function catalogRows(ops: PulledOp[]): CatalogRow[] {
   }
   const rows: CatalogRow[] = [];
   for (const p of products.values()) {
-    if (p.deletedAt) continue;
+    if (p.deletedAt || !isArtPrint(p.type)) continue;
     const variants = p.variants ?? [];
     const row = (variantId: string, variant: string, sku: string): CatalogRow => {
       const key = stockKey(p.id, variantId);

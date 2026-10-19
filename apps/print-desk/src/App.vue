@@ -308,7 +308,7 @@ async function printAll(): Promise<void> {
         </template>
       </tbody>
     </table>
-    <p v-if="!rows.length && !busy" class="muted">No products yet. Add products in Zollify, then reload.</p>
+    <p v-if="!rows.length && !busy" class="muted">No art prints yet. Give products the type "Art Print" in Zollify's catalogue, then reload.</p>
   </main>
 </template>
 

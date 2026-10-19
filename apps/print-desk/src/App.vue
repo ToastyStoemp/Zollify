@@ -6,6 +6,12 @@ import { isPrintFile, paperName, paperParam, settingsFor, sizeFromName } from '.
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
+/**
+ * A plain copy for IPC. Anything read from `settings` (a row's params) is a
+ * Vue reactive proxy, which Electron cannot send: "An object could not be
+ * cloned". Every object argument that may hold such values goes through this.
+ */
+const plain = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const settings = ref<Settings | null>(null);
 const session = ref<Session | null>(null);
@@ -177,19 +183,15 @@ async function signOut(): Promise<void> {
   rows.value = [];
 }
 
-/**
- * Writes this account's links: `change` gets a plain copy to edit. Plain
- * because IPC cannot clone Vue's reactive proxies ("An object could not be
- * cloned"), and the links are JSON on disk anyway.
- */
+/** Writes this account's links: `change` edits a copy, which is sent as plain JSON whatever was put in it. */
 async function writeLinks(change: (mine: Record<string, PrintLink>) => void): Promise<void> {
   if (!settings.value || !session.value) return;
   const acc = session.value.accountId;
-  const all = JSON.parse(JSON.stringify(settings.value.links)) as Settings['links'];
+  const all = plain(settings.value.links);
   const mine = (all[acc] ??= {});
   change(mine);
   try {
-    settings.value = await api.settings.set({ links: all });
+    settings.value = await api.settings.set({ links: plain(all) });
   } catch (err) {
     error.value = `Could not save the print settings: ${err instanceof Error ? err.message : String(err)}`;
     throw err;
@@ -329,7 +331,7 @@ async function printAll(): Promise<void> {
   for (const k of Object.keys(progress)) if (progress[k]!.done) delete progress[k];
   for (const j of jobs) progress[j.key] = { key: j.key, copies: j.copies, left: j.copies, status: 'Waiting', done: false };
   await guard(`Sending ${totalCopies.value} copies`, async () => {
-    const done = await api.photocraft.print(jobs);
+    const done = await api.photocraft.print(plain(jobs));
     const printed = done.filter((r) => r.ok);
     if (settings.value?.addToStock && printed.length) {
       const byKey = new Map(rows.value.map((r) => [r.key, r]));

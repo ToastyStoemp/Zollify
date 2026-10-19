@@ -1,8 +1,9 @@
 import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'electron';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findExe, print, printers } from './photocraft.js';
-import type { PrintJob, PrintResult, Settings } from './shared.js';
+import type { CopyProgress, PrintJob, PrintResult, Settings } from './shared.js';
+import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 
@@ -88,13 +89,57 @@ void app.whenReady().then(() => {
   ipcMain.handle('zollify:setOnHand', (_e, items: { productId: string; variantId: string; onHand: number }[]) => zollify.setOnHand(items).catch(fail));
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
-  ipcMain.handle('photocraft:print', async (e, jobs: PrintJob[]): Promise<PrintResult[]> => {
+  // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
+  const tracked = new Map<string, { printer: string; id: number; copies: number }>();
+  let watcher: ReturnType<typeof setInterval> | undefined;
+  let polling = false;
+  const report = (p: CopyProgress): void => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('spooler:progress', p);
+  };
+  async function poll(): Promise<void> {
+    if (polling) return;
+    polling = true;
+    try {
+      const snap = await snapshot();
+      if (!snap) return; // the query failed this time; keep the jobs and try again
+      for (const [key, t] of tracked) {
+        const job = snap.jobs.find((j) => j.printer === t.printer && j.id === t.id);
+        const p = progressOf(key, t.copies, job, snap.printers.find((pr) => pr.name === t.printer));
+        report(p);
+        if (p.done) tracked.delete(key);
+      }
+    } finally {
+      polling = false;
+      if (!tracked.size) {
+        clearInterval(watcher);
+        watcher = undefined;
+      }
+    }
+  }
+
+  ipcMain.handle('photocraft:print', async (_e, jobs: PrintJob[]): Promise<PrintResult[]> => {
     // One at a time: the printer queue is sequential anyway, and the results stay in order.
     const results: PrintResult[] = [];
     for (const job of jobs) {
+      report({ key: job.key, copies: job.copies, left: job.copies, status: 'Sending to PhotoCraft', done: false });
+      const before = await snapshot();
       const r = await print(store.data.photocraft, job);
       results.push(r);
-      e.sender.send('photocraft:progress', r);
+      if (!r.ok) {
+        report({ key: job.key, copies: job.copies, left: 0, status: r.message, done: true, failed: true });
+        continue;
+      }
+      const after = before && (await snapshot());
+      const printer = after ? targetPrinter(after, job.params.printer) : '';
+      const spooled = before && after ? newJob(before, after, printer, basename(job.file)) : undefined;
+      if (!spooled) {
+        // No Windows queue to follow, or the job already left it: sent is as far as we can see.
+        report({ key: job.key, copies: job.copies, left: 0, status: r.message, done: true });
+        continue;
+      }
+      tracked.set(job.key, { printer: spooled.printer, id: spooled.id, copies: job.copies });
+      report(progressOf(job.key, job.copies, spooled, after!.printers.find((p) => p.name === spooled.printer)));
+      watcher ??= setInterval(() => void poll(), 2000);
     }
     return results;
   });

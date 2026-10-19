@@ -19,10 +19,10 @@ contextBridge.exposeInMainWorld('printDesk', {
   photocraft: {
     printers: invoke('photocraft:printers'),
     print: invoke('photocraft:print'),
-    onProgress: (cb) => {
-      const handler = (_e, result) => cb(result);
-      ipcRenderer.on('photocraft:progress', handler);
-      return () => ipcRenderer.off('photocraft:progress', handler);
+    onQueue: (cb) => {
+      const handler = (_e, progress) => cb(progress);
+      ipcRenderer.on('spooler:progress', handler);
+      return () => ipcRenderer.off('spooler:progress', handler);
     },
   },
 });

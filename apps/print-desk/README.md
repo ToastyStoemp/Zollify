@@ -39,4 +39,11 @@ That builds the renderer (Vite) and the main process (tsc) and starts Electron.
   dialog gives you) and `printerProfile`.
 - **Print all** runs one `file.print` per queued row with `copies` set, then
   pushes an `inventory.set` op per printed row with the old count plus the
-  copies - the same op a stock count in the web app makes.
+  copies - the same op a stock count in the web app makes. Stock counts what
+  was sent; a job cancelled in the print queue afterwards is not taken back.
+- On Windows, each job is then followed in the print queue (`Win32_PrintJob`,
+  every 2 s) until it leaves it. PhotoCraft prints every copy as one page of
+  the job, so pages printed is copies done; the row shows a bar, the driver's
+  status and printer problems (no paper, offline...), and the toolbar the
+  copies left in the whole run. "Printed" is what the driver has sent to the
+  printer. Elsewhere a job shows as sent, without progress.

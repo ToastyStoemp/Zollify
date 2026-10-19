@@ -1,4 +1,4 @@
-import type { CatalogRow, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
+import type { CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
 declare module '*.vue' {
@@ -24,7 +24,8 @@ export interface PrintDeskApi {
   photocraft: {
     printers(): Promise<Printer[]>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
-    onProgress(cb: (result: PrintResult) => void): () => void;
+    /** Copies left per item, from the print queue, until each job leaves it. */
+    onQueue(cb: (progress: CopyProgress) => void): () => void;
   };
 }
 

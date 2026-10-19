@@ -32,6 +32,17 @@ export interface PrintResult {
   message: string;
 }
 
+/** One item of a print run: copies still to print, as far as the print queue says. */
+export interface CopyProgress {
+  key: string;
+  copies: number;
+  left: number;
+  /** Driver job status, a printer problem, or why the job never reached the queue. */
+  status: string;
+  done: boolean;
+  failed?: boolean;
+}
+
 export interface Settings {
   server: string;
   /** Path to photocraft-cli (or photocraft-cli.exe). */

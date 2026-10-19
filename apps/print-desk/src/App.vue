@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
-import type { CatalogRow, PrintLink, PrintResult, Printer, Session, Settings, Theme } from '../electron/shared';
+import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
 import { PAPERS } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
@@ -12,7 +12,8 @@ const session = ref<Session | null>(null);
 const rows = ref<CatalogRow[]>([]);
 const printers = ref<Printer[]>([]);
 const qty = reactive<Record<string, number>>({});
-const results = reactive<Record<string, PrintResult>>({});
+/** Per item of the current or last print run: copies left, from the print queue. */
+const progress = reactive<Record<string, CopyProgress>>({});
 const open = ref<string | null>(null);
 const busy = ref('');
 const error = ref('');
@@ -27,6 +28,11 @@ const shown = computed(() => {
 });
 const queued = computed(() => rows.value.filter((r) => (qty[r.key] ?? 0) > 0 && links.value[r.key]?.file));
 const totalCopies = computed(() => queued.value.reduce((n, r) => n + (qty[r.key] ?? 0), 0));
+/** Copies of the current run not printed yet; null once nothing is printing. */
+const copiesLeft = computed(() => {
+  const active = Object.values(progress).filter((p) => !p.done);
+  return active.length ? Object.values(progress).reduce((n, p) => n + p.left, 0) : null;
+});
 
 async function guard<T>(what: string, fn: () => Promise<T>): Promise<T | undefined> {
   busy.value = what;
@@ -46,8 +52,8 @@ onMounted(async () => {
   login.server = settings.value.server || 'https://';
   session.value = await api.zollify.resume();
   if (session.value) await loadAll();
-  api.photocraft.onProgress((r) => {
-    results[r.key] = r;
+  api.photocraft.onQueue((p) => {
+    progress[p.key] = p;
   });
 });
 
@@ -198,8 +204,10 @@ async function toggleAddToStock(on: boolean): Promise<void> {
 
 async function printAll(): Promise<void> {
   const jobs = queued.value.map((r) => ({ key: r.key, file: links.value[r.key]!.file, params: links.value[r.key]!.params, copies: qty[r.key]! }));
-  for (const j of jobs) delete results[j.key];
-  await guard(`Printing ${totalCopies.value} copies`, async () => {
+  // A new run starts a fresh count; rows from a finished run drop out of it.
+  for (const k of Object.keys(progress)) if (progress[k]!.done) delete progress[k];
+  for (const j of jobs) progress[j.key] = { key: j.key, copies: j.copies, left: j.copies, status: 'Waiting', done: false };
+  await guard(`Sending ${totalCopies.value} copies`, async () => {
     const done = await api.photocraft.print(jobs);
     const printed = done.filter((r) => r.ok);
     if (settings.value?.addToStock && printed.length) {
@@ -279,6 +287,7 @@ async function printAll(): Promise<void> {
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>
     </div>
+    <p v-if="copiesLeft !== null" class="queue" role="status">Printing: <strong>{{ copiesLeft }}</strong> {{ copiesLeft === 1 ? 'copy' : 'copies' }} left, as the print queue reports it</p>
 
     <table>
       <thead>
@@ -298,7 +307,16 @@ async function printAll(): Promise<void> {
               <button v-if="links[row.key]" type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file" /></td>
-            <td :class="results[row.key]?.ok ? 'ok' : 'error'">{{ results[row.key]?.message }}</td>
+            <td>
+              <template v-if="progress[row.key]">
+                <span v-if="progress[row.key]!.failed" class="error">{{ progress[row.key]!.status }}</span>
+                <span v-else-if="progress[row.key]!.done" class="ok">{{ progress[row.key]!.copies }} printed</span>
+                <template v-else>
+                  <progress :max="progress[row.key]!.copies" :value="progress[row.key]!.copies - progress[row.key]!.left"></progress>
+                  <div>{{ progress[row.key]!.copies - progress[row.key]!.left }} / {{ progress[row.key]!.copies }} · {{ progress[row.key]!.status }}</div>
+                </template>
+              </template>
+            </td>
           </tr>
           <tr v-if="open === row.key && links[row.key]" class="settings">
             <td colspan="7">
@@ -330,4 +348,6 @@ table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); 
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }
 tr.settings td { background: var(--zfy-bg); }
+.queue { margin: 0; }
+td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

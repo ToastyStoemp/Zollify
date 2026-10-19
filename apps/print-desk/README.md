@@ -18,11 +18,17 @@ settings never leave this computer; only the stock count goes to Zollify.
 
 ## Run
 
+On Windows, double-click **Print Desk.cmd** in this folder (or a shortcut to
+it on the desktop). It installs the dependencies on first run, then builds and
+starts the app; its console window stays open while the app runs.
+
+From a terminal at the repo root:
+
 ```bash
 npm run start -w @zollify/print-desk
 ```
 
-That builds the renderer (Vite) and the main process (tsc) and starts Electron.
+Both build the renderer (Vite) and the main process (tsc) and start Electron.
 
 ## How it works
 

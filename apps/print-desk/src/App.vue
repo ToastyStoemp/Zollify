@@ -253,6 +253,34 @@ async function applySettings(source: CatalogRow, params: Record<string, unknown>
   notice.value = `Print settings applied to ${targets.length} ${what}. Items of another size keep their own paper; their driver settings are set to it when they print.`;
 }
 
+/** "Fill from last event": each item's print count = what the last closed event sold of it. */
+async function fillFromLastEvent(): Promise<void> {
+  const found = await guard('Reading the last closed event', () => api.zollify.lastEventSold());
+  if (found === undefined) return;
+  if (!found) {
+    notice.value = 'No closed event yet: close an event in Zollify, then fill from it.';
+    return;
+  }
+  const { event, sold } = found;
+  const name = event.name || 'the last event';
+  const dates = event.dateStart ? ` (${event.dateStart}${event.dateEnd && event.dateEnd !== event.dateStart ? ` to ${event.dateEnd}` : ''})` : '';
+  let copies = 0;
+  let items = 0;
+  const noFile: string[] = [];
+  for (const r of rows.value) {
+    const n = sold[r.key] ?? 0;
+    qty[r.key] = n;
+    if (!n) continue;
+    copies += n;
+    items++;
+    if (!links.value[r.key]?.file) noFile.push(r.variant ? `${r.title} ${r.variant}` : r.title);
+  }
+  notice.value = items
+    ? `Filled from ${name}${dates}: ${copies} ${copies === 1 ? 'copy' : 'copies'} of ${items} ${items === 1 ? 'item' : 'items'} sold.` +
+      (noFile.length ? ` No file linked, so not printed: ${noFile.slice(0, 5).join(', ')}${noFile.length > 5 ? ` and ${noFile.length - 5} more` : ''}.` : '')
+    : `${name}${dates} sold no art prints. Print counts are cleared.`;
+}
+
 /** "Detect sizes": the paper of every item whose name says A0-A6. */
 async function detectSizes(): Promise<void> {
   let changed = 0;
@@ -448,6 +476,7 @@ async function printAll(): Promise<void> {
       <input v-model="filter" type="search" placeholder="Filter products" />
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
       <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
+      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to the copies the last closed event sold" @click="fillFromLastEvent">Fill from last event</button>
       <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>

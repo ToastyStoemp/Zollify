@@ -1,5 +1,6 @@
 import type { CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DevModeSummary } from '../electron/devmode';
+import type { EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
 declare module '*.vue' {
@@ -22,6 +23,8 @@ export interface PrintDeskApi {
     linkPoll(id: string, pollSecret: string): Promise<LinkPoll>;
     logout(): Promise<void>;
     catalog(): Promise<CatalogRow[]>;
+    /** Copies the last closed event sold per stock key; null when no event is closed. */
+    lastEventSold(): Promise<EventSold | null>;
     setOnHand(items: { productId: string; variantId: string; onHand: number }[]): Promise<void>;
   };
   photocraft: {

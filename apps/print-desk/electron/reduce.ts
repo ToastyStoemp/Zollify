@@ -54,3 +54,66 @@ export function catalogRows(ops: PulledOp[]): CatalogRow[] {
   rows.sort((a, b) => `${a.title} ${a.variant}`.localeCompare(`${b.title} ${b.variant}`));
   return rows;
 }
+
+/** What the last closed event sold, per stock key. */
+export interface EventSold {
+  event: { id: string; name: string; dateStart?: string; dateEnd?: string };
+  sold: Record<string, number>;
+}
+
+interface EventLike {
+  id: string;
+  name?: string;
+  kind?: string;
+  status?: string;
+  dateStart?: string;
+  dateEnd?: string;
+  updatedAt: number;
+  deletedAt?: number;
+}
+
+/**
+ * The last closed event (by end date, else start date, else when it last changed; stores are
+ * not events) and the copies it sold of each item: tx.create lines of that event, less reverted
+ * sales (tx.revert). Events reduce as the server does: event.upsert last writer wins, event.close
+ * closes. null when no event is closed.
+ * ponytail: sales of products merged away later (product.merge) stay under the old product, which
+ * Print Desk no longer lists; map them through the merges if that comes up.
+ */
+export function lastClosedEventSold(ops: PulledOp[]): EventSold | null {
+  const events = new Map<string, EventLike>();
+  const txs = new Map<string, { eventId: string; items: { pid: string; vid: string | null; qty: number }[] }>();
+  const reverted = new Set<string>();
+  for (const op of ops) {
+    if (op.type === 'event.upsert') {
+      const e = op.payload as EventLike;
+      const cur = events.get(e.id);
+      if (!cur || e.updatedAt >= cur.updatedAt) events.set(e.id, e);
+    } else if (op.type === 'event.close') {
+      const { eventId, updatedAt } = op.payload as { eventId: string; updatedAt: number };
+      const e = events.get(eventId);
+      if (e && updatedAt >= e.updatedAt) events.set(eventId, { ...e, status: 'closed', updatedAt });
+    } else if (op.type === 'tx.create') {
+      const tx = op.payload as { id: string; eventId: string; items?: { pid: string; vid: string | null; qty: number }[] };
+      if (!txs.has(tx.id)) txs.set(tx.id, { eventId: tx.eventId, items: tx.items ?? [] });
+    } else if (op.type === 'tx.revert') {
+      // ZollTool wrote `txId`, Zollify writes `id` (as the server reads it).
+      const p = op.payload as { txId?: string; id?: string };
+      reverted.add(p.txId ?? p.id ?? '');
+    }
+  }
+  const when = (e: EventLike): string => e.dateEnd || e.dateStart || '';
+  const closed = [...events.values()].filter((e) => e.status === 'closed' && !e.deletedAt && e.kind !== 'store');
+  closed.sort((a, b) => when(b).localeCompare(when(a)) || b.updatedAt - a.updatedAt);
+  const event = closed[0];
+  if (!event) return null;
+  const sold: Record<string, number> = {};
+  for (const [id, tx] of txs) {
+    if (tx.eventId !== event.id || reverted.has(id)) continue;
+    for (const item of tx.items) {
+      const key = stockKey(item.pid, item.vid);
+      sold[key] = (sold[key] ?? 0) + (Number(item.qty) || 0);
+    }
+  }
+  return { event: { id: event.id, name: event.name ?? '', dateStart: event.dateStart, dateEnd: event.dateEnd }, sold };
+}

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('printDesk', {
     linkPoll: invoke('zollify:linkPoll'),
     logout: invoke('zollify:logout'),
     catalog: invoke('zollify:catalog'),
+    lastEventSold: invoke('zollify:lastEventSold'),
     setOnHand: invoke('zollify:setOnHand'),
   },
   photocraft: {

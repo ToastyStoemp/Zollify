@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { catalogRows } from './reduce.js';
+import { catalogRows, lastClosedEventSold, type EventSold, type PulledOp } from './reduce.js';
 import type { CatalogRow, Session } from './shared.js';
 
 /** Zollify's answer to a login or refresh: a native client gets the refresh token in the body. */
@@ -154,7 +154,17 @@ export class Zollify {
 
   /** The whole op log, reduced to one row per sellable item with its counted stock. */
   async catalog(): Promise<CatalogRow[]> {
-    const ops: { type: string; payload: unknown }[] = [];
+    return catalogRows(await this.pullAll());
+  }
+
+  /** What the last closed event sold, per item; null when no event is closed. */
+  async lastEventSold(): Promise<EventSold | null> {
+    return lastClosedEventSold(await this.pullAll());
+  }
+
+  /** Every op this user may read, in order. */
+  private async pullAll(): Promise<PulledOp[]> {
+    const ops: PulledOp[] = [];
     let since = 0;
     for (;;) {
       const page = await this.request<{ ops: { serverSeq: number; type: string; payload: unknown }[]; latestSeq: number }>(`/api/sync/pull?since=${since}&limit=1000`);
@@ -163,7 +173,7 @@ export class Zollify {
       if (!page.ops.length || last >= page.latestSeq) break;
       since = last;
     }
-    return catalogRows(ops);
+    return ops;
   }
 
   /** Counts stock: each item's new on-hand figure, as the web app's stock count does. */

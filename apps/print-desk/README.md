@@ -81,6 +81,10 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
 - A row's settings can be applied to **all items of its size** or to **all
   items** (without global settings): items of another size keep their own
   paper, and the driver settings go along. Linked files are never touched.
+- **Fill from last event** sets every item's print count to the copies the
+  last closed event sold of it (the closed event that ended last, stores not
+  counted), less reverted sales. Items it sold none of go to 0. Items without a
+  linked file are named, as they cannot print.
 - **Print all** runs one `file.print` per queued row with `copies` set, then
   pushes an `inventory.set` op per printed row with the old count plus the
   copies - the same op a stock count in the web app makes. Stock counts what

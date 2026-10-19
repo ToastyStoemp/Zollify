@@ -12,7 +12,8 @@ settings never leave this computer; only the stock count goes to Zollify.
 - [PhotoCraft](https://getartcraft.com/apps/photocraft) installed - the app runs
   its `photocraft-cli` for every print (`file.print`), so printers, paper and
   colour handling are PhotoCraft's. The usual install folder is found on its
-  own; otherwise point the app at `photocraft-cli` with **Browse**.
+  own; otherwise point the app at `photocraft-cli` with **Browse**. A local
+  development build works the same way: Browse to its `photocraft-cli.exe`.
 - A Zollify account on a server you can reach. Sign in as an owner or admin:
   staff cannot change the inventory.
 
@@ -40,8 +41,11 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   per product or variant with its counted stock (`inventory.set`).
 - A file is linked with **Link a file**, or by dragging it from File Explorer
   onto the row (PSD, PSB, PCRAFT, PNG, JPG, TIFF, WebP). Linking reads the
-  image size (`photocraft-cli info`) and sets portrait or landscape to match;
-  a turn drops `printerSettings`, which hold the old orientation.
+  image size (`photocraft-cli info`) and sets portrait or landscape to match.
+  The driver settings (`printerSettings`) are kept: a PhotoCraft with the
+  Orientation change (storytold/photocraft#7847) turns them to the layout when
+  it prints. PhotoCraft 0.10.0 refuses a landscape layout on portrait driver
+  settings, so with it, set landscape in PhotoCraft's Print Settings… first.
 - Each row's file and `file.print` params live in `print-desk.json` in the app's
   user-data folder, keyed by account and `productId:variantId`. The JSON box in
   a row's settings takes any further PhotoCraft print param as it is, including

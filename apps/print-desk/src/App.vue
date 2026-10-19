@@ -282,7 +282,7 @@ async function linkFile(row: CatalogRow, file: string): Promise<string> {
     params = o.params;
     if (o.turned) {
       note = ` It is ${o.orientation} (${width} × ${height} px), so the print is now ${o.orientation}.`;
-      if (links.value[row.key]?.params.printerSettings) note += ' Its driver settings (printerSettings) were for the other orientation and were removed: set them again for this one.';
+      if (params.printerSettings) note += ' Its driver settings were kept; PhotoCraft turns them to match when it prints.';
     }
   } catch (err) {
     note = ` Could not read its size, so the orientation was left as it was (${err instanceof Error ? err.message : String(err)}).`;

@@ -3,8 +3,8 @@ import { orientFor, paperName, paperParam, settingsFor, sizeFromName } from './s
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
-  it('turns to landscape for a wide image and drops the driver settings', () => {
-    expect(orientFor(portrait, 3000, 2000)).toEqual({ params: { paper: 'a3', orientation: 'landscape' }, turned: true, orientation: 'landscape' });
+  it('turns to landscape for a wide image and keeps the driver settings for PhotoCraft to turn', () => {
+    expect(orientFor(portrait, 3000, 2000)).toEqual({ params: { paper: 'a3', orientation: 'landscape', printerSettings: 'hex' }, turned: true, orientation: 'landscape' });
   });
   it('leaves matching or square images alone, driver settings included', () => {
     expect(orientFor(portrait, 2000, 3000)).toEqual({ params: portrait, turned: false, orientation: 'portrait' });

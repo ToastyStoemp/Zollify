@@ -118,16 +118,19 @@ export function sizeFromName(...names: string[]): string | null {
 
 /**
  * Settings turned to the orientation of the image they print: landscape when
- * it is wider than tall, portrait when taller, unchanged when square. A turn
- * drops the Windows driver settings, which carry their own orientation that
- * PhotoCraft would refuse as a mismatch. `turned` says whether anything changed.
+ * it is wider than tall, portrait when taller, unchanged when square. `turned`
+ * says whether anything changed.
+ *
+ * The Windows driver settings (printerSettings) are kept: they hold the paper
+ * type, quality and tray, and a PhotoCraft build with the Orientation change
+ * (storytold/photocraft#7847) turns them to the layout when it prints. PhotoCraft
+ * 0.10.0 refuses a landscape layout on portrait settings either way, kept or not.
  */
 export function orientFor(params: Record<string, unknown>, width: number, height: number): { params: Record<string, unknown>; turned: boolean; orientation: string } {
   const current = params.orientation === 'landscape' ? 'landscape' : 'portrait';
   const orientation = width > height ? 'landscape' : height > width ? 'portrait' : current;
   if (orientation === current) return { params, turned: false, orientation };
-  const { printerSettings: _driver, ...rest } = params;
-  return { params: { ...rest, orientation }, turned: true, orientation };
+  return { params: { ...params, orientation }, turned: true, orientation };
 }
 
 /**

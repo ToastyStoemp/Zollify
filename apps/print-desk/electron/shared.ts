@@ -5,6 +5,8 @@ export interface PrintLink {
   file: string;
   /** PhotoCraft `file.print` params: printer, paper, orientation, scale, marks, printerSettings... */
   params: Record<string, unknown>;
+  /** Prints with its own params instead of the global print settings. */
+  own?: boolean;
 }
 
 /** One sellable item of the catalogue, keyed like the inventory ("pid:vid", '' for no variant). */
@@ -54,6 +56,11 @@ export interface Settings {
   addToStock: boolean;
   /** 'system' follows the device. */
   theme: Theme;
+  /**
+   * Print settings for every item without its own (PrintLink.own). Each item still gets its own
+   * paper (from the A size in its name) and orientation (from its image).
+   */
+  global: Record<string, unknown> | null;
 }
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -89,6 +96,17 @@ export function paperParam(name: string): string | [number, number] {
   if (PHOTOCRAFT_PAPERS.has(n)) return n;
   const mm = ISO_A_MM[n];
   return mm ? [pt(mm[0]), pt(mm[1])] : n;
+}
+
+/** Other papers PhotoCraft knows by name, millimetres, portrait. */
+const NAMED_MM: Record<string, [number, number]> = { letter: [215.9, 279.4], legal: [215.9, 355.6], tabloid: [279.4, 431.8], '4x6': [101.6, 152.4], '5x7': [127, 177.8] };
+
+/** A `paper` param's size in millimetres (a name, or [w, h] points), or null when it is neither. */
+export function paperMm(paper: unknown): [number, number] | null {
+  if (typeof paper === 'string') return ISO_A_MM[paper.toLowerCase()] ?? NAMED_MM[paper.toLowerCase()] ?? null;
+  if (!Array.isArray(paper) || paper.length !== 2) return null;
+  const [w, h] = (paper as unknown[]).map(Number) as [number, number];
+  return w > 0 && h > 0 ? [Math.round((w * 254) / 72) / 10, Math.round((h * 254) / 72) / 10] : null;
 }
 
 /** The named paper a `paper` param is ("a2" for A2's points, either way round), or null for a custom size. */
@@ -135,15 +153,24 @@ export function orientFor(params: Record<string, unknown>, width: number, height
 
 /**
  * One item's settings copied onto another. Same size (or a target with no
- * size in its name): everything. Another size: the target keeps its own paper,
- * and the Windows driver settings (printerSettings) stay behind, because they
- * carry the source's paper and PhotoCraft refuses a driver paper that differs
- * from the layout.
+ * size in its name): everything. Another size: the target keeps its own paper.
+ * The Windows driver settings (printerSettings) go along: Print Desk sets their
+ * paper to the item's when it prints (printercaps.ts fitDriverPaper).
  */
 export function settingsFor(source: Record<string, unknown>, sourceSize: string | null, targetSize: string | null): Record<string, unknown> {
   if (!targetSize || targetSize === sourceSize) return { ...source };
-  const { printerSettings: _driver, ...rest } = source;
-  return { ...rest, paper: paperParam(targetSize) };
+  return { ...source, paper: paperParam(targetSize) };
+}
+
+/**
+ * What an item prints with: its own params when it has them (`own`) or there are no global
+ * settings; else the global settings with the item's paper (the A size in its name, else its own
+ * paper) and its own orientation (set from its image when the file was linked).
+ */
+export function effectiveParams(link: PrintLink | undefined, global: Record<string, unknown> | null | undefined, size: string | null): Record<string, unknown> | null {
+  if (!global || link?.own) return link?.params ?? null;
+  const own = link?.params ?? {};
+  return { ...global, paper: size ? paperParam(size) : (own.paper ?? global.paper), orientation: own.orientation ?? global.orientation ?? 'portrait' };
 }
 
 export const stockKey = (productId: string, variantId: string | null | undefined): string => `${productId}:${variantId ?? ''}`;

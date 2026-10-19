@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { PrinterCaps } from './devmode.js';
+import { decodeDevMode, pickPaper, withPaper, type PrinterCaps } from './devmode.js';
+import { paperMm } from './shared.js';
 
 const run = promisify(execFile);
 
@@ -125,4 +126,78 @@ export async function printerCaps(printer: string): Promise<PrinterCaps> {
   const caps = parseCaps(JSON.parse(stdout.trim()) as RawCaps);
   cache.set(printer, caps);
   return caps;
+}
+
+/**
+ * Settings passed through the driver's own check (DocumentProperties, DM_IN_BUFFER | DM_OUT_BUFFER):
+ * it brings its private part in line with the public fields. No dialog, nothing printed, and the
+ * printer's defaults are not changed.
+ */
+const MERGE = String.raw`
+$ErrorActionPreference = 'Stop'
+Add-Type -Language CSharp -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class DriverMerge {
+  [DllImport("winspool.drv", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool OpenPrinterW(string name, out IntPtr handle, IntPtr defaults);
+  [DllImport("winspool.drv")]
+  static extern bool ClosePrinter(IntPtr handle);
+  [DllImport("winspool.drv", CharSet = CharSet.Unicode)]
+  static extern int DocumentPropertiesW(IntPtr hwnd, IntPtr printer, string name, IntPtr output, IntPtr input, int mode);
+  public static string Merge(string name, string hex) {
+    byte[] input = new byte[hex.Length / 2];
+    for (int i = 0; i < input.Length; i++) input[i] = Convert.ToByte(hex.Substring(i * 2, 2), 16);
+    IntPtr h;
+    if (!OpenPrinterW(name, out h, IntPtr.Zero)) throw new Exception("could not open the printer: " + Marshal.GetLastWin32Error());
+    IntPtr inBuf = IntPtr.Zero, outBuf = IntPtr.Zero;
+    try {
+      int size = DocumentPropertiesW(IntPtr.Zero, h, name, IntPtr.Zero, IntPtr.Zero, 0);
+      if (size <= 0) throw new Exception("the driver gave no settings size");
+      inBuf = Marshal.AllocHGlobal(Math.Max(size, input.Length));
+      Marshal.Copy(input, 0, inBuf, input.Length);
+      outBuf = Marshal.AllocHGlobal(size);
+      if (DocumentPropertiesW(IntPtr.Zero, h, name, outBuf, inBuf, 2 | 8) < 0) throw new Exception("the driver refused the settings");
+      int length = Math.Min(size, (Marshal.ReadInt16(outBuf, 68) & 0xffff) + (Marshal.ReadInt16(outBuf, 70) & 0xffff));
+      byte[] o = new byte[length];
+      Marshal.Copy(outBuf, o, 0, length);
+      return BitConverter.ToString(o).Replace("-", "").ToLowerInvariant();
+    } finally {
+      if (inBuf != IntPtr.Zero) Marshal.FreeHGlobal(inBuf);
+      if (outBuf != IntPtr.Zero) Marshal.FreeHGlobal(outBuf);
+      ClosePrinter(h);
+    }
+  }
+}
+'@
+[DriverMerge]::Merge($args[0], $args[1])
+`;
+
+/** The driver's checked copy of these settings (hex). Windows only. */
+export async function mergeDevMode(printer: string, hex: string): Promise<string> {
+  if (!/^[0-9a-f]+$/i.test(hex)) throw new Error('driver settings are not hex');
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `& { ${MERGE} } '${printer.replace(/'/g, "''")}' '${hex}'`], { windowsHide: true, timeout: 60_000, maxBuffer: 16 * 1024 * 1024 });
+  const out = stdout.trim();
+  if (!decodeDevMode(out)) throw new Error('the driver gave back no settings');
+  return out;
+}
+
+/**
+ * Print params whose driver settings (printerSettings) are for the paper they print on. Settings
+ * made for one size (the global ones, or ones applied from another item) carry that size, and
+ * PhotoCraft refuses a driver paper that differs from the layout: this sets the driver's paper of
+ * the item's size and lets the driver bring the rest in line, keeping media, quality, borderless
+ * and tray. Unchanged when the paper already matches, off Windows, or without driver settings.
+ */
+export async function fitDriverPaper(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const hex = params.printerSettings;
+  if (process.platform !== 'win32' || typeof hex !== 'string') return params;
+  const dm = decodeDevMode(hex);
+  const mm = paperMm(params.paper);
+  if (!dm || !mm) return params;
+  const caps = await printerCaps(dm.device);
+  const current = caps.papers.find((p) => p.id === dm.paper);
+  const target = pickPaper(caps.papers, mm);
+  if (!target) throw new Error(`${dm.device} has no ${mm[0]} × ${mm[1]} mm paper for these driver settings`);
+  if (current && pickPaper([current], mm)) return params;
+  return { ...params, printerSettings: await mergeDevMode(dm.device, withPaper(hex, target.id, target.name)) };
 }

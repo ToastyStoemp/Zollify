@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeDevMode, describeDevMode, optionName } from './devmode.js';
+import { decodeDevMode, describeDevMode, optionName, pickPaper, withPaper } from './devmode.js';
 import { parseCaps, parseTicket } from './printercaps.js';
 
 // The public part of a Canon PRO-1000 driver's settings as PhotoCraft remembers them (A3 portrait,
@@ -178,5 +178,37 @@ describe('describeDevMode with the driver options', () => {
     expect(l.Borderless).toBeUndefined();
     expect(l.Quality).toBe('high');
     expect(l['Driver data']).toMatch(/^3796 bytes/);
+  });
+});
+
+describe('withPaper', () => {
+  it('sets the paper code and form name and keeps the rest', () => {
+    const a4 = decodeDevMode(withPaper(PRO1000, 9, 'A4'))!;
+    expect(a4).toMatchObject({ paper: 9, formName: 'A4', mediaType: 331, source: 277, quality: -4, orientation: 'portrait', privateBytes: 3796 });
+    expect(a4.fields & 0xc).toBe(0); // no paper length or width to override the code
+  });
+  it('touches only dmFields, dmPaperSize and dmFormName', () => {
+    const a = Buffer.from(PRO1000, 'hex');
+    const b = Buffer.from(withPaper(PRO1000, 9, 'A4'), 'hex');
+    const changed = [...a.keys()].filter((i) => a[i] !== b[i]);
+    expect(changed.every((i) => (i >= 72 && i < 80) || (i >= 102 && i < 166))).toBe(true);
+  });
+});
+
+describe('pickPaper', () => {
+  const papers = [
+    { id: 300, name: 'A4 (art paper margin)', widthMm: 210, heightMm: 297 },
+    { id: 9, name: 'A4', widthMm: 210, heightMm: 297 },
+    { id: 8, name: 'A3', widthMm: 297, heightMm: 420 },
+    { id: 400, name: 'Custom 13x19', widthMm: 329, heightMm: 483 },
+  ];
+  it("prefers Windows' own code, either way round, within 1.5 mm", () => {
+    expect(pickPaper(papers, [210, 297])?.id).toBe(9);
+    expect(pickPaper(papers, [420.2, 297.1])?.id).toBe(8);
+    expect(pickPaper(papers, [329, 483])?.id).toBe(400);
+  });
+  it('finds nothing of another size', () => {
+    expect(pickPaper(papers, [420, 594])).toBeUndefined();
+    expect(pickPaper(papers, [212, 297])).toBeUndefined();
   });
 });

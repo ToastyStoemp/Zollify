@@ -12,7 +12,7 @@ import { PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
  * `size` is the A size the item's name says, when it says one: it offers
  * "apply to all items of this size" next to "apply to all items".
  */
-const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; size: string | null }>();
+const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; size: string | null; noApply?: boolean }>();
 const emit = defineEmits<{ update: [params: Record<string, unknown>]; apply: [params: Record<string, unknown>, scope: 'all' | 'size'] }>();
 
 const FIELDS = ['printer', 'paper', 'orientation', 'scaleToFit', 'scale', 'center', 'top', 'left', 'colorHandling', 'emulsionDown'] as const;
@@ -208,8 +208,8 @@ function apply(scope: 'all' | 'size'): void {
     <div class="actions">
       <button type="button" title="Fill this form with the settings of your last print in PhotoCraft (File › Print), driver settings included" @click="loadFromPhotoCraft">Load from PhotoCraft</button>
       <button type="submit" class="primary">Save settings</button>
-      <button v-if="size" type="button" @click="apply('size')">Apply to all {{ size.toUpperCase() }} items</button>
-      <button type="button" @click="apply('all')">Apply to all items</button>
+      <button v-if="size && !noApply" type="button" @click="apply('size')">Apply to all {{ size.toUpperCase() }} items</button>
+      <button v-if="!noApply" type="button" @click="apply('all')">Apply to all items</button>
     </div>
   </form>
 </template>

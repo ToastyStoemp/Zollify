@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
 import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
-import { driverOptions, printerCaps } from './printercaps.js';
+import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
 import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
@@ -131,8 +131,17 @@ void app.whenReady().then(() => {
   ipcMain.handle('photocraft:print', async (_e, jobs: PrintJob[]): Promise<PrintResult[]> => {
     // One at a time: the printer queue is sequential anyway, and the results stay in order.
     const results: PrintResult[] = [];
-    for (const job of jobs) {
-      report({ key: job.key, copies: job.copies, left: job.copies, status: 'Sending to PhotoCraft', done: false });
+    for (const asked of jobs) {
+      report({ key: asked.key, copies: asked.copies, left: asked.copies, status: 'Sending to PhotoCraft', done: false });
+      let job: PrintJob;
+      try {
+        job = { ...asked, params: await fitDriverPaper(asked.params) };
+      } catch (err) {
+        const message = `Driver settings: ${err instanceof Error ? err.message : String(err)}`;
+        results.push({ key: asked.key, ok: false, message });
+        report({ key: asked.key, copies: asked.copies, left: 0, status: message, done: true, failed: true });
+        continue;
+      }
       const before = await snapshot();
       const r = await print(store.data.photocraft, job);
       results.push(r);

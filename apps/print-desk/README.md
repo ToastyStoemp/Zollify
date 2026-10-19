@@ -66,12 +66,21 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
 - **Detect sizes** sets each item's paper from an A0-A6 size in its variant
   name, else its product name ("A3", "Poster a4"; not "A3+"). A3-A5 go to
   PhotoCraft by name, the other A sizes as points.
-- A row's settings can be applied to **all items of its size** (everything,
-  driver settings included) or to **all items**: there, items of another size
-  keep their own paper and get no `printerSettings`, because those carry the
-  driver's paper and PhotoCraft refuses a driver paper that differs from the
-  layout. So: set one item per size up with its driver settings, then apply
-  it to that size. Linked files are never touched.
+- **Global print settings** (toolbar): one set of settings for every item
+  that has no settings of its own. Each item still prints on its own paper
+  (the A size in its name, else its own paper) and in its own orientation (set
+  from its image when the file is linked). "Load from PhotoCraft" fills them
+  from your last PhotoCraft print. A row's settings panel offers "Own settings
+  for this item" (a copy to change) and back.
+- **Driver settings follow the paper.** PhotoCraft refuses driver settings
+  whose paper differs from the layout, so when an item prints on another size
+  than its driver settings were made for, Print Desk sets the driver's paper of
+  that size (from the printer's catalog) and lets the driver check the
+  settings (DocumentProperties, no dialog). Media, quality, borderless and tray
+  stay as they were. A printer without a paper of that size fails that item.
+- A row's settings can be applied to **all items of its size** or to **all
+  items** (without global settings): items of another size keep their own
+  paper, and the driver settings go along. Linked files are never touched.
 - **Print all** runs one `file.print` per queued row with `copies` set, then
   pushes an `inventory.set` op per printed row with the old count plus the
   copies - the same op a stock count in the web app makes. Stock counts what

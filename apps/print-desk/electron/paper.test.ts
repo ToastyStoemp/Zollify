@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orientFor, paperName, paperParam, settingsFor, sizeFromName } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, settingsFor, sizeFromName } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -51,8 +51,40 @@ describe('settingsFor', () => {
     expect(settingsFor(a3, 'a3', 'a3')).toEqual(a3);
     expect(settingsFor(a3, 'a3', null)).toEqual(a3);
   });
-  it('keeps the target paper and drops the driver settings for another size', () => {
-    expect(settingsFor(a3, 'a3', 'a2')).toEqual({ printer: 'Canon PRO-1000 series', paper: [1190.55, 1683.78], orientation: 'portrait', center: true });
-    expect(settingsFor(a3, null, 'a4')).toEqual({ printer: 'Canon PRO-1000 series', paper: 'a4', orientation: 'portrait', center: true });
+  it('keeps the target paper, driver settings included, for another size', () => {
+    expect(settingsFor(a3, 'a3', 'a2')).toEqual({ ...a3, paper: [1190.55, 1683.78] });
+    expect(settingsFor(a3, null, 'a4')).toEqual({ ...a3, paper: 'a4' });
+  });
+});
+
+describe('paperMm', () => {
+  it('reads names and points', () => {
+    expect(paperMm('a4')).toEqual([210, 297]);
+    expect(paperMm('A3')).toEqual([297, 420]);
+    expect(paperMm('letter')).toEqual([215.9, 279.4]);
+    expect(paperMm(paperParam('a2'))).toEqual([420, 594]);
+    expect(paperMm([842.29, 1191.14])).toEqual([297.1, 420.2]);
+  });
+  it('is null for anything else', () => {
+    expect(paperMm('b5')).toBeNull();
+    expect(paperMm([0, 10])).toBeNull();
+    expect(paperMm(undefined)).toBeNull();
+  });
+});
+
+describe('effectiveParams', () => {
+  const global = { printer: 'Canon PRO-1000 series', paper: 'a3', orientation: 'portrait', printerSettings: 'abcd', scaleToFit: true };
+  const link = { file: 'x.png', params: { printer: 'Other', paper: 'a5', orientation: 'landscape' } };
+  it('uses the global settings with the size from the name and the item orientation', () => {
+    expect(effectiveParams(link, global, 'a4')).toEqual({ ...global, paper: 'a4', orientation: 'landscape' });
+  });
+  it('falls back to the item paper, then the global paper and orientation', () => {
+    expect(effectiveParams(link, global, null)).toEqual({ ...global, paper: 'a5', orientation: 'landscape' });
+    expect(effectiveParams(undefined, global, null)).toEqual(global);
+  });
+  it('keeps an item with its own settings, and every item without global settings', () => {
+    expect(effectiveParams({ ...link, own: true }, global, 'a4')).toBe(link.params);
+    expect(effectiveParams(link, null, 'a4')).toBe(link.params);
+    expect(effectiveParams(undefined, null, 'a4')).toBeNull();
   });
 });

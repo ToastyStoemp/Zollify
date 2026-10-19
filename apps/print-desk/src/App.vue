@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
-import { isPrintFile, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import { effectiveParams, isPrintFile, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -202,9 +202,32 @@ async function saveLink(key: string, link: PrintLink): Promise<void> {
     mine[key] = link;
   });
 }
-/** An item's print settings, or the defaults when it has none yet. File '' = settings without a linked file. */
+/** An item's own print settings, or the defaults when it has none yet. File '' = settings without a linked file. */
 const paramsOf = (key: string): Record<string, unknown> => links.value[key]?.params ?? defaultParams();
 const sizeOf = (row: CatalogRow): string | null => sizeFromName(row.variant, row.title);
+const globalParams = computed(() => settings.value?.global ?? null);
+/** Whether the item prints with the global settings. */
+const usesGlobal = (row: CatalogRow): boolean => !!globalParams.value && !links.value[row.key]?.own;
+/** What the item prints with: its own settings, or the global ones with its paper and orientation. */
+const paramsFor = (row: CatalogRow): Record<string, unknown> => effectiveParams(links.value[row.key], globalParams.value, sizeOf(row)) ?? defaultParams();
+/** `open` for the global settings panel (no stock key looks like this). */
+const GLOBAL = '*global';
+
+async function saveGlobal(params: Record<string, unknown> | null): Promise<void> {
+  try {
+    settings.value = await api.settings.set({ global: params && plain(params) });
+    notice.value = params
+      ? 'Global print settings saved. Items without their own settings print with them, each on its own paper and orientation.'
+      : 'Global print settings removed. Every item prints with its own settings again.';
+  } catch (err) {
+    error.value = `Could not save the global print settings: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+/** Gives an item its own settings (a copy of what it prints with now), or back to the global ones. */
+async function setOwn(row: CatalogRow, own: boolean): Promise<void> {
+  const cur = links.value[row.key];
+  await saveLink(row.key, { file: cur?.file ?? '', params: own ? paramsFor(row) : (cur?.params ?? defaultParams()), own });
+}
 const paperLabel = (paper: unknown): string => {
   const name = paperName(paper ?? 'letter');
   return name ? (/^a\d$/.test(name) ? name.toUpperCase() : name) : 'custom paper';
@@ -220,25 +243,20 @@ async function applySettings(source: CatalogRow, params: Record<string, unknown>
     return;
   }
   if (!window.confirm(`Use these print settings for ${targets.length} other ${what}? Their own print settings are replaced. Linked files stay as they are.`)) return;
-  let noDriver = 0;
   await writeLinks((mine) => {
-    mine[source.key] = { file: mine[source.key]?.file ?? '', params };
+    mine[source.key] = { ...mine[source.key], file: mine[source.key]?.file ?? '', params };
     for (const t of targets) {
       const next = settingsFor(params, size, sizeOf(t));
-      if (params.printerSettings && !next.printerSettings) noDriver++;
-      mine[t.key] = { file: mine[t.key]?.file ?? '', params: next };
+      mine[t.key] = { ...mine[t.key], file: mine[t.key]?.file ?? '', params: next };
     }
   });
-  notice.value =
-    `Print settings applied to ${targets.length} ${what}.` +
-    (noDriver ? ` ${noDriver} of another size kept their own paper and got no driver settings (printerSettings): set those once per size and use "Apply to all A… items".` : '');
+  notice.value = `Print settings applied to ${targets.length} ${what}. Items of another size keep their own paper; their driver settings are set to it when they print.`;
 }
 
 /** "Detect sizes": the paper of every item whose name says A0-A6. */
 async function detectSizes(): Promise<void> {
   let changed = 0;
   let same = 0;
-  let noDriver = 0;
   const unsized: string[] = [];
   await writeLinks((mine) => {
     for (const r of rows.value) {
@@ -253,10 +271,8 @@ async function detectSizes(): Promise<void> {
         same++;
         continue;
       }
-      // The driver settings were made for the old paper; PhotoCraft would refuse the mismatch.
-      const { printerSettings, ...rest } = params;
-      if (printerSettings) noDriver++;
-      mine[r.key] = { file: cur?.file ?? '', params: { ...rest, paper: paperParam(size) } };
+      // Driver settings for the old paper are set to the new one when the item prints.
+      mine[r.key] = { ...cur, file: cur?.file ?? '', params: { ...params, paper: paperParam(size) } };
       changed++;
     }
   });
@@ -264,7 +280,6 @@ async function detectSizes(): Promise<void> {
     `Paper set from the name for ${changed} ${changed === 1 ? 'item' : 'items'}` +
     (same ? `, ${same} already matched` : '') +
     '.' +
-    (noDriver ? ` ${noDriver} lost their driver settings (printerSettings), which were for another paper.` : '') +
     (unsized.length ? ` No size in the name: ${unsized.slice(0, 5).join(', ')}${unsized.length > 5 ? ` and ${unsized.length - 5} more` : ''}.` : '');
 }
 /**
@@ -289,7 +304,7 @@ async function linkFile(row: CatalogRow, file: string): Promise<string> {
   } finally {
     busy.value = '';
   }
-  await saveLink(row.key, { file, params });
+  await saveLink(row.key, { ...links.value[row.key], file, params });
   return note;
 }
 async function pickFile(row: CatalogRow): Promise<void> {
@@ -350,7 +365,7 @@ async function toggleAddToStock(on: boolean): Promise<void> {
 }
 
 async function printAll(): Promise<void> {
-  const jobs = queued.value.map((r) => ({ key: r.key, file: links.value[r.key]!.file, params: links.value[r.key]!.params, copies: qty[r.key]! }));
+  const jobs = queued.value.map((r) => ({ key: r.key, file: links.value[r.key]!.file, params: paramsFor(r), copies: qty[r.key]! }));
   // A new run starts a fresh count; rows from a finished run drop out of it.
   for (const k of Object.keys(progress)) if (progress[k]!.done) delete progress[k];
   for (const j of jobs) progress[j.key] = { key: j.key, copies: j.copies, left: j.copies, status: 'Waiting', done: false };
@@ -432,10 +447,19 @@ async function printAll(): Promise<void> {
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
+      <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
       <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>
     </div>
+    <section v-if="open === GLOBAL" class="global" aria-label="Global print settings">
+      <p class="muted">
+        Every item without its own settings prints with these. Each still gets its own paper (from the A size in its name, else its own) and orientation (from its image),
+        and the driver settings are set to that paper when it prints, keeping media, quality and borderless.
+      </p>
+      <PrintSettings :params="globalParams ?? defaultParams()" :printers="printers" :size="null" no-apply @update="saveGlobal" />
+      <button v-if="globalParams" type="button" class="quiet" @click="saveGlobal(null)">Stop using global settings</button>
+    </section>
     <p v-if="copiesLeft !== null" class="queue" role="status">Printing: <strong>{{ copiesLeft }}</strong> {{ copiesLeft === 1 ? 'copy' : 'copies' }} left, as the print queue reports it</p>
 
     <table>
@@ -452,7 +476,7 @@ async function printAll(): Promise<void> {
               <button type="button" class="quiet" :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`" @click="pickFile(row)">{{ dropRow === row.key ? 'Drop to link' : links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
             </td>
             <td>
-              <span v-if="links[row.key]">{{ links[row.key]!.params.printer || 'default printer' }}, {{ paperLabel(links[row.key]!.params.paper) }} {{ links[row.key]!.params.orientation || '' }}</span>
+              <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? ' · global' : '' }}</span>
               <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file" /></td>
@@ -469,13 +493,21 @@ async function printAll(): Promise<void> {
           </tr>
           <tr v-if="open === row.key" class="settings">
             <td :colspan="hasSku ? 7 : 6">
-              <PrintSettings
-                :params="paramsOf(row.key)"
-                :printers="printers"
-                :size="sizeOf(row)"
-                @update="saveLink(row.key, { file: links[row.key]?.file ?? '', params: $event })"
-                @apply="(params, scope) => applySettings(row, params, scope)"
-              />
+              <div v-if="usesGlobal(row)" class="uses-global">
+                <span>Prints with the global print settings on {{ paperLabel(paramsFor(row).paper) }}, {{ paramsFor(row).orientation }}.</span>
+                <button type="button" @click="setOwn(row, true)">Own settings for this item</button>
+              </div>
+              <template v-else>
+                <PrintSettings
+                  :params="paramsOf(row.key)"
+                  :printers="printers"
+                  :size="sizeOf(row)"
+                  :no-apply="!!globalParams"
+                  @update="saveLink(row.key, { ...links[row.key], file: links[row.key]?.file ?? '', params: $event })"
+                  @apply="(params, scope) => applySettings(row, params, scope)"
+                />
+                <button v-if="globalParams" type="button" class="quiet" @click="setOwn(row, false)">Use the global settings</button>
+              </template>
             </td>
           </tr>
         </template>
@@ -508,5 +540,8 @@ tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
 .notice { margin: 0; padding: .5rem .75rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); }
 .notice button { padding: 0 .4rem; }
+.global { padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-surface); }
+.global > p { margin: 0 0 .4rem; }
+.uses-global { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

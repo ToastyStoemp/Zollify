@@ -87,6 +87,32 @@ export function decodeDevMode(hex: string): DevMode | null {
   };
 }
 
+/**
+ * The settings with another paper: dmPaperSize and the form name. The driver's private part still
+ * has the old sheet, so pass the result through the driver (printercaps.ts mergeDevMode).
+ */
+export function withPaper(hex: string, paper: number, formName: string): string {
+  const b = Buffer.from(hex, 'hex');
+  const size = b.readUInt16LE(68);
+  b.writeUInt32LE((b.readUInt32LE(72) | DM.PAPERSIZE) & ~(DM.PAPERLENGTH | DM.PAPERWIDTH), 72);
+  b.writeInt16LE(paper, 78);
+  if (size >= 166) {
+    b.fill(0, 102, 166);
+    b.write(formName.slice(0, 31), 102, 'utf16le');
+  }
+  return b.toString('hex');
+}
+
+/**
+ * The driver's paper of this size (millimetres, either way round, within 1.5 mm): Windows' own
+ * code first (up to 255), as a driver can list a size twice (Canon: "A4" and an art-paper margin A4).
+ */
+export function pickPaper(papers: PrinterCaps['papers'], [w, h]: [number, number]): PrinterCaps['papers'][number] | undefined {
+  const near = (a: number, b: number): boolean => Math.abs(a - b) <= 1.5;
+  const fits = papers.filter((p) => (near(p.widthMm, w) && near(p.heightMm, h)) || (near(p.widthMm, h) && near(p.heightMm, w)));
+  return fits.find((p) => p.id < 256) ?? fits[0];
+}
+
 /** A printer's own names for its codes, from the driver (printercaps.ts). */
 export interface PrinterCaps {
   papers: { id: number; name: string; widthMm: number; heightMm: number }[];

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { QrCode } from '@zollify/ui';
+// Straight from its file, not the @zollify/ui barrel: the barrel pulls in @zollify/shared and zod.
+import QrCode from '@zollify/ui/QrCode.vue';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
 import { effectiveParams, isPrintFile, targetFor, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';

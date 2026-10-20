@@ -7,7 +7,9 @@ import {
   germanAnnualDeadline,
   germanHolidays,
   nextGermanWorkingDay,
+  nextSwedishWorkingDay,
   normalizeLeadDays,
+  swedishHolidays,
   remindersDue,
   rulesFor,
   type TaxDeadlineSettings,
@@ -189,5 +191,80 @@ describe('reminders', () => {
     expect(remindersDue(s, '2026-10-10', new Set([id]), new Set()).find((r) => r.deadline.id === id)).toBeUndefined();
     expect(remindersDue(s, '2026-10-13', new Set(), new Set()).find((r) => r.deadline.id === id)).toMatchObject({ lead: -1 });
     expect(remindersDue(s, '2026-10-14', new Set(), new Set()).find((r) => r.deadline.id === id)).toBeUndefined();
+  });
+});
+
+describe('Sweden', () => {
+  const se = (profile: Partial<TaxDeadlineSettings['profile']> = {}) => settings({ country: 'SE', ...profile });
+
+  it('knows the holidays, including the moving Saturdays', () => {
+    const h = swedishHolidays(2026);
+    expect(h.get('2026-06-20')).toBe('Midsommardagen');
+    expect(h.get('2026-10-31')).toBe('Alla helgons dag');
+    expect(h.get('2026-05-14')).toBe('Kristi himmelsfärdsdag');
+    expect(h.get('2026-05-24')).toBe('Pingstdagen');
+    expect(h.get('2026-06-06')).toBe('Nationaldagen');
+    expect(swedishHolidays(2027).get('2027-06-26')).toBe('Midsommardagen');
+  });
+
+  it('moves a deadline off weekends, holidays and the three eves (lag 1930:173)', () => {
+    expect(nextSwedishWorkingDay('2026-06-19')).toBe('2026-06-22'); // midsummer eve, then the weekend
+    expect(nextSwedishWorkingDay('2026-12-24')).toBe('2026-12-28'); // Christmas Eve, Christmas, the weekend
+    expect(nextSwedishWorkingDay('2026-05-01')).toBe('2026-05-04'); // Första maj on a Friday
+    expect(nextSwedishWorkingDay('2026-03-12')).toBe('2026-03-12');
+  });
+
+  it('dates quarterly VAT returns the 12th of the second month after, the 17th in August', () => {
+    const s = se({ vatFrequency: 'quarterly' });
+    expect(due(s, 'se.vat-return:2026-Q1')).toBe('2026-05-12');
+    expect(due(s, 'se.vat-return:2026-Q2')).toBe('2026-08-17');
+    expect(due(s, 'se.vat-return:2026-Q3')).toBe('2026-11-12');
+    expect(due(s, 'se.vat-return:2026-Q4')).toBe('2027-02-12');
+    expect(due(s, 'se.vat-annual:2025')).toBeUndefined();
+  });
+
+  it('dates monthly returns by the size of the business', () => {
+    const small = se({ vatFrequency: 'monthly' });
+    expect(due(small, 'se.vat-return:2026-01')).toBe('2026-03-12');
+    expect(due(small, 'se.vat-return:2026-06')).toBe('2026-08-17');
+    expect(due(small, 'se.vat-return:2026-11')).toBe('2027-01-18'); // the 17th is a Sunday
+    const large = se({ vatFrequency: 'monthly', largeBusiness: true });
+    expect(due(large, 'se.vat-return:2026-03')).toBe('2026-04-27'); // the 26th is a Sunday
+    expect(due(large, 'se.vat-return:2026-11')).toBe('2026-12-28'); // the 27th is a Sunday
+    expect(due(large, 'se.vat-return:2026-12')).toBe('2027-01-26');
+  });
+
+  it('dates the yearly return by EU trade and legal form', () => {
+    expect(due(se({ vatFrequency: 'yearly', euTrade: true }), 'se.vat-annual:2025')).toBe('2026-02-26');
+    expect(due(se({ vatFrequency: 'yearly' }), 'se.vat-annual:2025')).toBe('2026-05-12');
+    expect(due(se({ vatFrequency: 'yearly', legalForm: 'company' }), 'se.vat-annual:2025')).toBe('2026-07-01');
+    expect(due(se({ vatFrequency: 'yearly' }), 'se.vat-return:2026-Q1')).toBeUndefined();
+  });
+
+  it('dates the income tax return, moved off the weekend', () => {
+    expect(due(se(), 'se.income-tax-return:2025')).toBe('2026-05-04'); // 2 May is a Saturday
+    expect(due(se({ legalForm: 'company' }), 'se.income-tax-return:2025')).toBe('2026-07-01');
+  });
+
+  it('lists preliminary tax monthly, the 17th in January and August', () => {
+    const s = se({ incomeTaxPrepayments: true });
+    expect(due(s, 'se.preliminary-tax:2026-01')).toBe('2026-01-19'); // the 17th is a Saturday
+    expect(due(s, 'se.preliminary-tax:2026-02')).toBe('2026-02-12');
+    expect(due(s, 'se.preliminary-tax:2026-08')).toBe('2026-08-17');
+    expect(due(se(), 'se.preliminary-tax:2026-02')).toBeUndefined();
+  });
+
+  it('dates the EC Sales List on the 25th', () => {
+    const s = se({ ecSalesList: true, ecSalesListFrequency: 'quarterly' });
+    expect(due(s, 'se.ec-sales-list:2026-Q1')).toBe('2026-04-27'); // the 25th is a Saturday
+    expect(due(se({ ecSalesList: true, ecSalesListFrequency: 'monthly' }), 'se.ec-sales-list:2026-02')).toBe('2026-03-25');
+  });
+
+  it('offers no VAT returns to an exempt business, and files the SME report with Skatteverket', () => {
+    const exempt = se({ vat: 'small-business', euSmeScheme: true });
+    const ids = rulesFor(exempt.profile).map((r) => r.id);
+    expect(ids).toEqual(['se.income-tax-return', 'eu.sme-report']);
+    expect(deadlinesBetween(exempt, '2026-01-01', '2026-12-31').find((d) => d.ruleId === 'eu.sme-report')?.where).toBe('Skatteverket (e-tjänst)');
+    expect(rulesFor(se({ incomeTaxPrepayments: true }).profile).map((r) => r.id)).toEqual(['se.vat-return', 'se.income-tax-return', 'se.preliminary-tax']);
   });
 });

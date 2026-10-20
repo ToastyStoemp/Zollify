@@ -42,6 +42,8 @@ export function fromBusinessProfile(current: TaxDeadlineProfile, profile: Profil
   if (f.scheme === 'sme') next.vat = f.exemptAtHome || !profile?.vat?.exemptCountries?.length ? 'small-business' : 'regular';
   else if (f.scheme === 'vat') next.vat = 'regular';
   if (EU_COUNTRIES.includes(next.country)) next.euSmeScheme = f.crossBorder;
+  // A Swedish business pays debited preliminary tax every month as a rule; the German prepayments are the exception.
+  if (next.country === 'SE' && current.country !== 'SE') next.incomeTaxPrepayments = true;
   if (next.vat !== 'regular') next.extension = false;
   return next;
 }

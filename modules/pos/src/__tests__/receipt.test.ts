@@ -222,6 +222,17 @@ describe('seller block', () => {
     expect(sellerLines(sale(), { artist })[0]).toEqual({ text: 'Lena Draws', heading: true });
   });
 
+  it('names a Swedish seller\'s organisationsnummer on an exempt sale, read from the Swedish VAT number', () => {
+    const se = { ...artist, countryOfOrigin: 'Sweden', vatNumber: 'SE556016272701' };
+    const exempt = sale({ currency: 'SEK', tax: { country: 'SE', exempt: true, rates: [null, null], note: 'Momsbefriad' } });
+    expect(sellerLines(exempt, { artist: se }).map((s) => s.text)).toContain('Org.nr: 556016-2727');
+    expect(sellerLines(exempt, { artist: se }).map((s) => s.text).join('\n')).not.toContain('Momsreg');
+    // Taxable: the Momsreg.nr line already holds it.
+    expect(sellerLines(sale({ currency: 'SEK', tax: { country: 'SE', exempt: false, rates: [25, 25] } }), { artist: se }).map((s) => s.text)).toContain('Momsreg.nr: SE556016272701');
+    // Not Swedish: nothing added.
+    expect(sellerLines(sale({ tax: { country: 'DE', exempt: true, rates: [null, null] } }), { artist }).map((s) => s.text).join('\n')).not.toContain('Org.nr');
+  });
+
   it('leaves the VAT number off an exempt sale - the exemption line stands in for it', () => {
     const block = sellerLines(sale({ tax: { country: 'DE', exempt: true, rates: [null, null], note: 'Gemäß § 19 UStG wird keine Umsatzsteuer berechnet.' } }), { artist }).map((s) => s.text);
     expect(block.join('\n')).not.toContain('DE123456789');

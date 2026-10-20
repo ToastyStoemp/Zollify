@@ -6,11 +6,13 @@ import {
   base64BodyLimit,
   cleanProfileLinks,
   cleanReceiptToggles,
+  countryCodeOf,
   fmtRate,
   isReceiptToken,
   maxBytesFor,
   receiptBreakdown,
   receiptFooterLinks,
+  swedishOrgNumber,
   vatBreakdown,
   vatIdLabel,
   vatNumberFor,
@@ -249,20 +251,26 @@ function seller(db: Database.Database, accountId: string, tx: Transaction): Publ
   const artist = profile.artist;
   // The registration for the country of the sale when there is one (Settings → VAT), else the default.
   const vatId = vatNumberFor(profile, tx.tax?.country) || undefined;
+  // A Swedish seller's kassakvitto names the organisationsnummer even on an exempt sale (SKVFS 2014:9, 7 kap. 1 §).
+  const orgNumber = countryCodeOf(artist.countryOfOrigin) === 'SE' ? swedishOrgNumber(vatNumberFor(profile, 'SE')) : '';
   return {
     // Phone, email and EORI stay off: a receipt needs who sold it and their
     // tax registration, not a way to reach them at home.
     name: artist.companyName.trim() || artist.fullName.trim() || row?.name || '',
     address: [artist.street, artist.postCodeCity, artist.countryOfOrigin].map((s) => s.trim()).filter(Boolean),
     ...(vatId ? { vatId, vatLabel: vatIdLabel(tx.tax?.country || artist.countryOfOrigin) } : {}),
+    ...(orgNumber ? { orgNumber } : {}),
   };
 }
 
 // ── What the customer sees ──────────────────────────────────────────────────
 
 export interface PublicReceipt {
-  /** `vatLabel`: what the seller's country calls the number - CVR, UID, USt-IdNr. - so the receipt reads as a local one. */
-  seller: { name: string; address: string[]; vatId?: string; vatLabel?: string };
+  /**
+   * `vatLabel`: what the seller's country calls the number - CVR, UID, USt-IdNr. - so the receipt reads as a local one.
+   * `orgNumber`: a Swedish seller's organisationsnummer, printed as the number on an exempt sale (never sent as is).
+   */
+  seller: { name: string; address: string[]; vatId?: string; vatLabel?: string; orgNumber?: string };
   event: string;
   at: number;
   number: string;
@@ -313,8 +321,11 @@ export function publicReceipt(
   const rows = vatBreakdown(tx);
   const exempt = tx.tax?.exempt === true;
   return {
-    // An exempt sale shows its exemption, not a VAT number - as on paper.
-    seller: exempt ? { name: extra.seller.name, address: extra.seller.address } : extra.seller,
+    // An exempt sale shows its exemption, not a VAT number - as on paper. A
+    // Swedish seller's organisationsnummer still has to be on it.
+    seller: exempt
+      ? { name: extra.seller.name, address: extra.seller.address, ...(extra.seller.orgNumber ? { vatId: extra.seller.orgNumber, vatLabel: 'Org.nr' } : {}) }
+      : (({ orgNumber: _o, ...rest }) => rest)(extra.seller),
     event: extra.event,
     at: tx.timestamp,
     number: tx.receiptNumber ?? tx.id.slice(-8).toUpperCase(),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TxItem } from '../types';
-import { VatProfileSchema, countryCodeOf, crossesCustomsBorder, resolveEventVat, saleTaxFor, vatBreakdown, vatIdLabel, vatNumberFor, type EventVat } from '../vat';
+import { VatProfileSchema, countryCodeOf, crossesCustomsBorder, resolveEventVat, saleTaxFor, vatBreakdown, vatIdLabel, vatNumberFor, type EventVat, swedishOrgNumber } from '../vat';
 
 const ev = (country: string, vat?: EventVat) => ({ venue: { country }, vat });
 const profile = (exemptCountries: string[] = [], extra: Record<string, string> = {}) => ({
@@ -154,5 +154,15 @@ describe('VAT profile: scheme and VAT numbers', () => {
     expect(vatNumberFor(profile, 'nl')).toBe('NL123B01');
     expect(vatNumberFor(profile, 'Germany')).toBe('BE0123456789');
     expect(vatNumberFor(null, 'DE')).toBe('');
+  });
+});
+
+describe('swedishOrgNumber', () => {
+  it('reads the organisationsnummer out of a Swedish VAT number, and nothing out of any other', () => {
+    expect(swedishOrgNumber('SE556016272701')).toBe('556016-2727');
+    expect(swedishOrgNumber(' se 5560162727 01 ')).toBe('556016-2727');
+    expect(swedishOrgNumber('DE123456789')).toBe('');
+    expect(swedishOrgNumber('SE55601627270')).toBe('');
+    expect(swedishOrgNumber(undefined)).toBe('');
   });
 });

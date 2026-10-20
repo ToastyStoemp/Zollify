@@ -70,6 +70,10 @@ export const TaxDeadlineProfileSchema = z.object({
   ecSalesListFrequency: z.enum(['monthly', 'quarterly']).default('quarterly'),
   /** Uses the EU cross-border SME scheme (has an EX number): a quarterly turnover report at home. */
   euSmeScheme: z.boolean().default(false),
+  /** Sweden: buys or sells with other EU countries, which moves the yearly VAT return to 26 February. */
+  euTrade: z.boolean().default(false),
+  /** Sweden: taxable base over SEK 40 million, so monthly VAT returns are due the 26th of the next month. */
+  largeBusiness: z.boolean().default(false),
   /**
    * The year the business started, when it is older than the account. Deadlines
    * from 1 January of that year on count; unset, they count from the day the
@@ -420,7 +424,177 @@ const germany: RuleSet = {
   shift: (day, p) => nextGermanWorkingDay(day, p.region),
 };
 
-const RULE_SETS: Record<string, RuleSet> = { DE: germany };
+// ── Sweden ──────────────────────────────────────────────────────────────────
+
+/** The Saturday on or after `day`. */
+const saturdayFrom = (day: string) => addDays(day, (6 - weekday(day) + 7) % 7);
+
+/** Swedish public holidays (allmänna helgdagar) in a year. */
+export function swedishHolidays(year: number): Map<string, string> {
+  const easter = easterSunday(year);
+  // Midsommardagen: the Saturday from 20 to 26 June. Alla helgons dag: the Saturday from 31 October to 6 November.
+  const list: [string, string][] = [
+    [ymd(year, 1, 1), 'Nyårsdagen'],
+    [ymd(year, 1, 6), 'Trettondedag jul'],
+    [addDays(easter, -2), 'Långfredagen'],
+    [easter, 'Påskdagen'],
+    [addDays(easter, 1), 'Annandag påsk'],
+    [ymd(year, 5, 1), 'Första maj'],
+    [addDays(easter, 39), 'Kristi himmelsfärdsdag'],
+    [addDays(easter, 49), 'Pingstdagen'],
+    [ymd(year, 6, 6), 'Nationaldagen'],
+    [saturdayFrom(ymd(year, 6, 20)), 'Midsommardagen'],
+    [saturdayFrom(ymd(year, 10, 31)), 'Alla helgons dag'],
+    [ymd(year, 12, 25), 'Juldagen'],
+    [ymd(year, 12, 26), 'Annandag jul'],
+  ];
+  return new Map(list);
+}
+
+/**
+ * Lag (1930:173) om beräkning av lagstadgad tid, 2 §: a deadline on a Saturday,
+ * Sunday or public holiday - or on midsummer eve, Christmas Eve or New Year's
+ * Eve - ends on the next weekday. Skatteverket's dates follow it.
+ */
+export function nextSwedishWorkingDay(day: string): string {
+  let d = day;
+  for (let i = 0; i < 10; i++) {
+    const w = weekday(d);
+    const y = parts(d)[0];
+    const holidays = swedishHolidays(y);
+    const eve = d === ymd(y, 12, 24) || d === ymd(y, 12, 31) || d === addDays(saturdayFrom(ymd(y, 6, 20)), -1);
+    if (w !== 0 && w !== 6 && !holidays.has(d) && !eve) return d;
+    d = addDays(d, 1);
+  }
+  return d;
+}
+/** Sweden: a return due the 12th is due the 17th when that falls in January or August. */
+const swedishTwelfth = (y: number, m: number) => ymd(y, m, m === 1 || m === 8 ? 17 : 12);
+
+const sweden: RuleSet = {
+  country: 'SE',
+  rules: [
+    { id: 'se.vat-return', label: 'VAT return (momsdeklaration)' },
+    { id: 'se.vat-annual', label: 'Yearly VAT return (momsdeklaration, helår)' },
+    { id: 'se.income-tax-return', label: 'Income tax return (inkomstdeklaration)' },
+    { id: 'se.preliminary-tax', label: 'Preliminary tax (debiterad preliminärskatt, F-skatt)' },
+    { id: 'se.ec-sales-list', label: 'EC Sales List (periodisk sammanställning)' },
+  ],
+  deadlines(p, year) {
+    const out: Omit<TaxDeadline, 'due'>[] = [];
+    const push = (d: Omit<TaxDeadline, 'due'>) => out.push(d);
+    const where = 'Skatteverket (e-tjänst)';
+
+    if (p.vat === 'regular' && p.vatFrequency !== 'yearly') {
+      if (p.vatFrequency === 'monthly' && p.largeBusiness) {
+        // Over SEK 40 million: the 26th of the next month; the 27th in December.
+        for (let m = 1; m <= 12; m++) {
+          const [dy, dm] = addMonths(year, m, 1);
+          push({
+            id: `se.vat-return:${year}-${pad(m)}`,
+            ruleId: 'se.vat-return',
+            title: `VAT return ${MONTHS[m - 1]} ${year}`,
+            period: `${MONTHS[m - 1]} ${year}`,
+            action: 'file-pay',
+            statutory: ymd(dy, dm, dm === 12 ? 27 : 26),
+            detail: 'Momsdeklaration for a taxable base over SEK 40 million: filed and paid by the 26th of the month after (the 27th in December), through Skatteverket\'s e-service. The VAT is paid into the tax account (skattekontot) the same day.',
+            where,
+          });
+        }
+      } else {
+        // Up to SEK 40 million: the 12th of the second month after the month or quarter; the 17th in January and August.
+        const step = p.vatFrequency === 'monthly' ? 1 : 3;
+        for (let m = step; m <= 12; m += step) {
+          const [dy, dm] = addMonths(year, m, 2);
+          const period = step === 1 ? `${MONTHS[m - 1]} ${year}` : `Q${m / 3} ${year}`;
+          push({
+            id: `se.vat-return:${step === 1 ? `${year}-${pad(m)}` : `${year}-Q${m / 3}`}`,
+            ruleId: 'se.vat-return',
+            title: `VAT return ${period}`,
+            period,
+            action: 'file-pay',
+            statutory: swedishTwelfth(dy, dm),
+            detail: 'Momsdeklaration through Skatteverket\'s e-service, and the VAT paid into the tax account (skattekontot) the same day: the 12th of the second month after the period, the 17th in January and August.',
+            where,
+          });
+        }
+      }
+    }
+
+    // The year before, as a calendar year (a company with another fiscal year: see Skatteverket's Viktiga datum).
+    const ty = year - 1;
+    const sole = p.legalForm !== 'company';
+    if (p.vat === 'regular' && p.vatFrequency === 'yearly') {
+      const statutory = p.euTrade ? ymd(year, 2, 26) : sole ? ymd(year, 5, 12) : ymd(year, 7, 1);
+      push({
+        id: `se.vat-annual:${ty}`,
+        ruleId: 'se.vat-annual',
+        title: `Yearly VAT return ${ty}`,
+        period: String(ty),
+        action: 'file-pay',
+        statutory,
+        detail: p.euTrade
+          ? 'Momsdeklaration for the whole year, for a taxable base up to SEK 1 million: with any purchase or sale from or to another EU country it is due the 26th of the second month after the year, 26 February for a calendar year, VAT paid the same day.'
+          : sole
+            ? 'Momsdeklaration for the whole year, for a taxable base up to SEK 1 million and no EU trade: due 12 May with the income tax return, VAT paid the same day.'
+            : 'Momsdeklaration for the whole year, for a taxable base up to SEK 1 million and no EU trade: due with the income tax return (1 July for a calendar year; 1 August when filed electronically).',
+        where,
+      });
+    }
+
+    push({
+      id: `se.income-tax-return:${ty}`,
+      ruleId: 'se.income-tax-return',
+      title: sole ? `Income tax return ${ty}` : `Corporate tax return ${ty}`,
+      period: String(ty),
+      action: 'file',
+      statutory: sole ? ymd(year, 5, 2) : ymd(year, 7, 1),
+      detail: sole
+        ? 'Inkomstdeklaration 1 with the NE appendix (the business\'s profit and loss), through Skatteverket\'s e-service. An extension (anstånd) can be asked for.'
+        : 'Inkomstdeklaration 2 for a fiscal year ending 31 December: 1 July on paper, 1 August electronically. Another fiscal year has its own date (Skatteverket\'s Viktiga datum).',
+      where,
+    });
+
+    // Debited preliminary tax: paid monthly into the tax account, the 12th; the 17th in January and August.
+    if (p.incomeTaxPrepayments) {
+      for (let m = 1; m <= 12; m++) {
+        push({
+          id: `se.preliminary-tax:${year}-${pad(m)}`,
+          ruleId: 'se.preliminary-tax',
+          title: `Preliminary tax ${MONTHS[m - 1]} ${year}`,
+          period: `${MONTHS[m - 1]} ${year}`,
+          action: 'pay',
+          statutory: swedishTwelfth(year, m),
+          detail: 'Debiterad preliminärskatt (F-skatt): the monthly amount on Skatteverket\'s decision, paid into the tax account (skattekontot) by the 12th, the 17th in January and August. Ask for a new decision (preliminär inkomstdeklaration) when the year looks very different.',
+          where: 'Skattekontot',
+        });
+      }
+    }
+
+    // EC Sales List: the 25th after the month or quarter when filed electronically (the 20th on paper).
+    if (p.ecSalesList) {
+      const step = p.ecSalesListFrequency === 'monthly' ? 1 : 3;
+      for (let m = step; m <= 12; m += step) {
+        const [dy, dm] = addMonths(year, m, 1);
+        const period = step === 1 ? `${MONTHS[m - 1]} ${year}` : `Q${m / 3} ${year}`;
+        push({
+          id: `se.ec-sales-list:${step === 1 ? `${year}-${pad(m)}` : `${year}-Q${m / 3}`}`,
+          ruleId: 'se.ec-sales-list',
+          title: `EC Sales List ${period}`,
+          period,
+          action: 'file',
+          statutory: ymd(dy, dm, 25),
+          detail: 'Periodisk sammanställning for VAT-free sales to businesses in other EU countries, through Skatteverket\'s e-service (the 20th on paper). Goods are reported monthly; quarterly is for services only. Nothing to report: nothing to file.',
+          where,
+        });
+      }
+    }
+    return out;
+  },
+  shift: (day) => nextSwedishWorkingDay(day),
+};
+
+const RULE_SETS: Record<string, RuleSet> = { DE: germany, SE: sweden };
 
 /** EU-wide: the cross-border SME scheme's quarterly report, within a month of the quarter's end. */
 const SME_RULE: RuleInfo = { id: 'eu.sme-report', label: 'EU SME scheme quarterly report' };
@@ -436,7 +610,7 @@ function smeReports(p: TaxDeadlineProfile, year: number): Omit<TaxDeadline, 'due
       action: 'file' as const,
       statutory: ymd(dy, dm, lastDayOfMonth(dy, dm)),
       detail: 'Turnover per EU country for the quarter (zero where there was none), filed in the country you are established in. The figures are under Books → SME report.',
-      where: p.country === 'DE' ? 'BZSt Online-Portal' : 'Your tax office',
+      where: p.country === 'DE' ? 'BZSt Online-Portal' : p.country === 'SE' ? 'Skatteverket (e-tjänst)' : 'Your tax office',
     };
   });
 }

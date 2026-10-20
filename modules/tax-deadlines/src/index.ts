@@ -8,7 +8,7 @@ import { clearSdk, setSdk } from './runtime';
  *
  * The business describes its tax setup once (country, VAT status, how often
  * it files, extension, advisor…) and the deadlines follow from the rules in
- * `deadlinesBetween` (@zollify/shared): Germany in full, the EU SME scheme
+ * `deadlinesBetween` (@zollify/shared): Germany and Sweden in full, the EU SME scheme
  * report for any EU country, and custom deadlines for anything else. The
  * server rings the bell and emails at the lead times picked.
  */

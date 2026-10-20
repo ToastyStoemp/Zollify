@@ -132,14 +132,47 @@ async function updateClaim(productId: string, variantId: string, value: string):
   }
 }
 
-const claimedRows = computed(() => claims.value.filter((r) => r.claimed !== null));
+/** The rows the search leaves showing - "all" in the bulk buttons means these. */
+const visibleClaims = computed(() => claimGroups.value.flatMap((g) => g.rows));
+const filtered = computed(() => search.value.trim() !== '');
+const claimedRows = computed(() => visibleClaims.value.filter((r) => r.claimed !== null));
+const claimableRows = computed(() => visibleClaims.value.filter((r) => r.claimed === null && r.available > 0));
 const unclaiming = ref(false);
+const claiming = ref(false);
 
-/** Drops every claim this event holds, so it sells from the shared pool again. */
+/**
+ * Reserves everything still free of each shown item that has no claim yet. The
+ * claim counts what this event already sold from the pool too, so what it can
+ * still sell stays the same - it just stops being up for grabs elsewhere.
+ * Items with a claim keep theirs.
+ */
+async function claimAll(): Promise<void> {
+  const rows = claimableRows.value;
+  if (!eventId.value || !rows.length) return;
+  const units = rows.reduce((n, r) => n + r.available, 0);
+  const which = filtered.value ? 'shown ' : '';
+  const ok = await shellConfirm(
+    `Claim all free stock of the ${rows.length} ${which}item${rows.length === 1 ? '' : 's'} without a claim (${units} unit${units === 1 ? '' : 's'}) for this event? No other event can sell it then.`,
+    'Claim all',
+  );
+  if (!ok) return;
+  claiming.value = true;
+  error.value = null;
+  try {
+    for (const row of rows) await setClaim(eventId.value, row.productId, row.variantId, row.soldHere + row.available);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not claim that stock.';
+  } finally {
+    claiming.value = false;
+  }
+}
+
+/** Drops every shown claim this event holds, so those items sell from the shared pool again. */
 async function unclaimAll(): Promise<void> {
   const rows = claimedRows.value;
   if (!eventId.value || !rows.length) return;
-  const ok = await shellConfirm(`Remove all ${rows.length} claims for this event? It will sell from unclaimed stock instead.`, 'Unclaim all');
+  const which = filtered.value ? 'shown ' : '';
+  const ok = await shellConfirm(`Remove all ${rows.length} ${which}claims for this event? It will sell from unclaimed stock instead.`, 'Unclaim all');
   if (!ok) return;
   unclaiming.value = true;
   error.value = null;
@@ -297,6 +330,9 @@ async function carryOver(): Promise<void> {
             </option>
           </optgroup>
         </select>
+        <button v-if="canEdit && claimableRows.length" type="button" class="quiet" :disabled="claiming" @click="claimAll">
+          {{ claiming ? 'Claiming…' : `Claim all (${claimableRows.length})` }}
+        </button>
         <button v-if="canEdit && claimedRows.length" type="button" class="quiet" :disabled="unclaiming" @click="unclaimAll">
           {{ unclaiming ? 'Removing…' : `Unclaim all (${claimedRows.length})` }}
         </button>

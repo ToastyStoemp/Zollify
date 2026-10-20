@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { checkPickedFile } from '@zollify/shared';
-import type { Dossier, Issue, Material, Reorder, Rep, Snapshot, SourcingFile, Supplier } from './engine';
+import { nextRef, type Dossier, type Issue, type Material, type Reorder, type Rep, type Snapshot, type SourcingFile, type Supplier } from './engine';
 import { sdk } from './runtime';
 
 /**
@@ -74,3 +74,59 @@ export async function fileBytes(id: string): Promise<{ filename: string; mime: s
 }
 
 export const supplierName = computed(() => new Map(snap.value.suppliers.map((s) => [s.id, s.name])));
+
+/**
+ * What is here now - the last count less what sold since, not the count
+ * itself. A dossier saved without a variant covers the whole product, so a
+ * product with variants adds them up.
+ */
+export function onHandFor(pid: string, vid: string): number {
+  const inv = sdk().data.inventory;
+  const variants = vid ? [] : (sdk().data.products.get(pid)?.variants ?? []);
+  return variants.length ? variants.reduce((n, v) => n + inv.inStock(pid, v.id), 0) : inv.inStock(pid, vid || null);
+}
+
+/** Reorders still open to new lines; anything later is already with the supplier. */
+const MERGEABLE = ['draft', 'quote_requested', 'quoted'];
+
+/**
+ * Turns picked lines into one reorder per supplier, folded into that
+ * supplier's open one when there is. `from` names where they came from in
+ * the reorder's history. Lines for the same dossier add up; lines without a
+ * supplier are left out and returned by title.
+ */
+export async function orderLines(
+  lines: { dossierId: string; title: string; supplierId: string | null; qty: number }[],
+  from: string,
+): Promise<{ created: number; merged: number; skipped: string[] }> {
+  const bySupplier = new Map<string, Map<string, { dossierId: string; title: string; qty: number }>>();
+  const skipped: string[] = [];
+  for (const l of lines) {
+    if (l.qty <= 0) continue;
+    if (!l.supplierId) {
+      skipped.push(l.title);
+      continue;
+    }
+    const m = bySupplier.get(l.supplierId) ?? bySupplier.set(l.supplierId, new Map()).get(l.supplierId)!;
+    const had = m.get(l.dossierId);
+    m.set(l.dossierId, { dossierId: l.dossierId, title: had?.title ?? l.title, qty: (had?.qty ?? 0) + l.qty });
+  }
+  let created = 0;
+  let merged = 0;
+  for (const [supplierId, m] of bySupplier) {
+    const add = [...m.values()];
+    const open = snap.value.reorders.filter((x) => x.supplierId === supplierId && MERGEABLE.includes(x.status)).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
+    if (open) {
+      const byD = new Map(open.lines.map((l) => [l.dossierId, l]));
+      for (const nl of add) byD.set(nl.dossierId, { ...(byD.get(nl.dossierId) ?? {}), ...nl });
+      await save('reorders', { ...open, lines: [...byD.values()], events: [...open.events, { status: open.status, at: Date.now(), note: `Added ${add.length} item(s) from ${from}` }] });
+      merged++;
+    } else {
+      const now = Date.now();
+      const r: Reorder = { id: crypto.randomUUID(), ref: nextRef(snap.value.reorders), supplierId, status: 'draft', note: '', currency: sdk().account()?.profile.defaultCurrency ?? 'CHF', landedExtra: null, lines: add, events: [{ status: 'draft', at: now, note: `Created from ${from}` }], createdAt: now };
+      await save('reorders', r);
+      created++;
+    }
+  }
+  return { created, merged, skipped };
+}

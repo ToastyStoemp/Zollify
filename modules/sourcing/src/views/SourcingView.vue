@@ -4,16 +4,18 @@ import { loaded, refresh, snap } from '../api';
 import DossiersTab from './DossiersTab.vue';
 import ReordersTab from './ReordersTab.vue';
 import RestockTab from './RestockTab.vue';
+import ForecastTab from './ForecastTab.vue';
 import IssuesTab from './IssuesTab.vue';
 import MaterialsTab from './MaterialsTab.vue';
 
 /**
  * Sourcing - the reorder cockpit, ported from ZollSource. Dossiers hold what
  * a supplier needs to make each product; Restock says what to order;
+ * Forecast turns per-day sales into what picked events will need;
  * Reorders carry an order from quote to received; Issues and Materials feed
  * the specs and the home-print costs.
  */
-type Tab = 'dossiers' | 'reorders' | 'restock' | 'issues' | 'materials';
+type Tab = 'dossiers' | 'reorders' | 'restock' | 'forecast' | 'issues' | 'materials';
 const tab = ref<Tab>('dossiers');
 const error = ref<string | null>(null);
 onMounted(() => {
@@ -24,6 +26,7 @@ const tabs = computed<{ id: Tab; label: string; badge?: number }[]>(() => [
   { id: 'dossiers', label: 'Dossiers', badge: snap.value.dossiers.length },
   { id: 'reorders', label: 'Reorders', badge: open.value },
   { id: 'restock', label: 'Restock' },
+  { id: 'forecast', label: 'Forecast' },
   { id: 'issues', label: 'Issues', badge: snap.value.issues.filter((i) => i.status === 'open').length },
   { id: 'materials', label: 'Materials' },
 ]);
@@ -47,6 +50,7 @@ function pick(id: Tab): void {
       <DossiersTab v-if="tab === 'dossiers'" @error="error = $event" />
       <ReordersTab v-else-if="tab === 'reorders'" @error="error = $event" />
       <RestockTab v-else-if="tab === 'restock'" @error="error = $event" />
+      <ForecastTab v-else-if="tab === 'forecast'" @error="error = $event" />
       <IssuesTab v-else-if="tab === 'issues'" @error="error = $event" />
       <MaterialsTab v-else @error="error = $event" />
     </template>

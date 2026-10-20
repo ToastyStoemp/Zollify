@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { QrCode } from '@zollify/ui';
 import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
-import { effectiveParams, isPrintFile, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import { effectiveParams, isPrintFile, targetFor, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -275,16 +275,30 @@ function fillCounts(counts: Record<string, number>, what: string, none: string):
     : none;
 }
 
+const count = (value: number): number => Math.max(0, Math.min(999, Math.floor(value) || 0));
 async function setTarget(value: number): Promise<void> {
-  settings.value = await api.settings.set({ target: Math.max(0, Math.floor(value) || 0) });
+  settings.value = await api.settings.set({ target: count(value) });
 }
-/** "Fill to target": each item's print count = what it takes to reach the target stock. */
+/** The A sizes in the catalogue, smallest number (largest paper) first, for per-size targets. */
+const sizes = computed(() => [...new Set(rows.value.map(sizeOf).filter((s): s is string => !!s))].sort());
+const showSizeTargets = ref(false);
+/** A size's own target; an empty box (NaN) clears it, so the size uses the main target again. */
+async function setSizeTarget(size: string, value: number): Promise<void> {
+  const next = { ...(settings.value?.sizeTargets ?? {}) };
+  if (Number.isNaN(value)) delete next[size];
+  else next[size] = count(value);
+  settings.value = await api.settings.set({ sizeTargets: next });
+}
+const targetOf = (row: CatalogRow): number => targetFor(sizeOf(row), settings.value?.target ?? 0, settings.value?.sizeTargets);
+/** "Fill to target": each item's print count = what it takes to reach its target stock. */
 function fillToTarget(): void {
+  const own = Object.entries(settings.value?.sizeTargets ?? {}).filter(([s]) => sizes.value.includes(s));
   const target = settings.value?.target ?? 0;
+  const what = [own.map(([s, n]) => `${s.toUpperCase()} ${n}`).join(', '), own.length ? `others ${target}` : `${target}`].filter(Boolean).join(', ');
   fillCounts(
-    Object.fromEntries(rows.value.map((r) => [r.key, target - r.onHand])),
-    `Filled up to ${target} on hand`,
-    target ? `Every item has ${target} or more on hand. Print counts are cleared.` : 'Set a target stock first.',
+    Object.fromEntries(rows.value.map((r) => [r.key, targetOf(r) - r.onHand])),
+    `Filled up to the target stock (${what})`,
+    rows.value.some((r) => targetOf(r) > 0) ? 'Every item is at or above its target stock. Print counts are cleared.' : 'Set a target stock first.',
   );
 }
 
@@ -502,10 +516,18 @@ async function printAll(): Promise<void> {
         Target stock
         <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
       </label>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to what it takes to reach the target stock" @click="fillToTarget">Fill to target</button>
+      <button v-if="sizes.length" type="button" class="quiet" :aria-expanded="showSizeTargets" title="A target per A size; items without a size in their name use the main target" @click="showSizeTargets = !showSizeTargets">Per size</button>
+      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to what it takes to reach its target stock" @click="fillToTarget">Fill to target</button>
       <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>
+    </div>
+    <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
+      <span class="muted">Target stock per size (empty: {{ settings?.target ?? 0 }}, the main target)</span>
+      <label v-for="s in sizes" :key="s" class="inline target">
+        {{ s.toUpperCase() }}
+        <input type="number" min="0" max="999" :value="settings?.sizeTargets?.[s] ?? ''" :placeholder="String(settings?.target ?? 0)" @change="setSizeTarget(s, ($event.target as HTMLInputElement).valueAsNumber)" />
+      </label>
     </div>
     <section v-if="open === GLOBAL" class="global" aria-label="Global print settings">
       <p class="muted">
@@ -587,6 +609,7 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .toolbar input[type='search'] { flex: 1; min-width: 12rem; }
 .target input { width: 4.5rem; }
+.size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border-radius: 10px; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }

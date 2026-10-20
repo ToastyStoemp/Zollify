@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveParams, orientFor, paperMm, paperName, paperParam, settingsFor, sizeFromName } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, settingsFor, sizeFromName, targetFor } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -86,5 +86,15 @@ describe('effectiveParams', () => {
     expect(effectiveParams({ ...link, own: true }, global, 'a4')).toBe(link.params);
     expect(effectiveParams(link, null, 'a4')).toBe(link.params);
     expect(effectiveParams(undefined, null, 'a4')).toBeNull();
+  });
+});
+
+describe('targetFor', () => {
+  it("uses the size's own target, else the main one", () => {
+    expect(targetFor('a2', 5, { a2: 2, a4: 0 })).toBe(2);
+    expect(targetFor('a4', 5, { a2: 2, a4: 0 })).toBe(0); // 0 is a target, not "unset"
+    expect(targetFor('a3', 5, { a2: 2 })).toBe(5);
+    expect(targetFor(null, 5, { a2: 2 })).toBe(5);
+    expect(targetFor('a2', 5, undefined)).toBe(5);
   });
 });

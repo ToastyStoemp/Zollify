@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { DevModeSummary } from '../electron/devmode';
-import type { Printer } from '../electron/shared';
-import { PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
+import type { ImageInfo, Printer, Units } from '../electron/shared';
+import { MM_PER, PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
+import ScaleFields from './ScaleFields.vue';
 
 /**
  * One item's PhotoCraft `file.print` params. The common ones are fields; the
@@ -12,14 +13,14 @@ import { PAPER_OPTIONS, paperName, paperParam } from '../electron/shared';
  * `size` is the A size the item's name says, when it says one: it offers
  * "apply to all items of this size" next to "apply to all items".
  */
-const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; size: string | null; noApply?: boolean }>();
-const emit = defineEmits<{ update: [params: Record<string, unknown>]; apply: [params: Record<string, unknown>, scope: 'all' | 'size'] }>();
+const props = defineProps<{ params: Record<string, unknown>; printers: Printer[]; size: string | null; noApply?: boolean; image?: ImageInfo | null; units: Units }>();
+const emit = defineEmits<{ update: [params: Record<string, unknown>]; apply: [params: Record<string, unknown>, scope: 'all' | 'size']; units: [units: Units] }>();
 
 const FIELDS = ['printer', 'paper', 'orientation', 'scaleToFit', 'scale', 'center', 'top', 'left', 'colorHandling', 'emulsionDown'] as const;
 
-/** PhotoCraft takes top/left in inches from the paper's top-left corner; the form shows millimetres. */
-const MM_PER_IN = 25.4;
-const toMm = (inches: unknown): number => Math.round((Number(inches) || 0) * MM_PER_IN * 10) / 10;
+/** PhotoCraft takes top/left in inches from the paper's top-left corner; the form shows the app's unit. */
+const inUnit = (inches: number): number => Math.round(((inches * 25.4) / MM_PER[props.units]) * 100) / 100;
+const fromUnit = (value: number): number => Math.max(0, value || 0) * (MM_PER[props.units] / 25.4);
 
 const form = ref(fromParams(props.params));
 const extra = ref(extraOf(props.params));
@@ -97,8 +98,9 @@ function fromParams(p: Record<string, unknown>) {
     scale: Number(p.scale ?? 100),
     // PhotoCraft centres unless told otherwise.
     center: p.center !== false,
-    topMm: toMm(p.top),
-    leftMm: toMm(p.left),
+    /** Inches, as PhotoCraft takes them; shown in the app's unit. */
+    top: Number(p.top) || 0,
+    left: Number(p.left) || 0,
     colorHandling: String(p.colorHandling ?? 'printerManages'),
     emulsionDown: p.emulsionDown === true,
   };
@@ -139,7 +141,7 @@ function collect(): Record<string, unknown> | null {
     scaleToFit: f.scaleToFit,
     ...(f.scaleToFit ? {} : { scale: f.scale > 0 ? f.scale : 100 }),
     center: f.center,
-    ...(f.center ? {} : { top: Math.max(0, f.topMm || 0) / MM_PER_IN, left: Math.max(0, f.leftMm || 0) / MM_PER_IN }),
+    ...(f.center ? {} : { top: Math.max(0, f.top), left: Math.max(0, f.left) }),
     colorHandling: f.colorHandling,
     ...(f.emulsionDown ? { emulsionDown: true } : {}),
   };
@@ -181,11 +183,11 @@ function apply(scope: 'all' | 'size'): void {
       <select v-model="form.orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
     </label>
     <label class="inline"><input v-model="form.scaleToFit" type="checkbox" /> Scale to fit</label>
-    <label v-if="!form.scaleToFit"><span>Scale %</span><input v-model.number="form.scale" type="number" min="1" max="1000" /></label>
+    <ScaleFields v-if="!form.scaleToFit" v-model:scale="form.scale" :image="image ?? null" :units="units" @units="emit('units', $event)" />
     <label class="inline"><input v-model="form.center" type="checkbox" /> Center on paper</label>
     <template v-if="!form.center">
-      <label><span>From top (mm)</span><input v-model.number="form.topMm" type="number" min="0" step="0.5" /></label>
-      <label><span>From left (mm)</span><input v-model.number="form.leftMm" type="number" min="0" step="0.5" /></label>
+      <label><span>From top ({{ units }})</span><input :value="inUnit(form.top)" type="number" min="0" step="0.01" @change="form.top = fromUnit(($event.target as HTMLInputElement).valueAsNumber)" /></label>
+      <label><span>From left ({{ units }})</span><input :value="inUnit(form.left)" type="number" min="0" step="0.01" @change="form.left = fromUnit(($event.target as HTMLInputElement).valueAsNumber)" /></label>
     </template>
     <label>
       <span>Colour</span>

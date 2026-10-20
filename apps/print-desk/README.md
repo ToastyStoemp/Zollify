@@ -70,8 +70,13 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   that has no settings of its own. Each item still prints on its own paper
   (the A size in its name, else its own paper) and in its own orientation (set
   from its image when the file is linked). "Load from PhotoCraft" fills them
-  from your last PhotoCraft print. A row's settings panel offers "Own settings
-  for this item" (a copy to change) and back.
+  from your last PhotoCraft print. A row using them can change its own paper,
+  orientation and scaling (scale to fit, or an exact size) and keep the rest
+  global; "All settings of its own" gives it a full copy to change, and back.
+- Without **scale to fit**, the size shows as width and height in cm, mm or
+  inches next to the scale (from the linked image's pixels and resolution, as
+  PhotoCraft prints it); typing either sets the scale. Positions use the same
+  unit, which is kept between sessions.
 - **Driver settings follow the paper.** PhotoCraft refuses driver settings
   whose paper differs from the layout, so when an item prints on another size
   than its driver settings were made for, Print Desk sets the driver's paper of
@@ -91,10 +96,15 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   last closed event sold of it (the closed event that ended last, stores not
   counted), less reverted sales. Items it sold none of go to 0. Items without a
   linked file are named, as they cannot print.
-- **Print all** runs one `file.print` per queued row with `copies` set, then
-  pushes an `inventory.set` op per printed row with the old count plus the
-  copies - the same op a stock count in the web app makes. Stock counts what
-  was sent; a job cancelled in the print queue afterwards is not taken back.
+- **Print all** runs one `file.print` per queued row with `copies` set. With
+  "Add printed copies to Zollify stock" on, copies are added as they come out,
+  not when they are sent: an `inventory.set` op (the same op a stock count in
+  the web app makes) each time the queue reports more copies done. When a job
+  leaves the queue, Windows' print log (PrintService/Operational) says how it
+  ended: event 307 with the pages printed, or 310 alone for a job cancelled in
+  the queue, which then counts only the copies the driver had sent. Without a
+  log entry within 15 s, all copies count. A print cancelled on the printer
+  itself after Windows sent it can't be seen.
 - On Windows, each job is then followed in the print queue (`Win32_PrintJob`,
   every 2 s) until it leaves it. PhotoCraft prints every copy as one page of
   the job, so pages printed is copies done; the row shows a bar, the driver's

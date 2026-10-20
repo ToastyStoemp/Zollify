@@ -1,4 +1,4 @@
-import type { CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
+import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DevModeSummary } from '../electron/devmode';
 import type { EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
@@ -30,7 +30,7 @@ export interface PrintDeskApi {
   photocraft: {
     printers(): Promise<Printer[]>;
     /** An image's size in pixels, read by photocraft-cli. */
-    size(file: string): Promise<{ width: number; height: number }>;
+    size(file: string): Promise<ImageInfo>;
     /** The settings of PhotoCraft's last print (File › Print), as an item's print params. */
     lastPrint(): Promise<Record<string, unknown>>;
     /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */

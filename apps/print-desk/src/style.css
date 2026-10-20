@@ -7,6 +7,7 @@
   --zfy-primary: #2b6cb0;
   --zfy-danger: #c6512f;
   --zfy-success: #2f855a;
+  --zfy-warning: #a86a00;
   color-scheme: light dark;
 }
 /* Electron's nativeTheme drives this: the device's choice, or the one picked in the app. */
@@ -20,6 +21,7 @@
     --zfy-primary: #4a8fd8;
     --zfy-danger: #f08a6c;
     --zfy-success: #5cc48d;
+    --zfy-warning: #e3b341;
   }
 }
 * { box-sizing: border-box; }
@@ -36,3 +38,4 @@ code { font-family: ui-monospace, monospace; font-size: .8rem; }
 .muted { color: var(--zfy-muted); }
 .error { color: var(--zfy-danger); }
 .ok { color: var(--zfy-success); }
+.warn { color: var(--zfy-warning); }

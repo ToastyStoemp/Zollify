@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 // Straight from its file, not the @zollify/ui barrel: the barrel pulls in @zollify/shared and zod.
 import QrCode from '@zollify/ui/QrCode.vue';
-import type { CatalogRow, CopyProgress, PrintLink, Printer, Session, Settings, Theme } from '../electron/shared';
+import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
 import { effectiveParams, isPrintFile, targetFor, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import ItemOverrides from './ItemOverrides.vue';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -65,6 +66,7 @@ onMounted(async () => {
   if (session.value) await loadAll();
   api.photocraft.onQueue((p) => {
     progress[p.key] = p;
+    void countPrinted(p);
   });
 });
 
@@ -224,6 +226,24 @@ async function saveGlobal(params: Record<string, unknown> | null): Promise<void>
     error.value = `Could not save the global print settings: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
+/** Images of linked files, by path, as PhotoCraft reads them: for print sizes in the settings. */
+const images = reactive<Record<string, ImageInfo | null>>({});
+watch(open, async (key) => {
+  const file = key ? links.value[key]?.file : '';
+  if (!file || file in images) return;
+  images[file] = null;
+  images[file] = await api.photocraft.size(file).catch(() => null);
+});
+const imageOf = (row: CatalogRow): ImageInfo | null => images[links.value[row.key]?.file ?? ''] ?? null;
+const units = computed<Units>(() => settings.value?.units ?? 'cm');
+async function setUnits(u: Units): Promise<void> {
+  settings.value = await api.settings.set({ units: u });
+}
+async function setOverrides(row: CatalogRow, overrides: Record<string, unknown>): Promise<void> {
+  const cur = links.value[row.key];
+  await saveLink(row.key, { ...cur, file: cur?.file ?? '', params: cur?.params ?? defaultParams(), overrides });
+}
+
 /** Gives an item its own settings (a copy of what it prints with now), or back to the global ones. */
 async function setOwn(row: CatalogRow, own: boolean): Promise<void> {
   const cur = links.value[row.key];
@@ -438,28 +458,43 @@ async function toggleAddToStock(on: boolean): Promise<void> {
   settings.value = await api.settings.set({ addToStock: on });
 }
 
+/** Per item of the current run: copies already added to the Zollify stock. */
+const counted: Record<string, number> = {};
+let stockQueue: Promise<void> = Promise.resolve();
+/**
+ * Adds copies to the Zollify stock as they come out, one item's new copies at a time, so a run
+ * cancelled halfway counts only what printed. In order, so two updates never race.
+ */
+function countPrinted(p: CopyProgress): Promise<void> {
+  stockQueue = stockQueue.then(async () => {
+    if (!settings.value?.addToStock) return;
+    const delta = p.printed - (counted[p.key] ?? 0);
+    const row = rows.value.find((r) => r.key === p.key);
+    if (delta <= 0 || !row) return;
+    try {
+      await api.zollify.setOnHand([{ productId: row.productId, variantId: row.variantId, onHand: row.onHand + delta }]);
+      row.onHand += delta;
+      counted[p.key] = (counted[p.key] ?? 0) + delta;
+    } catch (err) {
+      // Not counted, so the next progress report for this item tries again.
+      error.value = `Could not add printed copies to the Zollify stock: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  });
+  return stockQueue;
+}
+
 async function printAll(): Promise<void> {
   const jobs = queued.value.map((r) => ({ key: r.key, file: links.value[r.key]!.file, params: paramsFor(r), copies: qty[r.key]! }));
   // A new run starts a fresh count; rows from a finished run drop out of it.
   for (const k of Object.keys(progress)) if (progress[k]!.done) delete progress[k];
-  for (const j of jobs) progress[j.key] = { key: j.key, copies: j.copies, left: j.copies, status: 'Waiting', done: false };
+  for (const j of jobs) {
+    progress[j.key] = { key: j.key, copies: j.copies, printed: 0, left: j.copies, status: 'Waiting', done: false };
+    counted[j.key] = 0;
+  }
   await guard(`Sending ${totalCopies.value} copies`, async () => {
+    // Stock is added as copies come out (countPrinted), not here: a run can still be cancelled.
     const done = await api.photocraft.print(plain(jobs));
-    const printed = done.filter((r) => r.ok);
-    if (settings.value?.addToStock && printed.length) {
-      const byKey = new Map(rows.value.map((r) => [r.key, r]));
-      await api.zollify.setOnHand(
-        printed.map((r) => {
-          const row = byKey.get(r.key)!;
-          return { productId: row.productId, variantId: row.variantId, onHand: row.onHand + (qty[r.key] ?? 0) };
-        }),
-      );
-      for (const r of printed) {
-        const row = byKey.get(r.key)!;
-        row.onHand += qty[r.key] ?? 0;
-      }
-    }
-    for (const r of printed) qty[r.key] = 0;
+    for (const r of done) if (r.ok) qty[r.key] = 0;
   });
 }
 </script>
@@ -545,7 +580,7 @@ async function printAll(): Promise<void> {
         Every item without its own settings prints with these. Each still gets its own paper (from the A size in its name, else its own) and orientation (from its image),
         and the driver settings are set to that paper when it prints, keeping media, quality and borderless.
       </p>
-      <PrintSettings :params="globalParams ?? defaultParams()" :printers="printers" :size="null" no-apply @update="saveGlobal" />
+      <PrintSettings :params="globalParams ?? defaultParams()" :printers="printers" :size="null" :units="units" no-apply @update="saveGlobal" @units="setUnits" />
       <button v-if="globalParams" type="button" class="quiet" @click="saveGlobal(null)">Stop using global settings</button>
     </section>
     <p v-if="copiesLeft !== null" class="queue" role="status">Printing: <strong>{{ copiesLeft }}</strong> {{ copiesLeft === 1 ? 'copy' : 'copies' }} left, as the print queue reports it</p>
@@ -576,14 +611,15 @@ async function printAll(): Promise<void> {
               <button type="button" class="quiet" :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`" @click="pickFile(row)">{{ dropRow === row.key ? 'Drop to link' : links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
             </td>
             <td>
-              <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? ' · global' : '' }}</span>
+              <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
               <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file" /></td>
             <td>
               <template v-if="progress[row.key]">
                 <span v-if="progress[row.key]!.failed" class="error">{{ progress[row.key]!.status }}</span>
-                <span v-else-if="progress[row.key]!.done" class="ok">{{ progress[row.key]!.copies }} printed</span>
+                <span v-else-if="progress[row.key]!.cancelled" class="warn">{{ progress[row.key]!.status }}</span>
+                <span v-else-if="progress[row.key]!.done" class="ok" :title="progress[row.key]!.status">{{ progress[row.key]!.printed }} printed</span>
                 <template v-else>
                   <progress :max="progress[row.key]!.copies" :value="progress[row.key]!.copies - progress[row.key]!.left"></progress>
                   <div>{{ progress[row.key]!.copies - progress[row.key]!.left }} / {{ progress[row.key]!.copies }} · {{ progress[row.key]!.status }}</div>
@@ -593,16 +629,27 @@ async function printAll(): Promise<void> {
           </tr>
           <tr v-if="open === row.key" class="settings">
             <td :colspan="hasSku ? 8 : 7">
-              <div v-if="usesGlobal(row)" class="uses-global">
-                <span>Prints with the global print settings on {{ paperLabel(paramsFor(row).paper) }}, {{ paramsFor(row).orientation }}.</span>
-                <button type="button" @click="setOwn(row, true)">Own settings for this item</button>
-              </div>
+              <ItemOverrides
+                v-if="usesGlobal(row)"
+                :base="effectiveParams(links[row.key], globalParams, sizeOf(row), false) ?? {}"
+                :overrides="links[row.key]?.overrides ?? {}"
+                :image="imageOf(row)"
+                :units="units"
+                :size-from-name="sizeOf(row)"
+                :from-image="!!links[row.key]?.params.orientation"
+                @update="setOverrides(row, $event)"
+                @units="setUnits"
+                @own="setOwn(row, true)"
+              />
               <template v-else>
                 <PrintSettings
                   :params="paramsOf(row.key)"
                   :printers="printers"
                   :size="sizeOf(row)"
                   :no-apply="!!globalParams"
+                  :image="imageOf(row)"
+                  :units="units"
+                  @units="setUnits"
                   @update="saveLink(row.key, { ...links[row.key], file: links[row.key]?.file ?? '', params: $event })"
                   @apply="(params, scope) => applySettings(row, params, scope)"
                 />

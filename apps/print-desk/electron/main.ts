@@ -5,7 +5,7 @@ import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.j
 import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
 import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
-import { newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
+import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 
@@ -102,7 +102,10 @@ void app.whenReady().then(() => {
     return describeDevMode(dm, caps, options);
   });
   // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
-  const tracked = new Map<string, { printer: string; id: number; copies: number }>();
+  /** `sent`: pages the driver last reported; `goneAt`: when the job left the queue, while its outcome is looked up. */
+  const tracked = new Map<string, { printer: string; id: number; copies: number; since: number; sent: number; goneAt?: number }>();
+  /** How long to wait for Windows to log a job that left the queue before taking it as printed. */
+  const LOG_WAIT_MS = 15_000;
   let watcher: ReturnType<typeof setInterval> | undefined;
   let polling = false;
   const report = (p: CopyProgress): void => {
@@ -116,9 +119,21 @@ void app.whenReady().then(() => {
       if (!snap) return; // the query failed this time; keep the jobs and try again
       for (const [key, t] of tracked) {
         const job = snap.jobs.find((j) => j.printer === t.printer && j.id === t.id);
-        const p = progressOf(key, t.copies, job, snap.printers.find((pr) => pr.name === t.printer));
-        report(p);
-        if (p.done) tracked.delete(key);
+        if (job) {
+          const p = progressOf(key, t.copies, job, snap.printers.find((pr) => pr.name === t.printer));
+          t.sent = p.printed;
+          report(p);
+          continue;
+        }
+        // Left the queue: printed or cancelled, which only Windows' print log tells apart.
+        t.goneAt ??= Date.now();
+        const outcome = await jobOutcome(t.printer, t.id, t.since);
+        if (!outcome && Date.now() - t.goneAt < LOG_WAIT_MS) {
+          report({ key, copies: t.copies, printed: t.sent, left: t.copies - t.sent, status: 'Finishing', done: false });
+          continue;
+        }
+        report(finishedOf(key, t.copies, t.sent, outcome));
+        tracked.delete(key);
       }
     } finally {
       polling = false;
@@ -133,21 +148,23 @@ void app.whenReady().then(() => {
     // One at a time: the printer queue is sequential anyway, and the results stay in order.
     const results: PrintResult[] = [];
     for (const asked of jobs) {
-      report({ key: asked.key, copies: asked.copies, left: asked.copies, status: 'Sending to PhotoCraft', done: false });
+      report({ key: asked.key, copies: asked.copies, printed: 0, left: asked.copies, status: 'Sending to PhotoCraft', done: false });
       let job: PrintJob;
       try {
         job = { ...asked, params: await fitDriverPaper(asked.params) };
       } catch (err) {
         const message = `Driver settings: ${err instanceof Error ? err.message : String(err)}`;
         results.push({ key: asked.key, ok: false, message });
-        report({ key: asked.key, copies: asked.copies, left: 0, status: message, done: true, failed: true });
+        report({ key: asked.key, copies: asked.copies, printed: 0, left: 0, status: message, done: true, failed: true });
         continue;
       }
+      // A few seconds early, so the print log's events for this job are surely after it.
+      const since = Date.now() - 5000;
       const before = await snapshot();
       const r = await print(store.data.photocraft, job);
       results.push(r);
       if (!r.ok) {
-        report({ key: job.key, copies: job.copies, left: 0, status: r.message, done: true, failed: true });
+        report({ key: job.key, copies: job.copies, printed: 0, left: 0, status: r.message, done: true, failed: true });
         continue;
       }
       const after = before && (await snapshot());
@@ -155,10 +172,10 @@ void app.whenReady().then(() => {
       const spooled = before && after ? newJob(before, after, printer, basename(job.file)) : undefined;
       if (!spooled) {
         // No Windows queue to follow, or the job already left it: sent is as far as we can see.
-        report({ key: job.key, copies: job.copies, left: 0, status: r.message, done: true });
+        report({ key: job.key, copies: job.copies, printed: job.copies, left: 0, status: r.message, done: true });
         continue;
       }
-      tracked.set(job.key, { printer: spooled.printer, id: spooled.id, copies: job.copies });
+      tracked.set(job.key, { printer: spooled.printer, id: spooled.id, copies: job.copies, since, sent: Math.min(job.copies, spooled.pagesPrinted) });
       report(progressOf(job.key, job.copies, spooled, after!.printers.find((p) => p.name === spooled.printer)));
       watcher ??= setInterval(() => void poll(), 2000);
     }

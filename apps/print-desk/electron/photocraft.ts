@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { PrintJob, PrintResult, Printer } from './shared.js';
-import { printParams } from './shared.js';
+import { printParams, type ImageInfo } from './shared.js';
 
 const run = promisify(execFile);
 
@@ -111,12 +111,14 @@ export async function printers(exe: string): Promise<Printer[]> {
 }
 
 /** An image's size in pixels, from `photocraft-cli info` (any file PhotoCraft opens, PSD included). */
-export async function imageSize(exe: string, file: string): Promise<{ width: number; height: number }> {
+export async function imageSize(exe: string, file: string): Promise<ImageInfo> {
   const out = await cli(exe, ['info', file, '--compact'], 60_000);
   const width = Number(out.width);
   const height = Number(out.height);
   if (!(width > 0 && height > 0)) throw new Error('PhotoCraft did not report the image size');
-  return { width, height };
+  // PhotoCraft prints at the document's resolution; 72 is what it takes when there is none.
+  const resolution = Number(out.resolution) > 0 ? Number(out.resolution) : 72;
+  return { width, height, resolution };
 }
 
 /** Prints one job through `file.print`; never throws, the outcome is the result. */

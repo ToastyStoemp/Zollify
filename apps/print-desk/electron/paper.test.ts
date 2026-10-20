@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveParams, orientFor, paperMm, paperName, paperParam, settingsFor, sizeFromName, targetFor } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -98,5 +98,33 @@ describe('targetFor', () => {
     expect(targetFor(undefined, 'a3', 5, { a2: 2 })).toBe(5);
     expect(targetFor(undefined, null, 5, { a2: 2 })).toBe(5);
     expect(targetFor(undefined, 'a2', 5, undefined)).toBe(5);
+  });
+});
+
+describe('printSizeMm and scaleForMm', () => {
+  // An A3 page at 300 ppi: 3508 x 4961 px.
+  const a3 = { width: 3508, height: 4961, resolution: 300 };
+  it('prints pixels / resolution inches, times the scale', () => {
+    expect(printSizeMm(a3, 100).map(Math.round)).toEqual([297, 420]);
+    expect(printSizeMm(a3, 50).map(Math.round)).toEqual([149, 210]);
+    expect(printSizeMm({ width: 720, height: 360, resolution: 72 }, 100)).toEqual([254, 127]);
+  });
+  it('gives the scale for a size, and back', () => {
+    expect(scaleForMm(3508, 300, 297)).toBeCloseTo(99.99, 1);
+    const s = scaleForMm(3508, 300, 200);
+    expect(printSizeMm(a3, s)[0]).toBeCloseTo(200, 6);
+  });
+});
+
+describe('effectiveParams with overrides', () => {
+  const global = { printer: 'P', paper: 'a3', orientation: 'portrait', scaleToFit: true, center: true };
+  const link = { file: 'x.png', params: { orientation: 'landscape' }, overrides: { paper: 'a4', scaleToFit: false, scale: 80 } };
+  it('puts the item overrides over the name paper and image orientation', () => {
+    expect(effectiveParams(link, global, 'a2')).toEqual({ ...global, paper: 'a4', orientation: 'landscape', scaleToFit: false, scale: 80 });
+    expect(effectiveParams({ ...link, overrides: { orientation: 'portrait' } }, global, 'a2')).toMatchObject({ paper: [1190.55, 1683.78], orientation: 'portrait' });
+  });
+  it('leaves the overrides out on request, and for items with their own settings', () => {
+    expect(effectiveParams(link, global, 'a2', false)).toMatchObject({ paper: [1190.55, 1683.78], scaleToFit: true });
+    expect(effectiveParams({ ...link, own: true }, global, 'a2')).toBe(link.params);
   });
 });

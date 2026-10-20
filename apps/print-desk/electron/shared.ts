@@ -7,6 +7,11 @@ export interface PrintLink {
   params: Record<string, unknown>;
   /** Prints with its own params instead of the global print settings. */
   own?: boolean;
+  /**
+   * With the global settings: what this item prints differently (paper, orientation, scaleToFit,
+   * scale, center), ahead of the paper from its name and the orientation from its image.
+   */
+  overrides?: Record<string, unknown>;
 }
 
 /** One sellable item of the catalogue, keyed like the inventory ("pid:vid", '' for no variant). */
@@ -38,11 +43,15 @@ export interface PrintResult {
 export interface CopyProgress {
   key: string;
   copies: number;
+  /** Copies done so far: pages the driver sent, and in the end what Windows logged as printed. */
+  printed: number;
   left: number;
   /** Driver job status, a printer problem, or why the job never reached the queue. */
   status: string;
   done: boolean;
   failed?: boolean;
+  /** Cancelled in the queue: `printed` copies came out, the rest did not. */
+  cancelled?: boolean;
 }
 
 export interface Settings {
@@ -67,7 +76,28 @@ export interface Settings {
   sizeTargets: Record<string, number>;
   /** Account id -> stock key -> the item's own target stock, ahead of its size's and the main one. */
   itemTargets: Record<string, Record<string, number>>;
+  /** The unit print sizes and positions show in. */
+  units: Units;
 }
+
+export type Units = 'cm' | 'mm' | 'in';
+export const MM_PER: Record<Units, number> = { mm: 1, cm: 10, in: 25.4 };
+
+/** An image as PhotoCraft prints it: pixels, and pixels per inch (its resolution). */
+export interface ImageInfo {
+  width: number;
+  height: number;
+  resolution: number;
+}
+
+/** The image's printed width and height in millimetres at `scale` percent: PhotoCraft prints pixels / resolution inches. */
+export const printSizeMm = (image: ImageInfo, scale: number): [number, number] => {
+  const mm = (px: number): number => ((px / Math.max(1, image.resolution)) * 25.4 * scale) / 100;
+  return [mm(image.width), mm(image.height)];
+};
+
+/** The scale (percent) that prints `px` pixels at `resolution` as `mm` millimetres. */
+export const scaleForMm = (px: number, resolution: number, mm: number): number => (mm / ((px / Math.max(1, resolution)) * 25.4)) * 100;
 
 export type Theme = 'system' | 'light' | 'dark';
 
@@ -171,12 +201,14 @@ export function settingsFor(source: Record<string, unknown>, sourceSize: string 
 /**
  * What an item prints with: its own params when it has them (`own`) or there are no global
  * settings; else the global settings with the item's paper (the A size in its name, else its own
- * paper) and its own orientation (set from its image when the file was linked).
+ * paper) and its own orientation (set from its image when the file was linked), then whatever
+ * the item overrides (`withOverrides` false leaves those out, to show what they replace).
  */
-export function effectiveParams(link: PrintLink | undefined, global: Record<string, unknown> | null | undefined, size: string | null): Record<string, unknown> | null {
+export function effectiveParams(link: PrintLink | undefined, global: Record<string, unknown> | null | undefined, size: string | null, withOverrides = true): Record<string, unknown> | null {
   if (!global || link?.own) return link?.params ?? null;
   const own = link?.params ?? {};
-  return { ...global, paper: size ? paperParam(size) : (own.paper ?? global.paper), orientation: own.orientation ?? global.orientation ?? 'portrait' };
+  const base = { ...global, paper: size ? paperParam(size) : (own.paper ?? global.paper), orientation: own.orientation ?? global.orientation ?? 'portrait' };
+  return withOverrides ? { ...base, ...(link?.overrides ?? {}) } : base;
 }
 
 export const stockKey = (productId: string, variantId: string | null | undefined): string => `${productId}:${variantId ?? ''}`;

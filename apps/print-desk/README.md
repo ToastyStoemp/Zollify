@@ -96,6 +96,11 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   last closed event sold of it (the closed event that ended last, stores not
   counted), less reverted sales. Items it sold none of go to 0. Items without a
   linked file are named, as they cannot print.
+- **Stock stays current.** The catalogue and stock are read from Zollify again
+  every 30 s and whenever the window comes to the front, and before **Fill to
+  target**; only ops new since the last read come over. The header shows when
+  it last synced. Printed copies are added onto Zollify's count as it is at
+  that moment, so a stock count made in the Zollify app meanwhile is kept.
 - **Print all** runs one `file.print` per queued row with `copies` set. With
   "Add printed copies to Zollify stock" on, copies are added as they come out,
   not when they are sent: an `inventory.set` op (the same op a stock count in

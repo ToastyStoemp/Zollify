@@ -89,7 +89,7 @@ void app.whenReady().then(() => {
   ipcMain.handle('zollify:logout', () => zollify.logout());
   ipcMain.handle('zollify:catalog', () => zollify.catalog().catch(fail));
   ipcMain.handle('zollify:lastEventSold', () => zollify.lastEventSold().catch(fail));
-  ipcMain.handle('zollify:setOnHand', (_e, items: { productId: string; variantId: string; onHand: number }[]) => zollify.setOnHand(items).catch(fail));
+  ipcMain.handle('zollify:addOnHand', (_e, items: { productId: string; variantId: string; add: number }[]) => zollify.addOnHand(items).catch(fail));
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
   ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));

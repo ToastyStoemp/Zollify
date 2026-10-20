@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld('printDesk', {
     logout: invoke('zollify:logout'),
     catalog: invoke('zollify:catalog'),
     lastEventSold: invoke('zollify:lastEventSold'),
-    setOnHand: invoke('zollify:setOnHand'),
+    addOnHand: invoke('zollify:addOnHand'),
   },
   photocraft: {
     printers: invoke('photocraft:printers'),

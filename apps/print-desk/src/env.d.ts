@@ -25,7 +25,8 @@ export interface PrintDeskApi {
     catalog(): Promise<CatalogRow[]>;
     /** Copies the last closed event sold per stock key; null when no event is closed. */
     lastEventSold(): Promise<EventSold | null>;
-    setOnHand(items: { productId: string; variantId: string; onHand: number }[]): Promise<void>;
+    /** Adds copies to each item's stock as Zollify has it now; each item's new count. */
+    addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]>;
   };
   photocraft: {
     printers(): Promise<Printer[]>;

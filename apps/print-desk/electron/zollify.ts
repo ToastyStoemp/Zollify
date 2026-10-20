@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { catalogRows, lastClosedEventSold, type EventSold, type PulledOp } from './reduce.js';
 import type { CatalogRow, Session } from './shared.js';
+import { stockKey } from './shared.js';
 
 /** Zollify's answer to a login or refresh: a native client gets the refresh token in the body. */
 interface TokenResponse {
@@ -162,18 +163,39 @@ export class Zollify {
     return lastClosedEventSold(await this.pullAll());
   }
 
-  /** Every op this user may read, in order. */
-  private async pullAll(): Promise<PulledOp[]> {
-    const ops: PulledOp[] = [];
-    let since = 0;
+  /** The op log pulled so far, for `account`, up to server sequence `seq`: each pull fetches only what is new. */
+  private log: { account: string; seq: number; ops: PulledOp[] } = { account: '', seq: 0, ops: [] };
+  private pulling: Promise<PulledOp[]> = Promise.resolve([]);
+
+  /** Every op this user may read, in order. One pull at a time, so two never append the same ops. */
+  private pullAll(): Promise<PulledOp[]> {
+    this.pulling = this.pulling.catch(() => []).then(() => this.pullNew());
+    return this.pulling;
+  }
+  private async pullNew(): Promise<PulledOp[]> {
+    const account = this.session?.accountId ?? '';
+    if (this.log.account !== account) this.log = { account, seq: 0, ops: [] };
+    let since = this.log.seq;
     for (;;) {
       const page = await this.request<{ ops: { serverSeq: number; type: string; payload: unknown }[]; latestSeq: number }>(`/api/sync/pull?since=${since}&limit=1000`);
-      ops.push(...page.ops);
+      this.log.ops.push(...page.ops);
       const last = page.ops.at(-1)?.serverSeq ?? since;
+      this.log.seq = last;
       if (!page.ops.length || last >= page.latestSeq) break;
       since = last;
     }
-    return ops;
+    return this.log.ops;
+  }
+
+  /**
+   * Adds printed copies to the stock as Zollify has it now (pulled just before), not as this app
+   * last saw it: a count made elsewhere in the meantime is kept. Returns each item's new count.
+   */
+  async addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]> {
+    const now = new Map(catalogRows(await this.pullAll()).map((r) => [r.key, r.onHand]));
+    const next = items.map((i) => ({ ...i, key: stockKey(i.productId, i.variantId), onHand: (now.get(stockKey(i.productId, i.variantId)) ?? 0) + i.add }));
+    await this.setOnHand(next);
+    return next.map(({ key, onHand }) => ({ key, onHand }));
   }
 
   /** Counts stock: each item's new on-hand figure, as the web app's stock count does. */

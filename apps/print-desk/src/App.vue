@@ -76,8 +76,36 @@ async function loadAll(): Promise<void> {
 async function refreshCatalog(): Promise<void> {
   await guard('Loading catalogue', async () => {
     rows.value = await api.zollify.catalog();
+    syncedAt.value = new Date();
   });
 }
+/** When the stock was last read from Zollify. */
+const syncedAt = ref<Date | null>(null);
+/** How often the stock is read again, so a count made in the Zollify app shows here too. */
+const RESYNC_MS = 30_000;
+/**
+ * Reads the catalogue and stock again without a busy state: only what changed since the last
+ * read comes over. Skipped while something else runs; an error waits for the next try.
+ */
+async function resync(): Promise<void> {
+  if (!session.value || busy.value) return;
+  try {
+    const fresh = await api.zollify.catalog();
+    if (session.value) {
+      rows.value = fresh;
+      syncedAt.value = new Date();
+    }
+  } catch {
+    /* offline for a moment: the next resync tries again */
+  }
+}
+const resyncTimer = setInterval(() => void resync(), RESYNC_MS);
+const onFocus = (): void => void resync();
+window.addEventListener('focus', onFocus);
+onBeforeUnmount(() => {
+  clearInterval(resyncTimer);
+  window.removeEventListener('focus', onFocus);
+});
 async function refreshPrinters(): Promise<void> {
   try {
     printers.value = await api.photocraft.printers();
@@ -324,8 +352,9 @@ async function setItemTarget(row: CatalogRow, value: number): Promise<void> {
   else mine[row.key] = count(value);
   settings.value = await api.settings.set({ itemTargets: all });
 }
-/** "Fill to target": each item's print count = what it takes to reach its target stock. */
-function fillToTarget(): void {
+/** "Fill to target": each item's print count = what it takes to reach its target stock, from the latest stock. */
+async function fillToTarget(): Promise<void> {
+  await resync();
   fillCounts(
     Object.fromEntries(rows.value.map((r) => [r.key, targetOf(r) - r.onHand])),
     'Filled up to each item\'s target stock',
@@ -472,8 +501,10 @@ function countPrinted(p: CopyProgress): Promise<void> {
     const row = rows.value.find((r) => r.key === p.key);
     if (delta <= 0 || !row) return;
     try {
-      await api.zollify.setOnHand([{ productId: row.productId, variantId: row.variantId, onHand: row.onHand + delta }]);
-      row.onHand += delta;
+      // Onto Zollify's count as it is now, so a stock count made elsewhere meanwhile is kept.
+      const [done] = await api.zollify.addOnHand([{ productId: row.productId, variantId: row.variantId, add: delta }]);
+      const shown = rows.value.find((r) => r.key === p.key);
+      if (shown && done) shown.onHand = done.onHand;
       counted[p.key] = (counted[p.key] ?? 0) + delta;
     } catch (err) {
       // Not counted, so the next progress report for this item tries again.
@@ -542,6 +573,7 @@ async function printAll(): Promise<void> {
         <strong>{{ session.email }}</strong>
         <button type="button" class="quiet" @click="signOut">Sign out</button>
         <button type="button" class="quiet" :disabled="!!busy" @click="refreshCatalog">Reload catalogue</button>
+        <span v-if="syncedAt" class="muted synced" :title="`Stock is read from Zollify every ${RESYNC_MS / 1000} s and when this window comes to the front`">Stock synced {{ syncedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
       </div>
       <div class="exe">
         <span class="muted">photocraft-cli:</span>
@@ -674,6 +706,7 @@ async function printAll(): Promise<void> {
 .qr-wait { display: block; width: 220px; height: 220px; border-radius: 12px; background: #fff; opacity: .5; }
 .desk { padding: 1rem; display: flex; flex-direction: column; gap: .8rem; }
 header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.synced { font-size: .8rem; }
 .exe { display: flex; align-items: center; gap: .4rem; }
 .exe code { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }

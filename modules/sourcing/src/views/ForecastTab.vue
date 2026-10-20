@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
-import { fmtDayRange } from '@zollify/shared';
+import { computed, onMounted, ref } from 'vue';
+import { fmtDayRange, type EventStock } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import { forecast, forecastItems, incomingByDossier, rangeDays, salesHistory, sizeFactor, toMoq, upcomingEvents, type ForecastRow, type PlannedEvent } from '../forecast';
 import { onHandFor, orderLines, snap, supplierName } from '../api';
@@ -27,8 +27,15 @@ const soldOnly = ref(true);
 
 const events = computed(() => sdk().data.events.list());
 const transactions = computed(() => sdk().data.transactions.recent());
-const history = computed(() => salesHistory(events.value, transactions.value, windowDays.value ? Date.now() - windowDays.value * 86400000 : 0));
-const allTime = computed(() => salesHistory(events.value, transactions.value));
+/** What was brought to each event - lets an item that sold out stop counting days. */
+const stock = ref<Map<string, EventStock[]>>(new Map());
+onMounted(async () => {
+  const next = new Map<string, EventStock[]>();
+  await Promise.all(events.value.map(async (e) => next.set(e.id, await sdk().data.events.stock(e.id).catch(() => []))));
+  stock.value = next;
+});
+const history = computed(() => salesHistory(events.value, transactions.value, windowDays.value ? Date.now() - windowDays.value * 86400000 : 0, stock.value));
+const allTime = computed(() => salesHistory(events.value, transactions.value, 0, stock.value));
 const upcoming = computed(() => upcomingEvents(events.value));
 
 // ── Picked events, with their days and size factor ──────────────────────────
@@ -120,7 +127,7 @@ const rate = (n: number): string => (n ? (Math.round(n * 100) / 100).toFixed(2) 
       <span class="spacer"></span>
       <span class="muted small">{{ history.days }} event day{{ history.days === 1 ? '' : 's' }} · {{ history.units }} units</span>
     </div>
-    <p class="hint">Per day means per day at an event: units sold at events ÷ the days those events ran. Stores are left out. Pick the events to plan for; each gets a size from what its earlier editions sold per day against the average (1 = an average event), and both can be changed.</p>
+    <p class="hint">Per day means per day on sale at an event: units sold ÷ the days each item was on sale. An item that sold out stops counting days once it ran out. Stores are left out. Pick the events to plan for; each gets a size from what its earlier editions sold per day against the average (1 = an average event), and both can be changed.</p>
 
     <section class="events" aria-label="Events to plan for">
       <p v-if="!upcoming.length" class="empty">No upcoming events. Add one under Events and it shows up here.</p>

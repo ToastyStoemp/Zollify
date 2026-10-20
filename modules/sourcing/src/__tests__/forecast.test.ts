@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { SalesEvent, Transaction } from '@zollify/shared';
+import type { EventStock, SalesEvent, Transaction } from '@zollify/shared';
 import type { Dossier, Reorder } from '../engine';
-import { forecast, forecastItems, incomingByDossier, salesHistory, sizeFactor, upcomingEvents } from '../forecast';
+import { forecast, forecastItems, incomingByDossier, perDay, salesHistory, sizeFactor, upcomingEvents } from '../forecast';
 
 const ev = (id: string, name: string, dateStart: string, dateEnd: string, extra: Partial<SalesEvent> = {}): SalesEvent =>
   ({ id, name, dateStart, dateEnd, status: 'closed', venue: {}, currency: 'EUR', updatedAt: 0, ...extra }) as SalesEvent;
@@ -61,5 +61,27 @@ describe('forecast', () => {
     const products = [{ id: 'p', title: 'Pin', variants: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] }];
     expect(forecastItems(products, [dossier('d', 'p', null)]).map((i) => i.key)).toEqual(['p:']);
     expect(forecastItems(products, [dossier('d', 'p', 'a')]).map((i) => [i.key, i.dossier?.id ?? null])).toEqual([['p:a', 'd'], ['p:b', null]]);
+  });
+
+  it('an item that sold out stops counting days once it is gone', () => {
+    const stock: EventStock[] = [
+      { eventId: 'a24', productId: 'print', variantId: '', broughtQty: 10, updatedAt: 0 },
+      { eventId: 'a24', productId: 'pen', variantId: '', broughtQty: 100, updatedAt: 0 },
+    ];
+    const sales = [
+      sale('a24', '2024-05-04', 'print', null, 10), // gone on day 1 of 2
+      sale('a24', '2024-05-04', 'pen', null, 5),
+      sale('a24', '2024-05-05', 'pen', null, 5),
+    ];
+    const h = salesHistory([events[0]!], sales, 0, new Map([['a24', stock]]));
+    expect(perDay(h, 'print:')).toBe(10); // 10 units on sale for 1 day, not 5 over 2
+    expect(perDay(h, 'pen:')).toBe(5); // on sale both days, never ran out
+  });
+
+  it('an item not brought to an event adds no days for it', () => {
+    const stock: EventStock[] = [{ eventId: 'a24', productId: 'pen', variantId: '', broughtQty: 100, updatedAt: 0 }];
+    const h = salesHistory([events[0]!], [sale('a24', '2024-05-04', 'pen', null, 10), sale('a24', '2024-05-05', 'pen', null, 10)], 0, new Map([['a24', stock]]));
+    expect(perDay(h, 'pen:')).toBe(10); // 20 units over 2 days on sale
+    expect(perDay(h, 'print:')).toBe(0);
   });
 });

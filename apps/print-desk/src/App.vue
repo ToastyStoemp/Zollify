@@ -289,15 +289,25 @@ async function setSizeTarget(size: string, value: number): Promise<void> {
   else next[size] = count(value);
   settings.value = await api.settings.set({ sizeTargets: next });
 }
-const targetOf = (row: CatalogRow): number => targetFor(sizeOf(row), settings.value?.target ?? 0, settings.value?.sizeTargets);
+/** This account's own targets per item. */
+const itemTargets = computed<Record<string, number>>(() => (session.value ? (settings.value?.itemTargets?.[session.value.accountId] ?? {}) : {}));
+/** What the item's target falls back to without its own: its size's, else the main one. */
+const fallbackTargetOf = (row: CatalogRow): number => targetFor(undefined, sizeOf(row), settings.value?.target ?? 0, settings.value?.sizeTargets);
+const targetOf = (row: CatalogRow): number => targetFor(itemTargets.value[row.key], sizeOf(row), settings.value?.target ?? 0, settings.value?.sizeTargets);
+/** An item's own target; an empty box (NaN) clears it, so the item uses its size's or the main one again. */
+async function setItemTarget(row: CatalogRow, value: number): Promise<void> {
+  if (!session.value) return;
+  const all = plain(settings.value?.itemTargets ?? {});
+  const mine = (all[session.value.accountId] ??= {});
+  if (Number.isNaN(value)) delete mine[row.key];
+  else mine[row.key] = count(value);
+  settings.value = await api.settings.set({ itemTargets: all });
+}
 /** "Fill to target": each item's print count = what it takes to reach its target stock. */
 function fillToTarget(): void {
-  const own = Object.entries(settings.value?.sizeTargets ?? {}).filter(([s]) => sizes.value.includes(s));
-  const target = settings.value?.target ?? 0;
-  const what = [own.map(([s, n]) => `${s.toUpperCase()} ${n}`).join(', '), own.length ? `others ${target}` : `${target}`].filter(Boolean).join(', ');
   fillCounts(
     Object.fromEntries(rows.value.map((r) => [r.key, targetOf(r) - r.onHand])),
-    `Filled up to the target stock (${what})`,
+    'Filled up to each item\'s target stock',
     rows.value.some((r) => targetOf(r) > 0) ? 'Every item is at or above its target stock. Print counts are cleared.' : 'Set a target stock first.',
   );
 }
@@ -512,8 +522,8 @@ async function printAll(): Promise<void> {
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
       <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to the copies the last closed event sold" @click="fillFromLastEvent">Fill from last event</button>
-      <label class="inline target" title="Base stock per item, kept between sessions">
-        Target stock
+      <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
+        Main target
         <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
       </label>
       <button v-if="sizes.length" type="button" class="quiet" :aria-expanded="showSizeTargets" title="A target per A size; items without a size in their name use the main target" @click="showSizeTargets = !showSizeTargets">Per size</button>
@@ -541,7 +551,7 @@ async function printAll(): Promise<void> {
 
     <table>
       <thead>
-        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
+        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
       </thead>
       <tbody>
         <template v-for="row in shown" :key="row.key">
@@ -549,6 +559,18 @@ async function printAll(): Promise<void> {
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
+            <td>
+              <input
+                class="target-cell"
+                type="number"
+                min="0"
+                max="999"
+                :aria-label="`Target stock for ${row.variant ? `${row.title} ${row.variant}` : row.title}`"
+                :value="itemTargets[row.key] ?? ''"
+                :placeholder="String(fallbackTargetOf(row))"
+                @change="setItemTarget(row, ($event.target as HTMLInputElement).valueAsNumber)"
+              />
+            </td>
             <td>
               <button type="button" class="quiet" :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`" @click="pickFile(row)">{{ dropRow === row.key ? 'Drop to link' : links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
             </td>
@@ -569,7 +591,7 @@ async function printAll(): Promise<void> {
             </td>
           </tr>
           <tr v-if="open === row.key" class="settings">
-            <td :colspan="hasSku ? 7 : 6">
+            <td :colspan="hasSku ? 8 : 7">
               <div v-if="usesGlobal(row)" class="uses-global">
                 <span>Prints with the global print settings on {{ paperLabel(paramsFor(row).paper) }}, {{ paramsFor(row).orientation }}.</span>
                 <button type="button" @click="setOwn(row, true)">Own settings for this item</button>
@@ -608,7 +630,7 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .exe code { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .toolbar input[type='search'] { flex: 1; min-width: 12rem; }
-.target input { width: 4.5rem; }
+.target input, .target-cell { width: 4.5rem; }
 .size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border-radius: 10px; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }

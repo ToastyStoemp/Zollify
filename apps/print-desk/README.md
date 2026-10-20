@@ -81,11 +81,12 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
 - A row's settings can be applied to **all items of its size** or to **all
   items** (without global settings): items of another size keep their own
   paper, and the driver settings go along. Linked files are never touched.
-- **Target stock** is a base count per item, kept between sessions. **Per
-  size** gives each A size in the catalogue its own target (an empty box uses
-  the main one); items without a size in their name use the main target.
-  **Fill to target** sets each item's print count to what it takes to reach
-  its target from its Zollify on-hand count (0 when already there).
+- **Target stock** is the stock to print up to, kept between sessions. Each
+  product or variant has its own in the Target column. An empty box uses the
+  target of its A size (**Per size** in the toolbar), else the **Main target**;
+  the grey number shows which. **Fill to target** sets each item's print count
+  to what it takes to reach its target from its Zollify on-hand count (0 when
+  already there).
 - **Fill from last event** sets every item's print count to the copies the
   last closed event sold of it (the closed event that ended last, stores not
   counted), less reverted sales. Items it sold none of go to 0. Items without a

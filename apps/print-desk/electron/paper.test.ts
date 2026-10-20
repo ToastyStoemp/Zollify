@@ -90,11 +90,13 @@ describe('effectiveParams', () => {
 });
 
 describe('targetFor', () => {
-  it("uses the size's own target, else the main one", () => {
-    expect(targetFor('a2', 5, { a2: 2, a4: 0 })).toBe(2);
-    expect(targetFor('a4', 5, { a2: 2, a4: 0 })).toBe(0); // 0 is a target, not "unset"
-    expect(targetFor('a3', 5, { a2: 2 })).toBe(5);
-    expect(targetFor(null, 5, { a2: 2 })).toBe(5);
-    expect(targetFor('a2', 5, undefined)).toBe(5);
+  it("uses the item's own target, else its size's, else the main one", () => {
+    expect(targetFor(7, 'a2', 5, { a2: 2 })).toBe(7);
+    expect(targetFor(0, 'a2', 5, { a2: 2 })).toBe(0); // 0 is a target, not "unset"
+    expect(targetFor(undefined, 'a2', 5, { a2: 2, a4: 0 })).toBe(2);
+    expect(targetFor(undefined, 'a4', 5, { a2: 2, a4: 0 })).toBe(0);
+    expect(targetFor(undefined, 'a3', 5, { a2: 2 })).toBe(5);
+    expect(targetFor(undefined, null, 5, { a2: 2 })).toBe(5);
+    expect(targetFor(undefined, 'a2', 5, undefined)).toBe(5);
   });
 });

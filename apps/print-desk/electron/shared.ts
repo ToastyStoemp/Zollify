@@ -65,6 +65,8 @@ export interface Settings {
   target: number;
   /** Base stock per A size ("a3": 10), for items whose name says that size; others use `target`. */
   sizeTargets: Record<string, number>;
+  /** Account id -> stock key -> the item's own target stock, ahead of its size's and the main one. */
+  itemTargets: Record<string, Record<string, number>>;
 }
 
 export type Theme = 'system' | 'light' | 'dark';
@@ -185,6 +187,6 @@ export function printParams(link: PrintLink, copies: number): Record<string, unk
   return { ...rest, copies: Math.max(1, Math.min(999, Math.floor(copies))), send: true };
 }
 
-/** An item's target stock: its A size's own target when set, else the main one. */
-export const targetFor = (size: string | null, target: number, sizeTargets: Record<string, number> | undefined): number =>
-  (size ? sizeTargets?.[size] : undefined) ?? target;
+/** An item's target stock: its own when set, else its A size's, else the main one. */
+export const targetFor = (own: number | undefined, size: string | null, target: number, sizeTargets: Record<string, number> | undefined): number =>
+  own ?? (size ? sizeTargets?.[size] : undefined) ?? target;

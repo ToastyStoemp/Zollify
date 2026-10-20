@@ -10,7 +10,7 @@ export interface Stored extends Settings {
   refreshEncrypted?: boolean;
 }
 
-export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null };
+export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0 };
 
 export class Store {
   data: Stored;

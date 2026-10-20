@@ -61,6 +61,8 @@ export interface Settings {
    * paper (from the A size in its name) and orientation (from its image).
    */
   global: Record<string, unknown> | null;
+  /** Base stock per item: "Fill to target" prints each item up to this many on hand. */
+  target: number;
 }
 
 export type Theme = 'system' | 'light' | 'dark';

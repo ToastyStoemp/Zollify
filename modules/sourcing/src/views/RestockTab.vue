@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { Icon } from '@zollify/ui';
-import { computeEventPlan, computeRestock, nextRef, type Reorder } from '../engine';
-import { save, snap, supplierName } from '../api';
+import { computeEventPlan, computeRestock } from '../engine';
+import { toMoq } from '../forecast';
+import { onHandFor, orderLines, snap, supplierName } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -13,16 +14,7 @@ import { sdk } from '../runtime';
  */
 const emit = defineEmits<{ error: [message: string] }>();
 const lens = ref<'cover' | 'events'>('cover');
-/**
- * What is here now - the last count less what sold since, not the count
- * itself. A dossier saved without a variant covers the whole product, so a
- * product with variants adds them up.
- */
-const onHand = (pid: string, vid: string): number => {
-  const inv = sdk().data.inventory;
-  const variants = vid ? [] : (sdk().data.products.get(pid)?.variants ?? []);
-  return variants.length ? variants.reduce((n, v) => n + inv.inStock(pid, v.id), 0) : inv.inStock(pid, vid || null);
-};
+const onHand = onHandFor;
 const restock = computed(() => computeRestock(snap.value.dossiers, sdk().data.transactions.recent(), onHand));
 const plan = computed(() => computeEventPlan(sdk().data.events.list(), snap.value.dossiers, sdk().data.transactions.recent(), onHand));
 const rows = computed(() => (lens.value === 'cover' ? restock.value : plan.value.rows));
@@ -46,38 +38,12 @@ function pickDue(): void {
   }
   picked.value = s;
 }
-const MERGEABLE = ['draft', 'quote_requested', 'quoted'];
 async function order(): Promise<void> {
-  const bySupplier = new Map<string, { dossierId: string; title: string; qty: number }[]>();
-  const skipped: string[] = [];
-  for (const r of rows.value) {
-    if (!picked.value.has(r.dossierId)) continue;
-    let q = Math.max(0, Math.floor(Number(qty.value[r.dossierId]) || 0));
-    if (r.moq && q > 0) q = Math.max(q, r.moq);
-    if (q <= 0) continue;
-    if (!r.supplierId) {
-      skipped.push(r.title);
-      continue;
-    }
-    (bySupplier.get(r.supplierId) ?? bySupplier.set(r.supplierId, []).get(r.supplierId)!).push({ dossierId: r.dossierId, title: r.title, qty: q });
-  }
+  const lines = rows.value
+    .filter((r) => picked.value.has(r.dossierId))
+    .map((r) => ({ dossierId: r.dossierId, title: r.title, supplierId: r.supplierId, qty: toMoq(Math.max(0, Math.floor(Number(qty.value[r.dossierId]) || 0)), r.moq) }));
   try {
-    let created = 0;
-    let merged = 0;
-    for (const [supplierId, lines] of bySupplier) {
-      const open = snap.value.reorders.filter((x) => x.supplierId === supplierId && MERGEABLE.includes(x.status)).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))[0];
-      if (open) {
-        const byD = new Map(open.lines.map((l) => [l.dossierId, l]));
-        for (const nl of lines) byD.set(nl.dossierId, { ...(byD.get(nl.dossierId) ?? {}), ...nl });
-        await save('reorders', { ...open, lines: [...byD.values()], events: [...open.events, { status: open.status, at: Date.now(), note: `Added ${lines.length} item(s) from restock` }] });
-        merged++;
-      } else {
-        const now = Date.now();
-        const r: Reorder = { id: crypto.randomUUID(), ref: nextRef(snap.value.reorders), supplierId, status: 'draft', note: '', currency: sdk().account()?.profile.defaultCurrency ?? 'CHF', landedExtra: null, lines, events: [{ status: 'draft', at: now, note: 'Created from restock' }], createdAt: now };
-        await save('reorders', r);
-        created++;
-      }
-    }
+    const { created, merged, skipped } = await orderLines(lines, 'restock');
     picked.value = new Set();
     sdk().ui.toast(`${created} reorder${created === 1 ? '' : 's'} created, ${merged} updated${skipped.length ? ` · no supplier: ${skipped.join(', ')}` : ''}.`, { kind: 'success' });
   } catch (err) {

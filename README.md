@@ -192,6 +192,17 @@ Allocations and device picks are synced settings under `team.`, the prefix
 staff may write; every row is its own key, so two devices editing different
 rows never overwrite each other. A place holding less than nothing is flagged.
 
+*Sourcing forecast* - the **Forecast** tab in Sourcing gives each item's
+average sales per event day: units sold at events over the days those events
+ran (a day with no sales counts when the event's dates say you were there;
+stores are left out). Pick one or more upcoming events and each one gets a
+size factor: what its earlier editions sold per day against the average, 1
+when there is no history. Days and size can both be changed. Expected units
+are rate × days × size. The suggestion adds a buffer and takes off what is on
+hand and on reorders not yet received, rounded up to the MOQ. Ticked rows
+become reorders per supplier, like Restock. Items with no dossier can be
+copied as a list to make yourself.
+
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
 through the same till, stock claims, history and cash-up, so one account can run

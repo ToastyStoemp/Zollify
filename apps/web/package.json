@@ -20,6 +20,7 @@
     "@zollify/peppol-be": "*",
     "@zollify/economic": "*",
     "@zollify/sme-scheme": "*",
+    "@zollify/notify-me": "*",
     "@zollify/customs-ch": "*",
     "@zollify/customs-de": "*",
     "@zollify/customs-hub": "*",

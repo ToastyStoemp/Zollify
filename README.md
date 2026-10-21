@@ -34,6 +34,7 @@ modules/
   customs-ch/     Swiss EDEC XML, Forms 1174/1187, proforma, goods lists  (ported)
   customs-de/     German customs paperwork
   customs-hub/    one Customs entry point over the country modules
+  ata-carnet/     ATA Carnet general list from the packed stock, return check after the show
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
@@ -170,7 +171,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, ATA Carnet.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -436,6 +437,23 @@ from the slug and refuses unless the module is enabled for it. Hall, booth numbe
 link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
 Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
 handle) and legacy booth values, which fill in wherever the event has none.
+
+*ATA Carnet* - the `ata-carnet` module, reached through the Customs hub,
+is the paper for taking stock temporarily into a country outside the EU
+(the UK, Norway, Switzerland and most others) for a show. The **General
+List** is built from what the event claims: one numbered line per item
+(variant), in catalogue order grouped by type, with the trade description
+(title, variant, material, year), pieces, weight (a variant without one
+takes the product's), value (list price, or at cost where known) and
+country of origin - the carnet's own columns - as a PDF, a page to print,
+or a CSV for the chamber of commerce's online application; items with no
+weight or no value are flagged. The carnet's number, dates, countries and
+holder are kept on the event under their own key (`SalesEvent.carnet`), so
+the Swiss and German modules are untouched. The **return check** reads each
+line's sales (at this event and at any other event the same stock goes to
+on the trip) against it: pieces out, sold, sold value, due back - sold
+pieces are declared where the show was, the rest is presented at
+re-importation against the list.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

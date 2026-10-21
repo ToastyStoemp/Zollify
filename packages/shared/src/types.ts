@@ -72,6 +72,8 @@ export interface SalesEvent {
   customs?: Record<string, unknown>;
   /** Per-event German customs (ATLAS) state - separate from `customs` so the two modules never collide. */
   customsDe?: Record<string, unknown>;
+  /** Per-event ATA Carnet state (number, validity, countries) - the carnet module's own key. */
+  carnet?: Record<string, unknown>;
   /** VAT at this event - see resolveEventVat. Absent = from the country and the booth's exemptions. */
   vat?: EventVat;
   /** Hall, booth number, link and note - published by Public events. Not used for stores. */

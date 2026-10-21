@@ -76,6 +76,8 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point|economic\/grant)(\/|$|\?)/],
   [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
+  // Giving away or taking back gift card money needs the admin's own sign-in.
+  [/^(?!GET)/, /^\/api\/m\/gift-cards\/(settings|cards\/grant|cards\/[^/]+\/void)(\/|$)/],
 ];
 
 /**

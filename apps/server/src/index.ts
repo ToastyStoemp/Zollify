@@ -14,6 +14,7 @@ import { consignmentArtistServerModule, consignmentServerModule } from './module
 import { peppolServerModule } from './modules/peppol-be';
 import { economicServerModule } from './modules/economic';
 import { taxDeadlinesServerModule } from './modules/tax-deadlines';
+import { giftCardsServerModule } from './modules/gift-cards';
 
 loadDotEnv();
 
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
     peppolServerModule(jwtSecret),
     economicServerModule(jwtSecret),
     taxDeadlinesServerModule,
+    giftCardsServerModule,
   ];
 
   const app = await buildGateway({

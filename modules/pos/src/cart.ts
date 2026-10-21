@@ -10,6 +10,7 @@ import { sdk } from './runtime';
 import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
   allocateDiscounts,
+  applySettlements,
   computeCartTotals,
   distributeTotal,
   type CartLine as DiscountCartLine,
@@ -27,6 +28,14 @@ export interface CartLine extends SaleLine {
   fixed?: boolean;
   /** That module's key for the line, so the same thing is never added twice. */
   key?: string;
+  /** Outside VAT whatever the event charges (a voucher sold): recorded with no rate. */
+  taxFree?: boolean;
+  /**
+   * Money paid earlier, spent on this sale (a gift card). Kept as a negative
+   * unit price; no discount reaches it, and at checkout it records only what
+   * it covered - see applySettlements.
+   */
+  settles?: boolean;
 }
 
 interface CartState {
@@ -203,8 +212,9 @@ const discountLines = computed<DiscountCartLine[]>(() =>
     // discount began still gets it.
     consignorId: sdk().data.products.get(line.productId)?.consignorId,
     qty: line.qty,
-    unitPrice: line.unitPrice,
-    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+    // A settling line is not goods: nothing for a discount to match or share.
+    unitPrice: line.settles ? 0 : line.unitPrice,
+    lineTotal: line.settles ? 0 : (Math.round(line.unitPrice * 100) * line.qty) / 100,
   })),
 );
 
@@ -250,11 +260,22 @@ export const subtotal = computed(() => totals.value.subtotal);
 export const discountTotal = computed(
   () => round2(totals.value.ruleDiscountTotal + totals.value.customDiscountAmount),
 );
+/**
+ * What each settling line (a gift card spent) brings, in cart order, and how
+ * much of it the sale actually uses: never more than the goods come to after
+ * discounts, so a card worth more than the sale keeps the rest.
+ */
+const settling = computed(() => cart.lines.map((l) => (l.settles ? round2(Math.abs(l.unitPrice) * l.qty) : 0)));
+const appliedBase = computed(() => applySettlements(settling.value, totals.value.grandTotal));
+const appliedCharged = computed(() => applySettlements(settling.value.map((a) => toCharged(a)), chargeTotals.value.grandTotal));
+/** Paid earlier and spent on this sale, as charged - the part of the goods no payment is taken for. */
+export const settledTotal = computed(() => round2(appliedCharged.value.reduce((s, a) => s + a, 0)));
+
 /** Owed in the event's base currency - this is the figure the books use. */
-export const baseTotal = computed(() => totals.value.grandTotal);
+export const baseTotal = computed(() => round2(totals.value.grandTotal - appliedBase.value.reduce((s, a) => s + a, 0)));
 
 /** Owed in the currency the customer pays in. */
-export const total = computed(() => chargeTotals.value.grandTotal);
+export const total = computed(() => round2(chargeTotals.value.grandTotal - settledTotal.value));
 /** Rule discounts as charged, in the charge currency. */
 export const appliedDiscounts = computed(() => chargeTotals.value.ruleDiscounts);
 /** The manual discount as charged. */
@@ -382,6 +403,9 @@ export function addMisc(title: string, unitPrice: number, qty: number): void {
  */
 export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }): boolean {
   if (cart.lines.some((l) => l.key === line.key)) return true;
+  // A settling line is money coming off the sale: kept negative, so the cart
+  // and the sale record read the way a receipt does.
+  const unitPrice = line.settles ? -Math.abs(line.unitPrice) : line.unitPrice;
   cart.lines.push({
     lineId: `l${++lineSeq}`,
     productId: `module:${line.key}`,
@@ -390,11 +414,13 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
     sku: null,
     name: line.name,
     qty: line.qty,
-    unitPrice: line.unitPrice,
-    lineTotal: (Math.round(line.unitPrice * 100) * line.qty) / 100,
+    unitPrice,
+    lineTotal: (Math.round(unitPrice * 100) * line.qty) / 100,
     taxRate: null,
     fixed: true,
     key: line.key,
+    ...(line.taxFree || line.settles ? { taxFree: true } : {}),
+    ...(line.settles ? { settles: true } : {}),
     ...(line.consignorId ? { consignorId: line.consignorId } : {}),
     ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
     ...(line.ref ? { ref: line.ref } : {}),
@@ -405,7 +431,8 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
 /** The line a module added under `key`, for that module to read back. */
 export function findModuleLine(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null {
   const l = cart.lines.find((x) => x.key === key);
-  return l ? { key, name: l.name, qty: l.qty, unitPrice: l.unitPrice, ...(l.ref ? { ref: l.ref } : {}) } : null;
+  // A settling line reads back as the amount it applies, the way it was given.
+  return l ? { key, name: l.name, qty: l.qty, unitPrice: l.settles ? Math.abs(l.unitPrice) : l.unitPrice, ...(l.ref ? { ref: l.ref } : {}) } : null;
 }
 
 /** Changes what a module's line charges, in place. False when the cart has no line under that key. */
@@ -414,8 +441,8 @@ export function replaceModuleLine(line: Omit<TillLine, 'ref'>): boolean {
   if (!l) return false;
   l.name = line.name;
   l.qty = line.qty;
-  l.unitPrice = line.unitPrice;
-  l.lineTotal = (Math.round(line.unitPrice * 100) * line.qty) / 100;
+  l.unitPrice = l.settles ? -Math.abs(line.unitPrice) : line.unitPrice;
+  l.lineTotal = (Math.round(l.unitPrice * 100) * line.qty) / 100;
   return true;
 }
 
@@ -440,7 +467,9 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
 
   const charged = total.value;
   const base = baseTotal.value;
-  if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
+  // Nothing to take - unless money paid earlier (a gift card) covers goods that are in the cart.
+  const covered = charged <= 0 && settledTotal.value > 0 && chargeTotals.value.grandTotal > 0;
+  if (charged <= 0 && !covered) return { approved: false, error: 'The total is zero - nothing to charge.' };
 
   cart.busy = true;
   const thisAttempt = ++attempt;
@@ -484,16 +513,21 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
     // the books are kept in; the charged currency's split goes on asCharged.
     const baseShares = allocateDiscounts(discountLines.value, totals.value);
     const chargeShares = allocateDiscounts(chargeLines.value, chargeTotals.value);
-    let priced = cart.lines.map((line, i) => ({
+    const usedBase = appliedBase.value;
+    const usedCharged = appliedCharged.value;
+    const priced = cart.lines.map((line, i) => ({
       ...line,
-      lineTotal: round2((Math.round(line.unitPrice * 100) * line.qty) / 100 - baseShares[i]!),
+      // A settling line records what it actually covered, as a negative amount.
+      lineTotal: line.settles ? -usedBase[i]! : round2((Math.round(line.unitPrice * 100) * line.qty) / 100 - baseShares[i]!),
     }));
     // Safety net: if the split ever disagrees with the total (a discount
     // capped at a line's value, the total floored at zero), fall back to
     // spreading the difference so the lines still add up to what was paid.
-    if (Math.abs(priced.reduce((sum, l) => sum + l.lineTotal, 0) - base) > 0.001) priced = distributeTotal(priced, base);
+    // Over the goods only: a settling line is already exactly what it covered.
+    const goods = priced.filter((l) => !l.settles);
+    if (Math.abs(goods.reduce((sum, l) => sum + l.lineTotal, 0) - totals.value.grandTotal) > 0.001) distributeTotal(goods, totals.value.grandTotal);
 
-    const tax = saleTaxFor(cart.eventId, priced.map((l) => l.productId));
+    const tax = saleTaxFor(cart.eventId, priced.map((l) => ({ productId: l.productId, taxFree: l.taxFree })));
     const sale: SaleEvent = {
       saleId,
       eventId: cart.eventId,
@@ -505,7 +539,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       exchangeRate: cart.exchangeRate ?? undefined,
       ...(isConverting.value && marketRateNow() ? { marketRate: marketRateNow()! } : {}),
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
-      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, taxFree: _x, settles: _s, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.
@@ -513,7 +547,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // What the screen showed, for the receipt: list prices and each
       // discount by name, in the charged currency.
       asCharged: {
-        listTotals: chargeLines.value.map((l) => l.lineTotal),
+        listTotals: chargeLines.value.map((l, i) => (cart.lines[i]!.settles ? -usedCharged[i]! : l.lineTotal)),
         lineDiscounts: chargeShares,
         discounts: [
           ...chargeTotals.value.ruleDiscounts

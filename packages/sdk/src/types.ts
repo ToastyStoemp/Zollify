@@ -161,6 +161,18 @@ export interface TillLine {
   unitPrice: number;
   consignorId?: string;
   commissionPct?: number;
+  /**
+   * Outside VAT, whatever the event charges: the line's rate is recorded as
+   * none. A multi-purpose voucher sold, say - it is taxed when it is spent.
+   */
+  taxFree?: boolean;
+  /**
+   * Money the customer already paid - a gift card balance spent on this sale.
+   * `unitPrice` is the amount applied, positive. The till takes it off the
+   * total, lets no discount reach it, records it as a negative VAT-free line,
+   * and never applies more than the rest of the sale comes to.
+   */
+  settles?: boolean;
   ref?: { kind: string; id: string };
 }
 
@@ -177,6 +189,8 @@ export interface TillLineAccess {
   find(key: string): (TillLineInfo & { ref?: SaleLineRef }) | null;
   /** Swaps name, quantity and price of the line with `line.key`, in place. False when there is none. */
   replace(line: Omit<TillLine, 'ref'>): boolean;
+  /** What the sale comes to right now, in the till's currency, after discounts and settling lines. */
+  total?(): number;
 }
 
 /**
@@ -642,6 +656,12 @@ export interface Sdk {
     findLine(key: string): TillLineInfo | null;
     /** Changes the amount of a line this module added, keeping its place in the cart. False when it has no such line or no till is open. */
     replaceLine(line: Omit<TillLine, 'ref'>): boolean;
+    /**
+     * What the open till's sale comes to right now, in its currency, after
+     * discounts and settling lines; null when no till is open. Absent on
+     * older shells, so call it guarded.
+     */
+    total?(): number | null;
     /** The till's side: read and change the lines modules added. Only one till listens at a time. */
     onLineAccess(access: TillLineAccess): Unsubscribe;
     /** The till's side: receive lines modules add. Only one till listens at a time. */

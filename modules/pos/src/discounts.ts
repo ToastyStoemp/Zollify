@@ -217,6 +217,22 @@ export function allocateDiscounts(lines: CartLine[], totals: Pick<CartTotals, 'r
 }
 
 /**
+ * How much of each settling line (a gift card spent on the sale) is actually
+ * used: in order, each takes what is left of the goods after discounts, so a
+ * card worth more than the sale covers it and keeps the rest - and the lines
+ * still add up to what was paid. One amount per settling line; a line that is
+ * not settling anything (0) stays 0.
+ */
+export function applySettlements(amounts: number[], goods: number): number[] {
+  let left = Math.max(0, round2(goods));
+  return amounts.map((a) => {
+    const used = round2(Math.min(Math.max(0, a), left));
+    left = round2(left - used);
+    return used;
+  });
+}
+
+/**
  * Port of confirmPayment() step 3: scale line totals proportionally to the
  * actually-paid total; the last line absorbs cent-level rounding drift.
  * Mutates and returns the lines.

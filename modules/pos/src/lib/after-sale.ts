@@ -29,7 +29,7 @@ export const QrCode = (ui as Record<string, unknown>).QrCode as Component | unde
  * whose @zollify/shared predates VAT, or with no event to say where the sale
  * happened.
  */
-export function saleTaxFor(eventId: string | null, productIds: string[]): shared.SaleTax | undefined {
+export function saleTaxFor(eventId: string | null, lines: { productId: string; taxFree?: boolean }[]): shared.SaleTax | undefined {
   const resolve = (shared as Record<string, unknown>).resolveEventVat as typeof shared.resolveEventVat | undefined;
   const snapshot = (shared as Record<string, unknown>).saleTaxFor as typeof shared.saleTaxFor | undefined;
   const event = eventId ? sdk().data.events.get(eventId) : undefined;
@@ -38,7 +38,9 @@ export function saleTaxFor(eventId: string | null, productIds: string[]): shared
   // Charging with no rate known (a country missing from the table, and none
   // set on the event) records nothing rather than a made-up 0%.
   if (!resolved.exempt && resolved.standard == null) return undefined;
-  return snapshot(resolved, productIds.map((id) => sdk().data.products.get(id)?.taxClass));
+  const tax = snapshot(resolved, lines.map((l) => sdk().data.products.get(l.productId)?.taxClass));
+  // A line outside VAT (a voucher sold, a gift card spent) is recorded with no rate, whatever the event charges.
+  return { ...tax, rates: tax.rates.map((r, i) => (lines[i]?.taxFree ? null : r)) };
 }
 
 /** A fresh receipt token, or none on a shell that predates online receipts. */

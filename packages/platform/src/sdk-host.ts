@@ -368,6 +368,10 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         if (!tillLines || tillLines.find(line.key)?.ref?.moduleId !== moduleId) return false;
         return tillLines.replace(line);
       },
+      total() {
+        guard();
+        return tillLines?.total?.() ?? null;
+      },
       onLineAccess(access) {
         guard();
         tillLines = access;

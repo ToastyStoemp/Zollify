@@ -47,6 +47,7 @@ modules/
   consignment-artist/  the artist's own view of the stores that carry their work
   commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
   peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
+  wholesale/      trade prices and tiers, catalogue, trade customers and orders (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -170,7 +171,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Wholesale.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -436,6 +437,30 @@ from the slug and refuses unless the module is enabled for it. Hall, booth numbe
 link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
 Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
 handle) and legacy booth values, which fill in wherever the event has none.
+
+*Wholesale* - the `wholesale` module (admins) sells to shops outright, the
+reverse of consignment. **Trade prices**: per product, whether it is offered
+to the trade, price tiers by quantity (the highest tier a line reaches
+applies, else the list price), minimum order, pack size (orders round up to
+whole packs), lead time in working days, and the description, materials and
+dimensions the catalogue shows - kept apart from the catalogue, keyed by
+product id. **Customers**: the shops, with contact, VAT and enterprise
+numbers, address, currency, terms and a discount off the tier price.
+**Orders** go draft, confirmed, packed, shipped, invoiced, paid, or
+cancelled on the way; lines are priced from the tiers and the customer's
+discount when added and can be changed by hand, a line shows what is in
+stock, and a packing slip prints. Stock and revenue stay core's: the module
+makes a store-kind event named *Wholesale* once (kept out of the event
+pool), a confirmed or packed order claims its units on it the way an event
+claim does, and shipping records the order as a sale there, paid "on
+invoice", at the account's own VAT, so stock, the books and the reports
+follow with nothing re-entered. The expected ship date (the longest lead
+time among the lines, in working days from confirmation) shows on the home
+calendar. The **catalogue** is built on the device from the catalogue and
+its photos, narrowed by type, with tier prices or one customer's own, as a
+PDF or a page to print. Invoicing goes through Peppol or by hand for now;
+reverse charge for a VAT-registered customer abroad is the invoice's, not
+the till's. Writes are refused from a shared till.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

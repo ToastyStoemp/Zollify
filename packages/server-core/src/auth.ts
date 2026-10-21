@@ -76,6 +76,8 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point|economic\/grant)(\/|$|\?)/],
   [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
+  // Trade prices, customers and orders need the admin's own sign-in.
+  [/^(?!GET)/, /^\/api\/m\/wholesale\//],
 ];
 
 /**

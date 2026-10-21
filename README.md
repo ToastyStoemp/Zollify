@@ -407,6 +407,20 @@ event P&L from op-log revenue against booth / travel / accommodation costs,
 invoices attached, optional Claude invoice scanning behind daily caps.
 Credentials live encrypted per account under Settings → Integrations.
 
+*Event ranking* - a third screen in Tax & books reads the sales and events
+the device holds against the ledger's costs, so every figure is the ledger's
+(revenue excluding VAT): every past event ranked by profit per day, with
+days, costs, units and the average sale, sortable and as CSV; stores apart,
+over a period, with the days they sold on standing in for event days; the
+same show year over year, editions grouped by their series (or by name with
+the year taken out when they were never linked) with the change against the
+edition before; what sold at one event by type and item with each one's
+share; and dead stock - items on hand that sold at none of the last N events
+nor in the last N months, valued at cost where one is known. A home card
+shows the last event that is over against the average of its earlier
+editions. Nothing to enter; a gift card spent is not a sale of goods, so it
+is left out of units and items.
+
 *Tax deadlines* - when to file and pay, worked out from the business's tax
 setup rather than fetched: no tax office publishes deadlines as data, but the
 rules are fixed in law. The setup (country, state, legal form, VAT status and

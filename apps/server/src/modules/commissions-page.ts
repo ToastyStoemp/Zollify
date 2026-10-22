@@ -76,6 +76,7 @@ dd{text-align:right;font-weight:600}
 .pick p{overflow-wrap:anywhere;white-space:pre-wrap}
 .muted{color:var(--muted);font-size:.85rem}
 .brief p.text{white-space:pre-wrap;overflow-wrap:anywhere}
+.brief input[type=email]{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
 .brief textarea{width:100%;min-height:7rem;font:inherit;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical}
 .brief label{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:.92rem}
 .brief .facts{margin-top:8px}
@@ -177,6 +178,10 @@ export function renderCommission(c: PublicCommission, token = ''): string {
   const push = token && watch && c.push
     ? `<div id="push" class="card" hidden><h2>Notifications</h2><button type="button" id="push-btn" hidden>Notify me on this device</button><p id="push-msg" class="msg" hidden></p></div>`
     : '';
+  // A commission made at the till without an email: the customer leaves their own, here.
+  const mail = token && c.canAddBrief && !c.hasEmail && c.mailEnabled
+    ? `<form id="email-form" class="card brief"><h2>Updates by email</h2><label for="email-input">Leave your email and the shop writes when your commission is ready.<input id="email-input" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" /></label><button type="submit">Send me updates</button><p id="email-msg" class="msg" hidden></p></form>`
+    : '';
   const head = [
     // The script refreshes the page every five minutes, unless the customer is typing; without script, a plain refresh does.
     watch ? `<noscript><meta http-equiv="refresh" content="${REFRESH_SECONDS}" /></noscript>\n` : '',
@@ -186,7 +191,7 @@ export function renderCommission(c: PublicCommission, token = ''): string {
     `${c.title} - ${c.shop}`,
     `<header>${c.shop ? `<div class="shop">${h(c.shop)}</div>` : ''}<h1>${h(c.title)}</h1></header>
 <div class="card"><div class="status">${h(c.statusLabel)}</div>${progress}</div>
-${push}${updates}${token ? briefCard(c, token) : ''}${due}${money}${pickup}
+${push}${mail}${updates}${token ? briefCard(c, token) : ''}${due}${money}${pickup}
 <footer>Bookmark this page to check on your commission.<br />Times are shown in ${h(c.timeZone)}.</footer>`,
     head,
     { watch, script: !!token },

@@ -316,6 +316,8 @@ describe('times on the customer page', () => {
     brief: null,
     pictures: [],
     canAddBrief: true,
+    hasEmail: true,
+    mailEnabled: true,
     push: true,
   };
   // 23:30 UTC on 5 Jan 2099: already the next day in Zurich, still the same afternoon in Los Angeles.

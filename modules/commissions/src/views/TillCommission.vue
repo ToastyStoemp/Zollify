@@ -2,14 +2,17 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { COMMISSION_REF_KIND, CommissionCreateSchema, DEFAULT_KEEP_CUSTOMER_DAYS, fmtPrice, isClosedStatus, round2 } from '@zollify/shared';
 import { api, errorText, pendingPaid, type CommissionView } from '../api';
-import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
+import { QrCode } from '@zollify/ui';
+import { choiceOf, customerFields, duplicatesIn, emptyChoice, quickCustomer, type CustomerChoice, type CustomerContact } from '../customer-form';
 import { sdk } from '../runtime';
 import CustomerPicker from './CustomerPicker.vue';
 import { decideCharge } from '../till-line';
 
 /**
  * Over the till: take a deposit or the final balance for a commission, or
- * start a new one and take its deposit. The amount goes in the cart as an
+ * start a new one - a title and a price, a name and email if the customer
+ * gives them - then turn the screen round so they scan the code to follow it,
+ * and take the deposit. The amount goes in the cart as an
  * ordinary free-price sale line pointing at the commission, so the card
  * terminal, receipt, VAT and cash-up all work as for any sale; what is paid is
  * worked out from those sales afterwards, so a refund puts the balance back.
@@ -20,6 +23,7 @@ const props = defineProps<{ focus?: string }>();
 
 const items = ref<CommissionView[] | null>(null);
 const keepDays = ref(DEFAULT_KEEP_CUSTOMER_DAYS);
+const emailEnabled = ref(false);
 const error = ref<string | null>(null);
 const query = ref('');
 const event = computed(() => sdk().data.events.active());
@@ -30,6 +34,7 @@ async function load(): Promise<void> {
     const res = await api.list();
     items.value = res.commissions.filter((c) => !isClosedStatus(c.status));
     keepDays.value = res.settings.keepCustomerDays;
+    emailEnabled.value = res.emailEnabled;
     if (props.focus) {
       const picked = res.commissions.find((c) => c.id === props.focus);
       if (!picked) error.value = 'That commission is no longer there - pick another below.';
@@ -106,18 +111,23 @@ async function charge(c: CommissionView): Promise<void> {
 // ── A new commission, with its deposit ──────────────────────────────────────
 const creating = ref(false);
 const busy = ref(false);
-const form = reactive({ title: '', price: '', deposit: '', dueDate: '' });
+const form = reactive({ title: '', price: '', deposit: '', dueDate: '', name: '', email: '' });
+/** Someone already on file, found with the search; off, the quick name and email fields. */
+const fromFile = ref(false);
 const choice = ref<CustomerChoice>(emptyChoice());
 const duplicates = ref<CustomerContact[]>([]);
 const useDuplicate = (c: CustomerContact): void => {
   choice.value = choiceOf(c);
   duplicates.value = [];
 };
+/** Just made here: shown as a code for the customer to scan before anything else. */
+const made = ref<CommissionView | null>(null);
+const emailed = ref(false);
 const num = (s: string): number => Math.max(0, Number(s.replace(',', '.')) || 0);
 
 async function create(force = false): Promise<void> {
   const input = CommissionCreateSchema.safeParse({
-    ...customerFields(choice.value, force),
+    ...(fromFile.value ? customerFields(choice.value, force) : quickCustomer(form.name, form.email, force)),
     title: form.title,
     price: num(form.price),
     depositAsked: num(form.deposit),
@@ -131,19 +141,47 @@ async function create(force = false): Promise<void> {
   busy.value = true;
   error.value = null;
   try {
-    const made = await api.create(input.data);
+    const c = await api.create(input.data);
     creating.value = false;
-    items.value = [made, ...(items.value ?? [])];
-    choose(made);
-    sdk().ui.toast('Commission saved. Charge the deposit, or close this to skip it.', { kind: 'success' });
+    items.value = [c, ...(items.value ?? [])];
+    made.value = c;
+    emailed.value = false;
   } catch (err) {
     // A customer like this one is already on file: offer them instead of adding a second.
     const found = duplicatesIn(err);
-    if (found) duplicates.value = found;
-    else error.value = errorText(err, 'Could not save the commission.');
+    if (found) {
+      // The picker shows who matched, with "use this customer" and "add anyway".
+      if (!fromFile.value) choice.value = { picked: null, name: form.name.trim(), email: form.email.trim(), phone: '' };
+      fromFile.value = true;
+      duplicates.value = found;
+    } else error.value = errorText(err, 'Could not save the commission.');
   } finally {
     busy.value = false;
   }
+}
+function startNew(): void {
+  Object.assign(form, { title: '', price: '', deposit: '', dueDate: '', name: '', email: '' });
+  choice.value = emptyChoice();
+  duplicates.value = [];
+  fromFile.value = false;
+  creating.value = true;
+  error.value = null;
+}
+async function emailLink(c: CommissionView): Promise<void> {
+  busy.value = true;
+  try {
+    emailed.value = (await api.emailLink(c.id)).emailed;
+    if (!emailed.value) error.value = 'The email could not be sent.';
+  } catch (err) {
+    error.value = errorText(err, 'The email could not be sent.');
+  } finally {
+    busy.value = false;
+  }
+}
+/** On to the payment, with the deposit asked filled in. */
+function takePayment(c: CommissionView): void {
+  made.value = null;
+  choose(c);
 }
 </script>
 
@@ -151,7 +189,21 @@ async function create(force = false): Promise<void> {
   <div class="till-comm">
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <template v-if="target">
+    <template v-if="made">
+      <div class="scan">
+        <p class="big">Scan to follow your commission</p>
+        <QrCode :value="made.publicUrl" :size="240" label="QR code for the customer's tracking page" />
+        <p class="title">{{ made.title }}</p>
+        <p class="hint">Their own page: progress, messages, pictures they want to send. {{ !made.email && emailEnabled ? 'They can leave an email there for updates.' : '' }}</p>
+      </div>
+      <div class="actions">
+        <button v-if="made.depositAsked > 0 || made.price > 0" type="button" class="primary" @click="takePayment(made)">{{ made.depositAsked > 0 ? `Take the deposit · ${fmtPrice(made.depositAsked, made.currency)}` : 'Take a payment' }}</button>
+        <button v-if="made.email && emailEnabled" type="button" :disabled="busy || emailed" @click="emailLink(made)">{{ emailed ? 'Link emailed' : 'Email the link too' }}</button>
+        <button type="button" @click="emit('close')">Done</button>
+      </div>
+    </template>
+
+    <template v-else-if="target">
       <header class="head">
         <strong>{{ target.title }}</strong>
         <span class="hint">{{ target.customerName }} · price {{ target.price > 0 ? fmtPrice(target.price, target.currency) : 'not set' }} · paid {{ fmtPrice(paidOf(target), target.currency) }} · balance {{ fmtPrice(owed(target), target.currency) }}</span>
@@ -169,21 +221,28 @@ async function create(force = false): Promise<void> {
     </template>
 
     <form v-else-if="creating" class="new" @submit.prevent="create()">
-      <CustomerPicker v-model="choice" :keep-days="keepDays" :duplicates="duplicates" @use-duplicate="useDuplicate" @add-anyway="create(true)" />
       <label>What is it? <input v-model="form.title" type="text" maxlength="120" required placeholder="Short title the customer sees" /></label>
       <div class="two">
         <label>Price ({{ currency }}) <input v-model="form.price" type="text" inputmode="decimal" /></label>
         <label>Deposit ({{ currency }}) <input v-model="form.deposit" type="text" inputmode="decimal" /></label>
       </div>
       <label>Due date <input v-model="form.dueDate" type="date" /></label>
+      <CustomerPicker v-if="fromFile" v-model="choice" :keep-days="keepDays" :duplicates="duplicates" @use-duplicate="useDuplicate" @add-anyway="create(true)" />
+      <template v-else>
+        <div class="two">
+          <label>Name <small>optional</small><input v-model="form.name" type="text" maxlength="120" autocomplete="off" /></label>
+          <label>Email <small>optional, for updates</small><input v-model="form.email" type="email" maxlength="254" autocomplete="off" /></label>
+        </div>
+        <p class="hint">No name: filed as a walk-in, to rename later. The customer scans a code next and can leave their email on their page. <button type="button" class="link" @click="fromFile = true">Someone already on file?</button></p>
+      </template>
       <div class="actions">
-        <button type="submit" class="primary" :disabled="busy">Save and continue</button>
+        <button type="submit" class="primary" :disabled="busy">Save and show the code</button>
         <button type="button" @click="creating = false">Back</button>
       </div>
     </form>
 
     <template v-else>
-      <button type="button" class="primary" @click="creating = true; error = null">New commission</button>
+      <button type="button" class="primary" @click="startNew">New commission</button>
       <input v-model="query" type="search" placeholder="Find an open commission" aria-label="Find a commission" />
       <p v-if="!items && !error" class="hint">Loading…</p>
       <p v-else-if="items && !shown.length" class="hint">No open commissions{{ query ? ' match' : '' }}.</p>
@@ -207,4 +266,9 @@ label { display: flex; flex-direction: column; gap: .2rem; font-size: .875rem; }
 .new { display: flex; flex-direction: column; gap: .6rem; }
 .person { display: flex; justify-content: space-between; align-items: center; gap: .6rem; width: 100%; min-height: 3rem; padding: .4rem .8rem; text-align: left; font-weight: 400; }
 .amt { font-weight: 600; white-space: nowrap; }
+label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; font-weight: 400; }
+.link { background: none; border: 0; padding: 0; min-height: 0; color: var(--zfy-accent-ink, #0a5a4a); text-decoration: underline; font-weight: 600; font-size: inherit; cursor: pointer; }
+.scan { display: flex; flex-direction: column; align-items: center; gap: .5rem; text-align: center; padding: .4rem 0; }
+.scan .big { margin: 0; font-size: 1.15rem; font-weight: 700; }
+.scan .title { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 </style>

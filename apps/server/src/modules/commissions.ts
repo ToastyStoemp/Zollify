@@ -386,7 +386,7 @@ function ownerView(req: FastifyRequest, c: Commission, token: string, totals: Co
 }
 
 /** The single place that decides what the customer's page may know. */
-export function publicView(c: Commission, totals: CommissionTotals, settings: CommissionSettings, shop: string, pictures: BriefPicture[] = []): PublicCommission {
+export function publicView(c: Commission, totals: CommissionTotals, settings: CommissionSettings, shop: string, pictures: BriefPicture[] = [], hasEmail = false, mailEnabled = false): PublicCommission {
   const pickup = { name: settings.pickupName, address: settings.pickupAddress, note: settings.pickupNote };
   return {
     shop: settings.shopName || shop,
@@ -408,6 +408,8 @@ export function publicView(c: Commission, totals: CommissionTotals, settings: Co
     pictures,
     // An erased commission has nobody to hear from.
     canAddBrief: !isClosedStatus(c.status) && !!c.customerId,
+    hasEmail,
+    mailEnabled,
     push: true,
   };
 }
@@ -461,6 +463,13 @@ const deps: CommissionDeps = {
   replyTo: accountEmail,
   customers: (db, accountId) => customersOf(db, accountId).map(contactOf),
   insertCustomer,
+  customerOf: (db, accountId, id) => {
+    const r = customerRow(db, accountId, id);
+    return r ? contactOf(r) : undefined;
+  },
+  setCustomerEmail: (db, accountId, id, email) => {
+    db.prepare('UPDATE commission_customers SET email = ?, updatedAt = ? WHERE accountId = ? AND id = ?').run(email, Date.now(), accountId, id);
+  },
   newToken,
   originOf,
 };
@@ -750,7 +759,8 @@ export const commissionsServerModule: ServerModule = {
       if (!row || !ctx.isEnabled(row.accountId)) return missing();
       const c = JSON.parse(row.doc) as Commission;
       const totals = totalsFor(db, row.accountId, [c]).get(c.id)!;
-      const page = renderCommission(publicView(c, totals, readSettings(db, row.accountId), accountName(db, row.accountId), picturesOf(db, row.accountId, c.id)), req.params.token);
+      const hasEmail = !!(c.customerId && customerRow(db, row.accountId, c.customerId)?.email);
+      const page = renderCommission(publicView(c, totals, readSettings(db, row.accountId), accountName(db, row.accountId), picturesOf(db, row.accountId, c.id), hasEmail, ctx.mail.enabled), req.params.token);
       return reply.type('text/html; charset=utf-8').send(page);
     });
   },

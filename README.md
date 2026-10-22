@@ -245,6 +245,15 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
+**At the till**, New commission asks only what it is and the price (deposit
+and due date if wanted); name and email are optional - without a name it is
+filed as "Walk-in, 22 Oct", to rename under Customers. Saving shows a large QR
+code of the customer's page for them to scan, then takes the deposit. A
+customer with no email on file can leave one on that page for updates (only
+while none is on file, and only on a server that can send email); the shop is
+told and the customer gets a note. Someone already on file is still a search
+away.
+
 **What the customer brings.** On their tracking page the customer writes what
 they want and adds up to six reference pictures (PNG, JPEG or WebP, 5 MB
 each) while the commission is open; the owner sees both on the commission,

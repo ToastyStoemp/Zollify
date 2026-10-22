@@ -101,7 +101,8 @@ async function charge(c: CommissionView): Promise<void> {
     emit('close');
     return;
   }
-  if (!sdk().till.addLine({ ...line, ref: { kind: COMMISSION_REF_KIND, id: c.id } })) {
+  // The receipt carries the tracking page too, so the paper is a way back to it.
+  if (!sdk().till.addLine({ ...line, ref: { kind: COMMISSION_REF_KIND, id: c.id }, link: { label: 'Follow your commission', path: c.publicPath } })) {
     error.value = 'Open the till for an event or store first.';
     return;
   }

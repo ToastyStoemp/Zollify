@@ -165,6 +165,22 @@ describe('printed footer links', () => {
   });
 });
 
+describe('pages the lines point to', () => {
+  const build = (linkQrs?: { label: string; qrB64: string }[], qrB64?: string) => buildReceiptLines(sale(), 'Con', { artist: {}, logoB64: '', footerText: '', linkQrs, qrB64 });
+
+  it('prints each as a code with its label, before the online-receipt code', () => {
+    const lines = build([{ label: 'Follow your commission', qrB64: 'AAAA' }], 'BBBB');
+    const images = lines.filter((l) => l.kind === 'image').map((l) => l.imageB64);
+    expect(images).toEqual(['AAAA', 'BBBB']);
+    const at = lines.findIndex((l) => l.imageB64 === 'AAAA');
+    expect(lines[at + 1]?.text?.trim()).toBe('Follow your commission');
+  });
+
+  it('prints nothing extra without them', () => {
+    expect(build()).toEqual(build([]));
+  });
+});
+
 describe('optional header fields', () => {
   const artist = { companyName: 'Phuong Ninjin', fullName: 'Phuong Nguyen', street: 'Buckower Damm 93', postCodeCity: '12349 Berlin', countryOfOrigin: 'Germany', phone: '+49 176 0000000', email: 'shop@example.com', vatNumber: 'DE357138076' };
   const text = (fields?: Parameters<typeof buildReceiptLines>[2]['fields']) =>

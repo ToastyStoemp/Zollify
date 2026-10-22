@@ -15,6 +15,8 @@ import { decideCharge } from '../till-line';
  * worked out from those sales afterwards, so a refund puts the balance back.
  */
 const emit = defineEmits<{ close: [] }>();
+/** Set when the till was opened from a commission's page: that commission, picked already. */
+const props = defineProps<{ focus?: string }>();
 
 const items = ref<CommissionView[] | null>(null);
 const keepDays = ref(DEFAULT_KEEP_CUSTOMER_DAYS);
@@ -28,6 +30,12 @@ async function load(): Promise<void> {
     const res = await api.list();
     items.value = res.commissions.filter((c) => !isClosedStatus(c.status));
     keepDays.value = res.settings.keepCustomerDays;
+    if (props.focus) {
+      const picked = res.commissions.find((c) => c.id === props.focus);
+      if (!picked) error.value = 'That commission is no longer there - pick another below.';
+      else if (isClosedStatus(picked.status)) error.value = `"${picked.title}" is ${picked.status} - nothing more to take for it.`;
+      else choose(picked);
+    }
   } catch (err) {
     error.value = errorText(err, 'Could not load commissions - this needs a connection.');
   }

@@ -136,7 +136,12 @@ export interface TillAction {
   id: string;
   label: string;
   icon?: string;
-  /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
+  /**
+   * Shown in a sheet over the till. Receives a `close` emit to dismiss itself,
+   * and a `focus` prop (string, or absent) when the till was opened with a link
+   * naming this action - `/m/pos?action=<moduleId>:<id>&focus=<what>` - so a
+   * module's own page can send the seller to the till with something picked.
+   */
   component: ComponentLoader;
   order?: number;
   /** Show it as a tile beside the products instead of a button under the cart. */

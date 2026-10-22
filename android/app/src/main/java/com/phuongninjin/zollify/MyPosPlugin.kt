@@ -25,6 +25,8 @@ import com.mypos.slavesdk.POSHandler
 import com.mypos.slavesdk.POSInfoListener
 import com.mypos.slavesdk.POSReadyListener
 import com.mypos.slavesdk.TransactionData
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.UUID
 
 @CapacitorPlugin(
@@ -237,20 +239,22 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         if (pendingCall != null) { call.reject("Payment already in progress"); return }
 
         val amount   = call.getDouble("amount")   ?: run { call.reject("amount required"); return }
-        val currency = call.getString("currency") ?: "CHF"
+        val currency = (call.getString("currency") ?: "CHF").uppercase()
 
-        val posCurrency = when (currency.uppercase()) {
-            "CHF" -> Currency.CHF; "EUR" -> Currency.EUR; "GBP" -> Currency.GBP
-            "USD" -> Currency.USD; "SEK" -> Currency.SEK; "NOK" -> Currency.NOK
-            "DKK" -> Currency.DKK; else  -> Currency.EUR
-        }
+        // Every currency the SDK knows, by its ISO code. Anything else is refused
+        // rather than charged as EUR: the card would be billed in the wrong money.
+        val posCurrency = Currency.values().firstOrNull { it.name == currency }
+            ?: run { call.reject("myPOS cannot take payments in $currency"); return }
 
         POSHandler.setCurrency(posCurrency)
         pendingCall  = call
         callResolved = false
 
         pos.purchase(
-            String.format("%.2f", amount),
+            // Always "12.50": the SDK reads it with Double.parseDouble, so a
+            // locale-formatted "12,50" (Dutch, German, French phones) fails
+            // with "Invalid amount format.".
+            BigDecimal.valueOf(amount).setScale(2, RoundingMode.HALF_UP).toPlainString(),
             UUID.randomUUID().toString(),
             POSHandler.RECEIPT_DO_NOT_PRINT
         )

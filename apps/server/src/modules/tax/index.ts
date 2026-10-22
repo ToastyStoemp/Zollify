@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { base64BodyLimit, maxBytesFor, toBaseFactor, type SalesEvent, type Transaction } from '@zollify/shared';
+import { ExpenseDetailSchema, TRAVEL_RATE_DEFAULTS, TravelRatesSchema, base64BodyLimit, defaultTravelRates, describeDetail, eventDays, maxBytesFor, splitShared, toBaseFactor, type SalesEvent, type Transaction, type TravelRates } from '@zollify/shared';
 import {
   checkQuota,
   decodeUpload,
@@ -40,10 +40,26 @@ import { round2, type KvCache } from './types';
 
 const SECRET_SALT = 'zollify-module-credentials-v1';
 
+/**
+ * Ledger cost categories. Ids are stable: Lexware and e-conomic bookings
+ * and every stored expense refer to them, so a category is added, never
+ * renamed. `perdiem`, `mileage` and shared costs are worked out from the
+ * event rather than typed in - see @zollify/shared travel-costs.
+ */
 const EXPENSE_CATEGORIES = [
   { id: 'booth', label: 'Booth / table fee' },
-  { id: 'travel', label: 'Travel' },
+  { id: 'travel', label: 'Travel (tickets, fuel, tolls)' },
+  { id: 'mileage', label: 'Mileage (own car)' },
   { id: 'accommodation', label: 'Accommodation' },
+  { id: 'perdiem', label: 'Per diems (meals)' },
+  { id: 'shipping', label: 'Shipping and freight' },
+  { id: 'customs', label: 'Customs and duties' },
+  { id: 'marketing', label: 'Marketing and printing' },
+  { id: 'furniture', label: 'Booth furniture and rental' },
+  { id: 'staff', label: 'Staff and helpers' },
+  { id: 'insurance', label: 'Insurance' },
+  { id: 'fees', label: 'Fees (payment, platform)' },
+  { id: 'stock', label: 'Stock bought for the event' },
   { id: 'other', label: 'Other' },
 ] as const;
 const CATEGORY_IDS = EXPENSE_CATEGORIES.map((c) => c.id) as unknown as [string, ...string[]];
@@ -95,6 +111,9 @@ function migrate(db: Database.Database): void {
       tokens    INTEGER NOT NULL
     );
   `);
+  // How a computed expense came about (per diems, mileage, a shared cost's split), added later.
+  const cols = (db.prepare('PRAGMA table_info(tax_expenses)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('detail')) db.exec('ALTER TABLE tax_expenses ADD COLUMN detail TEXT');
 }
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
@@ -135,6 +154,14 @@ const ExpenseBody = z.object({
   date: z.string().max(10).default(''),
   vendor: z.string().max(200).default(''),
   note: z.string().max(1000).default(''),
+  /** For an expense worked out from the event: what went into the figure. */
+  detail: ExpenseDetailSchema.nullable().optional(),
+});
+
+/** A cost covering several events, split across them by their days or evenly. */
+const SharedBody = ExpenseBody.omit({ eventId: true, detail: true }).extend({
+  eventIds: z.array(z.string().min(1).max(64)).min(1).max(500),
+  method: z.enum(['days', 'even']).default('days'),
 });
 
 // ── Module ──────────────────────────────────────────────────────────────────
@@ -479,10 +506,16 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         invoiceName: string | null;
         invoiceAt: number | null;
         bookedVoucherId: string | null;
+        detail: string | null;
         createdAt: number;
         updatedAt: number;
       }
-      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, createdAt, updatedAt';
+      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, detail, createdAt, updatedAt';
+      const detailOf = (raw: string | null) => {
+        if (!raw) return null;
+        const parsed = ExpenseDetailSchema.safeParse(JSON.parse(raw));
+        return parsed.success ? parsed.data : null;
+      };
       const toExpense = (r: ExpenseRow) => ({
         id: r.id,
         eventId: r.eventId,
@@ -494,6 +527,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         note: r.note,
         invoice: r.invoiceName ? { filename: r.invoiceName, uploadedAt: r.invoiceAt } : null,
         bookedVoucherId: r.bookedVoucherId,
+        detail: detailOf(r.detail),
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       });
@@ -515,10 +549,82 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const id = randomUUID();
         db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, now, now);
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, now, now);
         return reply.code(201).send({ expense: listExpenses(accountId).find((x) => x.id === id) });
+      });
+
+      /**
+       * One cost over several events - a year's insurance, a van for two
+       * conventions - lands as one expense per event, each with its share
+       * and a note saying how it was split. The shares add up to the amount.
+       */
+      app.post('/ledger/expenses/shared', async (req, reply) => {
+        const { accountId } = who(req);
+        const parsed = SharedBody.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: 'Check the expense fields.' });
+        const e = parsed.data;
+        const events = new Map(eventsFor(accountId).map((ev) => [ev.id, ev]));
+        const ids = [...new Set(e.eventIds)];
+        const missing = ids.filter((id) => !events.has(id));
+        if (missing.length) return reply.code(400).send({ error: 'invalid', message: 'One of the events no longer exists.' });
+        const shares = splitShared(e.amount, ids.map((id) => ({ id, days: eventDays(events.get(id)!.dateStart, events.get(id)!.dateEnd) })), e.method);
+        const groupId = randomUUID();
+        const now = Date.now();
+        const currency = e.currency.toUpperCase();
+        const insert = db.prepare(
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        );
+        const made: string[] = [];
+        db.transaction(() => {
+          for (const s of shares) {
+            const detail = { kind: 'shared' as const, groupId, method: e.method, total: e.amount, of: ids.length };
+            const note = [e.note, describeDetail(detail, currency)].filter(Boolean).join(' · ');
+            const id = randomUUID();
+            insert.run(accountId, id, s.id, e.category, Math.round(s.amount * 100), currency, e.date.slice(0, 10), e.vendor, note, JSON.stringify(detail), now, now);
+            made.push(id);
+          }
+        })();
+        const all = listExpenses(accountId);
+        return reply.code(201).send({ expenses: made.map((id) => all.find((x) => x.id === id)) });
+      });
+
+      // ── Rates for per diems and mileage ─────────────────────────────────
+      // The account's own table, started from the defaults for its country
+      // and corrected by an admin as the yearly letters change.
+      const RATES_KEY = 'ledger.rates';
+      const readRates = (accountId: string): TravelRates => {
+        const stored = cacheFor(accountId).get<unknown>(RATES_KEY);
+        const parsed = stored ? TravelRatesSchema.safeParse(stored) : null;
+        if (parsed?.success) return parsed.data;
+        // The business's own country, from its profile; Germany's rules until it says.
+        const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+        let home = '';
+        try {
+          home = String((JSON.parse(row?.profile ?? '{}') as { artist?: { countryOfOrigin?: string } }).artist?.countryOfOrigin ?? '');
+        } catch {
+          /* no profile yet */
+        }
+        return defaultTravelRates(home || 'DE');
+      };
+      app.get('/ledger/rates', async (req) => ({ rates: readRates(who(req).accountId), defaults: Object.keys(TRAVEL_RATE_DEFAULTS) }));
+      app.put('/ledger/rates', async (req, reply) => {
+        const { accountId } = who(req);
+        const parsed = TravelRatesSchema.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Check the rates.' });
+        cacheFor(accountId).set(RATES_KEY, parsed.data);
+        return { rates: parsed.data };
+      });
+      /** Back to the defaults for a home country. */
+      app.post('/ledger/rates/reset', async (req, reply) => {
+        const { accountId } = who(req);
+        const home = String((req.body as { homeCountry?: string } | undefined)?.homeCountry ?? '').trim();
+        if (!home) return reply.code(400).send({ error: 'invalid', message: 'Say which country.' });
+        const rates = defaultTravelRates(home);
+        cacheFor(accountId).set(RATES_KEY, rates);
+        return { rates };
       });
 
       app.put<{ Params: { id: string } }>('/ledger/expenses/:id', async (req, reply) => {
@@ -528,10 +634,10 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const e = parsed.data;
         const info = db
           .prepare(
-            `UPDATE tax_expenses SET eventId = ?, category = ?, amountMinor = ?, currency = ?, date = ?, vendor = ?, note = ?, updatedAt = ?
+            `UPDATE tax_expenses SET eventId = ?, category = ?, amountMinor = ?, currency = ?, date = ?, vendor = ?, note = ?, detail = ?, updatedAt = ?
              WHERE accountId = ? AND id = ?`,
           )
-          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, Date.now(), accountId, req.params.id);
+          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, Date.now(), accountId, req.params.id);
         if (!info.changes) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
         return { expense: listExpenses(accountId).find((x) => x.id === req.params.id) };
       });

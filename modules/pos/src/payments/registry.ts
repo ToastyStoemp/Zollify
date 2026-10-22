@@ -2,7 +2,7 @@ import type { PaymentProvider, PaymentProviderId } from './provider';
 import { hasNativePlugin } from '../native/plugins';
 import { sdk } from '../runtime';
 import { manualProvider } from './manual';
-import { connectGo2, myposGo2Provider } from './mypos-go2';
+import { connectGo2, myposGo2Provider, watchGo2Wake } from './mypos-go2';
 import { myposCarbonProvider } from './mypos-carbon';
 import { myposGlassProvider } from './mypos-glass';
 import { sumupProvider } from './sumup';
@@ -59,5 +59,7 @@ export async function availableProviders(): Promise<PaymentProvider[]> {
 export function onActiveProviderChanged(id: PaymentProviderId): void {
   if (id === 'mypos-go2' && hasNativePlugin('MyPos')) {
     void connectGo2().catch(() => {});
+    // Over Wi-Fi the link drops while the phone sleeps; reopen it on waking.
+    watchGo2Wake(async () => (await sdk().config.get<string>('activeProvider')) === 'mypos-go2');
   }
 }

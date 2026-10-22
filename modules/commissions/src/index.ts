@@ -15,7 +15,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Commissions',
-  description: 'Take commissions with a deposit at the till and let the customer follow progress with a QR code.',
+  description: 'Take commissions at the till, with a deposit or in full, and let the customer follow progress with a QR code.',
   requires: ['catalog'],
   // Staff create and update commissions and take payments; settings and
   // replacing a link are admin-only on the server.
@@ -25,8 +25,10 @@ export default defineModule({
     setSdk(sdk);
     sdk.routes.add({ path: '', name: 'index', title: 'Commissions', component: () => import('./views/CommissionsView.vue') });
     sdk.nav.add({ routeName: 'index', group: 'selling', label: 'Commissions', icon: 'sparkles', order: 130 });
-    // Taking a deposit or the final balance, right at the till.
-    sdk.till.action({ id: 'commission', label: 'Commission', icon: 'sparkles', component: () => import('./views/TillCommission.vue') });
+    // Taking a deposit or the final balance, right at the till. A tile beside the
+    // products, so it is there with an empty cart - on a phone the cart (and the
+    // buttons under it) only opens once something is in it.
+    sdk.till.action({ id: 'commission', label: 'Commission', icon: 'sparkles', tile: true, component: () => import('./views/TillCommission.vue') });
     sdk.log.info('commissions module ready');
   },
 

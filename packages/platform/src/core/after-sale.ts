@@ -49,7 +49,15 @@ export async function setAfterSalePrefs(patch: Partial<AfterSalePrefs>): Promise
  * shell the configured server - since that server is what answers it.
  */
 export function receiptUrlFor(token: string): string {
+  return receiptLink(serverRoot(), token);
+}
+
+/** A public page of that same server, from its path (`/p/...`). */
+export function publicUrlFor(path: string): string {
+  return `${serverRoot()}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function serverRoot(): string {
   const api = new URL(getApiBase() || '/api', typeof location !== 'undefined' ? location.href : 'http://localhost/');
-  const root = `${api.origin}${api.pathname.replace(/\/api\/?$/, '')}`;
-  return receiptLink(root, token);
+  return `${api.origin}${api.pathname.replace(/\/api\/?$/, '')}`.replace(/\/+$/, '');
 }

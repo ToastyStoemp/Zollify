@@ -202,3 +202,42 @@ describe('tax module', () => {
     expect(res.statusCode).toBe(503);
   });
 });
+
+describe('costs worked out from the event', () => {
+  it('splits a shared cost across events by their days, whole cents, and remembers how', async () => {
+    const ops = (ids: string[]) => ids.map((id, i) => ({ opId: `op-shared-${id}`.padEnd(16, '0'), deviceId: 'dev-1', ts: 10 + i, type: 'event.upsert', payload: { id, name: id, venue: {}, currency: 'EUR', status: 'closed', updatedAt: 10 + i, dateStart: '2026-06-01', dateEnd: i === 0 ? '2026-06-03' : '2026-06-01' } }));
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: ops(['ev-long', 'ev-short']) } });
+    const res = await app.inject({ method: 'POST', url: `${M}/ledger/expenses/shared`, headers: auth(), payload: { eventIds: ['ev-long', 'ev-short'], method: 'days', category: 'insurance', amount: 100, currency: 'EUR', date: '2026-06-01', vendor: 'Allianz', note: 'Liability' } });
+    expect(res.statusCode).toBe(201);
+    const made = res.json().expenses as { eventId: string; amount: number; note: string; detail: { kind: string; of: number } }[];
+    expect(made.map((e) => [e.eventId, e.amount])).toEqual([['ev-long', 75], ['ev-short', 25]]);
+    expect(made[0]!.note).toBe('Liability · Share of 100.00 EUR split by days over 2 events');
+    expect(made[0]!.detail).toMatchObject({ kind: 'shared', method: 'days', total: 100, of: 2 });
+    expect((made[0]!.detail as unknown as { groupId: string }).groupId).toBe((made[1]!.detail as unknown as { groupId: string }).groupId);
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/shared`, headers: auth(), payload: { eventIds: ['nope'], amount: 1 } })).statusCode).toBe(400);
+  });
+
+  it('keeps the calculation of a per diem or mileage expense, and refuses a malformed one', async () => {
+    const detail = { kind: 'perdiem', country: 'DK', start: '2026-03-05', end: '2026-03-07', people: 2, rate: { full: 75, reduced: 50 }, year: 2025 };
+    const add = await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: 'ev-1', category: 'perdiem', amount: 350, currency: 'EUR', date: '2026-03-05', detail } });
+    expect(add.statusCode).toBe(201);
+    expect(add.json().expense.detail).toEqual(detail);
+    const list = await app.inject({ method: 'GET', url: `${M}/ledger/expenses?eventId=ev-1`, headers: auth() });
+    expect(list.json().expenses.find((e: { id: string }) => e.id === add.json().expense.id).detail).toEqual(detail);
+    expect(list.json().categories.map((c: { id: string }) => c.id)).toContain('mileage');
+    const bad = await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: 'ev-1', category: 'perdiem', amount: 1, detail: { kind: 'perdiem', people: 'two' } } });
+    expect(bad.statusCode).toBe(400);
+  });
+
+  it('starts the rate table from the defaults for the home country, takes corrections, and resets', async () => {
+    const first = await app.inject({ method: 'GET', url: `${M}/ledger/rates`, headers: auth() });
+    expect(first.json().rates).toMatchObject({ homeCountry: 'DE', domestic: { full: 28, reduced: 14 }, mileagePerKm: 0.3 });
+    expect(first.json().defaults).toEqual(['DE', 'BE']);
+    const edited = { ...first.json().rates, domestic: { full: 30, reduced: 15 }, year: 2026 };
+    expect((await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: edited })).json().rates.domestic).toEqual({ full: 30, reduced: 15 });
+    expect((await app.inject({ method: 'GET', url: `${M}/ledger/rates`, headers: auth() })).json().rates.year).toBe(2026);
+    expect((await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: { ...edited, mileagePerKm: -1 } })).statusCode).toBe(400);
+    const reset = await app.inject({ method: 'POST', url: `${M}/ledger/rates/reset`, headers: auth(), payload: { homeCountry: 'BE' } });
+    expect(reset.json().rates).toMatchObject({ homeCountry: 'BE', domestic: { full: 20.8 } });
+  });
+});

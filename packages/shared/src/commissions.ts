@@ -105,6 +105,10 @@ export interface CommissionUpdate {
 
 export interface Commission extends CommissionInput {
   id: string;
+  /** What the customer wrote, on the request page or their tracking page. */
+  brief?: CustomerBrief | null;
+  /** Came in from the public request page. */
+  source?: 'request';
   /** The customer record; null once their details were erased. */
   customerId: string | null;
   /** When the personal details were cleared from this commission, if they were. */
@@ -136,6 +140,35 @@ export function commissionTotals(price: number, payments: CommissionPayment[]): 
   return { paid, payments, balance: round2(Math.max(0, price - paid)) };
 }
 
+/** What the till asks for first: a deposit, then the rest; or the full price in one go. */
+export const COMMISSION_PAYMENT_MODES = ['deposit', 'full'] as const;
+export type CommissionPaymentMode = (typeof COMMISSION_PAYMENT_MODES)[number];
+
+export type CommissionPaymentKind = 'Deposit' | 'Full price' | 'Balance' | 'Payment';
+
+/**
+ * The payment the till offers next for a commission, and how much. With
+ * `full`, nothing paid yet means the whole price, whatever deposit was once
+ * set; with `deposit`, a deposit asked comes first. After the first payment it
+ * is the balance either way. `Payment` with 0: nothing to suggest (no price,
+ * or paid up) - the seller types an amount.
+ */
+export function nextCommissionPayment(
+  c: Pick<Commission, 'price' | 'depositAsked'>,
+  paid: number,
+  mode: CommissionPaymentMode,
+): { kind: CommissionPaymentKind; amount: number } {
+  const owed = round2(Math.max(0, c.price - paid));
+  const deposit = round2(Math.max(0, c.depositAsked - paid));
+  if (paid <= 0) {
+    if (mode === 'deposit' && deposit > 0) return { kind: 'Deposit', amount: deposit };
+    if (owed > 0) return { kind: 'Full price', amount: owed };
+    if (deposit > 0) return { kind: 'Deposit', amount: deposit };
+    return { kind: 'Payment', amount: 0 };
+  }
+  return owed > 0 ? { kind: 'Balance', amount: owed } : { kind: 'Payment', amount: 0 };
+}
+
 /** Past its due date and not finished. `today` is YYYY-MM-DD, local to the shop. */
 export function isOverdue(c: Pick<Commission, 'dueDate' | 'status'>, today: string): boolean {
   return !!c.dueDate && !isClosedStatus(c.status) && c.dueDate < today;
@@ -161,8 +194,96 @@ export const CommissionSettingsSchema = z.object({
   timeZone: z.string().trim().min(1).max(64).refine(isTimeZone, 'Unknown time zone.').default('UTC'),
   /** Days a customer's details are kept after their last commission closes; 0 erases at the next sweep. */
   keepCustomerDays: z.number().int().min(0).max(365).default(DEFAULT_KEEP_CUSTOMER_DAYS),
+  /** The public request page takes new requests. Its address is kept apart (see the request-page routes). */
+  requestsOpen: z.boolean().default(false),
+  /** What the request page says above the form: what you take on, prices, how long. */
+  requestIntro: z.string().trim().max(1000).default(''),
+  /** At the till: a deposit first (the deposit field is offered), or the full price at once (it is not). */
+  paymentMode: z.enum(COMMISSION_PAYMENT_MODES).default('deposit'),
 });
 export type CommissionSettings = z.infer<typeof CommissionSettingsSchema>;
+
+// ── What the customer tells us ─────────────────────────────────────────────
+
+/** Reference pictures one commission may hold, from the customer. */
+export const BRIEF_MAX_PICTURES = 6;
+/** The public request page's address: `/p/commissions/request/<token>`. */
+export const COMMISSION_REQUEST_PATH = '/p/commissions/request/';
+/** 18 random bytes, base64url: the request page's token. */
+export const COMMISSION_REQUEST_TOKEN_RE = /^[A-Za-z0-9_-]{24}$/;
+
+/** An address the customer leaves on their tracking page, for updates. */
+export const CustomerEmailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email address.').max(254) });
+
+/** What the customer wrote about what they want; theirs to change while the commission is open. */
+export const CustomerBriefSchema = z.object({
+  text: z.string().trim().max(4000, 'Keep it under 4000 characters.').default(''),
+});
+
+/** A new request from the public page. */
+export const CommissionRequestSchema = z.object({
+  name: z.string().trim().min(1, 'Enter your name.').max(120),
+  email: z.string().trim().toLowerCase().email('Enter a valid email address.').max(254),
+  phone: z.string().trim().max(40).default(''),
+  /** A few words: "Fox portrait, A4". */
+  title: z.string().trim().min(1, 'Say in a few words what you would like.').max(120),
+  /** The brief. */
+  text: z.string().trim().min(1, 'Describe what you would like.').max(4000),
+  budget: z.string().trim().max(80).default(''),
+  /** When they would like it by; YYYY-MM-DD or empty. */
+  wantedBy: z.union([z.literal(''), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).default(''),
+  /** Honeypot: a bot fills it, a person never sees it. */
+  website: z.string().max(200).default(''),
+});
+export type CommissionRequestInput = z.infer<typeof CommissionRequestSchema>;
+
+/** The customer's brief as kept on the commission. Personal free text: cleared when their details are erased. */
+export interface CustomerBrief {
+  text: string;
+  /** From the request form: what they said about money and time. */
+  budget: string;
+  wantedBy: string;
+  updatedAt: number;
+}
+
+/** A reference picture's description; the bytes stay on the server. */
+export interface BriefPicture {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  createdAt: number;
+}
+
+// ── Browser notifications ──────────────────────────────────────────────────
+
+/** Devices one commission may notify. */
+export const PUSH_MAX_PER_COMMISSION = 5;
+
+/**
+ * Push services a subscription may point at. The address comes from the
+ * customer's browser, and the server posts to it - so only the browsers' own
+ * push services, never somewhere a stranger chose (an address inside the
+ * server's network, say).
+ */
+const PUSH_HOSTS = [/^fcm\.googleapis\.com$/, /^android\.googleapis\.com$/, /(^|\.)push\.services\.mozilla\.com$/, /(^|\.)notify\.windows\.com$/, /(^|\.)push\.apple\.com$/];
+
+export function isPushEndpoint(endpoint: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || (u.port && u.port !== '443')) return false;
+  return PUSH_HOSTS.some((re) => re.test(u.hostname));
+}
+
+export const PushSubscriptionSchema = z.object({
+  endpoint: z.string().max(1000).refine(isPushEndpoint, 'That is not a browser push address.'),
+  keys: z.object({ p256dh: z.string().regex(/^[A-Za-z0-9_-]{40,120}$/), auth: z.string().regex(/^[A-Za-z0-9_-]{8,40}$/) }),
+});
+export type PushSubscriptionInput = z.infer<typeof PushSubscriptionSchema>;
 
 /** Statuses at which the tracking page keeps asking the server for news; closed ones will not change. */
 export const isWatchedStatus = (s: CommissionStatus): boolean => !isClosedStatus(s);
@@ -182,4 +303,15 @@ export interface PublicCommission {
   balance: number;
   updates: { at: number; status: CommissionStatus; statusLabel: string; changed: boolean; message: string }[];
   pickup: { name: string; address: string; note: string } | null;
+  /** What the customer told us, and their pictures; theirs to see on their own page. */
+  brief: { text: string; budget: string; wantedBy: string } | null;
+  pictures: BriefPicture[];
+  /** The customer may still change the brief and the pictures. */
+  canAddBrief: boolean;
+  /** An email is on file for updates (never which one). Without, the page offers to take one. */
+  hasEmail: boolean;
+  /** The server can send email at all; without, the page does not ask for an address. */
+  mailEnabled: boolean;
+  /** The server can send browser notifications. */
+  push: boolean;
 }

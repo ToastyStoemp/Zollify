@@ -398,6 +398,7 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
     ...(line.consignorId ? { consignorId: line.consignorId } : {}),
     ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
     ...(line.ref ? { ref: line.ref } : {}),
+    ...(line.link ? { link: line.link } : {}),
   });
   return true;
 }

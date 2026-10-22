@@ -7,6 +7,8 @@ import { QrCode } from '@zollify/ui';
 import { isNativePlatform } from '../native/plugins';
 import { sdk } from '../runtime';
 import SumupSoloPairing from './SumupSoloPairing.vue';
+import Go2Connection from './Go2Connection.vue';
+import type { Go2Transport } from '../payments/mypos-go2';
 
 /**
  * First-run setup: how do you take card payments? Picks the terminal this
@@ -44,7 +46,7 @@ const error = ref<string | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
 
 const MYPOS: { id: MyposId; title: string; text: string; needs: string }[] = [
-  { id: 'mypos-go2', title: 'Go2', text: 'A small card reader that pairs with this device over Bluetooth.', needs: 'the Zollify Android app' },
+  { id: 'mypos-go2', title: 'Go2', text: 'A small card reader that connects to this device over Wi-Fi or Bluetooth.', needs: 'the Zollify Android app' },
   { id: 'mypos-carbon', title: 'Carbon', text: 'An all-in-one terminal: Zollify runs on the Carbon and takes the card on the same device.', needs: 'Zollify installed on the Carbon' },
   { id: 'mypos-glass', title: 'Glass', text: 'Tap to pay on this phone, with the myPOS Glass app.', needs: 'the Zollify Android app and myPOS Glass' },
 ];
@@ -122,6 +124,12 @@ async function act(action: 'configure' | 'pairReader'): Promise<void> {
 }
 
 const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
+/** How this device reaches the Go2, as picked in the step itself. */
+const go2Transport = ref<Go2Transport>('bluetooth');
+function go2Saved(transport: Go2Transport): void {
+  go2Transport.value = transport;
+  setTimeout(() => void refresh(), 1200);
+}
 </script>
 
 <template>
@@ -211,8 +219,9 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
           <span>Sign up at <a href="https://www.mypos.com/" target="_blank" rel="noopener noreferrer">mypos.com</a> and get your {{ myposDevice.title }}.</span>
         </li>
         <li v-if="mypos === 'mypos-go2'" :class="{ done: status?.connected }">
-          <strong>Pair the Go2</strong>
-          <span v-if="usable">{{ status?.connected ? 'Terminal ready.' : 'Switch the Go2 on, allow Bluetooth when asked, and connect.' }}</span>
+          <strong>Connect the Go2</strong>
+          <span v-if="usable">{{ status?.connected ? 'Terminal ready.' : go2Transport === 'wifi' ? 'Switch the Go2 on, enter its address below, and connect.' : 'Switch the Go2 on, allow Bluetooth when asked, and connect.' }}</span>
+          <Go2Connection v-if="usable" class="go2" connect @loaded="go2Transport = $event" @saved="go2Saved" />
           <button v-if="usable && !status?.connected" type="button" :disabled="busy" @click="act('configure')">Connect</button>
         </li>
         <li v-else :class="{ done: status?.connected }">
@@ -252,4 +261,5 @@ const myposDevice = computed(() => MYPOS.find((m) => m.id === mypos.value)!);
 .steps li { display: flex; flex-direction: column; gap: .25rem; align-items: flex-start; }
 .steps li span { font-size: .875rem; color: var(--zfy-muted); }
 .steps li.done strong::after { content: ' ✓'; color: var(--zfy-accent-ink); }
+.steps li .go2 { align-self: stretch; max-width: 32rem; }
 </style>

@@ -189,6 +189,8 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
      */
     @PluginMethod
     fun connectTerminal(call: PluginCall) {
+        // Reopening the link would cut a payment the customer is in the middle of.
+        if (pendingCall != null) { call.reject("Payment in progress"); return }
         if (call.getString("transport") == "wifi") {
             val host = call.getString("host")?.trim().orEmpty()
             if (host.isEmpty()) { call.reject("Enter the terminal's IP address"); return }
@@ -220,11 +222,22 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         call.resolve(JSObject().apply { put("granted", granted) })
     }
 
-    /** Current status polled by the setup screen. */
+    /**
+     * Current status, polled by the setup screen and checked before a payment.
+     * `alive` probes the Wi-Fi link: after the phone sleeps the terminal's TCP
+     * link is gone, yet the SDK never says so and `connected` stays true. Not
+     * probed mid-payment, so nothing is written into a running transaction.
+     */
     @PluginMethod
     fun getStatus(call: PluginCall) {
         val ret = JSObject()
         ret.put("connected", termReady) // only true once fully handshaked
+        val alive = when {
+            POSHandler.getConnectionType() != ConnectionType.TCP_IP -> termReady
+            pendingCall != null -> termReady
+            else -> try { pos.isConnected() } catch (_: Exception) { false }
+        }
+        ret.put("alive", alive)
         call.resolve(ret)
     }
 

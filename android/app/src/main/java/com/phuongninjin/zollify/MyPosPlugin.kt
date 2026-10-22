@@ -182,7 +182,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
      * Params: { transport?: 'bluetooth' | 'wifi', host?: string, port?: number }
      *
      * Wi-Fi: the Go2 in slave mode on the same network listens on TCP (port
-     * 8080 unless changed on the terminal); the SDK's TCP_IP connection type
+     * 60180 unless changed on the terminal); the SDK's TCP_IP connection type
      * needs no Bluetooth hardware, no pairing and no location permission -
      * just the terminal's address. A Go2 without the optional Bluetooth
      * module can only be reached this way or over USB.
@@ -194,7 +194,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         if (call.getString("transport") == "wifi") {
             val host = call.getString("host")?.trim().orEmpty()
             if (host.isEmpty()) { call.reject("Enter the terminal's IP address"); return }
-            val port = call.getInt("port") ?: 8080
+            val port = call.getInt("port") ?: 60180
             termReady = false
             termConnected = false
             POSHandler.setConnectionType(ConnectionType.TCP_IP)

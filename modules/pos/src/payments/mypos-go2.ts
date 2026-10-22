@@ -12,12 +12,14 @@ export const GO2_TRANSPORT_SETTING = 'mypos.go2.transport';
 export const GO2_HOST_SETTING = 'mypos.go2.host';
 export const GO2_PORT_SETTING = 'mypos.go2.port';
 export type Go2Transport = 'bluetooth' | 'wifi';
+/** The port a Go2 in slave mode listens on over Wi-Fi, unless changed on the terminal. */
+export const GO2_DEFAULT_PORT = 60180;
 
 export async function go2Connection(): Promise<{ transport: Go2Transport; host: string; port: number }> {
   return {
     transport: ((await getSetting<string>(GO2_TRANSPORT_SETTING)) === 'wifi' ? 'wifi' : 'bluetooth') as Go2Transport,
     host: ((await getSetting<string>(GO2_HOST_SETTING)) ?? '').trim(),
-    port: Number(await getSetting<number | string>(GO2_PORT_SETTING)) || 8080,
+    port: Number(await getSetting<number | string>(GO2_PORT_SETTING)) || GO2_DEFAULT_PORT,
   };
 }
 

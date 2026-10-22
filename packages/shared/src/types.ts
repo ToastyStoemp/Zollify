@@ -352,6 +352,8 @@ export interface TxItem {
   commissionPct?: number;
   /** The module record this line paid for - e.g. a workshop booking. */
   ref?: { moduleId: string; kind: string; id: string };
+  /** A public page of this server the receipt points the customer to - see receiptLinksOf. */
+  link?: { label: string; path: string };
 }
 
 export interface TxDiscount {

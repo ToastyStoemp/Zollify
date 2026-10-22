@@ -13,10 +13,12 @@
   "dependencies": {
     "@zollify/server-core": "*",
     "@zollify/shared": "*",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/web-push": "^3.6.4",
     "vitest": "^5.0.1"
   }
 }

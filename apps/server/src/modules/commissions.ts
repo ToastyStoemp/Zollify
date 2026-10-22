@@ -27,11 +27,13 @@ import {
   type CommissionPayment,
   type CommissionSettings,
   type CommissionTotals,
+  type BriefPicture,
   type PublicCommission,
   type Transaction,
 } from '@zollify/shared';
 import { isEnabled, reduceTransactions, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
 import { renderCommission, renderNotFound } from './commissions-page';
+import { deleteCustomerSide, eraseCustomerFiles, migrateCustomerSide, picturesOf, pushCount, pushUpdate, registerCustomerSide, registerOwnerSide, type CommissionDeps } from './commissions-customer';
 
 /**
  * Commissions - the server half.
@@ -101,6 +103,7 @@ export function migrate(db: Database.Database): void {
     );
   `);
   migrateCustomers(db);
+  migrateCustomerSide(db);
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -266,6 +269,7 @@ function eraseCustomer(db: Database.Database, accountId: string, customerId: str
     for (const { c } of commissionsOf(db, accountId)) {
       if (c.customerId !== customerId) continue;
       save(db, accountId, eraseCommission(c, now));
+      eraseCustomerFiles(db, accountId, c.id);
       touched++;
     }
     db.prepare('DELETE FROM commission_customers WHERE accountId = ? AND id = ?').run(accountId, customerId);
@@ -363,13 +367,26 @@ function totalsFor(db: Database.Database, accountId: string, all: Commission[]):
 // ── Views ───────────────────────────────────────────────────────────────────
 
 /** The owner's and staff's view: the record with the customer's details joined in, never stored on it. */
-function ownerView(req: FastifyRequest, c: Commission, token: string, totals: CommissionTotals, contact: Contact | null) {
+function ownerView(req: FastifyRequest, c: Commission, token: string, totals: CommissionTotals, contact: Contact | null, db: Database.Database, accountId: string) {
   const { customerName: _name, email: _email, phone: _phone, ...record } = c as LegacyCommission;
-  return { ...record, customerName: displayName(contact), email: contact?.email ?? '', phone: contact?.phone ?? '', ...totals, token, publicPath: `${COMMISSION_PUBLIC_PATH}${token}`, publicUrl: `${originOf(req)}${COMMISSION_PUBLIC_PATH}${token}` };
+  return {
+    ...record,
+    brief: c.brief ?? null,
+    customerName: displayName(contact),
+    email: contact?.email ?? '',
+    phone: contact?.phone ?? '',
+    ...totals,
+    token,
+    publicPath: `${COMMISSION_PUBLIC_PATH}${token}`,
+    publicUrl: `${originOf(req)}${COMMISSION_PUBLIC_PATH}${token}`,
+    // The customer's reference pictures (the bytes are fetched one by one) and the devices that get notifications.
+    pictures: picturesOf(db, accountId, c.id),
+    pushDevices: pushCount(db, accountId, c.id),
+  };
 }
 
 /** The single place that decides what the customer's page may know. */
-export function publicView(c: Commission, totals: CommissionTotals, settings: CommissionSettings, shop: string): PublicCommission {
+export function publicView(c: Commission, totals: CommissionTotals, settings: CommissionSettings, shop: string, pictures: BriefPicture[] = [], hasEmail = false, mailEnabled = false): PublicCommission {
   const pickup = { name: settings.pickupName, address: settings.pickupAddress, note: settings.pickupNote };
   return {
     shop: settings.shopName || shop,
@@ -387,6 +404,13 @@ export function publicView(c: Commission, totals: CommissionTotals, settings: Co
       .slice(0, PUBLIC_UPDATES)
       .map((u) => ({ at: u.at, status: u.status, statusLabel: COMMISSION_STATUS_LABEL[u.status], changed: u.changed, message: u.message })),
     pickup: pickup.name || pickup.address || pickup.note ? pickup : null,
+    brief: c.brief ? { text: c.brief.text, budget: c.brief.budget, wantedBy: c.brief.wantedBy } : null,
+    pictures,
+    // An erased commission has nobody to hear from.
+    canAddBrief: !isClosedStatus(c.status) && !!c.customerId,
+    hasEmail,
+    mailEnabled,
+    push: true,
   };
 }
 
@@ -426,6 +450,30 @@ async function tellCustomer(
 
 const IdParam = z.string().min(1).max(80);
 
+/** What the customer side (requests, brief, pictures, push) borrows from here. */
+const deps: CommissionDeps = {
+  rowOf,
+  byToken: (db, token) => {
+    const row = db.prepare('SELECT accountId, doc FROM commissions WHERE token = ?').get(token) as { accountId: string; doc: string } | undefined;
+    return row ? { accountId: row.accountId, c: JSON.parse(row.doc) as Commission } : null;
+  },
+  save,
+  readSettings,
+  shopName: accountName,
+  replyTo: accountEmail,
+  customers: (db, accountId) => customersOf(db, accountId).map(contactOf),
+  insertCustomer,
+  customerOf: (db, accountId, id) => {
+    const r = customerRow(db, accountId, id);
+    return r ? contactOf(r) : undefined;
+  },
+  setCustomerEmail: (db, accountId, id, email) => {
+    db.prepare('UPDATE commission_customers SET email = ?, updatedAt = ? WHERE accountId = ? AND id = ?').run(email, Date.now(), accountId, id);
+  },
+  newToken,
+  originOf,
+};
+
 export const commissionsServerModule: ServerModule = {
   id: MODULE_ID,
   // Staff create and update commissions and take payments at the till.
@@ -434,10 +482,12 @@ export const commissionsServerModule: ServerModule = {
   migrate,
   onAccountDeleted: (db, accountId) => {
     for (const t of ['commissions', 'commission_customers', 'commissions_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+    deleteCustomerSide(db, accountId);
   },
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;
+    registerOwnerSide(app, ctx, deps);
     const bad = (message: string) => ({ error: 'invalid_request', message });
     const adminOnly = (role: string) => role === 'member';
     const forbidden = { error: 'forbidden', message: 'Only an admin can do that.' };
@@ -449,7 +499,7 @@ export const commissionsServerModule: ServerModule = {
 
     /** One commission as the owner's screens get it, with its customer looked up. */
     const viewOf = (req: FastifyRequest, accountId: string, c: Commission, token: string) => {
-      return ownerView(req, c, token, totalsFor(db, accountId, [c]).get(c.id)!, contactOfCommission(accountId, c));
+      return ownerView(req, c, token, totalsFor(db, accountId, [c]).get(c.id)!, contactOfCommission(accountId, c), db, accountId);
     };
 
     // The server also sweeps at startup and every few hours; see `sweepCustomers`.
@@ -471,7 +521,7 @@ export const commissionsServerModule: ServerModule = {
       const totals = totalsFor(db, who.accountId, rows.map((r) => r.c));
       const customers = customerMap(db, who.accountId);
       return {
-        commissions: rows.map((r) => ownerView(req, r.c, r.token, totals.get(r.c.id)!, contactFor(r.c, customers))),
+        commissions: rows.map((r) => ownerView(req, r.c, r.token, totals.get(r.c.id)!, contactFor(r.c, customers), db, who.accountId)),
         settings: readSettings(db, who.accountId),
         emailEnabled: ctx.mail.enabled,
       };
@@ -517,7 +567,7 @@ export const commissionsServerModule: ServerModule = {
         if (!customerRow(db, who.accountId, customer!.id)) insertCustomer(db, who.accountId, customer!);
         save(db, who.accountId, c, token);
       })();
-      return reply.code(201).send(ownerView(req, c, token, commissionTotals(c.price, []), customer!));
+      return reply.code(201).send(ownerView(req, c, token, commissionTotals(c.price, []), customer!, db, who.accountId));
     });
 
     app.put<{ Params: { id: string } }>('/commissions/:id', async (req, reply) => {
@@ -553,6 +603,8 @@ export const commissionsServerModule: ServerModule = {
       save(db, who.accountId, next);
       const link = `${originOf(req)}${COMMISSION_PUBLIC_PATH}${row.token}`;
       const emailed = body.data.email ? await tellCustomer(ctx, who.accountId, next, contactOfCommission(who.accountId, next), link, { message: body.data.message, changed }) : false;
+      // Devices the customer asked to be notified on hear about every step and message; never holds up the answer.
+      void pushUpdate(ctx, who.accountId, next, link, readSettings(db, who.accountId).shopName || accountName(db, who.accountId), body.data.message).catch(() => {});
       return { commission: viewOf(req, who.accountId, next, row.token), emailed };
     });
 
@@ -584,7 +636,9 @@ export const commissionsServerModule: ServerModule = {
     app.delete<{ Params: { id: string } }>('/commissions/:id', async (req, reply) => {
       const who = ctx.identity(req);
       if (adminOnly(who.role)) return reply.code(403).send(forbidden);
-      const res = db.prepare('DELETE FROM commissions WHERE accountId = ? AND id = ?').run(who.accountId, IdParam.parse(req.params.id));
+      const id = IdParam.parse(req.params.id);
+      const res = db.prepare('DELETE FROM commissions WHERE accountId = ? AND id = ?').run(who.accountId, id);
+      if (res.changes) eraseCustomerFiles(db, who.accountId, id);
       return res.changes ? { ok: true } : reply.code(404).send({ error: 'not_found' });
     });
 
@@ -632,7 +686,7 @@ export const commissionsServerModule: ServerModule = {
       const contact = contactOf(state.customer);
       return {
         customer: summaryOf(state, totals),
-        commissions: state.commissions.map((c) => ownerView(req, c, tokens.get(c.id) ?? '', totals.get(c.id)!, contact)),
+        commissions: state.commissions.map((c) => ownerView(req, c, tokens.get(c.id) ?? '', totals.get(c.id)!, contact, db, who.accountId)),
         keepCustomerDays: days,
       };
     });
@@ -689,6 +743,7 @@ export const commissionsServerModule: ServerModule = {
   /** The customer's tracking page: `/p/commissions/<token>`. */
   publicRoutes: (ctx: PublicModuleContext) => async (app) => {
     const { db } = ctx;
+    registerCustomerSide(app, ctx, deps);
 
     // A personal page: never cached, never indexed, and it does not leak its own address.
     app.addHook('onSend', async (_req, reply) => {
@@ -704,7 +759,8 @@ export const commissionsServerModule: ServerModule = {
       if (!row || !ctx.isEnabled(row.accountId)) return missing();
       const c = JSON.parse(row.doc) as Commission;
       const totals = totalsFor(db, row.accountId, [c]).get(c.id)!;
-      const page = renderCommission(publicView(c, totals, readSettings(db, row.accountId), accountName(db, row.accountId)));
+      const hasEmail = !!(c.customerId && customerRow(db, row.accountId, c.customerId)?.email);
+      const page = renderCommission(publicView(c, totals, readSettings(db, row.accountId), accountName(db, row.accountId), picturesOf(db, row.accountId, c.id), hasEmail, ctx.mail.enabled), req.params.token);
       return reply.type('text/html; charset=utf-8').send(page);
     });
   },

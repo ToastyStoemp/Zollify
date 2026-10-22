@@ -1,5 +1,5 @@
 import type Dexie from 'dexie';
-import type { DeviceSummary } from '@zollify/shared';
+import { isReceiptLineLink, type DeviceSummary } from '@zollify/shared';
 import {
   SDK_VERSION,
   type AccountSnapshot,
@@ -35,7 +35,7 @@ import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
 import { fetchHistoricalRates, fetchLatestRate } from './core/exchange-rate';
-import { loadAfterSalePrefs, receiptUrlFor } from './core/after-sale';
+import { loadAfterSalePrefs, publicUrlFor, receiptUrlFor } from './core/after-sale';
 import { logDiagnostic, sendDiagnosticLog } from './core/diagnostics';
 import { canForceSell, forceSell, sellLockFor } from './core/sell-lock';
 import {
@@ -331,6 +331,7 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
       publish: (cart) => sendDisplayCart(cart),
       afterSale: () => loadAfterSalePrefs(),
       receiptUrl: (token) => receiptUrlFor(token),
+      publicUrl: (path) => publicUrlFor(path),
     },
     realtime: {
       connected: () => realtimeConnected.value,
@@ -353,8 +354,13 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         guard();
         if (!tillReceiver) return false;
         // The ref names the module that added the line - never one it chose.
-        const { ref, ...rest } = line;
-        return tillReceiver({ ...rest, ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}) });
+        // A link the receipt could not print is dropped here, not at print time.
+        const { ref, link, ...rest } = line;
+        return tillReceiver({
+          ...rest,
+          ...(ref ? { ref: { moduleId, kind: ref.kind, id: ref.id } } : {}),
+          ...(isReceiptLineLink(link) ? { link: { label: link.label.trim(), path: link.path } } : {}),
+        });
       },
       findLine(key) {
         guard();

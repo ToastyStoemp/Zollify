@@ -232,7 +232,9 @@ the store hears back the same way.
 **Commissions** track custom work from request to pickup (Requested, Accepted,
 In progress, Ready for pickup, Collected, Cancelled). The record and the
 customer's contact details stay on the server, never in the synced op-log. A
-"Commission" button over the till takes a deposit or the final balance as an
+"Commission" tile beside the products (there with an empty cart, so on a phone
+too), or "Take the deposit at the till" on a commission's page, which opens
+the till with it picked, takes a deposit or the final balance as an
 ordinary free-price sale line whose `ref` names the commission, so payment
 providers, receipts, VAT and cash-up work as for any sale; the paid-so-far is
 derived from those sale lines (a reverted sale gives the balance back). The
@@ -244,6 +246,42 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
+**Deposit or in full**: under Commissions -> Payment, customer page and request
+page, an admin picks how the till takes payment - a deposit first, then the
+balance (the default), or the full price at once, which drops the deposit
+field from new commissions and has the till offer the whole price as one
+"Full price" line (a commission that already has a deposit set keeps it).
+**At the till**, New commission asks only what it is and the price (deposit,
+when the shop takes deposits, and due date if wanted); name and email are optional - without a name it is
+filed as "Walk-in, 22 Oct", to rename under Customers. Saving shows a large QR
+code of the customer's page for them to scan, then takes the deposit. A
+customer with no email on file can leave one on that page for updates (only
+while none is on file, and only on a server that can send email); the shop is
+told and the customer gets a note. Someone already on file is still a search
+away. Every receipt for a commission payment carries the page too: the
+printed receipt has a "Follow your commission" QR code (whatever the receipt
+QR setting), and the on-screen and online receipts link to it. This is the
+till line's `link` in the SDK, open to any module: a label and a public path
+of this server (`/p/...`); anything else is dropped, and a cancelled sale
+links nothing.
+
+**What the customer brings.** On their tracking page the customer writes what
+they want and adds up to six reference pictures (PNG, JPEG or WebP, 5 MB
+each) while the commission is open; the owner sees both on the commission,
+can save or remove a picture, and is told when they change. An admin can open
+a **request page**, `/p/commissions/request/<token>` (Customer page and request
+page, under Commissions): name, email, what they would like, the brief,
+budget, a date wish and pictures; it costs a proof-of-work, is rate limited and
+has a honeypot, and each request lands as a Requested commission for a new
+customer record, rings the bell, and mails the customer their tracking link.
+The address has a QR code and can be replaced. The tracking page also offers
+**browser notifications**: "Notify me on this device" subscribes the browser
+(Web Push, VAPID keys made by the server on first start; see `VAPID_SUBJECT`),
+and every step and message the owner posts reaches up to five devices. It
+works in Chrome, Firefox and Edge; on an iPhone only once the page is added
+to the home screen (the page says so). Email stays the channel that reaches
+everyone. The brief, pictures and devices are erased with the customer's
+other details.
 A customer is one record per account (name, email, phone) that commissions point
 at, so a returning customer is picked from a search instead of retyped, a
 Customers tab shows everything one customer ordered, paid and still owes, and a
@@ -407,6 +445,28 @@ own IndexedDB, and what was booked is remembered server-side. **Ledger**: per-
 event P&L from op-log revenue against booth / travel / accommodation costs,
 invoices attached, optional Claude invoice scanning behind daily caps.
 Credentials live encrypted per account under Settings → Integrations.
+
+*Ledger costs worked out from the event* - the ledger's categories cover
+what doing an event costs (booth, travel, mileage, accommodation, per diems,
+shipping, customs, marketing, furniture, staff, insurance, fees, stock,
+other; ids are stable because bookings refer to them). Three costs are
+computed rather than typed: **per diems** from the event's dates and
+country (the day of arrival and of departure at the reduced rate, the days
+between in full, times the people who went; a one-day trip once at the
+reduced rate), **mileage** from a distance (there and back, times the
+trips, at the rate per kilometre), and **a cost over several events**
+(insurance, a van, one trip to two shows) split across them by the days
+each runs or evenly, in whole cents, each event getting its share as its
+own expense. Each computed expense keeps its calculation (`detail`) and
+says it in its note, so the books read how the figure came about. The
+rates are the account's own table under *Rates* on the ledger: started
+from the defaults for the business's country (Germany's BMF letter for
+2025 with the destinations a booth most often visits, Luxembourg's rate as
+the fallback; Belgium's daily allowance, country list with departure and
+return days at half, and kilometre rate) and corrected by an admin as the
+yearly letters come out - the app cannot fetch them, so check the defaults
+before relying on them. Rules live in `@zollify/shared` (`travel-costs.ts`),
+shared by the app and the server.
 
 *Tax deadlines* - when to file and pay, worked out from the business's tax
 setup rather than fetched: no tax office publishes deadlines as data, but the

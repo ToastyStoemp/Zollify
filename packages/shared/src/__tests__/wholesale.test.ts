@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OrderInputSchema, TradeCustomerSchema, TradeDetailsSchema, addWorkingDays, expectedShipDate, nextOrderStatuses, orderTotals, orderableQty, reservedByItem, tierPriceFor, unitPriceFor } from '../wholesale';
+import { OrderInputSchema, TradeCustomerSchema, TradeDetailsSchema, addWorkingDays, catalogueCards, tiersForPrice, expectedShipDate, nextOrderStatuses, orderTotals, orderableQty, reservedByItem, tierPriceFor, unitPriceFor } from '../wholesale';
 
 const tiers = [{ minQty: 10, price: 8 }, { minQty: 50, price: 6.5 }, { minQty: 1, price: 9 }];
 
@@ -65,5 +65,75 @@ describe('orders', () => {
     expect(TradeCustomerSchema.parse({ company: 'Plush & Co', country: 'be', email: 'A@B.CO' })).toMatchObject({ country: 'BE', email: 'a@b.co', currency: 'EUR', discountPct: 0 });
     expect(OrderInputSchema.safeParse({ customerId: '', lines: [] }).success).toBe(false);
     expect(OrderInputSchema.safeParse({ customerId: 'c', lines: [{ productId: 'p', title: 'T', qty: 0, unitPrice: 1 }] }).success).toBe(false);
+  });
+});
+
+describe('variants to the trade', () => {
+  const print = {
+    id: 'p-print',
+    title: 'Harbour print',
+    sku: 'HP',
+    price: 20,
+    imageId: 'img-print',
+    variants: [
+      { id: 'a4', name: 'A4', sku: 'HP-A4' },
+      { id: 'a3', name: 'A3', sku: 'HP-A3', price: 30 },
+      { id: 'a2', name: 'A2', price: 45, unlisted: true },
+    ],
+  };
+  const keychain = {
+    id: 'p-zodiac',
+    title: 'Zodiac keychain',
+    price: 8,
+    imageId: 'img-zodiac',
+    variants: [
+      { id: 'chicken', name: 'Chicken', sku: 'ZK-CH', imageId: 'img-chicken' },
+      { id: 'dog', name: 'Dog', sku: 'ZK-DO', imageId: 'img-dog' },
+    ],
+  };
+  const tiers = [{ minQty: 10, price: 10 }, { minQty: 50, price: 9 }];
+
+  it('gives a variant with its own price the same discount off it', () => {
+    expect(tiersForPrice(tiers, 20, 30)).toEqual([{ minQty: 10, price: 15 }, { minQty: 50, price: 13.5 }]);
+    expect(tiersForPrice(tiers, 20, 20)).toBe(tiers);
+    // Nothing to scale from: the tiers stand as entered.
+    expect(tiersForPrice(tiers, 0, 30)).toBe(tiers);
+    expect(unitPriceFor(tiersForPrice(tiers, 20, 30), 12, 30, 0)).toBe(15);
+  });
+
+  it('shows sizes of one print as rows on one card, each at its own price', () => {
+    const cards = catalogueCards(print, { tiers });
+    expect(cards).toHaveLength(1);
+    expect(cards[0]!.title).toBe('Harbour print');
+    expect(cards[0]!.rows.map((r) => [r.label, r.sku, r.listPrice, r.tiers[0]!.price])).toEqual([
+      ['A4', 'HP-A4', 20, 10],
+      ['A3', 'HP-A3', 30, 15],
+    ]);
+  });
+
+  it('shows variants with photos of their own as items of their own', () => {
+    const cards = catalogueCards(keychain, {});
+    expect(cards.map((c) => [c.title, c.imageId, c.sku, c.rows.length])).toEqual([
+      ['Zodiac keychain · Chicken', 'img-chicken', 'ZK-CH', 1],
+      ['Zodiac keychain · Dog', 'img-dog', 'ZK-DO', 1],
+    ]);
+  });
+
+  it('follows the choice made for the product', () => {
+    expect(catalogueCards(keychain, { variantDisplay: 'options' })).toHaveLength(1);
+    const separate = catalogueCards(print, { tiers, variantDisplay: 'separate' });
+    expect(separate.map((c) => c.title)).toEqual(['Harbour print · A4', 'Harbour print · A3']);
+    // A size with no photo of its own shows the print's.
+    expect(separate[1]!.imageId).toBe('img-print');
+    expect(separate[1]!.rows[0]!.tiers[0]!.price).toBe(15);
+  });
+
+  it('keeps a product without variants as one card at its price', () => {
+    const cards = catalogueCards({ id: 'p', title: 'Sticker', price: 3, variants: [] }, {});
+    expect(cards).toEqual([{ productId: 'p', title: 'Sticker', imageId: undefined, sku: '', rows: [{ variantId: null, label: '', sku: '', listPrice: 3, tiers: [] }] }]);
+  });
+
+  it('defaults to automatic for products saved before the choice existed', () => {
+    expect(TradeDetailsSchema.parse({}).variantDisplay).toBe('auto');
   });
 });

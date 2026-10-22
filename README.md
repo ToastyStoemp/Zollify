@@ -243,6 +243,23 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
+**What the customer brings.** On their tracking page the customer writes what
+they want and adds up to six reference pictures (PNG, JPEG or WebP, 5 MB
+each) while the commission is open; the owner sees both on the commission,
+can save or remove a picture, and is told when they change. An admin can open
+a **request page**, `/p/commissions/request/<token>` (Customer page and request
+page, under Commissions): name, email, what they would like, the brief,
+budget, a date wish and pictures; it costs a proof-of-work, is rate limited and
+has a honeypot, and each request lands as a Requested commission for a new
+customer record, rings the bell, and mails the customer their tracking link.
+The address has a QR code and can be replaced. The tracking page also offers
+**browser notifications**: "Notify me on this device" subscribes the browser
+(Web Push, VAPID keys made by the server on first start; see `VAPID_SUBJECT`),
+and every step and message the owner posts reaches up to five devices. It
+works in Chrome, Firefox and Edge; on an iPhone only once the page is added
+to the home screen (the page says so). Email stays the channel that reaches
+everyone. The brief, pictures and devices are erased with the customer's
+other details.
 A customer is one record per account (name, email, phone) that commissions point
 at, so a returning customer is picked from a search instead of retyped, a
 Customers tab shows everything one customer ordered, paid and still owes, and a

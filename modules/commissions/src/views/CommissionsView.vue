@@ -18,6 +18,8 @@ import { api, errorText, localToday, type CommissionView } from '../api';
 import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
 import CustomerPicker from './CustomerPicker.vue';
 import CustomersPanel from './CustomersPanel.vue';
+import CustomerBrief from './CustomerBrief.vue';
+import RequestPageLink from './RequestPageLink.vue';
 import { slipHtml } from '../slip';
 import { sdk } from '../runtime';
 
@@ -320,7 +322,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
         </button>
 
         <details v-if="isAdmin" class="settings" :open="showSettings" @toggle="showSettings = ($event.target as HTMLDetailsElement).open">
-          <summary>Pickup details on the customer's page</summary>
+          <summary>Customer page and request page</summary>
           <label>Shop name <small>(blank: your account name)</small><input v-model="pickup.shopName" type="text" maxlength="80" /></label>
           <label>Collect from <input v-model="pickup.pickupName" type="text" maxlength="120" placeholder="Store or event name" /></label>
           <label>Address <textarea v-model="pickup.pickupAddress" rows="2" maxlength="300" /></label>
@@ -330,6 +332,11 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Keep customer details after the last commission closes <small>days, 0 to 365; 0 erases at the next check (every few hours). Then name, email, phone, notes and messages are erased.</small>
             <input v-model.number="pickup.keepCustomerDays" type="number" min="0" max="365" step="1" class="short" />
           </label>
+          <h3>Request page</h3>
+          <p class="hint">A public page where people ask for a commission: what they want, a budget, a date and reference pictures. Each request lands here as Requested, and they get their tracking link.</p>
+          <label class="inline"><input v-model="pickup.requestsOpen" type="checkbox" /> Take requests</label>
+          <label>What the page says above the form <small>what you take on, prices, how long it takes</small><textarea v-model="pickup.requestIntro" rows="3" maxlength="1000" /></label>
+          <RequestPageLink v-if="showSettings" :key="String(settings.requestsOpen)" />
           <button type="button" :disabled="busy" @click="saveSettings">Save</button>
         </details>
       </section>
@@ -371,6 +378,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           </dl>
           <p class="hint">Take a deposit or the balance from the till: Commission button.</p>
           <p v-if="current.description" class="text">{{ current.description }}</p>
+          <CustomerBrief :commission="current" @changed="load" />
           <p v-if="current.notes" class="text note"><strong>Internal note:</strong> {{ current.notes }}</p>
 
           <div v-if="nextStatuses(current.status).length" class="statuses" role="group" aria-label="Move to">

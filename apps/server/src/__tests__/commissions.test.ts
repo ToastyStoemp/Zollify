@@ -233,7 +233,9 @@ describe('the customer page', () => {
     expect(html).toContain('Marktgasse 5, 3011 Bern');
     expect(html).toContain('Ink &amp; Charcoal');
     // Everything typed is escaped, and there is no script on the page.
-    expect(html).not.toContain('<script');
+    // The one script is the page's own file; nothing typed ever becomes one.
+    expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/p/commissions/commission.js">']);
+    expect(html).toContain('Started &lt;script&gt;alert(1)&lt;/script&gt; today');
     expect(html).not.toContain('<b>print');
     expect(html).toContain('Tiger &lt;b&gt;print&lt;/b&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -311,6 +313,10 @@ describe('times on the customer page', () => {
     balance: 0,
     updates: [],
     pickup: null,
+    brief: null,
+    pictures: [],
+    canAddBrief: true,
+    push: true,
   };
   // 23:30 UTC on 5 Jan 2099: already the next day in Zurich, still the same afternoon in Los Angeles.
   const lateEvening = Date.UTC(2099, 0, 5, 23, 30);
@@ -337,12 +343,39 @@ describe('times on the customer page', () => {
     expect(renderCommission({ ...base, timeZone: '<b>' })).toContain('Times are shown in &lt;b&gt;.');
   });
 
-  it('refreshes by itself only while the commission is open, with no script', () => {
+  it('refreshes by itself only while the commission is open, and never runs inline script', () => {
+    const token = 'A'.repeat(32);
     for (const status of ['requested', 'accepted', 'in_progress', 'ready'] as const) {
-      const html = renderCommission({ ...base, status });
-      expect(html).toContain('<meta http-equiv="refresh" content="300" />');
-      expect(html).not.toContain('<script');
+      const html = renderCommission({ ...base, status }, token);
+      // Without script, a plain refresh; with it, the script waits while the customer types.
+      expect(html).toContain('<noscript><meta http-equiv="refresh" content="300" /></noscript>');
+      expect(html).toContain('data-watch="1"');
+      expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/p/commissions/commission.js">']);
     }
-    for (const status of ['collected', 'cancelled'] as const) expect(renderCommission({ ...base, status })).not.toContain('http-equiv');
+    for (const status of ['collected', 'cancelled'] as const) {
+      const html = renderCommission({ ...base, status, canAddBrief: false }, token);
+      expect(html).not.toContain('http-equiv');
+      expect(html).not.toContain('id="push"');
+    }
+    // Rendered without its token (a preview) it has no forms and no script at all.
+    expect(renderCommission(base)).not.toContain('<script');
+  });
+
+  it('shows the brief escaped, a form while open, read-only once closed', () => {
+    const token = 'B'.repeat(32);
+    const withBrief = { ...base, brief: { text: 'A fox <b>please</b>', budget: '150', wantedBy: '2099-01-31' }, pictures: [{ id: 'p1', name: 'ref<1>.png', mime: 'image/png', size: 10, createdAt: 1 }] };
+    const open = renderCommission(withBrief, token);
+    expect(open).toContain('id="brief"');
+    expect(open).toContain('A fox &lt;b&gt;please&lt;/b&gt;</textarea>');
+    expect(open).toContain('Budget: 150 · Wanted by 31 Jan 2099');
+    expect(open).toContain(`/p/commissions/${token}/pictures/p1`);
+    expect(open).toContain('alt="ref&lt;1&gt;.png"');
+    expect(open).toContain('data-remove="p1"');
+    expect(open).toContain('id="push"');
+    expect(open).toContain(`/p/commissions/${token}/manifest.webmanifest`);
+    const closed = renderCommission({ ...withBrief, status: 'collected', canAddBrief: false }, token);
+    expect(closed).not.toContain('id="brief"');
+    expect(closed).toContain('What you asked for');
+    expect(closed).not.toContain('data-remove');
   });
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
-import { COMMISSION_REF_KIND, CommissionCreateSchema, DEFAULT_KEEP_CUSTOMER_DAYS, fmtPrice, isClosedStatus, round2 } from '@zollify/shared';
+import { COMMISSION_REF_KIND, CommissionCreateSchema, DEFAULT_KEEP_CUSTOMER_DAYS, fmtPrice, isClosedStatus, nextCommissionPayment, round2, type CommissionPaymentKind, type CommissionPaymentMode } from '@zollify/shared';
 import { api, errorText, pendingPaid, type CommissionView } from '../api';
 import { QrCode } from '@zollify/ui';
 import { choiceOf, customerFields, duplicatesIn, emptyChoice, quickCustomer, type CustomerChoice, type CustomerContact } from '../customer-form';
@@ -24,6 +24,8 @@ const props = defineProps<{ focus?: string }>();
 const items = ref<CommissionView[] | null>(null);
 const keepDays = ref(DEFAULT_KEEP_CUSTOMER_DAYS);
 const emailEnabled = ref(false);
+/** The shop's choice under Settings: a deposit first, or the full price at once. */
+const paymentMode = ref<CommissionPaymentMode>('deposit');
 const error = ref<string | null>(null);
 const query = ref('');
 const event = computed(() => sdk().data.events.active());
@@ -35,6 +37,7 @@ async function load(): Promise<void> {
     items.value = res.commissions.filter((c) => !isClosedStatus(c.status));
     keepDays.value = res.settings.keepCustomerDays;
     emailEnabled.value = res.emailEnabled;
+    paymentMode.value = res.settings.paymentMode ?? 'deposit';
     if (props.focus) {
       const picked = res.commissions.find((c) => c.id === props.focus);
       if (!picked) error.value = 'That commission is no longer there - pick another below.';
@@ -58,17 +61,20 @@ const owed = (c: CommissionView): number => round2(Math.max(0, c.price - paidOf(
 
 // ── Taking a payment ────────────────────────────────────────────────────────
 const target = ref<CommissionView | null>(null);
-const kind = ref<'Deposit' | 'Balance' | 'Payment'>('Deposit');
+const kind = ref<CommissionPaymentKind>('Deposit');
 const amount = ref('');
 
 function choose(c: CommissionView): void {
   target.value = c;
   error.value = null;
-  // A deposit first; once something is paid, the rest.
-  const asked = round2(Math.max(0, c.depositAsked - paidOf(c)));
-  if (paidOf(c) === 0 && asked > 0) pick('Deposit', asked);
-  else if (owed(c) > 0) pick('Balance', owed(c));
-  else pick('Payment', 0);
+  // A deposit first or the full price, as the shop takes it; once something is paid, the rest.
+  const next = nextCommissionPayment(c, paidOf(c), paymentMode.value);
+  pick(next.kind, next.amount);
+}
+/** "Take the deposit · EUR 15.00", "Take the full price · EUR 45.00"… for the button after saving. */
+function firstPaymentLabel(c: CommissionView): string {
+  const next = nextCommissionPayment(c, paidOf(c), paymentMode.value);
+  return next.amount > 0 ? `Take the ${next.kind.toLowerCase()} · ${fmtPrice(next.amount, c.currency)}` : 'Take a payment';
 }
 function pick(k: typeof kind.value, value: number): void {
   kind.value = k;
@@ -131,7 +137,7 @@ async function create(force = false): Promise<void> {
     ...(fromFile.value ? customerFields(choice.value, force) : quickCustomer(form.name, form.email, force)),
     title: form.title,
     price: num(form.price),
-    depositAsked: num(form.deposit),
+    depositAsked: paymentMode.value === 'full' ? 0 : num(form.deposit),
     dueDate: form.dueDate,
     currency: currency.value,
   });
@@ -198,7 +204,7 @@ function takePayment(c: CommissionView): void {
         <p class="hint">Their own page: progress, messages, pictures they want to send. {{ !made.email && emailEnabled ? 'They can leave an email there for updates.' : '' }}</p>
       </div>
       <div class="actions">
-        <button v-if="made.depositAsked > 0 || made.price > 0" type="button" class="primary" @click="takePayment(made)">{{ made.depositAsked > 0 ? `Take the deposit · ${fmtPrice(made.depositAsked, made.currency)}` : 'Take a payment' }}</button>
+        <button v-if="made.depositAsked > 0 || made.price > 0" type="button" class="primary" @click="takePayment(made)">{{ firstPaymentLabel(made) }}</button>
         <button v-if="made.email && emailEnabled" type="button" :disabled="busy || emailed" @click="emailLink(made)">{{ emailed ? 'Link emailed' : 'Email the link too' }}</button>
         <button type="button" @click="emit('close')">Done</button>
       </div>
@@ -210,8 +216,8 @@ function takePayment(c: CommissionView): void {
         <span class="hint">{{ target.customerName }} · price {{ target.price > 0 ? fmtPrice(target.price, target.currency) : 'not set' }} · paid {{ fmtPrice(paidOf(target), target.currency) }} · balance {{ fmtPrice(owed(target), target.currency) }}</span>
       </header>
       <div class="kinds" role="group" aria-label="What is this payment">
-        <button type="button" :class="{ on: kind === 'Deposit' }" @click="pick('Deposit', round2(Math.max(0, target.depositAsked - paidOf(target))))">Deposit</button>
-        <button type="button" :class="{ on: kind === 'Balance' }" :disabled="owed(target) <= 0" @click="pick('Balance', owed(target))">Balance {{ owed(target) > 0 ? fmtPrice(owed(target), target.currency) : '' }}</button>
+        <button v-if="paymentMode === 'deposit' || target.depositAsked > 0" type="button" :class="{ on: kind === 'Deposit' }" @click="pick('Deposit', round2(Math.max(0, target.depositAsked - paidOf(target))))">Deposit</button>
+        <button type="button" :class="{ on: kind === 'Balance' || kind === 'Full price' }" :disabled="owed(target) <= 0" @click="pick(paidOf(target) > 0 ? 'Balance' : 'Full price', owed(target))">{{ paidOf(target) > 0 ? 'Balance' : 'Full price' }} {{ owed(target) > 0 ? fmtPrice(owed(target), target.currency) : '' }}</button>
         <button type="button" :class="{ on: kind === 'Payment' }" @click="pick('Payment', 0)">Other amount</button>
       </div>
       <label>Amount ({{ target.currency }}) <input v-model="amount" type="text" inputmode="decimal" autocomplete="off" /></label>
@@ -225,7 +231,7 @@ function takePayment(c: CommissionView): void {
       <label>What is it? <input v-model="form.title" type="text" maxlength="120" required placeholder="Short title the customer sees" /></label>
       <div class="two">
         <label>Price ({{ currency }}) <input v-model="form.price" type="text" inputmode="decimal" /></label>
-        <label>Deposit ({{ currency }}) <input v-model="form.deposit" type="text" inputmode="decimal" /></label>
+        <label v-if="paymentMode === 'deposit'">Deposit ({{ currency }}) <input v-model="form.deposit" type="text" inputmode="decimal" /></label>
       </div>
       <label>Due date <input v-model="form.dueDate" type="date" /></label>
       <CustomerPicker v-if="fromFile" v-model="choice" :keep-days="keepDays" :duplicates="duplicates" @use-duplicate="useDuplicate" @add-anyway="create(true)" />

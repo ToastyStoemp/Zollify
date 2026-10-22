@@ -140,6 +140,35 @@ export function commissionTotals(price: number, payments: CommissionPayment[]): 
   return { paid, payments, balance: round2(Math.max(0, price - paid)) };
 }
 
+/** What the till asks for first: a deposit, then the rest; or the full price in one go. */
+export const COMMISSION_PAYMENT_MODES = ['deposit', 'full'] as const;
+export type CommissionPaymentMode = (typeof COMMISSION_PAYMENT_MODES)[number];
+
+export type CommissionPaymentKind = 'Deposit' | 'Full price' | 'Balance' | 'Payment';
+
+/**
+ * The payment the till offers next for a commission, and how much. With
+ * `full`, nothing paid yet means the whole price, whatever deposit was once
+ * set; with `deposit`, a deposit asked comes first. After the first payment it
+ * is the balance either way. `Payment` with 0: nothing to suggest (no price,
+ * or paid up) - the seller types an amount.
+ */
+export function nextCommissionPayment(
+  c: Pick<Commission, 'price' | 'depositAsked'>,
+  paid: number,
+  mode: CommissionPaymentMode,
+): { kind: CommissionPaymentKind; amount: number } {
+  const owed = round2(Math.max(0, c.price - paid));
+  const deposit = round2(Math.max(0, c.depositAsked - paid));
+  if (paid <= 0) {
+    if (mode === 'deposit' && deposit > 0) return { kind: 'Deposit', amount: deposit };
+    if (owed > 0) return { kind: 'Full price', amount: owed };
+    if (deposit > 0) return { kind: 'Deposit', amount: deposit };
+    return { kind: 'Payment', amount: 0 };
+  }
+  return owed > 0 ? { kind: 'Balance', amount: owed } : { kind: 'Payment', amount: 0 };
+}
+
 /** Past its due date and not finished. `today` is YYYY-MM-DD, local to the shop. */
 export function isOverdue(c: Pick<Commission, 'dueDate' | 'status'>, today: string): boolean {
   return !!c.dueDate && !isClosedStatus(c.status) && c.dueDate < today;
@@ -169,6 +198,8 @@ export const CommissionSettingsSchema = z.object({
   requestsOpen: z.boolean().default(false),
   /** What the request page says above the form: what you take on, prices, how long. */
   requestIntro: z.string().trim().max(1000).default(''),
+  /** At the till: a deposit first (the deposit field is offered), or the full price at once (it is not). */
+  paymentMode: z.enum(COMMISSION_PAYMENT_MODES).default('deposit'),
 });
 export type CommissionSettings = z.infer<typeof CommissionSettingsSchema>;
 

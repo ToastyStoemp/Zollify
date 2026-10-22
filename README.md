@@ -245,8 +245,13 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
-**At the till**, New commission asks only what it is and the price (deposit
-and due date if wanted); name and email are optional - without a name it is
+**Deposit or in full**: under Commissions -> Payment, customer page and request
+page, an admin picks how the till takes payment - a deposit first, then the
+balance (the default), or the full price at once, which drops the deposit
+field from new commissions and has the till offer the whole price as one
+"Full price" line (a commission that already has a deposit set keeps it).
+**At the till**, New commission asks only what it is and the price (deposit,
+when the shop takes deposits, and due date if wanted); name and email are optional - without a name it is
 filed as "Walk-in, 22 Oct", to rename under Customers. Saving shows a large QR
 code of the customer's page for them to scan, then takes the deposit. A
 customer with no email on file can leave one on that page for updates (only

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CommissionCreateSchema, CommissionInputSchema, CommissionSettingsSchema, CustomerInputSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextStatuses } from '../commissions';
+import { CommissionCreateSchema, CommissionInputSchema, CommissionSettingsSchema, CustomerInputSchema, CommissionUpdateSchema, commissionTotals, isOverdue, nextCommissionPayment, nextStatuses } from '../commissions';
 
 describe('commissionTotals', () => {
   it('sums payments to the cent and never goes negative', () => {
@@ -77,5 +77,36 @@ describe('settings retention', () => {
     expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: -1 }).success).toBe(false);
     expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: 366 }).success).toBe(false);
     expect(CommissionSettingsSchema.safeParse({ keepCustomerDays: 1.5 }).success).toBe(false);
+  });
+});
+
+describe('nextCommissionPayment', () => {
+  const c = (price: number, depositAsked = 0) => ({ price, depositAsked });
+
+  it('asks the deposit first, then the balance', () => {
+    expect(nextCommissionPayment(c(45, 15), 0, 'deposit')).toEqual({ kind: 'Deposit', amount: 15 });
+    expect(nextCommissionPayment(c(45, 15), 15, 'deposit')).toEqual({ kind: 'Balance', amount: 30 });
+    expect(nextCommissionPayment(c(45, 15), 45, 'deposit')).toEqual({ kind: 'Payment', amount: 0 });
+  });
+
+  it('asks the full price when no deposit was set', () => {
+    expect(nextCommissionPayment(c(45), 0, 'deposit')).toEqual({ kind: 'Full price', amount: 45 });
+  });
+
+  it('asks the full price at once when the shop takes it that way, even if a deposit was set', () => {
+    expect(nextCommissionPayment(c(45, 15), 0, 'full')).toEqual({ kind: 'Full price', amount: 45 });
+    expect(nextCommissionPayment(c(45.1), 0, 'full')).toEqual({ kind: 'Full price', amount: 45.1 });
+    expect(nextCommissionPayment(c(45), 20, 'full')).toEqual({ kind: 'Balance', amount: 25 });
+  });
+
+  it('still asks a deposit when there is no price yet to take in full', () => {
+    expect(nextCommissionPayment(c(0, 10), 0, 'full')).toEqual({ kind: 'Deposit', amount: 10 });
+    expect(nextCommissionPayment(c(0), 0, 'full')).toEqual({ kind: 'Payment', amount: 0 });
+  });
+
+  it('defaults to a deposit first, and keeps an older settings record working', () => {
+    expect(CommissionSettingsSchema.parse({}).paymentMode).toBe('deposit');
+    expect(CommissionSettingsSchema.parse({ paymentMode: 'full' }).paymentMode).toBe('full');
+    expect(CommissionSettingsSchema.safeParse({ paymentMode: 'later' }).success).toBe(false);
   });
 });

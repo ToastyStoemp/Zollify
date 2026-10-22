@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { choiceOf, customerFields, duplicatesIn, emptyChoice, erasureNote, retentionLine } from '../customer-form';
+import { choiceOf, customerFields, duplicatesIn, emptyChoice, erasureNote, quickCustomer, retentionLine, walkInName } from '../customer-form';
 
 const mira = { id: 'c1', name: 'Mira', email: 'mira@example.test', phone: '' };
 
@@ -37,5 +37,16 @@ describe('duplicatesIn', () => {
     expect(duplicatesIn({ body: { error: 'invalid_request' } })).toBeNull();
     expect(duplicatesIn(new Error('x'))).toBeNull();
     expect(duplicatesIn(null)).toBeNull();
+  });
+});
+
+describe('the quick form at the till', () => {
+  const at = new Date('2026-10-22T15:00:00');
+  it('files a nameless commission under a walk-in name with the day', () => {
+    expect(walkInName(at)).toBe('Walk-in, 22 Oct');
+    expect(quickCustomer('  ', '', false, at)).toEqual({ customer: { name: 'Walk-in, 22 Oct', email: '', phone: '' }, forceNewCustomer: false });
+  });
+  it('keeps what was typed, trimmed, and passes "add anyway" on', () => {
+    expect(quickCustomer(' Mira ', ' mira@example.test ', true, at)).toEqual({ customer: { name: 'Mira', email: 'mira@example.test', phone: '' }, forceNewCustomer: true });
   });
 });

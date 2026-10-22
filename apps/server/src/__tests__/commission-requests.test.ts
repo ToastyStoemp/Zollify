@@ -258,6 +258,35 @@ describe('browser notifications', () => {
   });
 });
 
+describe('made at the till with no email', () => {
+  it('files a walk-in, and the customer leaves their own email on their page, once', async () => {
+    const made = (await call(staff, 'POST', '/commissions', { customer: { name: 'Walk-in, 22 Oct', email: '' }, forceNewCustomer: true, title: 'Badge', price: 30, depositAsked: 10 })).json();
+    let html = (await pub('GET', made.publicPath)).body;
+    expect(html).toContain('id="email-form"');
+    expect((await pub('POST', `${made.publicPath}/email`, { email: 'nope' })).statusCode).toBe(400);
+    sent.length = 0;
+    expect((await pub('POST', `${made.publicPath}/email`, { email: 'Sam@Example.test' })).json()).toEqual({ ok: true, emailed: true });
+    expect(sent[0]).toMatchObject({ to: 'sam@example.test', subject: 'Updates on Badge', replyTo: 'shop@example.test' });
+    expect((await call(staff, 'GET', `/commissions/${made.id}`)).json().email).toBe('sam@example.test');
+    // The page never shows the address, and no longer offers the box.
+    html = (await pub('GET', made.publicPath)).body;
+    expect(html).not.toContain('id="email-form"');
+    expect(html).not.toContain('sam@example.test');
+    // Whoever holds the link cannot change it afterwards.
+    expect((await pub('POST', `${made.publicPath}/email`, { email: 'other@example.test' })).statusCode).toBe(409);
+    expect((await call(staff, 'GET', `/commissions/${made.id}`)).json().email).toBe('sam@example.test');
+  });
+
+  it('is not offered when the shop has an email, nor once closed', async () => {
+    const withMail = (await call(staff, 'POST', '/commissions', { customer: { name: 'Kim', email: 'kim@example.test' }, forceNewCustomer: true, title: 'Mug' })).json();
+    expect((await pub('GET', withMail.publicPath)).body).not.toContain('id="email-form"');
+    const closed = (await call(staff, 'POST', '/commissions', { customer: { name: 'Walk-in', email: '' }, forceNewCustomer: true, title: 'Pin' })).json();
+    await call(staff, 'POST', `/commissions/${closed.id}/updates`, { status: 'cancelled' });
+    expect((await pub('GET', closed.publicPath)).body).not.toContain('id="email-form"');
+    expect((await pub('POST', `${closed.publicPath}/email`, { email: 'x@example.test' })).statusCode).toBe(409);
+  });
+});
+
 describe('erasure', () => {
   it('takes the customer\'s brief, pictures and devices with their details', async () => {
     const made = (await call(staff, 'POST', '/commissions', { customer: { name: 'Lee', email: 'lee@example.test' }, forceNewCustomer: true, title: 'Cat' })).json();
@@ -272,5 +301,14 @@ describe('erasure', () => {
     expect(after.pushDevices).toBe(0);
     const html = (await pub('GET', made.publicPath)).body;
     expect(html).not.toContain('Tabby');
+  });
+});
+
+describe('a server that cannot send email', () => {
+  it('does not ask the customer for an address', async () => {
+    const { renderCommission } = await import('../modules/commissions-page');
+    const page = { shop: 'Ink', title: 'Fox', status: 'requested' as const, statusLabel: 'Requested', dueDate: '', timeZone: 'UTC', currency: 'EUR', price: 0, paid: 0, balance: 0, updates: [], pickup: null, brief: null, pictures: [], canAddBrief: true, hasEmail: false, push: true };
+    expect(renderCommission({ ...page, mailEnabled: true }, 'C'.repeat(32))).toContain('id="email-form"');
+    expect(renderCommission({ ...page, mailEnabled: false }, 'C'.repeat(32))).not.toContain('id="email-form"');
   });
 });

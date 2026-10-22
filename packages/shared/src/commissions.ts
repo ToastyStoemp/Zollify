@@ -181,6 +181,9 @@ export const COMMISSION_REQUEST_PATH = '/p/commissions/request/';
 /** 18 random bytes, base64url: the request page's token. */
 export const COMMISSION_REQUEST_TOKEN_RE = /^[A-Za-z0-9_-]{24}$/;
 
+/** An address the customer leaves on their tracking page, for updates. */
+export const CustomerEmailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email address.').max(254) });
+
 /** What the customer wrote about what they want; theirs to change while the commission is open. */
 export const CustomerBriefSchema = z.object({
   text: z.string().trim().max(4000, 'Keep it under 4000 characters.').default(''),
@@ -274,6 +277,10 @@ export interface PublicCommission {
   pictures: BriefPicture[];
   /** The customer may still change the brief and the pictures. */
   canAddBrief: boolean;
+  /** An email is on file for updates (never which one). Without, the page offers to take one. */
+  hasEmail: boolean;
+  /** The server can send email at all; without, the page does not ask for an address. */
+  mailEnabled: boolean;
   /** The server can send browser notifications. */
   push: boolean;
 }

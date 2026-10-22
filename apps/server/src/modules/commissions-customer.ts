@@ -12,6 +12,7 @@ import {
   COMMISSION_TOKEN_RE,
   CommissionRequestSchema,
   CustomerBriefSchema,
+  CustomerEmailSchema,
   PUSH_MAX_PER_COMMISSION,
   PushSubscriptionSchema,
   base64BodyLimit,
@@ -211,6 +212,8 @@ export interface CommissionDeps {
   replyTo(db: Database.Database, accountId: string): string | null;
   customers(db: Database.Database, accountId: string): { id: string; name: string; email: string; phone: string }[];
   insertCustomer(db: Database.Database, accountId: string, c: { id: string; name: string; email: string; phone: string; keepFrom: number; createdAt: number; updatedAt: number }): void;
+  customerOf(db: Database.Database, accountId: string, id: string): { id: string; name: string; email: string; phone: string } | undefined;
+  setCustomerEmail(db: Database.Database, accountId: string, id: string, email: string): void;
   newToken(): string;
   originOf(req: FastifyRequest): string;
 }
@@ -428,6 +431,38 @@ export function registerCustomerSide(app: FastifyInstance, ctx: PublicModuleCont
     return res.changes ? { ok: true } : reply.code(404).send({ error: 'not_found' });
   });
 
+  // ── An email for updates, left by the customer ───────────────────────
+  // Only while none is on file: whoever holds the link may add an address,
+  // never change or read the one the shop has. A commission made at the
+  // till with no email gets one this way, from the customer's own phone.
+  app.post<Tok>('/:token/email', { config: { rateLimit: { max: 5, timeWindow: '10 minutes' } }, bodyLimit: 1024 }, async (req, reply) => {
+    const found = tracked(req.params.token);
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    if (isClosedStatus(found.c.status) || !found.c.customerId) return reply.code(409).send(bad('This commission is closed.'));
+    const body = CustomerEmailSchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send(bad(body.error.issues[0]?.message ?? 'Enter a valid email address.'));
+    const customer = deps.customerOf(db, found.accountId, found.c.customerId);
+    if (!customer) return reply.code(409).send(bad('This commission is closed.'));
+    if (customer.email) return reply.code(409).send(bad('The shop already has an email for this commission.'));
+    if (!ctx.mail.enabled) return reply.code(409).send(bad('The shop cannot send email right now.'));
+    deps.setCustomerEmail(db, found.accountId, customer.id, body.data.email);
+    tellOwner(found.accountId, `Email left for updates: ${found.c.title}`, customer.name, `email:${found.c.id}`);
+    let emailed = false;
+    if (ctx.mail.enabled) {
+      const s = deps.readSettings(db, found.accountId);
+      const shop = s.shopName || deps.shopName(db, found.accountId) || 'The shop';
+      const replyTo = deps.replyTo(db, found.accountId);
+      emailed = await ctx.mail.send({
+        to: body.data.email,
+        accountId: found.accountId,
+        subject: `Updates on ${found.c.title}`,
+        text: [`${shop} will email you here as "${found.c.title}" moves on.`, '', `Your page: ${deps.originOf(req)}${COMMISSION_PUBLIC_PATH}${req.params.token}`, '', 'Not you? Reply to this email and we will remove the address.', '', `- ${shop}`].join('\n'),
+        ...(replyTo ? { replyTo } : {}),
+      });
+    }
+    return { ok: true, emailed };
+  });
+
   // ── Notifications on this device ─────────────────────────────────────
   app.post<Tok>('/:token/push', { config: { rateLimit: { max: 10, timeWindow: '10 minutes' } }, bodyLimit: 4096 }, async (req, reply) => {
     const found = tracked(req.params.token);
@@ -530,6 +565,23 @@ const TRACKING_SCRIPT = String.raw`(function () {
           .then(function () { location.reload(); })
           .catch(function (err) { busy = false; say(msg, err.message, true); });
       });
+    });
+  }
+
+  // ── An email for updates ──
+  var mailForm = $('email-form');
+  if (mailForm) {
+    var mailInput = $('email-input');
+    var mailMsg = $('email-msg');
+    mailInput.addEventListener('input', function () { dirty = true; });
+    mailForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (busy) return;
+      busy = true;
+      say(mailMsg, 'Saving…');
+      post(base + '/email', { email: mailInput.value })
+        .then(function (res) { busy = false; dirty = false; mailForm.textContent = ''; var p = document.createElement('p'); p.className = 'msg'; p.textContent = 'Thanks - you will get updates by email.' + (res && res.emailed ? ' We sent you a note to check it arrives.' : ''); mailForm.appendChild(p); })
+        .catch(function (err) { busy = false; say(mailMsg, err.message, true); });
     });
   }
 

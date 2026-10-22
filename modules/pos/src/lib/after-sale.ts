@@ -67,3 +67,31 @@ export function receiptUrl(token: string | undefined): string | undefined {
   const d = display();
   return token && d.receiptUrl ? d.receiptUrl(token) : undefined;
 }
+
+/** A sale line's link (`/p/...`) as a full address, or none on a shell that cannot say where its server is. */
+export function lineLinkUrl(path: string): string | undefined {
+  const d = display();
+  return d.publicUrl ? d.publicUrl(path) : undefined;
+}
+
+/**
+ * The pages a sale's lines point the customer to - a commission to follow,
+ * say - with the full address for each, for the receipt to print or show.
+ * None on a cancelled sale, or a shell that predates them.
+ */
+export function saleLineLinks(tx: Pick<shared.Transaction, 'items' | 'revertedAt'>): { label: string; url: string }[] {
+  const of = (shared as Record<string, unknown>).receiptLinksOf as typeof shared.receiptLinksOf | undefined;
+  if (!of || tx.revertedAt) return [];
+  return of(tx.items).flatMap((l) => {
+    const url = lineLinkUrl(l.path);
+    return url ? [{ label: l.label, url }] : [];
+  });
+}
+
+/** The same links as printable QR codes (base64 PNG); a code that fails to render is left out. */
+export async function lineLinkQrs(links: { label: string; url: string }[]): Promise<{ label: string; qrB64: string }[]> {
+  const raster = (ui as Record<string, unknown>).qrPngBase64 as ((value: string) => Promise<string>) | undefined;
+  if (!raster) return [];
+  const made = await Promise.all(links.map((l) => raster(l.url).then((qrB64) => ({ label: l.label, qrB64 }), () => null)));
+  return made.filter((m): m is { label: string; qrB64: string } => m !== null);
+}

@@ -1,4 +1,4 @@
-import type { SalesEvent } from '@zollify/shared';
+import type { ExpenseDetail, SalesEvent, SplitMethod, TravelRates } from '@zollify/shared';
 import { sdk } from './runtime';
 import type { BookingPayload } from './engine/clusters';
 
@@ -65,8 +65,22 @@ export interface Expense {
   note: string;
   invoice: { filename: string; uploadedAt: number | null } | null;
   bookedVoucherId: string | null;
+  /** How a computed expense came about (per diems, mileage, a shared cost's split); null when typed in. */
+  detail: ExpenseDetail | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** A cost covering several events, split across them on the server. */
+export interface SharedExpenseInput {
+  eventIds: string[];
+  method: SplitMethod;
+  category: string;
+  amount: number;
+  currency: string;
+  date: string;
+  vendor: string;
+  note: string;
 }
 
 export interface PnlRow {
@@ -120,6 +134,10 @@ export const api = {
   addExpense: (e: Partial<Expense>) => sdk().http.post<{ expense: Expense }>('ledger/expenses', e),
   updateExpense: (id: string, e: Partial<Expense>) => sdk().http.put<{ expense: Expense }>(`ledger/expenses/${id}`, e),
   deleteExpense: (id: string) => sdk().http.del<{ ok: true }>(`ledger/expenses/${id}`),
+  addShared: (e: SharedExpenseInput) => sdk().http.post<{ expenses: Expense[] }>('ledger/expenses/shared', e),
+  rates: () => sdk().http.get<{ rates: TravelRates; defaults: string[] }>('ledger/rates'),
+  saveRates: (rates: TravelRates) => sdk().http.put<{ rates: TravelRates }>('ledger/rates', rates),
+  resetRates: (homeCountry: string) => sdk().http.post<{ rates: TravelRates }>('ledger/rates/reset', { homeCountry }),
   invoice: (id: string) => sdk().http.get<{ filename: string; base64: string }>(`ledger/expenses/${id}/invoice`),
   attachInvoice: (id: string, base64: string, filename: string) => sdk().http.post<{ expense: Expense }>(`ledger/expenses/${id}/invoice`, { base64, filename }),
   pnl: () => sdk().http.get<{ rows: PnlRow[] }>('ledger/pnl'),

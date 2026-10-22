@@ -45,4 +45,5 @@ export * from './booked-base';
 export * from './tax-deadlines';
 export * from './sme-report';
 export * from './sme-thresholds';
+export * from './travel-costs';
 export * from './gift-cards';

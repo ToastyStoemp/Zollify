@@ -1,4 +1,4 @@
-import { COMMISSION_REF_KIND, type Commission, type CommissionCreateInput, type CommissionInput, type CustomerInput, type CommissionPayment, type CommissionSettings, type CommissionStatus } from '@zollify/shared';
+import { COMMISSION_REF_KIND, type BriefPicture, type Commission, type CommissionCreateInput, type CommissionInput, type CustomerInput, type CommissionPayment, type CommissionSettings, type CommissionStatus } from '@zollify/shared';
 import { sdk } from './runtime';
 import type { CustomerContact } from './customer-form';
 
@@ -20,6 +20,16 @@ export interface CommissionView extends Commission {
   token: string;
   publicPath: string;
   publicUrl: string;
+  /** The customer's reference pictures; the bytes are fetched one by one. */
+  pictures: BriefPicture[];
+  /** Devices the customer asked to be notified on. */
+  pushDevices: number;
+}
+
+export interface RequestPage {
+  open: boolean;
+  path: string;
+  url: string;
 }
 
 export interface CommissionList {
@@ -63,6 +73,10 @@ export const api = {
   eraseCustomer: (id: string) => sdk().http.post<{ ok: true; commissions: number }>(`customers/${id}/erase`),
   eraseClosedCustomers: () => sdk().http.post<{ erased: number }>('customers/erase-closed'),
   settings: () => sdk().http.get<CommissionSettings>('settings'),
+  picture: (id: string, pid: string) => sdk().http.get<{ name: string; mime: string; base64: string }>(`commissions/${id}/pictures/${pid}`),
+  removePicture: (id: string, pid: string) => sdk().http.del<{ ok: true }>(`commissions/${id}/pictures/${pid}`),
+  requestPage: () => sdk().http.get<RequestPage>('request-page'),
+  newRequestLink: () => sdk().http.post<RequestPage>('request-page/link'),
   saveSettings: (s: CommissionSettings) => sdk().http.put<CommissionSettings>('settings', s),
 };
 

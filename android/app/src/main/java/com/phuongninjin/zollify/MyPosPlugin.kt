@@ -25,6 +25,8 @@ import com.mypos.slavesdk.POSHandler
 import com.mypos.slavesdk.POSInfoListener
 import com.mypos.slavesdk.POSReadyListener
 import com.mypos.slavesdk.TransactionData
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.UUID
 
 @CapacitorPlugin(
@@ -180,17 +182,19 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
      * Params: { transport?: 'bluetooth' | 'wifi', host?: string, port?: number }
      *
      * Wi-Fi: the Go2 in slave mode on the same network listens on TCP (port
-     * 8080 unless changed on the terminal); the SDK's TCP_IP connection type
+     * 60180 unless changed on the terminal); the SDK's TCP_IP connection type
      * needs no Bluetooth hardware, no pairing and no location permission -
      * just the terminal's address. A Go2 without the optional Bluetooth
      * module can only be reached this way or over USB.
      */
     @PluginMethod
     fun connectTerminal(call: PluginCall) {
+        // Reopening the link would cut a payment the customer is in the middle of.
+        if (pendingCall != null) { call.reject("Payment in progress"); return }
         if (call.getString("transport") == "wifi") {
             val host = call.getString("host")?.trim().orEmpty()
             if (host.isEmpty()) { call.reject("Enter the terminal's IP address"); return }
-            val port = call.getInt("port") ?: 8080
+            val port = call.getInt("port") ?: 60180
             termReady = false
             termConnected = false
             POSHandler.setConnectionType(ConnectionType.TCP_IP)
@@ -218,11 +222,22 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         call.resolve(JSObject().apply { put("granted", granted) })
     }
 
-    /** Current status polled by the setup screen. */
+    /**
+     * Current status, polled by the setup screen and checked before a payment.
+     * `alive` probes the Wi-Fi link: after the phone sleeps the terminal's TCP
+     * link is gone, yet the SDK never says so and `connected` stays true. Not
+     * probed mid-payment, so nothing is written into a running transaction.
+     */
     @PluginMethod
     fun getStatus(call: PluginCall) {
         val ret = JSObject()
         ret.put("connected", termReady) // only true once fully handshaked
+        val alive = when {
+            POSHandler.getConnectionType() != ConnectionType.TCP_IP -> termReady
+            pendingCall != null -> termReady
+            else -> try { pos.isConnected() } catch (_: Exception) { false }
+        }
+        ret.put("alive", alive)
         call.resolve(ret)
     }
 
@@ -237,20 +252,22 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
         if (pendingCall != null) { call.reject("Payment already in progress"); return }
 
         val amount   = call.getDouble("amount")   ?: run { call.reject("amount required"); return }
-        val currency = call.getString("currency") ?: "CHF"
+        val currency = (call.getString("currency") ?: "CHF").uppercase()
 
-        val posCurrency = when (currency.uppercase()) {
-            "CHF" -> Currency.CHF; "EUR" -> Currency.EUR; "GBP" -> Currency.GBP
-            "USD" -> Currency.USD; "SEK" -> Currency.SEK; "NOK" -> Currency.NOK
-            "DKK" -> Currency.DKK; else  -> Currency.EUR
-        }
+        // Every currency the SDK knows, by its ISO code. Anything else is refused
+        // rather than charged as EUR: the card would be billed in the wrong money.
+        val posCurrency = Currency.values().firstOrNull { it.name == currency }
+            ?: run { call.reject("myPOS cannot take payments in $currency"); return }
 
         POSHandler.setCurrency(posCurrency)
         pendingCall  = call
         callResolved = false
 
         pos.purchase(
-            String.format("%.2f", amount),
+            // Always "12.50": the SDK reads it with Double.parseDouble, so a
+            // locale-formatted "12,50" (Dutch, German, French phones) fails
+            // with "Invalid amount format.".
+            BigDecimal.valueOf(amount).setScale(2, RoundingMode.HALF_UP).toPlainString(),
             UUID.randomUUID().toString(),
             POSHandler.RECEIPT_DO_NOT_PRINT
         )

@@ -1,6 +1,6 @@
 import { computed, reactive, ref } from 'vue';
 import type { SaleEvent } from '@zollify/sdk';
-import type { PaymentLeg, Transaction, TxItem } from '@zollify/shared';
+import { isReceiptLineLink, type PaymentLeg, type Transaction, type TxItem } from '@zollify/shared';
 import { openCoreDb, type CoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
@@ -81,6 +81,7 @@ export function saleToTransaction(
     ...withConsignor(line.consignorId ?? consignorOf(line.productId)),
     ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
     ...(line.ref ? { ref: { moduleId: line.ref.moduleId, kind: line.ref.kind, id: line.ref.id } } : {}),
+    ...(isReceiptLineLink(line.link) ? { link: { label: line.link.label, path: line.link.path } } : {}),
     pid: line.productId,
     vid: line.variantId ?? null,
     title: line.name,

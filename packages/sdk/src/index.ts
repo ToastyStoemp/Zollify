@@ -24,6 +24,7 @@ export type {
   SetupStep,
   SaleLine,
   SaleLineRef,
+  SaleLineLink,
   TillAction,
   TillLine,
   TillLineAccess,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
 import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
@@ -45,6 +45,7 @@ import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
 import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
+import { tillLinkFrom } from '../lib/till-link';
 import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
@@ -653,10 +654,24 @@ function applyDiscount(): void {
 const tillActions = computed(() => sdk().till.actions());
 const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
 const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
-const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
-function runAction(action: TillAction): void {
-  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
+const openAction = shallowRef<{ action: TillAction; view: Component; focus: string | null } | null>(null);
+function runAction(action: TillAction, focus: string | null = null): void {
+  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>), focus };
 }
+// A link naming one of these actions (see lib/till-link) opens it once, then
+// drops the query so a reload or Back does not open it again.
+const route = useRoute();
+watch(
+  [() => route.query, tillActions],
+  ([query, actions]) => {
+    const link = tillLinkFrom(query, actions);
+    if (!link) return;
+    runAction(link.action, link.focus);
+    const { action: _a, focus: _f, ...rest } = query;
+    void router.replace({ query: rest });
+  },
+  { immediate: true },
+);
 const offTill = sdk().till.onAddLine((line) => {
   if (!activeEvent.value) {
     toast('Pick an active event first (Events).', 'bad');
@@ -1284,7 +1299,7 @@ function lockTill(): void {
 
     <!-- ── A screen another module put on the till ───────────────────────── -->
     <ModalShell v-if="openAction" :title="openAction.action.label" @close="openAction = null">
-      <component :is="openAction.view" @close="openAction = null" />
+      <component :is="openAction.view" :focus="openAction.focus ?? undefined" @close="openAction = null" />
     </ModalShell>
 
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->

@@ -47,6 +47,7 @@ modules/
   consignment-artist/  the artist's own view of the stores that carry their work
   commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
   peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
+  notify-me/      a QR code customers scan to hear about restocks, events near them and webstore news (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -170,7 +171,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Notify me.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -496,6 +497,26 @@ from the slug and refuses unless the module is enabled for it. Hall, booth numbe
 link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
 Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
 handle) and legacy booth values, which fill in wherever the event has none.
+
+*Notify me* - the `notify-me` module publishes `/p/notify-me/<slug>`: a page
+a customer scans into at the booth to hear from the business - when an item
+is back in stock (`/p/notify-me/<slug>/i/<productId>`, from a code printed
+for one item, preselects it), when the business is next at an event in their
+country or anywhere, and webstore news. Signing up costs a proof-of-work and
+is rate limited like the workshop sign-up, with a honeypot; the address is
+confirmed by mail before anything is sent (double opt-in), every mail
+carries its own leave link (the newest mail's always works), and a sweep
+erases the unconfirmed after a week, those who left after a month and the
+silent after a set number of months. Restocks follow the till's own counts:
+an item counted back above zero after it stood at zero is announced to those
+who asked for it (or for anything), once per cooldown; an event is announced
+when one appears with dates ahead, once, to those for its country; news is
+a note an admin writes, sent one plain mail each. The admin's screen prints
+the codes (one for the booth, one per item, as a sheet with the address in
+words), lists who signed up and for what, erases anyone on request, and
+keeps what was sent. Settings → Notify me holds the address, what the page
+offers, the webstore link, the cooldown and the erasure period; writes are
+refused from a shared till. Needs a server that can send email.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

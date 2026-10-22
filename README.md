@@ -530,9 +530,16 @@ claim does, and shipping records the order as a sale there, paid "on
 invoice", at the account's own VAT, so stock, the books and the reports
 follow with nothing re-entered. The expected ship date (the longest lead
 time among the lines, in working days from confirmation) shows on the home
-calendar. The **catalogue** is built on the device from the catalogue and
-its photos, narrowed by type, with tier prices or one customer's own, as a
-PDF or a page to print. Invoicing goes through Peppol or by hand for now;
+calendar. **Variants**: tiers are entered against the product's price, and
+a variant with a price of its own gets the same discount off it (A4 at 20
+going for 10 makes the 30 A3 go for 15), in orders and the catalogue alike.
+Per product, the catalogue shows variants as items of their own (the zodiac
+animals of one keychain, each with its photo, SKU and prices), as sizes of
+one item (a row each with its price), or automatically: a variant with a
+photo of its own is an item of its own. The **catalogue** is built on the
+device from the catalogue and its photos (written into the page, so they
+show in the PDF and in the Android viewer), narrowed by type, with tier
+prices or one customer's own, as a PDF or a page to print. Invoicing goes through Peppol or by hand for now;
 reverse charge for a VAT-registered customer abroad is the invoice's, not
 the till's. Writes are refused from a shared till.
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import { TradeDetailsSchema, fmtPrice, type Product, type TradeDetails } from '@zollify/shared';
+import { TradeDetailsSchema, catalogueCards, fmtPrice, unitPriceFor, type Product, type TradeDetails } from '@zollify/shared';
 import { api, errorText } from '../api';
 import { sdk } from '../runtime';
 
@@ -52,6 +52,23 @@ async function save(): Promise<void> {
     busy.value = false;
   }
 }
+/**
+ * What the catalogue will make of the product being edited, with the tiers as
+ * they stand in the form: each card, and each size's price at each tier - so
+ * the A3's share of the A4's discount is there to see before saving.
+ */
+const preview = computed(() => {
+  const p = editing.value;
+  if (!p || !p.variants.some((v) => !v.unlisted)) return [];
+  const tiers = form.tiers.map((t) => ({ minQty: Number(t.minQty), price: Number(t.price) })).filter((t) => t.minQty > 0);
+  return catalogueCards(p, { tiers, variantDisplay: form.variantDisplay }).map((c) => ({
+    title: c.title,
+    rows: c.rows.map((r) => ({
+      label: r.label || c.title,
+      prices: (r.tiers.length ? r.tiers : [{ minQty: Number(form.moq) || 1, price: r.listPrice }]).map((t) => `${t.minQty}+ ${fmtPrice(unitPriceFor(r.tiers, t.minQty, r.listPrice, 0), currency.value)}`).join(' · '),
+    })),
+  }));
+});
 const summary = (p: Product): string => {
   const d = props.details[p.id];
   if (!d) return 'list price';
@@ -84,6 +101,21 @@ const summary = (p: Product): string => {
         <button type="button" class="quiet" @click="form.tiers = form.tiers.filter((_, k) => k !== i)">Remove</button>
       </div>
       <div><button type="button" @click="addTier">Add a tier</button></div>
+      <template v-if="editing.variants.some((v) => !v.unlisted)">
+        <h3>Variants in the catalogue</h3>
+        <div class="choices" role="radiogroup" aria-label="Variants in the catalogue">
+          <label class="check"><input v-model="form.variantDisplay" type="radio" value="auto" /> Automatic - a variant with a photo of its own is an item of its own</label>
+          <label class="check"><input v-model="form.variantDisplay" type="radio" value="separate" /> Each its own item - like the zodiac animals of one keychain</label>
+          <label class="check"><input v-model="form.variantDisplay" type="radio" value="options" /> Sizes or versions of one item - like A4 and A3 of one print</label>
+        </div>
+        <p class="hint">The tiers above are for the product's price ({{ fmtPrice(editing.price, currency) }}); a variant with a price of its own gets the same discount off its price.</p>
+        <div class="preview">
+          <div v-for="c in preview" :key="c.title" class="pcard">
+            <strong>{{ c.title }}</strong>
+            <span v-for="r in c.rows" :key="r.label" class="hint">{{ c.rows.length > 1 ? `${r.label}: ` : '' }}{{ r.prices }}</span>
+          </div>
+        </div>
+      </template>
       <label>Trade description <textarea v-model="form.description" rows="3" maxlength="1000"></textarea></label>
       <div class="grid">
         <label>Materials <input v-model="form.materials" type="text" maxlength="200" :placeholder="editing.material || ''" /></label>
@@ -120,6 +152,9 @@ label.check { flex-direction: row; align-items: center; gap: .4rem; }
 .tier label { flex-direction: row; align-items: center; gap: .3rem; }
 .tier input { width: 7rem; }
 .actions { display: flex; gap: .5rem; }
+.choices { display: flex; flex-direction: column; gap: .3rem; }
+.preview { display: flex; flex-wrap: wrap; gap: .5rem; }
+.pcard { display: flex; flex-direction: column; gap: .1rem; padding: .45rem .6rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; font-size: .85rem; }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
 .row { display: flex; justify-content: space-between; gap: .6rem; text-align: left; width: 100%; padding: .5rem .7rem; font-weight: 400; min-height: 3rem; }
 .row.off { opacity: .6; }

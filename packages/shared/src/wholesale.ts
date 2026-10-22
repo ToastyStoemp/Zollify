@@ -23,6 +23,15 @@ export const TradeTierSchema = z.object({
 });
 export type TradeTier = z.infer<typeof TradeTierSchema>;
 
+/**
+ * How a product's variants show in the catalogue: `separate` - each is an item
+ * of its own (the zodiac chicken and dog of one keychain); `options` - sizes
+ * or versions of one item (A4 and A3 of one print), a row each on its card;
+ * `auto` - separate when a variant has a photo of its own.
+ */
+export const VARIANT_DISPLAYS = ['auto', 'separate', 'options'] as const;
+export type VariantDisplay = (typeof VARIANT_DISPLAYS)[number];
+
 /** What a product is to the trade. Kept apart from the catalogue, keyed by product id. */
 export const TradeDetailsSchema = z.object({
   /** Offered to the trade at all. */
@@ -38,6 +47,7 @@ export const TradeDetailsSchema = z.object({
   description: z.string().trim().max(1000).default(''),
   materials: z.string().trim().max(200).default(''),
   dimensions: z.string().trim().max(120).default(''),
+  variantDisplay: z.enum(VARIANT_DISPLAYS).default('auto'),
 });
 export type TradeDetails = z.infer<typeof TradeDetailsSchema>;
 
@@ -140,6 +150,18 @@ export interface WholesaleOrder extends OrderInput {
   createdBy: string | null;
 }
 
+/**
+ * A product's tiers for a variant with a list price of its own: the same
+ * discount off its own price. A4 at EUR 20 going for 10 from 10 pieces makes
+ * the EUR 30 A3 go for 15. Tiers are entered against the product's price, so
+ * a variant at that price - or a product with no price to scale from - keeps
+ * them as they are.
+ */
+export function tiersForPrice(tiers: TradeTier[], productPrice: number, listPrice: number): TradeTier[] {
+  if (!(productPrice > 0) || listPrice === productPrice) return tiers;
+  return tiers.map((t) => ({ minQty: t.minQty, price: round2((t.price * listPrice) / productPrice) }));
+}
+
 /** The tier price for a quantity: the highest tier reached, or the list price. */
 export function tierPriceFor(tiers: TradeTier[], qty: number, listPrice: number): number {
   const reached = [...tiers].filter((t) => qty >= t.minQty).sort((a, b) => b.minQty - a.minQty)[0];
@@ -190,4 +212,60 @@ export function reservedByItem(orders: Pick<WholesaleOrder, 'status' | 'lines'>[
     }
   }
   return out;
+}
+
+// ── The catalogue ───────────────────────────────────────────────────────────
+
+/** One price line on a catalogue card: the product itself, or one of its variants. */
+export interface CatalogueRow {
+  variantId: string | null;
+  /** The option's name on a card with several ("A3"); empty on a card of one. */
+  label: string;
+  sku: string;
+  listPrice: number;
+  tiers: TradeTier[];
+}
+
+export interface CatalogueCard {
+  productId: string;
+  /** "Zodiac keychain · Chicken" for a variant that is an item of its own. */
+  title: string;
+  imageId?: string;
+  sku: string;
+  rows: CatalogueRow[];
+}
+
+interface CatalogueProduct {
+  id: string;
+  title: string;
+  sku?: string;
+  price: number;
+  imageId?: string;
+  variants: { id: string; name: string; sku?: string; price?: number; imageId?: string; unlisted?: boolean }[];
+}
+
+/**
+ * A product as the trade catalogue shows it. A variant that is an item of its
+ * own gets a card of its own, with its photo, SKU and prices; the rest are
+ * options on the product's card, a row each with its own price. Unlisted
+ * variants are left out.
+ */
+export function catalogueCards(p: CatalogueProduct, d?: Partial<Pick<TradeDetails, 'tiers' | 'variantDisplay'>>): CatalogueCard[] {
+  const tiers = d?.tiers ?? [];
+  const row = (v: CatalogueProduct['variants'][number] | null, label: string): CatalogueRow => {
+    const listPrice = v?.price ?? p.price;
+    return { variantId: v?.id ?? null, label, sku: v?.sku || p.sku || '', listPrice, tiers: tiersForPrice(tiers, p.price, listPrice) };
+  };
+  const listed = p.variants.filter((v) => !v.unlisted);
+  if (!listed.length) return [{ productId: p.id, title: p.title, imageId: p.imageId, sku: p.sku ?? '', rows: [row(null, '')] }];
+  const mode = d?.variantDisplay ?? 'auto';
+  const ownItem = (v: CatalogueProduct['variants'][number]): boolean =>
+    mode === 'separate' || (mode === 'auto' && !!v.imageId && v.imageId !== p.imageId);
+  const options = listed.filter((v) => !ownItem(v));
+  const cards: CatalogueCard[] = [];
+  if (options.length) cards.push({ productId: p.id, title: p.title, imageId: p.imageId, sku: p.sku ?? '', rows: options.map((v) => row(v, v.name)) });
+  for (const v of listed.filter(ownItem)) {
+    cards.push({ productId: p.id, title: `${p.title} · ${v.name}`, imageId: v.imageId ?? p.imageId, sku: v.sku || p.sku || '', rows: [row(v, '')] });
+  }
+  return cards;
 }

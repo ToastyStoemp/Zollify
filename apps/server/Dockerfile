@@ -32,6 +32,7 @@ COPY modules/consignment-artist/package.json modules/consignment-artist/
 COPY modules/commissions/package.json modules/commissions/
 COPY modules/peppol-be/package.json modules/peppol-be/
 COPY modules/migration/package.json modules/migration/
+COPY modules/gift-cards/package.json modules/gift-cards/
 COPY apps/web/package.json apps/web/
 COPY apps/server/package.json apps/server/
 RUN --mount=type=cache,target=/root/.npm npm ci

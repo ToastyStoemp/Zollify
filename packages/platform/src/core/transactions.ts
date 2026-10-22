@@ -97,18 +97,22 @@ export function saleToTransaction(
   // whole amount. A custom method (TWINT, PayPal…) is card-like money: not in
   // the cash box.
   const method = sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card');
+  // A sale settled entirely by money paid earlier (a gift card) took nothing
+  // at the till: no leg at all, rather than a leg of nothing.
   const legs: PaymentLeg[] = sale.payment.legs?.length
     ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider, ...(l.settled ? { settled: l.settled } : {}) }))
-    : [
-        {
-          kind: method === 'cash' ? 'cash' : 'card',
-          amount: sale.total,
-          provider: sale.payment.provider,
-          txRef: sale.payment.txRef,
-          cardBrand: sale.payment.cardBrand,
-          ...(sale.payment.settled ? { settled: sale.payment.settled } : {}),
-        },
-      ];
+    : sale.total <= 0
+      ? []
+      : [
+          {
+            kind: method === 'cash' ? 'cash' : 'card',
+            amount: sale.total,
+            provider: sale.payment.provider,
+            txRef: sale.payment.txRef,
+            cardBrand: sale.payment.cardBrand,
+            ...(sale.payment.settled ? { settled: sale.payment.settled } : {}),
+          },
+        ];
 
   return {
     id: sale.saleId,

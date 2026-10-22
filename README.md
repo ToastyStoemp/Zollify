@@ -46,6 +46,7 @@ modules/
   consignment/    artists' work sold in your stores, commission and payouts (client + server half)
   consignment-artist/  the artist's own view of the stores that carry their work
   commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
+  gift-cards/     cards sold at the till and spent at any till, balance from sales (client + server half)
   peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
@@ -170,7 +171,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Gift cards.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -291,6 +292,34 @@ is collected or cancelled they are erased after a period an admin sets (default
 while the module is on. Erasing deletes the name, email and phone and clears the
 notes, details and customer messages, and keeps title, price, payments, dates and
 status. Admins can also erase one customer or all closed ones at once.
+
+*Gift cards* - the `gift-cards` module sells a card at the till and takes it
+as payment at any till of the account. A card is a code (`ZG` and 16
+characters from an alphabet without 0/O or 1/I/L) kept on the server; what is
+on it is never stored but summed from the till's own sales: selling or topping
+up a card is an ordinary VAT-free sale line pointing at it (`ref.kind =
+'load'`), and spending it is a *settling* line pointing at it (`'redeem'`,
+negative), which the till takes off the total after discounts, keeps outside
+VAT and every discount, and records only what it actually covered. So a refund
+of the sale that sold a card empties it, a refund of a sale it paid for puts
+the money back, and an offline sale counts when it syncs. A sale a card covers
+in full is recorded with the method `prepaid` and no payment leg. The Gift
+card button over the till sells a card (any amount up to a limit set under
+Settings → Gift cards, with a staff-only note), looks one up by scanning or
+typing its code, takes an amount from it (suggested: what is on it, capped at
+what the sale comes to) or tops it up. Codes show whole to whoever holds them
+and to admins, masked to staff in lists; a card prints as an A6 slip or on the
+Label Printer module's printer. Admins issue a card without a sale (goodwill,
+a prize), void one, set an expiry in months (0 = never; a card keeps the
+expiry it was issued with) and read the period report the books need: issued,
+redeemed, outstanding at the period's end and lapsed (on voided or expired
+cards), per currency, as a table or CSV. Granting, voiding and the settings
+are refused from a shared till. For the books a card sold is a liability
+until spent: the sale and the redemption both land in the no-VAT bucket of
+Tax & books and e-conomic, so revenue nets out over time, and the report
+gives the figures to book the liability by hand. The SDK carries what any
+module selling prepaid value needs: `TillLine.taxFree`, `TillLine.settles`
+and `sdk.till.total()`.
 
 **Store events** plan what happens in the shops besides selling. *Artist of the
 month* features an artist at one or more stores for a date range, optionally

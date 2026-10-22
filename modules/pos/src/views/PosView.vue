@@ -32,6 +32,7 @@ import {
   setCartEvent,
   setCustomDiscount,
   setQty,
+  settledTotal,
   subtotal,
   toCharged,
   total,
@@ -604,7 +605,7 @@ const lines = computed(() =>
  */
 const cartVat = computed(() => {
   if (!lines.value.length) return [];
-  const tax = saleTaxFor(cart.eventId, cart.lines.map((l) => l.productId));
+  const tax = saleTaxFor(cart.eventId, cart.lines.map((l) => ({ productId: l.productId, taxFree: l.taxFree })));
   if (!tax || tax.exempt) return [];
   const asLines = lines.value.map((l) => ({ pid: l.productId, vid: l.variantId, title: l.name, variantLabel: l.variantLabel ?? null, type: l.type, qty: l.qty, unitPrice: l.chargedUnit, lineTotal: l.chargedTotal }));
   const shares = allocateDiscounts(asLines, chargeTotals.value);
@@ -678,7 +679,7 @@ const offTill = sdk().till.onAddLine((line) => {
   }
   return addModuleLine(line);
 });
-const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
+const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine, total: () => total.value });
 onUnmounted(() => {
   offTill();
   offTillLines();
@@ -905,6 +906,18 @@ async function confirmPayment(): Promise<void> {
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
   finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
+}
+
+/** Goods in the cart, and money paid earlier (a gift card) covers all of them: nothing to take. */
+const settledCovers = computed(() => itemCount.value > 0 && settledTotal.value > 0 && total.value <= 0);
+async function completeSettled(): Promise<void> {
+  if (!activeEvent.value) return toast('Pick an active event first (Events).', 'bad');
+  if (sellBlocked.value) return toast(`Sell 🔒 - ${lockedBy.value} took this event's leftovers.`, 'bad');
+  const outcome = await checkout(crypto.randomUUID(), { method: 'prepaid' });
+  if (outcome.cancelled) return;
+  if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
+  const count = outcome.sale!.lines.filter((l) => l.lineTotal >= 0).reduce((s, l) => s + l.qty, 0);
+  finish(outcome.sale!, `Covered in full - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
 }
 
 function finish(sale: SaleEvent, message: string, test = false): void {
@@ -1216,7 +1229,10 @@ function lockTill(): void {
           <button type="button" @click="openMisc">+ Misc item</button>
           <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
-        <div class="pay">
+        <div v-if="settledCovers" class="pay">
+          <button type="button" class="cash" :disabled="sellBlocked" @click="completeSettled">Complete - nothing to take</button>
+        </div>
+        <div v-else class="pay">
           <button type="button" class="cash" :disabled="!itemCount || sellBlocked" @click="startPayment('cash')">Cash</button>
           <button type="button" class="card" :disabled="!itemCount || sellBlocked" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount || sellBlocked" @click="startPayment('split')">Split</button>

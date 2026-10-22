@@ -15,7 +15,7 @@ export default defineModule({
   version: '0.1.0',
   sdk: '^0.1.0',
   title: 'Commissions',
-  description: 'Take commissions with a deposit at the till and let the customer follow progress with a QR code.',
+  description: 'Take commissions at the till, with a deposit or in full, and let the customer follow progress with a QR code.',
   requires: ['catalog'],
   // Staff create and update commissions and take payments; settings and
   // replacing a link are admin-only on the server.

@@ -10,6 +10,7 @@ import {
   fmtPrice,
   isClosedStatus,
   isOverdue,
+  nextCommissionPayment,
   nextStatuses,
   type CommissionSettings,
   type CommissionStatus,
@@ -45,6 +46,11 @@ const router = useRouter();
 const tillOn = computed(() => router.hasRoute('pos:index'));
 function takePayment(c: CommissionView): void {
   void router.push({ name: 'pos:index', query: { action: 'commissions:commission', focus: c.id } });
+}
+/** "Take the deposit at the till", or the full price, or the balance - whatever the till will offer first. */
+function tillLabel(c: CommissionView): string {
+  const next = nextCommissionPayment(c, c.paid, settings.value.paymentMode ?? 'deposit');
+  return next.kind === 'Payment' ? 'Take a payment at the till' : `Take the ${next.kind.toLowerCase()} at the till`;
 }
 const isAdmin = computed(() => sdk().account()?.role !== 'member');
 const today = localToday();
@@ -329,7 +335,14 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
         </button>
 
         <details v-if="isAdmin" class="settings" :open="showSettings" @toggle="showSettings = ($event.target as HTMLDetailsElement).open">
-          <summary>Customer page and request page</summary>
+          <summary>Payment, customer page and request page</summary>
+          <h3>At the till</h3>
+          <div class="choices" role="radiogroup" aria-label="How customers pay">
+            <label class="inline"><input v-model="pickup.paymentMode" type="radio" value="deposit" /> A deposit first, the rest later</label>
+            <label class="inline"><input v-model="pickup.paymentMode" type="radio" value="full" /> The full price at once</label>
+          </div>
+          <p class="hint">{{ pickup.paymentMode === 'full' ? 'No deposit field on new commissions; the till takes the whole price in one payment. A commission that already has a deposit set keeps it.' : 'New commissions have a deposit field; the till asks for the deposit first, then the balance. Without a deposit it asks the full price.' }}</p>
+          <h3>Customer page</h3>
           <label>Shop name <small>(blank: your account name)</small><input v-model="pickup.shopName" type="text" maxlength="80" /></label>
           <label>Collect from <input v-model="pickup.pickupName" type="text" maxlength="120" placeholder="Store or event name" /></label>
           <label>Address <textarea v-model="pickup.pickupAddress" rows="2" maxlength="300" /></label>
@@ -357,7 +370,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Details <small>private to you and staff</small><textarea v-model="form.description" rows="3" maxlength="4000" /></label>
           <div class="two">
             <label>Price ({{ form.currency }}) <input v-model="form.price" type="text" inputmode="decimal" /></label>
-            <label>Deposit asked <input v-model="form.depositAsked" type="text" inputmode="decimal" /></label>
+            <label v-if="settings.paymentMode !== 'full' || form.depositAsked">Deposit asked <input v-model="form.depositAsked" type="text" inputmode="decimal" /></label>
           </div>
           <label>Due date <input v-model="form.dueDate" type="date" /></label>
           <label>Internal notes <small>never shown to the customer</small><textarea v-model="form.notes" rows="2" maxlength="4000" /></label>
@@ -384,7 +397,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
             <dt>Balance</dt><dd><strong>{{ money(current.balance, current) }}</strong></dd>
           </dl>
           <div v-if="!isClosedStatus(current.status)" class="till">
-            <button v-if="tillOn" type="button" class="primary" @click="takePayment(current)">{{ current.paid > 0 ? 'Take the balance at the till' : 'Take the deposit at the till' }}</button>
+            <button v-if="tillOn" type="button" class="primary" @click="takePayment(current)">{{ tillLabel(current) }}</button>
             <p class="hint">{{ tillOn ? 'Opens the till with this commission picked; the payment is an ordinary sale.' : 'Switch on the till (POS) to take payments.' }} It is also the Commission tile on the till.</p>
           </div>
           <p v-if="current.description" class="text">{{ current.description }}</p>
@@ -489,6 +502,7 @@ label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .url { font-size: .75rem; overflow-wrap: anywhere; }
 .settings { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
 .settings summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.choices { display: flex; flex-direction: column; gap: .3rem; }
 .settings[open] > :not(summary) { margin-top: .5rem; }
 @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } .two { grid-template-columns: 1fr; } }
 </style>

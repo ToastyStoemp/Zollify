@@ -445,6 +445,28 @@ event P&L from op-log revenue against booth / travel / accommodation costs,
 invoices attached, optional Claude invoice scanning behind daily caps.
 Credentials live encrypted per account under Settings → Integrations.
 
+*Ledger costs worked out from the event* - the ledger's categories cover
+what doing an event costs (booth, travel, mileage, accommodation, per diems,
+shipping, customs, marketing, furniture, staff, insurance, fees, stock,
+other; ids are stable because bookings refer to them). Three costs are
+computed rather than typed: **per diems** from the event's dates and
+country (the day of arrival and of departure at the reduced rate, the days
+between in full, times the people who went; a one-day trip once at the
+reduced rate), **mileage** from a distance (there and back, times the
+trips, at the rate per kilometre), and **a cost over several events**
+(insurance, a van, one trip to two shows) split across them by the days
+each runs or evenly, in whole cents, each event getting its share as its
+own expense. Each computed expense keeps its calculation (`detail`) and
+says it in its note, so the books read how the figure came about. The
+rates are the account's own table under *Rates* on the ledger: started
+from the defaults for the business's country (Germany's BMF letter for
+2025 with the destinations a booth most often visits, Luxembourg's rate as
+the fallback; Belgium's daily allowance, country list with departure and
+return days at half, and kilometre rate) and corrected by an admin as the
+yearly letters come out - the app cannot fetch them, so check the defaults
+before relying on them. Rules live in `@zollify/shared` (`travel-costs.ts`),
+shared by the app and the server.
+
 *Tax deadlines* - when to file and pay, worked out from the business's tax
 setup rather than fetched: no tax office publishes deadlines as data, but the
 rules are fixed in law. The setup (country, state, legal form, VAT status and

@@ -39,6 +39,16 @@ const COUNTRIES: CountryCard[] = [
     documentsRoute: 'customs-de:documents',
     declarantPanel: 'customs-de.declarant',
   },
+  {
+    key: 'ata',
+    code: 'ATA',
+    flag: '🛃',
+    title: 'ATA Carnet',
+    description: 'For the UK, Norway, Switzerland and most countries outside the EU: the General List from the packed stock, and the return check after the show.',
+    indexRoute: 'ata-carnet:index',
+    documentsRoute: 'ata-carnet:documents',
+    declarantPanel: '',
+  },
 ];
 
 const router = useRouter();
@@ -187,7 +197,7 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
         <p class="desc">{{ c.description }}</p>
         <div class="actions">
           <router-link :to="openTarget(c)" class="primary">Open documents</router-link>
-          <router-link :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
+          <router-link v-if="c.declarantPanel" :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
         </div>
       </article>
     </div>
@@ -199,7 +209,7 @@ async function exportAll(phase: CustomsPhase): Promise<void> {
         <p class="desc">{{ c.description }}</p>
         <div class="actions">
           <router-link :to="openTarget(c)" class="primary">{{ eventId ? 'Open documents' : 'Open events' }}</router-link>
-          <router-link :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
+          <router-link v-if="c.declarantPanel" :to="{ name: 'settings', query: { panel: c.declarantPanel } }" class="secondary">Declarant settings</router-link>
         </div>
       </article>
     </div>

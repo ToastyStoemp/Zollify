@@ -58,6 +58,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   economic: () => import('@zollify/economic'),
   'tax-deadlines': () => import('@zollify/tax-deadlines'),
   'sme-scheme': () => import('@zollify/sme-scheme'),
+  'ata-carnet': () => import('@zollify/ata-carnet'),
 };
 
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */

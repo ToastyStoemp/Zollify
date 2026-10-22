@@ -13,6 +13,7 @@
   "dependencies": {
     "@zollify/consignment": "*",
     "@zollify/consignment-artist": "*",
+    "@zollify/ata-carnet": "*",
     "@zollify/commissions": "*",
     "@zollify/convention-checklist": "*",
     "@zollify/multi-storage": "*",

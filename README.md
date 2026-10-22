@@ -252,7 +252,12 @@ code of the customer's page for them to scan, then takes the deposit. A
 customer with no email on file can leave one on that page for updates (only
 while none is on file, and only on a server that can send email); the shop is
 told and the customer gets a note. Someone already on file is still a search
-away.
+away. Every receipt for a commission payment carries the page too: the
+printed receipt has a "Follow your commission" QR code (whatever the receipt
+QR setting), and the on-screen and online receipts link to it. This is the
+till line's `link` in the SDK, open to any module: a label and a public path
+of this server (`/p/...`); anything else is dropped, and a cancelled sale
+links nothing.
 
 **What the customer brings.** On their tracking page the customer writes what
 they want and adds up to six reference pictures (PNG, JPEG or WebP, 5 MB

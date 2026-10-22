@@ -11,6 +11,7 @@ import {
   maxBytesFor,
   receiptBreakdown,
   receiptFooterLinks,
+  receiptLinksOf,
   vatBreakdown,
   vatIdLabel,
   vatNumberFor,
@@ -276,6 +277,8 @@ export interface PublicReceipt {
   brand: { logo?: string; footer: string[] };
   /** Webstore and social links for the footer; absent when the booth set none. */
   links?: ReceiptFooterLink[];
+  /** Pages of this server the sale's lines point to (a commission to follow); `path` is always `/p/...`. */
+  follow?: { label: string; path: string }[];
   /** The next public events (ISO dates), when the booth switched that on and publishes the events page. */
   nextEvents?: { name: string; city: string; start: string; end: string }[];
   /** VAT included per rate, or the exemption the sale was made under. */
@@ -330,6 +333,8 @@ export function publicReceipt(
         : {}),
     })),
     status: tx.revertedAt ? 'voided' : 'paid',
+    // Only what receiptLinksOf accepts - a public page of this server - and none on a cancelled sale.
+    ...(!tx.revertedAt && receiptLinksOf(tx.items ?? []).length ? { follow: receiptLinksOf(tx.items ?? []) } : {}),
     brand: {
       // Inline, so the logo needs no URL of its own that could name the account.
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
@@ -404,6 +409,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .linkrow { margin: .3rem 0; overflow-wrap: anywhere; }
 .linkrow a { color: var(--accent); }
+.follow { display: block; text-align: center; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: .55rem 1rem; margin: .5rem 0; text-decoration: none; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
@@ -476,6 +482,18 @@ ${POW_SOLVER_JS}
     receiptEl.appendChild(box);
     receiptEl.appendChild(el('hr'));
   }
+  // What the sale's lines point to (a commission to follow): only ever a page of
+  // this same server, so the anchor is built from the path alone.
+  function follow(r) {
+    var links = (r.follow || []).filter(function (l) { return typeof l.path === 'string' && /^\/p\/[A-Za-z0-9][A-Za-z0-9\/_.-]*$/.test(l.path); });
+    if (!links.length) return;
+    links.forEach(function (l) {
+      var a = el('a', 'follow', l.label);
+      a.href = l.path;
+      receiptEl.appendChild(a);
+    });
+    receiptEl.appendChild(el('hr'));
+  }
   function dates(start, end) {
     function f(s) { var d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); }
     return end && end !== start ? f(start) + ' - ' + f(end) : f(start);
@@ -520,6 +538,7 @@ ${POW_SOLVER_JS}
       if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
     });
     receiptEl.appendChild(el('hr'));
+    follow(r);
     footer(r);
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));

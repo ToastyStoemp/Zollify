@@ -72,6 +72,21 @@ describe('recording sales', () => {
     expect(t.items[0]).toMatchObject({ consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } });
   });
 
+  it('keeps the page a line points the customer to, and drops one that is not a public page here', () => {
+    const link = { label: 'Follow your commission', path: '/p/commissions/abcdefghijklmnopqrstuvwx' };
+    const t = tx.saleToTransaction(
+      sale({
+        lines: [
+          { productId: 'module:c1', sku: null, name: 'Deposit', qty: 1, unitPrice: 30, lineTotal: 30, taxRate: null, link },
+          { productId: 'module:c2', sku: null, name: 'Other', qty: 1, unitPrice: 5, lineTotal: 5, taxRate: null, link: { label: 'Prize', path: 'https://evil.example' } },
+        ],
+      }),
+      'dev',
+    );
+    expect(t.items[0]!.link).toEqual(link);
+    expect(t.items[1]!.link).toBeUndefined();
+  });
+
   it('keeps the consignment artist a line belonged to when it sold', async () => {
     const product = { id: 'p1', title: 'Anchor print', forSale: true, unlisted: false, price: 35, variants: [], sortOrder: 0, updatedAt: 1 };
     await catalog.upsertProduct({ ...product, consignorId: 'artist-1' });

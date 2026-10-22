@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cashShortcutAmounts } from '../cash';
 
-/** What a customer hands over in notes - never with a note to spare. */
+/** What a customer hands over in notes and a coin or two - never with a piece to spare. */
 describe('cash suggestions', () => {
   it('offers single notes for 15 euros, not 20 + 5 or 20 + 20', () => {
     expect(cashShortcutAmounts(15, 'EUR')).toEqual([20, 50, 100, 200]);
@@ -11,20 +11,30 @@ describe('cash suggestions', () => {
     expect(cashShortcutAmounts(35, 'EUR')).toEqual([40, 50, 100, 200]);
   });
 
-  it('offers a ten and a five for a price with cents', () => {
-    expect(cashShortcutAmounts(12.5, 'EUR')).toEqual([15, 20, 50, 100]);
+  it('rounds a price with cents up with a coin or two, and a five', () => {
+    // 10 + 2 + 1, 10 + 2 + 2, 10 + 5.
+    expect(cashShortcutAmounts(12.5, 'EUR')).toEqual([13, 14, 15, 20, 50]);
+    // 10 + 5 + 2 + 2 for 18; never three coins.
+    expect(cashShortcutAmounts(18, 'EUR')).toEqual([19, 20, 50, 100, 200]);
   });
 
-  it('offers the smaller notes for a small price', () => {
-    expect(cashShortcutAmounts(3, 'EUR')).toEqual([5, 10, 20, 50]);
+  it('offers coins and the smaller notes for a small price', () => {
+    // Two 2-euro coins for 3.
+    expect(cashShortcutAmounts(3, 'EUR')).toEqual([4, 5, 10, 20, 50]);
+  });
+
+  it('never pads a hand with a coin that is spare', () => {
+    // 10 + 2 + 1 for 12 pounds: the 10 and 2 already pay.
+    expect(cashShortcutAmounts(12, 'GBP')).toEqual([15, 20, 50]);
   });
 
   it('uses each currency’s own notes', () => {
     // A dollar note makes 16 a fair hand for 15.50; 15 exactly has its own button.
     expect(cashShortcutAmounts(15.5, 'USD')).toEqual([16, 20, 50, 100]);
     expect(cashShortcutAmounts(15, 'USD')).toEqual([20, 50, 100]);
-    // Swiss notes start at 10.
-    expect(cashShortcutAmounts(7.5, 'CHF')).toEqual([10, 20, 50, 100]);
+    // Swiss notes start at 10; the 2 and 5 franc coins round up with them.
+    expect(cashShortcutAmounts(7.5, 'CHF')).toEqual([10, 20, 50, 100, 200]);
+    expect(cashShortcutAmounts(12.5, 'CHF')).toEqual([14, 15, 20, 50, 100]);
     expect(cashShortcutAmounts(1500, 'JPY')).toEqual([2000, 5000, 10000]);
   });
 

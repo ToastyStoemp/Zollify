@@ -1,10 +1,12 @@
-import { COMMISSION_STATUSES, COMMISSION_STATUS_LABEL, isWatchedStatus, type CommissionStatus, type PublicCommission } from '@zollify/shared';
+import { BRIEF_MAX_PICTURES, COMMISSION_PUBLIC_PATH, COMMISSION_STATUSES, COMMISSION_STATUS_LABEL, isWatchedStatus, type CommissionStatus, type PublicCommission } from '@zollify/shared';
 
 /**
- * The customer's tracking page, rendered on the server as plain HTML with no
- * script at all. Every value goes through `h`, so nothing an owner or customer
- * typed can become markup, and the page needs no inline script for a strict
- * CSP to refuse.
+ * The customer's tracking page, rendered on the server as plain HTML. Every
+ * value goes through `h`, so nothing an owner or customer typed can become
+ * markup. Reading it needs no script; one small script file (never inline,
+ * so the strict CSP stays) adds sending the brief and pictures, turning on
+ * notifications, and the five-minute refresh that waits while the customer
+ * is typing. Without script, a plain meta refresh stands in.
  */
 
 const h = (s: unknown): string =>
@@ -73,10 +75,23 @@ dd{text-align:right;font-weight:600}
 .pick .name{font-weight:700}
 .pick p{overflow-wrap:anywhere;white-space:pre-wrap}
 .muted{color:var(--muted);font-size:.85rem}
+.brief p.text{white-space:pre-wrap;overflow-wrap:anywhere}
+.brief input[type=email]{width:100%;font:inherit;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text)}
+.brief textarea{width:100%;min-height:7rem;font:inherit;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);resize:vertical}
+.brief label{display:flex;flex-direction:column;gap:4px;margin-top:10px;font-size:.92rem}
+.brief .facts{margin-top:8px}
+.pics{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.pics figure{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.pics img{width:88px;height:88px;object-fit:cover;border-radius:8px;border:1px solid var(--border)}
+button{font:inherit;font-weight:700;padding:10px 14px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer;margin-top:10px}
+@media(prefers-color-scheme:dark){button{color:#020617}}
+button.link{background:none;color:var(--accent-ink);padding:0;margin:0;font-weight:600;font-size:.8rem;text-decoration:underline}
+button:disabled{opacity:.6;cursor:default}
+.msg{margin-top:8px;font-size:.9rem}.msg.err{color:var(--warn)}
 footer{margin-top:24px;text-align:center;color:var(--muted);font-size:.72rem}
 `;
 
-function shell(title: string, body: string, head = ''): string {
+function shell(title: string, body: string, head = '', opts: { watch?: boolean; script?: boolean } = {}): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -87,9 +102,9 @@ function shell(title: string, body: string, head = ''): string {
 ${head}<title>${h(title)}</title>
 <style>${STYLE}</style>
 </head>
-<body>
+<body${opts.watch ? ' data-watch="1"' : ''}>
 <main>${body}</main>
-</body>
+${opts.script ? '<script src="/p/commissions/commission.js"></script>\n' : ''}</body>
 </html>
 `;
 }
@@ -98,7 +113,33 @@ export function renderNotFound(): string {
   return shell('Not available', '<header><h1>This page is not available</h1></header><div class="card"><p class="muted">The link may have been replaced or the commission removed. Please ask the shop for a new one.</p></div>');
 }
 
-export function renderCommission(c: PublicCommission): string {
+/** What the customer asked for, their pictures, and - while it is open - the form to change both. */
+function briefCard(c: PublicCommission, token: string): string {
+  if (!c.canAddBrief && !c.brief?.text && !c.pictures.length) return '';
+  const facts = [c.brief?.budget ? `Budget: ${c.brief.budget}` : '', c.brief?.wantedBy && fmtDay(c.brief.wantedBy) ? `Wanted by ${fmtDay(c.brief.wantedBy)}` : ''].filter(Boolean);
+  const pics = c.pictures.length
+    ? `<div class="pics">${c.pictures
+        .map(
+          (p) =>
+            `<figure><img src="${h(`${COMMISSION_PUBLIC_PATH}${token}/pictures/${p.id}`)}" alt="${h(p.name)}" loading="lazy" />${c.canAddBrief ? `<button type="button" class="link" data-remove="${h(p.id)}">Remove</button>` : ''}</figure>`,
+        )
+        .join('')}</div>`
+    : '';
+  if (!c.canAddBrief) {
+    return `<div class="card brief"><h2>What you asked for</h2>${c.brief?.text ? `<p class="text">${h(c.brief.text)}</p>` : ''}${facts.length ? `<p class="muted facts">${h(facts.join(' · '))}</p>` : ''}${pics}</div>`;
+  }
+  const room = BRIEF_MAX_PICTURES - c.pictures.length;
+  return `<form id="brief" class="card brief"><h2>What you would like</h2>
+<label for="brief-text">Describe it - style, size, colours, anything the artist should know.<textarea id="brief-text" maxlength="4000">${h(c.brief?.text ?? '')}</textarea></label>
+${facts.length ? `<p class="muted facts">${h(facts.join(' · '))}</p>` : ''}${pics}
+${room > 0 ? `<label for="brief-files">Reference pictures <span class="muted">(up to ${room} more, PNG, JPEG or WebP, 5 MB each)</span><input id="brief-files" type="file" accept="image/png,image/jpeg,image/webp" multiple /></label>` : `<input id="brief-files" type="file" hidden /><p class="muted">That is the most pictures one commission can hold.</p>`}
+<button type="submit">Save</button>
+<p id="brief-msg" class="msg" hidden></p>
+<noscript><p class="muted">Turn on JavaScript to send a description or pictures.</p></noscript>
+</form>`;
+}
+
+export function renderCommission(c: PublicCommission, token = ''): string {
   const cancelled = c.status === 'cancelled';
   const at = STEPS.indexOf(c.status as (typeof STEPS)[number]);
   const progress = cancelled
@@ -132,13 +173,27 @@ export function renderCommission(c: PublicCommission): string {
       ? `<div class="card pick"><h2>Pickup</h2>${c.pickup.name ? `<p class="name">${h(c.pickup.name)}</p>` : ''}${c.pickup.address ? `<p>${h(c.pickup.address)}</p>` : ''}${c.pickup.note ? `<p class="muted">${h(c.pickup.note)}</p>` : ''}</div>`
       : '';
 
+  const watch = isWatchedStatus(c.status);
+  // Offered while there is still news to come; the script shows it when the browser can take it.
+  const push = token && watch && c.push
+    ? `<div id="push" class="card" hidden><h2>Notifications</h2><button type="button" id="push-btn" hidden>Notify me on this device</button><p id="push-msg" class="msg" hidden></p></div>`
+    : '';
+  // A commission made at the till without an email: the customer leaves their own, here.
+  const mail = token && c.canAddBrief && !c.hasEmail && c.mailEnabled
+    ? `<form id="email-form" class="card brief"><h2>Updates by email</h2><label for="email-input">Leave your email and the shop writes when your commission is ready.<input id="email-input" type="email" required maxlength="254" autocomplete="email" placeholder="you@example.com" /></label><button type="submit">Send me updates</button><p id="email-msg" class="msg" hidden></p></form>`
+    : '';
+  const head = [
+    // The script refreshes the page every five minutes, unless the customer is typing; without script, a plain refresh does.
+    watch ? `<noscript><meta http-equiv="refresh" content="${REFRESH_SECONDS}" /></noscript>\n` : '',
+    token ? `<link rel="manifest" href="${h(`${COMMISSION_PUBLIC_PATH}${token}/manifest.webmanifest`)}" />\n<meta name="theme-color" content="#0e7c66" />\n<meta name="apple-mobile-web-app-capable" content="yes" />\n` : '',
+  ].join('');
   return shell(
     `${c.title} - ${c.shop}`,
     `<header>${c.shop ? `<div class="shop">${h(c.shop)}</div>` : ''}<h1>${h(c.title)}</h1></header>
 <div class="card"><div class="status">${h(c.statusLabel)}</div>${progress}</div>
-${updates}${due}${money}${pickup}
+${push}${mail}${updates}${token ? briefCard(c, token) : ''}${due}${money}${pickup}
 <footer>Bookmark this page to check on your commission.<br />Times are shown in ${h(c.timeZone)}.</footer>`,
-    // A plain meta refresh, so an open page picks up a status change with no script; closed ones stay put.
-    isWatchedStatus(c.status) ? `<meta http-equiv="refresh" content="${REFRESH_SECONDS}" />\n` : '',
+    head,
+    { watch, script: !!token },
   );
 }

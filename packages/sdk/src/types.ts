@@ -121,6 +121,16 @@ export interface SaleLine {
   commissionPct?: number;
   /** What the line pays for, when a module added it to the till - see TillApi. */
   ref?: SaleLineRef;
+  /** A page the receipt sends the customer to for this line - see TillLine.link. */
+  link?: SaleLineLink;
+}
+
+/** A public page of this server, e.g. a commission's tracking page. */
+export interface SaleLineLink {
+  /** Short, for the customer: "Follow your commission". At most 60 characters. */
+  label: string;
+  /** Server-relative and public: `/p/<module>/...`. Anything else is dropped. */
+  path: string;
 }
 
 /** Ties a sale line back to the module record it settles, e.g. a workshop booking. */
@@ -136,7 +146,12 @@ export interface TillAction {
   id: string;
   label: string;
   icon?: string;
-  /** Shown in a sheet over the till. Receives a `close` emit to dismiss itself. */
+  /**
+   * Shown in a sheet over the till. Receives a `close` emit to dismiss itself,
+   * and a `focus` prop (string, or absent) when the till was opened with a link
+   * naming this action - `/m/pos?action=<moduleId>:<id>&focus=<what>` - so a
+   * module's own page can send the seller to the till with something picked.
+   */
   component: ComponentLoader;
   order?: number;
   /** Show it as a tile beside the products instead of a button under the cart. */
@@ -162,6 +177,11 @@ export interface TillLine {
   consignorId?: string;
   commissionPct?: number;
   ref?: { kind: string; id: string };
+  /**
+   * Printed on the receipt as a QR code with `label` under it, and linked
+   * from the online receipt - where the customer follows what they paid for.
+   */
+  link?: SaleLineLink;
 }
 
 /** A line a module put in the cart, as it stands now. */
@@ -604,12 +624,14 @@ export interface Sdk {
    * Customer display: publish what this register's cart looks like right now.
    * `afterSale` is what this device's owner chose to show once a sale is paid
    * (device-local, set under Settings → This device); `receiptUrl` turns a
-   * sale's receipt token into the link its QR code carries.
+   * sale's receipt token into the link its QR code carries; `publicUrl`
+   * does the same for any public page of the server (`/p/...`).
    */
   display: {
     publish(cart: DisplayCart): void;
     afterSale(): Promise<{ thankYou: boolean; receiptQr: boolean }>;
     receiptUrl(token: string): string;
+    publicUrl(path: string): string;
   };
 
   /**

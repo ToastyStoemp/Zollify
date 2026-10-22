@@ -111,7 +111,7 @@ export function owedByCurrency(commissions: readonly { status: CommissionStatus;
 
 /**
  * The commission with everything personal cleared, and what the books need
- * kept. Cleared: internal notes, the free-text details, and the messages
+ * kept. Cleared: internal notes, the free-text details, the customer's brief, and the messages
  * written for the customer (all free text that can name or describe a person).
  * Kept: title, price, deposit asked, currency, due date, status, the dates of
  * every step (the messages are blanked, the steps stay) and the link token.
@@ -124,6 +124,8 @@ export function eraseCommission(c: Commission, now: number): Commission {
     customerErasedAt: c.customerErasedAt ?? now,
     notes: '',
     description: '',
+    // The customer's own words, too. Their pictures are deleted by the server with the same sweep.
+    brief: null,
     updates: c.updates.map((u) => (u.message ? { ...u, message: '' } : u)),
   };
 }

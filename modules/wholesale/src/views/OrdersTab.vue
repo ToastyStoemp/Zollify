@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
-import { ORDER_STATUS_LABEL, OrderInputSchema, fmtPrice, isEditable, nextOrderStatuses, orderTotals, orderableQty, unitPriceFor, type OrderLine, type OrderStatus, type Product, type TradeCustomer, type TradeDetails, type WholesaleOrder } from '@zollify/shared';
+import { ORDER_STATUS_LABEL, OrderInputSchema, fmtPrice, isEditable, nextOrderStatuses, orderTotals, orderableQty, tiersForPrice, unitPriceFor, type OrderLine, type OrderStatus, type Product, type TradeCustomer, type TradeDetails, type WholesaleOrder } from '@zollify/shared';
 import { api, errorText } from '../api';
 import { recordShipment, syncClaims } from '../stock';
 import { sdk } from '../runtime';
@@ -46,13 +46,14 @@ function onCustomer(): void {
   if (c) form.currency = c.currency;
   reprice();
 }
-/** Every line at the tier its quantity reaches, less the customer's discount. */
+/** Every line at the tier its quantity reaches, less the customer's discount. A variant at a price of its own gets the tiers' discount off that price. */
 function reprice(): void {
   for (const l of form.lines) {
     const p = sdk().data.products.get(l.productId);
     const v = l.variantId ? p?.variants.find((x) => x.id === l.variantId) : undefined;
     const list = v?.price ?? p?.price ?? l.unitPrice;
-    l.unitPrice = unitPriceFor(props.details[l.productId]?.tiers ?? [], l.qty, list, customer.value?.discountPct ?? 0);
+    const tiers = tiersForPrice(props.details[l.productId]?.tiers ?? [], p?.price ?? 0, list);
+    l.unitPrice = unitPriceFor(tiers, l.qty, list, customer.value?.discountPct ?? 0);
   }
 }
 function add(p: Product, variantId: string | null): void {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   COMMISSION_STATUSES,
   COMMISSION_STATUS_LABEL,
@@ -39,6 +40,12 @@ const notice = ref<string | null>(null);
 const busy = ref(false);
 
 const tab = ref<'commissions' | 'customers'>('commissions');
+const router = useRouter();
+/** The till is POS's; open it with this commission picked, when POS is on. */
+const tillOn = computed(() => router.hasRoute('pos:index'));
+function takePayment(c: CommissionView): void {
+  void router.push({ name: 'pos:index', query: { action: 'commissions:commission', focus: c.id } });
+}
 const isAdmin = computed(() => sdk().account()?.role !== 'member');
 const today = localToday();
 
@@ -376,7 +383,10 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
             <dt>Paid so far</dt><dd>{{ money(current.paid, current) }}<span v-if="current.depositAsked > 0 && current.paid < current.depositAsked" class="hint"> (deposit asked {{ money(current.depositAsked, current) }})</span></dd>
             <dt>Balance</dt><dd><strong>{{ money(current.balance, current) }}</strong></dd>
           </dl>
-          <p class="hint">Take a deposit or the balance from the till: Commission button.</p>
+          <div v-if="!isClosedStatus(current.status)" class="till">
+            <button v-if="tillOn" type="button" class="primary" @click="takePayment(current)">{{ current.paid > 0 ? 'Take the balance at the till' : 'Take the deposit at the till' }}</button>
+            <p class="hint">{{ tillOn ? 'Opens the till with this commission picked; the payment is an ordinary sale.' : 'Switch on the till (POS) to take payments.' }} It is also the Commission tile on the till.</p>
+          </div>
           <p v-if="current.description" class="text">{{ current.description }}</p>
           <CustomerBrief :commission="current" @changed="load" />
           <p v-if="current.notes" class="text note"><strong>Internal note:</strong> {{ current.notes }}</p>
@@ -465,6 +475,7 @@ label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .link { align-self: flex-start; padding: 0; min-height: 0; border: 0; background: none; color: var(--zfy-accent-ink, #0a5a4a); text-decoration: underline; font-size: .84rem; font-weight: 400; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .foot { justify-content: space-between; margin-top: .4rem; }
+.till { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; }
 .statuses { display: flex; gap: .4rem; flex-wrap: wrap; }
 .money { display: grid; grid-template-columns: auto 1fr; gap: .2rem 1rem; margin: 0; font-size: .92rem; }
 .money dd { margin: 0; }

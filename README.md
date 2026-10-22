@@ -231,7 +231,9 @@ the store hears back the same way.
 **Commissions** track custom work from request to pickup (Requested, Accepted,
 In progress, Ready for pickup, Collected, Cancelled). The record and the
 customer's contact details stay on the server, never in the synced op-log. A
-"Commission" button over the till takes a deposit or the final balance as an
+"Commission" tile beside the products (there with an empty cart, so on a phone
+too), or "Take the deposit at the till" on a commission's page, which opens
+the till with it picked, takes a deposit or the final balance as an
 ordinary free-price sale line whose `ref` names the commission, so payment
 providers, receipts, VAT and cash-up work as for any sale; the paid-so-far is
 derived from those sale lines (a reverted sale gives the balance back). The

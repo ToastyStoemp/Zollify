@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { chargedLineTotals, fmtPrice, localIsoDay, needsRateLookup, round2, seesSalesTotals, toBaseFactor } from '@zollify/shared';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL, chargedLineTotals, fmtPrice, localIsoDay, needsRateLookup, round2, seesSalesTotals, toBaseFactor } from '@zollify/shared';
 import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
@@ -388,7 +388,8 @@ function exportCsv(): void {
 }
 
 const fmtTime = (ts: number): string => new Date(ts).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const methodIcon = (m: string): string => ({ cash: 'banknote', card: 'credit-card', split: 'zap' })[m] ?? 'smartphone';
+const methodIcon = (m: string): string => ({ cash: 'banknote', card: 'credit-card', split: 'zap', [GIVEN_AWAY]: 'gift' })[m] ?? 'smartphone';
+const methodName = (m: string): string => (m === GIVEN_AWAY ? GIVEN_AWAY_LABEL.toLowerCase() : m);
 const money = (n: number, c: string) => fmtPrice(n, c);
 </script>
 
@@ -522,7 +523,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     <div class="filters">
       <input v-model="txSearch" type="search" placeholder="Find an item or discount…" aria-label="Find a sale" class="txsearch" />
       <div class="seg">
-        <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ m }}</button>
+        <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ methodName(m) }}</button>
       </div>
       <select v-if="sellerOptions.length > 1" v-model="sellerFilter" aria-label="Sold by">
         <option value="">Everyone</option>
@@ -538,6 +539,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <Icon :name="methodIcon(tx.method)" :size="16" />
           <strong>{{ money(amountOf(tx), currencyOf(tx)) }}</strong>
           <span v-if="allMode" class="chip">{{ eventName(tx.eventId) }}</span>
+          <span v-if="tx.method === GIVEN_AWAY" class="chip">{{ methodName(tx.method) }}</span>
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
           <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && showSeller"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>

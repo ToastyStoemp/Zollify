@@ -7,6 +7,7 @@ import { rasterizeReceipt } from './lib/receipt-raster';
 import { lineLinkQrs, receiptQrPng, saleLineLinks } from './lib/after-sale';
 import { serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from './lib/given-away';
 
 /**
  * Receipt building for the myPOS Carbon's built-in thermal printer (carbon
@@ -325,6 +326,8 @@ export function buildReceiptLines(
   }
 
   // ── Payment legs ──
+  // A sale given away took nothing, so it has no legs; say so instead.
+  if (!tx.payments.length && tx.method === GIVEN_AWAY) lines.push({ kind: 'text', text: row(GIVEN_AWAY_LABEL, fmtPrice(0, tx.currency)) });
   for (const leg of tx.payments) {
     lines.push({ kind: 'text', text: row(paymentLabel(tx, leg), fmtPrice(leg.amount, tx.currency)) });
     // Charged on the card in another currency (cards in the base currency).

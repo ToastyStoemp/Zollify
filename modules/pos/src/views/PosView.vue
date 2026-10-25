@@ -35,6 +35,7 @@ import {
   subtotal,
   toCharged,
   total,
+  GIVEN_AWAY,
   loadTestMode,
   testMode,
 } from '../cart';
@@ -790,7 +791,9 @@ const confirmDisabled = computed(() => {
   if (payment.method === 'split') return !splitState.value.ok;
   return false;
 });
-const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', split: 'Split payment' })[payment.method] ?? `${payment.method} payment`);
+const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', split: 'Split payment', [GIVEN_AWAY]: 'Give away' })[payment.method] ?? `${payment.method} payment`);
+/** A cart that comes to nothing (a 100% discount): there is nothing to pay, so it is given away instead. */
+const givesAway = computed(() => itemCount.value > 0 && Math.abs(total.value) < 0.005);
 
 function startPayment(method: string): void {
   if (!itemCount.value) return;
@@ -904,7 +907,8 @@ async function confirmPayment(): Promise<void> {
   if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
-  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
+  const items = `${count} item${count === 1 ? '' : 's'}`;
+  finish(outcome.sale!, payment.method === GIVEN_AWAY ? `Given away - ${items}` : `Payment confirmed - ${items} sold`, outcome.test);
 }
 
 function finish(sale: SaleEvent, message: string, test = false): void {
@@ -1216,7 +1220,10 @@ function lockTill(): void {
           <button type="button" @click="openMisc">+ Misc item</button>
           <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
-        <div class="pay">
+        <div v-if="givesAway" class="pay">
+          <button type="button" class="free" :disabled="sellBlocked" @click="startPayment(GIVEN_AWAY)">Give away</button>
+        </div>
+        <div v-else class="pay">
           <button type="button" class="cash" :disabled="!itemCount || sellBlocked" @click="startPayment('cash')">Cash</button>
           <button type="button" class="card" :disabled="!itemCount || sellBlocked" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount || sellBlocked" @click="startPayment('split')">Split</button>
@@ -1371,6 +1378,10 @@ function lockTill(): void {
           <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
+        <template v-else-if="payment.method === GIVEN_AWAY">
+          <p>Nothing to pay - the items leave stock and the sale is kept on record as given away.</p>
+        </template>
+
         <template v-else>
           <p>Confirm the {{ payment.method === 'card' ? 'card' : payment.method }} payment was completed{{ payment.method === 'card' && !hasTerminal ? ' on the terminal' : '' }}.</p>
         </template>
@@ -1378,7 +1389,7 @@ function lockTill(): void {
       <template #footer>
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
-          <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
+          <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">{{ payment.method === GIVEN_AWAY ? 'Give away' : 'Confirm sale' }}</button>
           <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
           <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
@@ -1501,6 +1512,8 @@ function lockTill(): void {
 .pay .cash, .confirm.cash { background: #0e7c66; }
 .pay .card, .confirm.card { background: #2f6fb8; }
 .pay .split, .confirm.split { background: #b8742f; }
+.pay .free, .confirm.free { background: #8a4fb8; }
+.pay .free { grid-column: 1 / -1; }
 .pay button:hover:not(:disabled), .confirm:hover:not(:disabled) { filter: brightness(1.08); }
 
 .form { display: flex; flex-direction: column; gap: .6rem; }

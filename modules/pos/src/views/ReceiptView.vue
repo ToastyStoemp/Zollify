@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { fmtPrice, receiptDateTime } from '@zollify/shared';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from '../lib/given-away';
 import { paymentLabel, receiptAmounts, receiptSeller, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
 import { QrCode, receiptUrl as receiptUrlFor, saleLineLinks, type PrintState } from '../lib/after-sale';
@@ -107,6 +108,7 @@ const paidWith = computed(() => {
   const sale = tx.value;
   if (!sale) return '';
   const legs = sale.payments ?? [];
+  if (!legs.length && sale.method === GIVEN_AWAY) return GIVEN_AWAY_LABEL;
   return legs
     .map((leg) =>
       [

@@ -47,7 +47,12 @@ export function installDiagnostics(): void {
     push('error', args);
     original.error(...args);
   };
-  window.addEventListener('error', (e) => push('error', [`Uncaught: ${e.message}`, (e.error as Error | undefined)?.stack ?? '']));
+  window.addEventListener('error', (e) => {
+    // The browser's note that a layout settled a frame late: harmless, and it
+    // filled support logs as if it were an error.
+    if (/ResizeObserver loop/.test(e.message ?? '')) return;
+    push('error', [`Uncaught: ${e.message}`, (e.error as Error | undefined)?.stack ?? '']);
+  });
   window.addEventListener('unhandledrejection', (e) => push('error', ['Unhandled rejection:', e.reason]));
 }
 

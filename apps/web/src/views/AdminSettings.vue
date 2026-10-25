@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import type { AdminAccount, AdminAccountDetail, AdminAccountRelation, AdminFeedbackEntry, AdminLogEntry, AdminMetricRow, AdminOverview } from '@zollify/shared';
-import { authFetch, shellConfirm } from '@zollify/platform';
+import { authFetch, copyText, saveFile, shellConfirm } from '@zollify/platform';
 import { Icon } from '@zollify/ui';
 import ServerSettingsPanel from '../components/ServerSettingsPanel.vue';
 
@@ -159,6 +159,19 @@ async function toggleAccount(id: string): Promise<void> {
 // ── Logs ────────────────────────────────────────────────────────────────────
 const openLog = ref<string | null>(null);
 const logText = ref('');
+const logNote = ref<string | null>(null);
+const logLoaded = computed(() => !!openLog.value && logText.value !== 'Loading…');
+async function copyLog(): Promise<void> {
+  logNote.value = (await copyText(logText.value)) ? 'Copied.' : 'Could not copy - download it instead.';
+  setTimeout(() => (logNote.value = null), 4000);
+}
+async function downloadLog(entry: AdminLogEntry): Promise<void> {
+  const who = (entry.deviceName || entry.deviceId.slice(0, 8)).replace(/[^A-Za-z0-9_-]+/g, '-').toLowerCase();
+  const at = new Date(entry.createdAt).toISOString().slice(0, 16).replace(/[:T]/g, '-');
+  await saveFile(`zollify-log-${who}-${at}.txt`, logText.value, 'text/plain').catch(() => {
+    logNote.value = 'Could not save the log.';
+  });
+}
 async function viewLog(entry: AdminLogEntry): Promise<void> {
   if (openLog.value === entry.id) {
     openLog.value = null;
@@ -301,7 +314,14 @@ const kb = (n: number): string => `${Math.max(1, Math.round(n / 1024))} KB`;
               <span class="main"><span>{{ l.accountName }} · {{ l.deviceName || l.deviceId.slice(0, 8) }}<em v-if="l.reason">{{ l.reason }}</em></span><small>{{ when(l.createdAt) }} · {{ l.flavor || 'web' }}<template v-if="l.appVersion"> {{ l.appVersion }}</template> · {{ kb(l.size) }}</small></span>
               <Icon :name="openLog === l.id ? 'chevron-down' : 'chevron-right'" :size="14" />
             </button>
-            <pre v-if="openLog === l.id" class="log">{{ logText }}</pre>
+            <template v-if="openLog === l.id">
+              <div v-if="logLoaded" class="log-actions">
+                <button type="button" class="quiet" @click="copyLog">Copy</button>
+                <button type="button" class="quiet" @click="downloadLog(l)">Download</button>
+                <span v-if="logNote" class="hint" role="status">{{ logNote }}</span>
+              </div>
+              <pre class="log">{{ logText }}</pre>
+            </template>
           </li>
         </ul>
       </article>
@@ -357,6 +377,8 @@ em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35re
 .relations em { margin: 0; }
 .sub { margin: .3rem 0 0; font-size: .72rem; text-transform: uppercase; letter-spacing: .06em; color: var(--zfy-muted, #5a6472); }
 .plain { list-style: none; margin: 0; padding: 0; font-size: .85rem; display: flex; flex-direction: column; gap: .15rem; }
+.log-actions { display: flex; align-items: center; gap: .4rem; margin-top: .3rem; }
+.log-actions .quiet { min-height: 1.9rem; padding: .15rem .6rem; font-size: .8rem; }
 .log { margin: .3rem 0 0; max-height: 20rem; overflow: auto; padding: .6rem .8rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .72rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session .quiet { min-height: 2.2rem; font-size: .78rem; }
 </style>

@@ -70,7 +70,7 @@ export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type C
 export { guardUnsyncedOnClose, leaveOnPurpose, shouldGuardLeave, resetLeaveGuard } from './leave-guard';
 export { theme, setTheme, applyStoredTheme, type Theme } from './theme';
 export * from './core';
-export { isNative, getServerUrl, setServerUrl, saveFile, openDocument, openFileBlob } from './native';
+export { isNative, getServerUrl, setServerUrl, saveFile, openDocument, openFileBlob, copyText } from './native';
 export { nativeHeaders } from './session';
 export { selfUpdates, currentAppVersion, checkForUpdate, downloadUpdate, installDownloadedUpdate, updateDownload, type UpdateCheck, type Flavor } from './updates';
 export { notifyShellUpdateReady, checkAndQueueShellUpdate, announceShellUpdate, currentShellVersion, shellUpdaterStatus, checkShellUpdate, queueShellUpdate, shellUpdateQueued, reloadShellNow, type ShellUpdateCheck } from './shell-updates';

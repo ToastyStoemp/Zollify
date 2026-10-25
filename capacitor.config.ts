@@ -23,8 +23,11 @@ const config: CapacitorConfig = {
     // Manual mode: this app drives its own check/download/apply against its
     // own server (see packages/platform/src/shell-updates.ts) rather than
     // Capgo's hosted channel API - autoUpdate: true would try to talk to
-    // Capgo Cloud, which this deploy doesn't use.
-    CapacitorUpdater: { autoUpdate: false },
+    // Capgo Cloud, which this deploy doesn't use. statsUrl '' stops the
+    // plugin reporting this device's id and version to Capgo Cloud as well:
+    // it did so regardless, and on a weak signal every failed report landed
+    // in the device log ("Failed to send stats batch").
+    CapacitorUpdater: { autoUpdate: false, statsUrl: '' },
   },
 };
 

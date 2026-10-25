@@ -505,12 +505,18 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <button v-if="daily.length > 1" type="button" :class="['toggle', { on: compareDaily }]" @click="compareDaily = !compareDaily">vs. day before</button>
         </div>
         <p v-if="!daily.length" class="hint">No sales yet.</p>
-        <div v-else :class="['days', 'daily', { compare: compareDaily }]">
+        <div v-else class="days daily">
           <div v-for="d in daily" :key="d.day" class="dayrow">
             <span class="muted">{{ d.day.slice(5) }}</span>
-            <div class="bar"><div :style="{ width: d.pct + '%' }"></div></div>
-            <!-- Kept on every row, empty on the first (no day before), so all the bars are the same length. -->
-            <span v-if="compareDaily" :class="['delta', d.delta == null || d.deltaPct == null ? 'muted' : d.delta > 0 ? 'good' : d.delta < 0 ? 'bad' : 'muted']">{{ d.delta == null ? '' : d.deltaPct == null ? '-' : `${d.delta > 0 ? '+' : ''}${d.deltaPct}%` }}</span>
+            <div class="bar">
+              <div :style="{ width: d.pct + '%' }"></div>
+              <!-- The change on the bar itself, so it takes no room from it: just past the fill, or inside a nearly full one. -->
+              <span
+                v-if="compareDaily && d.delta != null"
+                :class="['delta', d.pct > 70 ? 'in' : d.deltaPct == null || d.delta === 0 ? 'muted' : d.delta > 0 ? 'good' : 'bad']"
+                :style="d.pct > 70 ? { right: `calc(${100 - d.pct}% + .35rem)` } : { left: `calc(${d.pct}% + .35rem)` }"
+              >{{ d.deltaPct == null ? '-' : `${d.delta > 0 ? '+' : ''}${d.deltaPct}%` }}</span>
+            </div>
             <strong>{{ money(d.value, displayCurrency) }}</strong>
           </div>
         </div>
@@ -628,11 +634,13 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .bar { flex: 1; height: 1rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }
 .bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); opacity: .75; }
 .delta { width: 3.2rem; text-align: right; flex-shrink: 0; white-space: nowrap; }
-/* One grid for all the days, so a wider figure on one row cannot make its bar shorter than the rest. */
+/* One grid for all the days, so a wider amount on one row cannot make its bar shorter than the rest. */
 .days.daily { display: grid; grid-template-columns: 3rem 1fr minmax(6rem, auto); column-gap: .5rem; }
-.days.daily.compare { grid-template-columns: 3rem 1fr minmax(3.2rem, auto) minmax(6rem, auto); }
 .daily .dayrow { display: contents; }
-.daily .delta, .daily strong { width: auto; white-space: nowrap; }
+.daily strong { width: auto; white-space: nowrap; }
+.daily .bar { position: relative; }
+.daily .delta { position: absolute; top: 0; width: auto; line-height: 1rem; font-size: .7rem; font-weight: 600; }
+.daily .delta.in { color: #fff; }
 .dayrow strong { width: 6rem; text-align: right; font-variant-numeric: tabular-nums; }
 .hours { display: flex; align-items: stretch; gap: .25rem; height: 7rem; }
 .hour { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: .2rem; }

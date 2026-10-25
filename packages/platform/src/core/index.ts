@@ -170,6 +170,8 @@ export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, publicUrlFor, type AfterSalePrefs } from './after-sale';
 export {
   addDisplayVideos,
+  DIM_MAX_PCT,
+  dimLayer,
   displayVideoBlob,
   displayVideoPrefs,
   listDisplayVideos,

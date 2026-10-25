@@ -375,7 +375,10 @@ no connection and never sync, back up or use the server's storage; muted,
 one after another, starting over at the end, the screen kept awake. When a
 cart comes in it either sits on a panel over the video, which plays on
 dimmed, or takes the screen while the video waits paused; either way the
-video carries on after the sale. A file the device cannot play is skipped;
+video carries on after the sale. Over the video, each device sets how
+strongly and with what colour it dims (0 to 80%, black by default) and the
+panel's background, text and total colours (the app's own by default), with
+a preview over a frame of the first video. A file the device cannot play is skipped;
 MP4 plays everywhere.
 
 *Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as

@@ -65,9 +65,22 @@ describe('display videos', () => {
   });
 
   it('plays them under the cart by default, and remembers this device’s choice', async () => {
-    expect({ ...videos.displayVideoPrefs }).toEqual({ enabled: true, mode: 'overlay' });
-    await videos.setDisplayVideoPrefs({ mode: 'swap', enabled: false });
-    Object.assign(videos.displayVideoPrefs, { enabled: true, mode: 'overlay' });
-    expect(await videos.loadDisplayVideoPrefs()).toEqual({ enabled: false, mode: 'swap' });
+    expect({ ...videos.displayVideoPrefs }).toEqual({ enabled: true, mode: 'overlay', dimPct: 45, dimColor: '#000000', panelBg: '', panelText: '', totalColor: '' });
+    await videos.setDisplayVideoPrefs({ mode: 'swap', enabled: false, dimPct: 60, dimColor: '#1A2B3C', totalColor: '#e09f3e' });
+    Object.assign(videos.displayVideoPrefs, { enabled: true, mode: 'overlay', dimPct: 45, dimColor: '#000000', totalColor: '' });
+    expect(await videos.loadDisplayVideoPrefs()).toMatchObject({ enabled: false, mode: 'swap', dimPct: 60, dimColor: '#1a2b3c', totalColor: '#e09f3e', panelBg: '' });
+  });
+
+  it('keeps stored colours and dimming within what the display can show', async () => {
+    const { openCoreDb } = await import('../core/db');
+    await openCoreDb(account.accountId).settings.put({ key: 'core.displayVideos', value: { dimPct: 300, dimColor: 'red; background: url(x)', panelBg: '#fff', panelText: '#ffffff' } });
+    expect(await videos.loadDisplayVideoPrefs()).toMatchObject({ dimPct: 80, dimColor: '#000000', panelBg: '', panelText: '#ffffff' });
+  });
+
+  it('dims with the chosen colour at the chosen strength', () => {
+    expect(videos.dimLayer({ dimPct: 45, dimColor: '#000000' })).toBe('rgba(0, 0, 0, 0.45)');
+    expect(videos.dimLayer({ dimPct: 30, dimColor: '#1a2b3c' })).toBe('rgba(26, 43, 60, 0.3)');
+    expect(videos.dimLayer({ dimPct: 0, dimColor: '#ffffff' })).toBe('rgba(255, 255, 255, 0)');
+    expect(videos.dimLayer({ dimPct: 99, dimColor: 'nope' })).toBe('rgba(0, 0, 0, 0.8)');
   });
 });

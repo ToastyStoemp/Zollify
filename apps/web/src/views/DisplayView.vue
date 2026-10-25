@@ -5,6 +5,7 @@ import {
   afterSalePrefs,
   authFetch,
   currentAccount,
+  dimLayer,
   displayCarts,
   displayVideoBlob,
   displayVideoPrefs,
@@ -82,6 +83,19 @@ const videosOn = computed(() => displayVideoPrefs.enabled && playlist.value.leng
 /** Full screen between sales; under the cart when it comes over them; out of sight when the cart takes the screen. */
 const videoShown = computed(() => videosOn.value && (screen.value === 'idle' || displayVideoPrefs.mode === 'overlay'));
 const overVideo = computed(() => videoShown.value && screen.value !== 'idle');
+/**
+ * This device's colours for the cart over the video, as the app's own colour
+ * variables - so labels, lines and the thank-you follow them too. Unset ones
+ * keep the app's light or dark look.
+ */
+const panelStyle = computed<Record<string, string>>(() => {
+  const p = displayVideoPrefs;
+  return {
+    ...(p.panelBg ? { '--zfy-bg': p.panelBg, '--zfy-surface': p.panelBg } : {}),
+    ...(p.panelText ? { '--zfy-ink': p.panelText, '--zfy-muted': `color-mix(in srgb, ${p.panelText} 65%, transparent)`, '--zfy-line': `color-mix(in srgb, ${p.panelText} 20%, transparent)`, color: p.panelText } : {}),
+    ...(p.totalColor ? { '--zfy-accent': p.totalColor } : {}),
+  };
+});
 
 async function loadVideos(): Promise<void> {
   await loadDisplayVideoPrefs().catch(() => {});
@@ -198,7 +212,7 @@ const amount = (n: number): string => n.toFixed(2);
       @ended="next"
       @error="failed"
     ></video>
-    <div v-if="overVideo" class="scrim"></div>
+    <div v-if="overVideo" class="scrim" :style="{ background: dimLayer(displayVideoPrefs) }"></div>
     <button v-if="needsTap && videoShown" type="button" class="tap" @click="play">Tap to play the videos</button>
     <div class="controls">
       <select v-if="sources.length > 1" v-model="selectedId" aria-label="Register">
@@ -217,11 +231,11 @@ const amount = (n: number): string => n.toFixed(2);
       <p v-else class="hint pulse">Waiting for the next sale…</p>
     </div>
 
-    <div v-else-if="screen === 'thanks' && current" class="thanks" :class="{ panel: overVideo }">
+    <div v-else-if="screen === 'thanks' && current" class="thanks" :class="{ panel: overVideo }" :style="overVideo ? panelStyle : undefined">
       <AfterSalePanel :thank-you="afterSalePrefs.thankYou" :total="fmtPrice(current.paid!.total, current.currency)" :receipt-url="receiptUrl" :logo="logo" :qr-size="260" />
     </div>
 
-    <div v-else-if="current" class="cart" :class="{ panel: overVideo }">
+    <div v-else-if="current" class="cart" :class="{ panel: overVideo }" :style="overVideo ? panelStyle : undefined">
       <p class="event">{{ current.eventName }}<span v-if="stale" class="stale">register offline?</span></p>
       <div class="lines">
         <div v-for="(l, i) in current.lines" :key="i" class="line">
@@ -247,13 +261,13 @@ const amount = (n: number): string => n.toFixed(2);
 /* Videos between sales: full bleed, black behind whatever does not fill the screen. */
 .display.with-video { background: #000; }
 .video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; z-index: 0; }
-.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1; }
+.scrim { position: absolute; inset: 0; z-index: 1; }
 .spacer { flex: 1; }
 .offline { position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 2; margin: 0; padding: .3rem .7rem; border-radius: 6px; background: rgba(0, 0, 0, .6); color: #fff; font-size: .8rem; }
 .tap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; font-size: 1.2rem; padding: .8rem 1.4rem; }
 .with-video .exit { color: rgba(255, 255, 255, .55); }
 /* The cart over a playing video: on a panel of its own, readable from across the table. */
-.panel { position: relative; z-index: 2; width: 100%; max-width: 48rem; margin: auto; padding: 1.5rem 2rem; border-radius: 16px; background: color-mix(in srgb, var(--zfy-bg) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+.panel { position: relative; z-index: 2; width: 100%; max-width: 48rem; margin: auto; padding: 1.5rem 2rem; border-radius: 16px; color: var(--zfy-ink); background: color-mix(in srgb, var(--zfy-bg) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
 .cart.panel { flex: 0 1 auto; max-height: calc(100% - 2rem); }
 .panel .lines { margin-top: 1rem; }
 .exit:hover { color: var(--zfy-ink); background: var(--zfy-surface); }

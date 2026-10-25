@@ -34,10 +34,33 @@ export interface DisplayVideoPrefs {
   /** Play the videos at all; off keeps them stored but shows the logo as before. */
   enabled: boolean;
   mode: DisplayVideoMode;
+  /** How much the video is darkened under the cart, 0 to 80 percent. */
+  dimPct: number;
+  /** What it is darkened with - black, or a colour that suits the art. */
+  dimColor: string;
+  /** The cart panel's background, text and total; empty follows the app's light or dark look. */
+  panelBg: string;
+  panelText: string;
+  totalColor: string;
 }
 
 const PREFS_KEY = 'core.displayVideos';
-const DEFAULT_PREFS: DisplayVideoPrefs = { enabled: true, mode: 'overlay' };
+export const DIM_MAX_PCT = 80;
+const DEFAULT_PREFS: DisplayVideoPrefs = { enabled: true, mode: 'overlay', dimPct: 45, dimColor: '#000000', panelBg: '', panelText: '', totalColor: '' };
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** A colour as stored: `#rrggbb`, or empty for the app's own. Anything else is dropped. */
+function colour(value: unknown, fallback: string): string {
+  return typeof value === 'string' && (value === '' || HEX.test(value)) ? value.toLowerCase() : fallback;
+}
+
+/** `#rrggbb` at an opacity, for the dimming layer. */
+export function dimLayer(prefs: Pick<DisplayVideoPrefs, 'dimPct' | 'dimColor'>): string {
+  const hex = HEX.test(prefs.dimColor) ? prefs.dimColor : '#000000';
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const alpha = Math.min(DIM_MAX_PCT, Math.max(0, prefs.dimPct)) / 100;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 /** This device's choice; read by the display, set under Settings → This device. */
 export const displayVideoPrefs = reactive<DisplayVideoPrefs>({ ...DEFAULT_PREFS });
@@ -67,6 +90,11 @@ export async function loadDisplayVideoPrefs(): Promise<DisplayVideoPrefs> {
   Object.assign(displayVideoPrefs, DEFAULT_PREFS, {
     ...(typeof stored.enabled === 'boolean' ? { enabled: stored.enabled } : {}),
     ...(stored.mode === 'overlay' || stored.mode === 'swap' ? { mode: stored.mode } : {}),
+    ...(typeof stored.dimPct === 'number' && Number.isFinite(stored.dimPct) ? { dimPct: Math.min(DIM_MAX_PCT, Math.max(0, Math.round(stored.dimPct))) } : {}),
+    dimColor: colour(stored.dimColor, DEFAULT_PREFS.dimColor) || DEFAULT_PREFS.dimColor,
+    panelBg: colour(stored.panelBg, ''),
+    panelText: colour(stored.panelText, ''),
+    totalColor: colour(stored.totalColor, ''),
   });
   return { ...displayVideoPrefs };
 }

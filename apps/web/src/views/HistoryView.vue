@@ -253,6 +253,21 @@ const bestAll = computed(() => {
   return [...map.values()].sort(byRevenue ? (a, b) => b.value - a.value : (a, b) => b.qty - a.qty);
 });
 const bestSellers = computed(() => (bestExpanded.value ? bestAll.value : bestAll.value.slice(0, 8)));
+/**
+ * Each row's share of the whole, in what the list ranks by: items sold for
+ * Products and Types, revenue for the revenue lists. Out of every row, not
+ * only the eight shown.
+ */
+const bestTotal = computed(() => {
+  const byRevenue = bestMode.value === 'revenue' || bestMode.value === 'revenueByType';
+  return { byRevenue, sum: bestAll.value.reduce((s, b) => s + (byRevenue ? b.value : b.qty), 0) };
+});
+function bestShare(b: { qty: number; value: number }): string {
+  const { byRevenue, sum } = bestTotal.value;
+  if (sum <= 0) return '';
+  const pct = ((byRevenue ? b.value : b.qty) / sum) * 100;
+  return pct > 0 && pct < 1 ? '<1%' : `${Math.round(pct)}%`;
+}
 
 // ── Per day / per hour ──────────────────────────────────────────────────────
 const compareDaily = ref(false);
@@ -461,6 +476,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <span class="name" :style="b.type ? { color: typeColor(b.type) } : undefined">{{ b.label }}</span>
             <span class="muted">{{ b.qty }}×</span>
             <strong>{{ money(b.value, displayCurrency) }}</strong>
+            <span class="share" :title="bestTotal.byRevenue ? 'Share of revenue' : 'Share of items sold'">{{ bestShare(b) }}</span>
           </li>
         </ol>
         <button v-if="bestAll.length > 8" type="button" class="quiet more" :aria-expanded="bestExpanded" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
@@ -600,6 +616,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .rank { width: 1.4rem; text-align: right; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .best strong { min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.share { min-width: 2.6rem; text-align: right; font-size: .78rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .more { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .78rem; min-height: 2.2rem; padding: 0 .3rem; }
 .days { display: flex; flex-direction: column; gap: .35rem; font-size: .78rem; }
 .dayrow .small { font-size: .66rem; min-width: 3rem; text-align: right; }

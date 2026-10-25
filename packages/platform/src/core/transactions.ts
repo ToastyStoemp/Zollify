@@ -95,9 +95,11 @@ export function saleToTransaction(
 
   // A split sale carries its own legs; anything else is one leg for the
   // whole amount. A custom method (TWINT, PayPal…) is card-like money: not in
-  // the cash box.
+  // the cash box. A sale given away took no money at all, so it has no legs.
   const method = sale.payment.method ?? (sale.payment.provider === 'manual' ? 'cash' : 'card');
-  const legs: PaymentLeg[] = sale.payment.legs?.length
+  const legs: PaymentLeg[] = method === 'free'
+    ? []
+    : sale.payment.legs?.length
     ? sale.payment.legs.map((l) => ({ kind: l.kind, amount: l.amount, provider: l.provider, ...(l.settled ? { settled: l.settled } : {}) }))
     : [
         {

@@ -248,8 +248,9 @@ export interface SaleEvent {
      * How the money actually moved. A terminal provider is always card; a
      * manual sale says which, because an external terminal the app never
      * talks to is still a card sale and must not land in the cash count.
+     * `free`: given away - the sale came to nothing and nothing was paid.
      */
-    method?: 'cash' | 'card' | 'split' | (string & {});
+    method?: 'cash' | 'card' | 'split' | 'free' | (string & {});
     /** How the total was made up when more than one way paid (a split). */
     legs?: { kind: 'cash' | 'card'; amount: number; provider?: string; settled?: CardSettlement }[];
     txRef?: string;

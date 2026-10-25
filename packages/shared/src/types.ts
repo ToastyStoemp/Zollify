@@ -305,8 +305,16 @@ export interface CostBatch {
   deletedAt?: number;
 }
 
-/** Built-in methods plus user-defined ones (e.g. "TWINT", "PayPal QR"). */
-export type PaymentMethod = 'cash' | 'card' | 'split' | (string & {});
+/**
+ * Built-in methods plus user-defined ones (e.g. "TWINT", "PayPal QR").
+ * `free`: given away - a sale that came to nothing (a 100% discount), with no
+ * payment at all; its items still leave stock.
+ */
+export type PaymentMethod = 'cash' | 'card' | 'split' | 'free' | (string & {});
+
+/** The method of a sale given away; see PaymentMethod. */
+export const GIVEN_AWAY = 'free';
+export const GIVEN_AWAY_LABEL = 'Given away';
 
 export interface PaymentLeg {
   kind: 'cash' | 'card';

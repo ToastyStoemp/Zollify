@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import {
   EMPTY_PROFILE_LINKS,
+  GIVEN_AWAY,
+  GIVEN_AWAY_LABEL,
   adoptLegacyLinks,
   base64BodyLimit,
   cleanProfileLinks,
@@ -325,7 +327,8 @@ export function publicReceipt(
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
     total: tx.total,
-    payments: (tx.payments ?? []).map((p) => ({
+    // A sale given away took nothing: no legs, one line saying so.
+    payments: !tx.payments?.length && tx.method === GIVEN_AWAY ? [{ label: GIVEN_AWAY_LABEL, amount: 0 }] : (tx.payments ?? []).map((p) => ({
       label: paymentLabel(tx, p.kind, p.cardBrand),
       amount: Number(p.amount) || 0,
       ...(p.settled && Number.isFinite(Number(p.settled.amount)) && /^[A-Z]{3}$/.test(String(p.settled.currency))

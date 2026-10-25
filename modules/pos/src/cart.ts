@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
 import type { CardSettlement, SalesEvent } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
+
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
 import type { PaymentProvider, PaymentResult } from './payments/provider';
@@ -15,6 +16,10 @@ import {
   type CartLine as DiscountCartLine,
   type CustomDiscount,
 } from './discounts';
+
+import { GIVEN_AWAY } from './lib/given-away';
+
+export { GIVEN_AWAY };
 
 export interface CartLine extends SaleLine {
   lineId: string;
@@ -441,7 +446,13 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
 
   const charged = total.value;
   const base = baseTotal.value;
-  if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
+  // A sale that comes to nothing (a 100% discount) is given away - nothing
+  // to charge, but its items still leave stock and it is on record. Only
+  // such a sale can be, so nothing with a price slips out as a gift.
+  const free = Math.abs(charged) < 0.005;
+  if (charged < 0) return { approved: false, error: 'The total is below zero.' };
+  if (free && pay.method !== GIVEN_AWAY) return { approved: false, error: 'The total is zero - complete it with Give away.' };
+  if (!free && pay.method === GIVEN_AWAY) return { approved: false, error: 'Only a sale that comes to nothing can be given away.' };
 
   cart.busy = true;
   const thisAttempt = ++attempt;
@@ -529,7 +540,8 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
         provider: pay.method === 'card' ? providerName : pay.method,
         approved: true,
         method: pay.method,
-        legs: pay.legs,
+        // Given away: nothing was paid, so no leg - not a cash leg of 0 in the count.
+        legs: free ? [] : pay.legs,
         cashReceived: pay.cashReceived,
         txRef,
         cardBrand,

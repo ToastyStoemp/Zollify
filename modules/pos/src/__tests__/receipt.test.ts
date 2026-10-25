@@ -39,6 +39,12 @@ describe('printed receipt amounts', () => {
     expect(lines).toContain('   à CHF 20.00');
   });
 
+  it('prints a sale given away as given away, not as an empty payment', () => {
+    const lines = text(sale({ method: 'free', payments: [], total: 0, items: [{ pid: 'p1', vid: null, title: 'Print', qty: 1, unitPrice: 20, lineTotal: 0 }] }));
+    expect(amountOn(lines, 'Given away')).toBe('CHF 0.00');
+    expect(lines.some((l) => l.startsWith('Cash'))).toBe(false);
+  });
+
   it('prints a converted sale in the charged currency, lines adding up to the total', () => {
     // CHF 45 of goods charged as a rounded EUR 47.
     const lines = text(sale({ currency: 'EUR', total: 47, baseCurrency: 'CHF', baseTotal: 45, exchangeRate: 1.04, payments: [{ kind: 'cash', amount: 47 }] }));

@@ -505,11 +505,18 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <button v-if="daily.length > 1" type="button" :class="['toggle', { on: compareDaily }]" @click="compareDaily = !compareDaily">vs. day before</button>
         </div>
         <p v-if="!daily.length" class="hint">No sales yet.</p>
-        <div v-else class="days">
+        <div v-else class="days daily">
           <div v-for="d in daily" :key="d.day" class="dayrow">
             <span class="muted">{{ d.day.slice(5) }}</span>
-            <div class="bar"><div :style="{ width: d.pct + '%' }"></div></div>
-            <span v-if="compareDaily && d.delta != null" :class="['delta', d.delta > 0 ? 'good' : d.delta < 0 ? 'bad' : 'muted']">{{ d.delta > 0 ? '+' : '' }}{{ d.deltaPct }}%</span>
+            <div class="bar">
+              <div :style="{ width: d.pct + '%' }"></div>
+              <!-- The change on the bar itself, so it takes no room from it: just past the fill, or inside a nearly full one. -->
+              <span
+                v-if="compareDaily && d.delta != null"
+                :class="['delta', d.pct > 70 ? 'in' : d.deltaPct == null || d.delta === 0 ? 'muted' : d.delta > 0 ? 'good' : 'bad']"
+                :style="d.pct > 70 ? { right: `calc(${100 - d.pct}% + .35rem)` } : { left: `calc(${d.pct}% + .35rem)` }"
+              >{{ d.deltaPct == null ? '-' : `${d.delta > 0 ? '+' : ''}${d.deltaPct}%` }}</span>
+            </div>
             <strong>{{ money(d.value, displayCurrency) }}</strong>
           </div>
         </div>
@@ -625,8 +632,16 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .dayrow { display: flex; align-items: center; gap: .5rem; }
 .dayrow > .muted { width: 3rem; flex-shrink: 0; }
 .bar { flex: 1; height: 1rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }
-.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); opacity: .75; }
-.delta { width: 3.2rem; text-align: right; flex-shrink: 0; }
+/* Full strength, so the change written on a full bar stays readable in either theme. */
+.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); }
+.delta { width: 3.2rem; text-align: right; flex-shrink: 0; white-space: nowrap; }
+/* One grid for all the days, so a wider amount on one row cannot make its bar shorter than the rest. */
+.days.daily { display: grid; grid-template-columns: 3rem 1fr minmax(6rem, auto); column-gap: .5rem; }
+.daily .dayrow { display: contents; }
+.daily strong { width: auto; white-space: nowrap; }
+.daily .bar { position: relative; }
+.daily .delta { position: absolute; top: 0; width: auto; line-height: 1rem; font-size: .7rem; font-weight: 600; }
+.daily .delta.in { color: var(--zfy-on-accent, #fff); }
 .dayrow strong { width: 6rem; text-align: right; font-variant-numeric: tabular-nums; }
 .hours { display: flex; align-items: stretch; gap: .25rem; height: 7rem; }
 .hour { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: .2rem; }

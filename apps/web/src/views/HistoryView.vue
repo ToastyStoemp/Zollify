@@ -632,7 +632,8 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .dayrow { display: flex; align-items: center; gap: .5rem; }
 .dayrow > .muted { width: 3rem; flex-shrink: 0; }
 .bar { flex: 1; height: 1rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }
-.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); opacity: .75; }
+/* Full strength, so the change written on a full bar stays readable in either theme. */
+.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); }
 .delta { width: 3.2rem; text-align: right; flex-shrink: 0; white-space: nowrap; }
 /* One grid for all the days, so a wider amount on one row cannot make its bar shorter than the rest. */
 .days.daily { display: grid; grid-template-columns: 3rem 1fr minmax(6rem, auto); column-gap: .5rem; }
@@ -640,7 +641,7 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .daily strong { width: auto; white-space: nowrap; }
 .daily .bar { position: relative; }
 .daily .delta { position: absolute; top: 0; width: auto; line-height: 1rem; font-size: .7rem; font-weight: 600; }
-.daily .delta.in { color: #fff; }
+.daily .delta.in { color: var(--zfy-on-accent, #fff); }
 .dayrow strong { width: 6rem; text-align: right; font-variant-numeric: tabular-nums; }
 .hours { display: flex; align-items: stretch; gap: .25rem; height: 7rem; }
 .hour { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: .2rem; }

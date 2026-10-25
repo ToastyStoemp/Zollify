@@ -366,6 +366,18 @@ some days or until ended. It becomes an ordinary rule in the store (every
 till applies it, offline too), the store can end it under Discounts, and
 both sides are told.
 
+*Customer display* - any device can mirror a register's cart live, facing
+the customer (Settings → This device → Open customer display), and shows a
+thank-you and the receipt QR once paid. Between sales it can play videos -
+the booth's art on a screen: added under Settings → This device, kept on
+that device only (IndexedDB, persistent storage asked for) so they play with
+no connection and never sync, back up or use the server's storage; muted,
+one after another, starting over at the end, the screen kept awake. When a
+cart comes in it either sits on a panel over the video, which plays on
+dimmed, or takes the screen while the video waits paused; either way the
+video carries on after the sale. A file the device cannot play is skipped;
+MP4 plays everywhere.
+
 *Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as
 signed JSON anywhere: each sale, a daily or weekly summary (in the webhook's
 time zone), and the in-app notifications by category - rentals and setups,

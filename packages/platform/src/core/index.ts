@@ -168,3 +168,18 @@ export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sen
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced-settings';
 export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, publicUrlFor, type AfterSalePrefs } from './after-sale';
+export {
+  addDisplayVideos,
+  displayVideoBlob,
+  displayVideoPrefs,
+  listDisplayVideos,
+  loadDisplayVideoPrefs,
+  moveDisplayVideo,
+  removeDisplayVideo,
+  requestPersistentStorage,
+  setDisplayVideoPrefs,
+  storageEstimate,
+  type DisplayVideoInfo,
+  type DisplayVideoMode,
+  type DisplayVideoPrefs,
+} from './display-videos';

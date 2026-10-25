@@ -1,13 +1,29 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { fmtPrice } from '@zollify/shared';
-import { afterSalePrefs, authFetch, currentAccount, displayCarts, loadAfterSalePrefs, realtimeConnected, setDisplaySubscribed } from '@zollify/platform';
+import {
+  afterSalePrefs,
+  authFetch,
+  currentAccount,
+  displayCarts,
+  displayVideoBlob,
+  displayVideoPrefs,
+  listDisplayVideos,
+  loadAfterSalePrefs,
+  loadDisplayVideoPrefs,
+  realtimeConnected,
+  setDisplaySubscribed,
+} from '@zollify/platform';
 import { AfterSalePanel, BrandLogo, Icon } from '@zollify/ui';
 
 /**
  * Customer display - ZollTool's. This device mirrors another register's cart
  * live, fed by the server's realtime relay. With several registers
  * broadcasting, pick one; otherwise the newest is followed.
+ *
+ * With videos added on this device (Settings → This device), they play while
+ * no sale is on; a cart either comes over them, the video dimmed behind, or
+ * takes the screen while the video waits paused - and they carry on after.
  */
 
 const THANKS_DISPLAY_MS = 8_000;
@@ -53,12 +69,77 @@ watch(thanksRaw, (on) => {
 });
 const screen = computed<'idle' | 'thanks' | 'cart'>(() => (thanksRaw.value && !thanksExpired.value ? 'thanks' : current.value?.lines.length ? 'cart' : 'idle'));
 
-// Keep the screen lit while there is something to show; let it sleep a minute after.
+// ── Videos between sales ────────────────────────────────────────────────────
+const playlist = ref<string[]>([]);
+const playing = ref(0);
+const videoSrc = ref<string | null>(null);
+const player = ref<HTMLVideoElement | null>(null);
+/** The browser would not start a video by itself; a tap on the screen does. */
+const needsTap = ref(false);
+/** Videos in a row that would not play - once every one has failed, the logo comes back. */
+let failures = 0;
+const videosOn = computed(() => displayVideoPrefs.enabled && playlist.value.length > 0);
+/** Full screen between sales; under the cart when it comes over them; out of sight when the cart takes the screen. */
+const videoShown = computed(() => videosOn.value && (screen.value === 'idle' || displayVideoPrefs.mode === 'overlay'));
+const overVideo = computed(() => videoShown.value && screen.value !== 'idle');
+
+async function loadVideos(): Promise<void> {
+  await loadDisplayVideoPrefs().catch(() => {});
+  playlist.value = (await listDisplayVideos().catch(() => [])).map((v) => v.id);
+  failures = 0;
+  if (playlist.value.length) await cue(0);
+}
+async function cue(index: number): Promise<void> {
+  const id = playlist.value[index];
+  if (!id) return;
+  playing.value = index;
+  const blob = await displayVideoBlob(id).catch(() => null);
+  if (videoSrc.value) URL.revokeObjectURL(videoSrc.value);
+  videoSrc.value = blob ? URL.createObjectURL(blob) : null;
+  if (!blob) return next();
+  await nextTick();
+  void play();
+}
+function next(): void {
+  if (playlist.value.length) void cue((playing.value + 1) % playlist.value.length);
+}
+/** A file this device cannot play: skip it, and give up once none will. */
+function failed(): void {
+  failures++;
+  if (failures >= playlist.value.length) {
+    playlist.value = [];
+    return;
+  }
+  next();
+}
+async function play(): Promise<void> {
+  const v = player.value;
+  if (!v || !videoShown.value) return;
+  // Muted as a property too: only a silent video may start on its own.
+  v.muted = true;
+  try {
+    await v.play();
+    needsTap.value = false;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'NotAllowedError') needsTap.value = true;
+  }
+}
+function started(): void {
+  failures = 0;
+}
+// Pause when the cart takes the screen, carry on where it was after.
+watch(videoShown, (shown) => {
+  if (shown) void play();
+  else player.value?.pause();
+});
+
+// Keep the screen lit while there is something to show - a sale, or the videos; let it sleep a minute after.
+const awake = computed(() => screen.value !== 'idle' || videoShown.value);
 let sleepTimer: ReturnType<typeof setTimeout> | undefined;
 watch(
-  screen,
-  async (state) => {
-    if (state !== 'idle') {
+  awake,
+  async (on) => {
+    if (on) {
       clearTimeout(sleepTimer);
       sleepTimer = undefined;
       if (!wakeLock) {
@@ -84,6 +165,7 @@ onMounted(() => {
   setDisplaySubscribed(true);
   void loadAfterSalePrefs().catch(() => {});
   void loadLogo();
+  void loadVideos();
   clock = setInterval(() => (now.value = Date.now()), 5000);
 });
 onUnmounted(() => {
@@ -92,13 +174,32 @@ onUnmounted(() => {
   clearTimeout(thanksTimer);
   clearTimeout(sleepTimer);
   void wakeLock?.release().catch(() => {});
+  if (videoSrc.value) URL.revokeObjectURL(videoSrc.value);
 });
 
 const amount = (n: number): string => n.toFixed(2);
 </script>
 
 <template>
-  <div class="display">
+  <div class="display" :class="{ 'with-video': videoShown, 'over-video': overVideo }">
+    <video
+      v-if="videoSrc"
+      v-show="videoShown"
+      ref="player"
+      class="video"
+      :src="videoSrc"
+      muted
+      playsinline
+      autoplay
+      preload="auto"
+      :loop="playlist.length === 1"
+      aria-hidden="true"
+      @playing="started"
+      @ended="next"
+      @error="failed"
+    ></video>
+    <div v-if="overVideo" class="scrim"></div>
+    <button v-if="needsTap && videoShown" type="button" class="tap" @click="play">Tap to play the videos</button>
     <div class="controls">
       <select v-if="sources.length > 1" v-model="selectedId" aria-label="Register">
         <option value="">newest register</option>
@@ -107,22 +208,24 @@ const amount = (n: number): string => n.toFixed(2);
     </div>
     <router-link :to="{ name: 'settings' }" class="exit" aria-label="Leave display mode"><Icon name="x" :size="18" /></router-link>
 
-    <div v-if="screen === 'idle'" class="idle">
+    <p v-if="screen === 'idle' && videoShown && !realtimeConnected" class="offline">Not connected - waiting for the server…</p>
+    <div v-if="screen === 'idle' && videoShown" class="spacer"></div>
+    <div v-else-if="screen === 'idle'" class="idle">
       <BrandLogo v-if="logo" :src="logo" size="large" />
       <p v-if="boothName" class="brand">{{ boothName }}</p>
       <p v-if="!realtimeConnected" class="hint">Not connected - waiting for the server…</p>
       <p v-else class="hint pulse">Waiting for the next sale…</p>
     </div>
 
-    <div v-else-if="screen === 'thanks' && current" class="thanks">
+    <div v-else-if="screen === 'thanks' && current" class="thanks" :class="{ panel: overVideo }">
       <AfterSalePanel :thank-you="afterSalePrefs.thankYou" :total="fmtPrice(current.paid!.total, current.currency)" :receipt-url="receiptUrl" :logo="logo" :qr-size="260" />
     </div>
 
-    <template v-else-if="current">
+    <div v-else-if="current" class="cart" :class="{ panel: overVideo }">
       <p class="event">{{ current.eventName }}<span v-if="stale" class="stale">register offline?</span></p>
       <div class="lines">
         <div v-for="(l, i) in current.lines" :key="i" class="line">
-          <span class="name">{{ l.qty }} × {{ l.title }}<span v-if="l.variantLabel" class="muted"> · {{ l.variantLabel }}</span></span>
+          <span class="name">{{ l.qty }} × {{ l.title }}<span v-if="l.variantLabel && !l.title.endsWith(l.variantLabel)" class="muted"> · {{ l.variantLabel }}</span></span>
           <span class="sum">{{ fmtPrice(l.lineTotal, current.currency) }}</span>
         </div>
         <div v-for="d in current.discounts" :key="d.name" class="line good"><span>{{ d.name }}</span><span>− {{ fmtPrice(d.amount, current.currency) }}</span></div>
@@ -131,15 +234,28 @@ const amount = (n: number): string => n.toFixed(2);
         <p class="label">Total</p>
         <p class="figure"><span class="cur">{{ current.currency }}</span><span class="num">{{ amount(current.total) }}</span></p>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .display { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; padding: 2rem; background: var(--zfy-bg); color: var(--zfy-ink); }
-.controls { position: absolute; left: .75rem; top: .75rem; }
+.controls { position: absolute; left: .75rem; top: .75rem; z-index: 3; }
 .controls select { font-size: .75rem; min-height: 1.8rem; }
-.exit { position: absolute; right: .75rem; top: .75rem; padding: .4rem; border-radius: 8px; color: var(--zfy-faint); }
+.exit { position: absolute; right: .75rem; top: .75rem; z-index: 3; padding: .4rem; border-radius: 8px; color: var(--zfy-faint); }
+.cart { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Videos between sales: full bleed, black behind whatever does not fill the screen. */
+.display.with-video { background: #000; }
+.video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; z-index: 0; }
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); z-index: 1; }
+.spacer { flex: 1; }
+.offline { position: absolute; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 2; margin: 0; padding: .3rem .7rem; border-radius: 6px; background: rgba(0, 0, 0, .6); color: #fff; font-size: .8rem; }
+.tap { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 2; font-size: 1.2rem; padding: .8rem 1.4rem; }
+.with-video .exit { color: rgba(255, 255, 255, .55); }
+/* The cart over a playing video: on a panel of its own, readable from across the table. */
+.panel { position: relative; z-index: 2; width: 100%; max-width: 48rem; margin: auto; padding: 1.5rem 2rem; border-radius: 16px; background: color-mix(in srgb, var(--zfy-bg) 96%, transparent); backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
+.cart.panel { flex: 0 1 auto; max-height: calc(100% - 2rem); }
+.panel .lines { margin-top: 1rem; }
 .exit:hover { color: var(--zfy-ink); background: var(--zfy-surface); }
 .idle, .thanks { margin: auto; text-align: center; display: flex; flex-direction: column; gap: 1rem; align-items: center; }
 .logo { max-width: min(22rem, 70vw); max-height: 10rem; object-fit: contain; }

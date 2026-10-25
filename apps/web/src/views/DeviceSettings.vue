@@ -195,6 +195,7 @@ async function removeDevice(d: DeviceSummary): Promise<void> {
   }
 }
 import SharedTillSettings from './SharedTillSettings.vue';
+import DisplayVideosSettings from '../components/DisplayVideosSettings.vue';
 
 // ── Notifications on this device ────────────────────────────────────────────
 const notifyError = ref<string | null>(null);
@@ -233,6 +234,8 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
     <h3>Customer display</h3>
     <p class="hint">Turn this device into a second screen that mirrors another register's cart live - a tablet facing the customer. Sales still happen on the register.</p>
     <router-link :to="{ name: 'display' }" class="btn">Open customer display</router-link>
+    <h3>Videos on the customer display</h3>
+    <DisplayVideosSettings />
 
     <h3>After a sale</h3>
     <p class="hint">What this screen shows once a payment goes through - on a register and on a customer display alike. Set on each device on its own, so the till and the screen facing the customer can differ.</p>

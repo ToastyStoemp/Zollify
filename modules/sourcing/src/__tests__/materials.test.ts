@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { materialOnHand, materialTotals, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type Material } from '../engine';
+import { materialOnHand, materialTotals, materialWaste, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type Material } from '../engine';
 
 /** Paper ordered in boxes that arrive when the supplier has them. */
 
@@ -11,7 +11,7 @@ describe('an order that comes in parts', () => {
     expect(receivedOf(m.purchases[0]!)).toBe(25);
     expect(outstandingOf(m.purchases[0]!)).toBe(50);
     expect(materialTotals(m)).toMatchObject({ qty: 75, received: 25, onOrder: 50, spent: 30, unitCost: 0.4 });
-    expect(materialOnHand(m, { used: 10, recent: [] })).toBe(15);
+    expect(materialOnHand(m, { used: 10, wasted: 0, recent: [] })).toBe(15);
   });
 
   it('is on order in full until the first box arrives', () => {
@@ -44,5 +44,14 @@ describe('what paper costs, and what it makes a print cost', () => {
 
   it('leaves out products no longer in the catalogue', () => {
     expect(recipeCostChanges([dossier()], [a3([{ id: 'o1', qty: 10, cost: 10 }])], () => undefined)).toEqual([]);
+  });
+});
+
+describe('waste', () => {
+  it('is the misprints as a share of all use, at the average price paid', () => {
+    const m = a3([{ id: 'o1', qty: 50, cost: 100 }]);
+    expect(materialWaste(m, { used: 10, wasted: 1, recent: [] })).toEqual({ qty: 1, rate: 0.1, cost: 2 });
+    expect(materialWaste(m, { used: 0, wasted: 0, recent: [] })).toEqual({ qty: 0, rate: 0, cost: 0 });
+    expect(materialWaste(m, undefined)).toEqual({ qty: 0, rate: 0, cost: 0 });
   });
 });

@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { currentBatch, materialOnHand, materialTotals, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type CostChange, type Material, type MaterialUse, type Purchase } from '../engine';
+import { currentBatch, materialOnHand, materialTotals, materialWaste, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type CostChange, type Material, type MaterialUse, type Purchase } from '../engine';
 import { currentUnitCost } from '@zollify/shared';
 import { costSettings, countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
 import { sdk } from '../runtime';
@@ -179,13 +179,14 @@ function batchText(m: Material): string {
 }
 const onHand = (m: Material) => materialOnHand(m, usageOf(m));
 const low = (m: Material) => typeof m.lowAt === 'number' && onHand(m) <= m.lowAt;
-const SOURCE: Record<MaterialUse['source'], string> = { manual: 'Used', printer: 'Printed', count: 'Recount' };
+const SOURCE: Record<MaterialUse['source'], string> = { manual: 'Used', printer: 'Printed', count: 'Recount', waste: 'Misprint' };
+const waste = (m: Material) => materialWaste(m, usageOf(m));
 const useText = (u: MaterialUse, m: Material) => (u.source === 'count' ? (u.qty > 0 ? `${plural(u.qty, m.unit)} fewer` : `${plural(-u.qty, m.unit)} more`) : plural(u.qty, m.unit));
 const stamp = (t: number) => new Date(t).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
-const using = ref<{ m: Material; mode: 'use' | 'count'; qty: string; note: string } | null>(null);
+const using = ref<{ m: Material; mode: 'use' | 'count'; qty: string; note: string; waste: boolean } | null>(null);
 function openUse(m: Material, mode: 'use' | 'count'): void {
-  using.value = { m, mode, qty: mode === 'count' ? String(onHand(m)) : '', note: '' };
+  using.value = { m, mode, qty: mode === 'count' ? String(onHand(m)) : '', note: '', waste: false };
 }
 async function logUse(): Promise<void> {
   const u = using.value;
@@ -193,7 +194,7 @@ async function logUse(): Promise<void> {
   const qty = parseFloat(u.qty);
   if (u.mode === 'use' ? !(qty > 0) : !(qty >= 0)) return emit('error', u.mode === 'use' ? 'How many were used?' : 'How many are there?');
   try {
-    if (u.mode === 'use') await useMaterial(u.m.id, qty, u.note.trim() || undefined);
+    if (u.mode === 'use') await useMaterial(u.m.id, qty, u.note.trim() || undefined, u.waste);
     else await countMaterial(u.m.id, qty);
     using.value = null;
   } catch (err) {
@@ -222,7 +223,7 @@ async function undoUse(u: MaterialUse): Promise<void> {
     <article v-for="m in list" :key="m.id" class="card">
       <div class="head">
         <span class="main"><strong>{{ m.name }}<em>{{ m.type }}</em></strong><small>{{ plural(materialTotals(m).qty, m.unit) }} ordered<template v-if="materialTotals(m).onOrder"> · <span class="onorder">{{ amount(m, materialTotals(m).onOrder) }} still to come</span></template> · {{ fmtPrice(materialTotals(m).spent, currency) }} spent · used by {{ usedBy(m) }} recipe{{ usedBy(m) === 1 ? '' : 's' }}</small></span>
-        <span :class="['unit', 'hand', { low: low(m) }]"><strong>{{ onHand(m) }}</strong><small>{{ m.unit }}s on hand{{ low(m) ? ' · low' : '' }}</small></span>
+        <span :class="['unit', 'hand', { low: low(m) }]"><strong>{{ onHand(m) }}</strong><small>{{ m.unit }}s on hand{{ low(m) ? ' · low' : '' }}</small><small v-if="waste(m).qty > 0" class="waste" :title="`${plural(waste(m).qty, m.unit)} wasted, at the average price paid`">{{ Math.round(waste(m).rate * 100) }}% waste · {{ fmtPrice(waste(m).cost, currency) }}</small></span>
         <span class="unit" :title="`Average over every order: ${fmtPrice(materialTotals(m).unitCost, currency)} per ${m.unit}`"><strong>{{ fmtPrice(nowCost(m), currency) }}</strong><small>per {{ m.unit }} now</small><small class="batch">{{ batchText(m) }}</small></span>
         <button type="button" @click="openBuy(m)"><Icon name="plus" :size="14" /> Purchase</button>
         <button type="button" @click="openUse(m, 'use')">Use</button>
@@ -339,8 +340,9 @@ async function undoUse(u: MaterialUse): Promise<void> {
           <label><span>{{ using.mode === 'use' ? 'Used' : 'On hand' }} ({{ using.m.unit }}s)</span><input v-model="using.qty" type="number" min="0" step="1" inputmode="decimal" /></label>
           <label v-if="using.mode === 'use'"><span>Note</span><input v-model="using.note" type="text" maxlength="200" /></label>
         </div>
+        <label v-if="using.mode === 'use'" class="check"><input v-model="using.waste" type="checkbox" /> A misprint - count it as waste</label>
       </div>
-      <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="using = null">Cancel</button><button type="button" class="primary" @click="logUse">{{ using.mode === 'use' ? 'Log use' : 'Save count' }}</button></div></template>
+      <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="using = null">Cancel</button><button type="button" class="primary" @click="logUse">{{ using.mode === 'count' ? 'Save count' : using.waste ? 'Log waste' : 'Log use' }}</button></div></template>
     </ModalShell>
   </div>
 </template>
@@ -387,6 +389,7 @@ async function undoUse(u: MaterialUse): Promise<void> {
 .src { font-weight: 600; }
 .src.printer { color: var(--zfy-accent-ink, #0a5a4a); }
 .src.count { color: var(--zfy-muted, #5a6472); }
+.src.waste, .hand .waste { color: var(--zfy-danger, #c6512f); }
 .form { display: flex; flex-direction: column; gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }

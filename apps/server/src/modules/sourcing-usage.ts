@@ -20,7 +20,8 @@ import { reduceProducts, type ModuleContext, type ModuleServices, type PublicMod
  * and can be revoked at any time.
  */
 
-export type UseSource = 'manual' | 'printer' | 'count';
+/** By hand, sent by the printing app, what a recount found - or a misprint, which is waste. */
+export type UseSource = 'manual' | 'printer' | 'count' | 'waste';
 export interface MaterialUse {
   id: string;
   materialId: string;
@@ -32,6 +33,8 @@ export interface MaterialUse {
 export interface MaterialUsage {
   /** Everything used, recounts included (a recount that found more is a negative use). */
   used: number;
+  /** The part of `used` that was misprints and other waste. */
+  wasted: number;
   /** The latest uses, newest first. */
   recent: MaterialUse[];
 }
@@ -129,9 +132,11 @@ export const onHandOf = (db: Database.Database, accountId: string, m: MaterialDo
 /** Per material: what was used and the latest uses - for the snapshot. */
 export function usageSnapshot(db: Database.Database, accountId: string): Record<string, MaterialUsage> {
   const out: Record<string, MaterialUsage> = {};
-  const totals = db.prepare('SELECT materialId, SUM(qty) AS used FROM sourcing_material_use WHERE accountId = ? GROUP BY materialId').all(accountId) as { materialId: string; used: number }[];
+  const totals = db
+    .prepare("SELECT materialId, SUM(qty) AS used, SUM(CASE WHEN source = 'waste' THEN qty ELSE 0 END) AS wasted FROM sourcing_material_use WHERE accountId = ? GROUP BY materialId")
+    .all(accountId) as { materialId: string; used: number; wasted: number }[];
   const recent = db.prepare('SELECT id, materialId, qty, at, source, note FROM sourcing_material_use WHERE accountId = ? AND materialId = ? ORDER BY at DESC LIMIT ?');
-  for (const t of totals) out[t.materialId] = { used: round(t.used), recent: recent.all(accountId, t.materialId, RECENT) as MaterialUse[] };
+  for (const t of totals) out[t.materialId] = { used: round(t.used), wasted: round(t.wasted), recent: recent.all(accountId, t.materialId, RECENT) as MaterialUse[] };
   return out;
 }
 
@@ -219,7 +224,7 @@ function logUse(
   return { duplicate: !res.changes, onHand };
 }
 
-const UseBody = z.object({ qty: z.number().positive().max(100_000), note: z.string().trim().max(200).optional() });
+const UseBody = z.object({ qty: z.number().positive().max(100_000), note: z.string().trim().max(200).optional(), waste: z.boolean().optional() });
 const CountBody = z.object({ onHand: z.number().min(0).max(10_000_000) });
 const KeyBody = z.object({ label: z.string().trim().min(1).max(60) });
 
@@ -233,8 +238,8 @@ export function registerUsage(app: FastifyInstance, ctx: ModuleContext): void {
     if (!m) return reply.code(404).send({ error: 'not_found' });
     const body = UseBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'How many were used?' });
-    const { onHand } = logUse(ctx, who.accountId, m, { qty: body.data.qty, source: 'manual', note: body.data.note });
-    return { onHand, usage: usageSnapshot(ctx.db, who.accountId)[m.id] ?? { used: 0, recent: [] } };
+    const { onHand } = logUse(ctx, who.accountId, m, { qty: body.data.qty, source: body.data.waste ? 'waste' : 'manual', note: body.data.note });
+    return { onHand, usage: usageSnapshot(ctx.db, who.accountId)[m.id] ?? { used: 0, wasted: 0, recent: [] } };
   });
 
   /** A recount: the difference to what the books say becomes a use (negative when more was found). */
@@ -246,7 +251,7 @@ export function registerUsage(app: FastifyInstance, ctx: ModuleContext): void {
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'How many are there?' });
     const diff = round(onHandOf(ctx.db, who.accountId, m) - body.data.onHand);
     if (diff !== 0) logUse(ctx, who.accountId, m, { qty: diff, source: 'count', note: `Counted ${body.data.onHand}` });
-    return { onHand: onHandOf(ctx.db, who.accountId, m), usage: usageSnapshot(ctx.db, who.accountId)[m.id] ?? { used: 0, recent: [] } };
+    return { onHand: onHandOf(ctx.db, who.accountId, m), usage: usageSnapshot(ctx.db, who.accountId)[m.id] ?? { used: 0, wasted: 0, recent: [] } };
   });
 
   app.delete<{ Params: { id: string } }>('/usage/:id', async (req) => {
@@ -307,6 +312,8 @@ const MaterialBody = z.object({
   note: z.string().trim().max(200).optional(),
   /** The print job's own id: sending it again counts once. */
   id: JobId,
+  /** A misprint: still used up, but counted as waste. */
+  waste: z.boolean().optional(),
 });
 /** Copies of a product printed: every material of its dossier's recipe, times the copies. */
 const RecipeBody = z.object({
@@ -315,6 +322,7 @@ const RecipeBody = z.object({
   copies: z.number().int().positive().max(10_000),
   note: z.string().trim().max(200).optional(),
   id: JobId,
+  waste: z.boolean().optional(),
 });
 
 /**
@@ -363,12 +371,13 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
       const lines = (d.recipe ?? []).filter((r) => r.materialId && Number(r.qty) > 0);
       if (!lines.length) return reply.code(409).send({ error: 'no_recipe', message: `"${d.title}" has no recipe yet - give its dossier the materials one print uses.` });
       const note = [`${job.data.copies} × ${d.title}`, job.data.note].filter(Boolean).join(' · ');
+      const source: UseSource = job.data.waste ? 'waste' : 'printer';
       const out = [];
       let duplicate = true;
       for (const line of lines) {
         const m = all.find((x) => x.id === line.materialId);
         if (!m) continue;
-        const res = logUse(ctx, key.accountId, m, { id: job.data.id && `print-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source: 'printer', note, keyId: key.id });
+        const res = logUse(ctx, key.accountId, m, { id: job.data.id && `${source}-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source, note, keyId: key.id });
         duplicate &&= res.duplicate;
         out.push({ ...view(key.accountId, m), onHand: res.onHand });
       }
@@ -379,7 +388,8 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
     const wanted = body.data.material.toLowerCase();
     const m = all.find((x) => x.id === body.data.material) ?? all.find((x) => x.name.trim().toLowerCase() === wanted);
     if (!m) return reply.code(404).send({ error: 'unknown_material', message: `No material "${body.data.material}". Add it under Sourcing → Materials, or send its id.` });
-    const { duplicate, onHand } = logUse(ctx, key.accountId, m, { id: body.data.id && `print-${body.data.id}`, qty: body.data.qty, source: 'printer', note: body.data.note, keyId: key.id });
+    const source: UseSource = body.data.waste ? 'waste' : 'printer';
+    const { duplicate, onHand } = logUse(ctx, key.accountId, m, { id: body.data.id && `${source}-${body.data.id}`, qty: body.data.qty, source, note: body.data.note, keyId: key.id });
     return reply.code(duplicate ? 200 : 201).send({ material: { ...view(key.accountId, m), onHand }, duplicate });
   });
 }

@@ -199,3 +199,22 @@ describe('prints by recipe, and product costs that follow the batches', () => {
     expect((await printer('POST', '/usage', { print: 'Empty', copies: 1 }, key)).statusCode).toBe(409);
   });
 });
+
+describe('misprints', () => {
+  it('are used up like any print, but counted as waste - by hand and from the printing app', async () => {
+    await call('PUT', '/materials/a2', { id: 'a2', name: 'Hahnemühle A2', type: 'paper', unit: 'sheet', purchases: [{ id: 'p1', qty: 20, cost: 40, date: '2026-10-01' }] });
+    const byHand = await call('POST', '/materials/a2/use', { qty: 2, waste: true, note: 'banding' });
+    expect(byHand.json()).toMatchObject({ onHand: 18, usage: { used: 2, wasted: 2 } });
+    expect(byHand.json().usage.recent[0]).toMatchObject({ source: 'waste', qty: 2, note: 'banding' });
+
+    const key = (await call('POST', '/keys', { label: 'Print room' })).json().secret;
+    const printed = await printer('POST', '/usage', { material: 'a2', qty: 8, id: 'job-0500' }, key);
+    expect(printed.statusCode).toBe(201);
+    // The same job id again, as a misprint: a different use, not the print resent.
+    const spoiled = await printer('POST', '/usage', { material: 'a2', qty: 1, id: 'job-0500', waste: true }, key);
+    expect(spoiled.statusCode).toBe(201);
+    expect(spoiled.json().material.onHand).toBe(9);
+    expect((await call('GET', '/snapshot')).json().usage.a2).toMatchObject({ used: 11, wasted: 3 });
+    expect((await printer('POST', '/usage', { material: 'a2', qty: 1, id: 'job-0500', waste: true }, key)).json().duplicate).toBe(true);
+  });
+});

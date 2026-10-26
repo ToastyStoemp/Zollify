@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { materialOnHand, materialTotals, outstandingOf, receivedOf, type Material, type MaterialUse, type Purchase } from '../engine';
+import { materialOnHand, materialTotals, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type CostChange, type Material, type MaterialUse, type Purchase } from '../engine';
 import { countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
 import { sdk } from '../runtime';
 import PrinterKeys from './PrinterKeys.vue';
@@ -39,6 +39,34 @@ async function saveMaterial(): Promise<void> {
     emit('error', err instanceof Error ? err.message : 'Could not save the material.');
   }
 }
+// ── Product costs from recipes, at today's material prices ──────────────────
+/** The cost on the catalogue product (or variant); undefined when it is gone. */
+function productCost(pid: string, vid: string | null): number | null | undefined {
+  const p = sdk().data.products.get(pid);
+  if (!p) return undefined;
+  if (vid) {
+    const v = p.variants.find((x) => x.id === vid);
+    return v ? (v.cost ?? null) : undefined;
+  }
+  return p.cost ?? null;
+}
+const costChanges = computed(() => recipeCostChanges(snap.value.dossiers, snap.value.materials, productCost));
+const reviewing = ref<CostChange[] | null>(null);
+async function applyCosts(): Promise<void> {
+  const changes = reviewing.value ?? [];
+  try {
+    for (const c of changes) {
+      const p = sdk().data.products.get(c.pid);
+      if (!p) continue;
+      await sdk().data.products.upsert(c.vid ? { ...p, variants: p.variants.map((v) => (v.id === c.vid ? { ...v, cost: c.now } : v)) } : { ...p, cost: c.now });
+    }
+    sdk().ui.toast(`Cost updated on ${changes.length} product${changes.length === 1 ? '' : 's'}.`, { kind: 'success' });
+    reviewing.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not update the product costs.');
+  }
+}
+
 // ── Packs: a box of 25 sheets, typed as boxes and kept as sheets ────────────
 const packs = (m: Material) => (m.packSize && m.packSize > 1 ? m.packSize : 0);
 const packName = (m: Material) => m.packName || 'box';
@@ -156,8 +184,9 @@ async function undoUse(u: MaterialUse): Promise<void> {
 <template>
   <div class="tab">
     <div class="tools">
-      <p class="hint">Unit cost = total spent ÷ total units bought, so it self-adjusts as prices change. Give a dossier a recipe and its cost per print follows.</p>
+      <p class="hint">Unit cost = total spent ÷ total units ordered, so it follows the price of every order. Give a dossier a recipe and its cost per print follows - and when prices move, update the products' costs from here.</p>
       <span class="spacer"></span>
+      <button v-if="costChanges.length" type="button" @click="reviewing = costChanges">Update {{ costChanges.length }} product cost{{ costChanges.length === 1 ? '' : 's' }}</button>
       <button type="button" class="primary" @click="openNew"><Icon name="plus" :size="14" /> New material</button>
     </div>
     <p v-if="!list.length" class="empty">No materials yet. Start with the paper you print on.</p>
@@ -174,7 +203,8 @@ async function undoUse(u: MaterialUse): Promise<void> {
       </div>
       <ul v-if="m.purchases.length" class="purchases">
         <li v-for="p in sorted(m)" :key="p.id" :class="{ waiting: outstandingOf(p) > 0, parts: !!p.deliveries }">
-          <span>{{ p.date || '-' }}</span><span>{{ amount(m, p.qty) }}</span><span>{{ fmtPrice(p.cost, currency) }}</span>
+          <span>{{ p.date || '-' }}</span><span>{{ amount(m, p.qty) }}</span>
+          <span class="price">{{ fmtPrice(p.cost, currency) }}<small>{{ fmtPrice(pricePerUnit(p), currency) }}/{{ m.unit }}<template v-if="packs(m)"> · {{ fmtPrice(pricePerUnit(p) * packs(m), currency) }}/{{ packName(m) }}</template></small></span>
           <span class="muted">
             <template v-if="p.deliveries">
               <span class="got">{{ amount(m, receivedOf(p)) }} arrived<template v-if="outstandingOf(p) > 0">, {{ amount(m, outstandingOf(p)) }} to come</template></span>
@@ -245,6 +275,16 @@ async function undoUse(u: MaterialUse): Promise<void> {
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="buying = null">Cancel</button><button type="button" class="primary" @click="logPurchase">Log purchase</button></div></template>
     </ModalShell>
 
+    <ModalShell v-if="reviewing" title="Product costs from recipes" @close="reviewing = null">
+      <div class="form">
+        <p class="hint">These products' recipes cost something else at today's material prices. Updating writes the new cost onto each product, where margins and the books read it.</p>
+        <ul class="changes">
+          <li v-for="c in reviewing" :key="c.dossierId"><span>{{ c.title }}</span><span class="muted">{{ c.was === null ? 'no cost yet' : fmtPrice(c.was, currency) }}</span><span>→</span><strong>{{ fmtPrice(c.now, currency) }}</strong></li>
+        </ul>
+      </div>
+      <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="reviewing = null">Cancel</button><button type="button" class="primary" @click="applyCosts">Update costs</button></div></template>
+    </ModalShell>
+
     <ModalShell v-if="receiving" :title="`Received · ${receiving.m.name}`" @close="receiving = null">
       <div class="form">
         <p class="hint">Still to come on this order: {{ amount(receiving.m, outstandingOf(receiving.p)) }}.</p>
@@ -292,13 +332,17 @@ async function undoUse(u: MaterialUse): Promise<void> {
 .unit small { color: var(--zfy-muted, #5a6472); font-size: .7rem; }
 .head button { min-height: 2.2rem; padding: .2rem .6rem; font-size: .78rem; }
 .purchases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
-.purchases li { display: grid; grid-template-columns: 6rem 9rem 6rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
+.purchases li { display: grid; grid-template-columns: 6rem 9rem 9rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
 .purchases li.waiting { box-shadow: inset 3px 0 0 var(--zfy-warning, #d9942b); }
 /* An order's deliveries are worth reading in full, not cut off like a long note. */
 .purchases li.parts .muted { white-space: normal; }
 .got { color: var(--zfy-ink, #1a2230); }
 .onorder { color: var(--zfy-warning-ink, #8a5a12); font-weight: 600; }
 .acts { display: flex; align-items: center; gap: .2rem; }
+.price { display: flex; flex-direction: column; }
+.price small { color: var(--zfy-muted, #5a6472); font-size: .7rem; }
+.changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
+.changes li { display: grid; grid-template-columns: 1fr auto auto auto; gap: .5rem; align-items: center; font-variant-numeric: tabular-nums; }
 .acts .receive { min-height: 2rem; padding: .1rem .5rem; font-size: .74rem; }
 .acts .quiet { font-size: .74rem; }
 .qty { display: flex; gap: .4rem; align-items: center; }

@@ -321,6 +321,35 @@ export function unitCost(m: Material): number {
   const cost = m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0);
   return qty > 0 ? round4(cost / qty) : 0;
 }
+/** What one unit of an order cost: its price divided by what was ordered. */
+export const pricePerUnit = (p: Purchase): number => ((Number(p.qty) || 0) > 0 ? round4((Number(p.cost) || 0) / Number(p.qty)) : 0);
+
+/** A product whose recipe now costs something else than the cost on the product. */
+export interface CostChange {
+  dossierId: string;
+  pid: string;
+  vid: string | null;
+  title: string;
+  was: number | null;
+  now: number;
+}
+/**
+ * Products to bring up to date: every dossier with a recipe and a catalogue
+ * link whose print cost, at today's material prices, differs from the cost
+ * on the product.
+ */
+export function recipeCostChanges(dossiers: Dossier[], materials: Material[], costOf: (pid: string, vid: string | null) => number | null | undefined): CostChange[] {
+  const out: CostChange[] = [];
+  for (const d of dossiers) {
+    if (!d.pid || !d.recipe.some((r) => r.materialId && Number(r.qty) > 0)) continue;
+    const was = costOf(d.pid, d.vid || null);
+    if (was === undefined) continue;
+    const now = printCost(d.recipe, materials).total;
+    if (was === null || Math.abs(was - now) >= 0.005) out.push({ dossierId: d.id, pid: d.pid, vid: d.vid || null, title: d.title, was, now });
+  }
+  return out;
+}
+
 /** What of an order has arrived: all of it, unless deliveries are being logged. */
 export function receivedOf(p: Purchase): number {
   return p.deliveries ? round4(p.deliveries.reduce((s, d) => s + (Number(d.qty) || 0), 0)) : Number(p.qty) || 0;

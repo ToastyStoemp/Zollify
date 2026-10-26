@@ -2,9 +2,10 @@
 import { computed, ref } from 'vue';
 import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { materialTotals, type Material } from '../engine';
-import { remove, save, snap } from '../api';
+import { materialOnHand, materialTotals, type Material, type MaterialUse } from '../engine';
+import { countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
 import { sdk } from '../runtime';
+import PrinterKeys from './PrinterKeys.vue';
 
 /**
  * Materials - home-print consumables. Paper, ink, packaging: log what you
@@ -23,7 +24,9 @@ function openNew(): void {
 async function saveMaterial(): Promise<void> {
   if (!editing.value?.name.trim()) return emit('error', 'A material needs a name.');
   try {
-    await save('materials', { ...editing.value, name: editing.value.name.trim(), unit: editing.value.unit.trim() || 'unit' });
+    const { lowAt, ...rest } = editing.value;
+    const mark = Number(lowAt);
+    await save('materials', { ...rest, name: rest.name.trim(), unit: rest.unit.trim() || 'unit', ...(lowAt !== undefined && String(lowAt) !== '' && mark >= 0 ? { lowAt: mark } : {}) });
     editing.value = null;
   } catch (err) {
     emit('error', err instanceof Error ? err.message : 'Could not save the material.');
@@ -49,6 +52,39 @@ const dropPurchase = (m: Material, id: string) => save('materials', { ...m, purc
 const usedBy = (m: Material) => snap.value.dossiers.filter((d) => d.recipe.some((r) => r.materialId === m.id)).length;
 const sorted = (m: Material) => [...m.purchases].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
 const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+
+// ── On hand: bought less used, by hand, by the printing app, or by a recount ─
+const usageOf = (m: Material) => snap.value.usage?.[m.id];
+const onHand = (m: Material) => materialOnHand(m, usageOf(m));
+const low = (m: Material) => typeof m.lowAt === 'number' && onHand(m) <= m.lowAt;
+const SOURCE: Record<MaterialUse['source'], string> = { manual: 'Used', printer: 'Printed', count: 'Recount' };
+const useText = (u: MaterialUse, m: Material) => (u.source === 'count' ? (u.qty > 0 ? `${plural(u.qty, m.unit)} fewer` : `${plural(-u.qty, m.unit)} more`) : plural(u.qty, m.unit));
+const stamp = (t: number) => new Date(t).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+
+const using = ref<{ m: Material; mode: 'use' | 'count'; qty: string; note: string } | null>(null);
+function openUse(m: Material, mode: 'use' | 'count'): void {
+  using.value = { m, mode, qty: mode === 'count' ? String(onHand(m)) : '', note: '' };
+}
+async function logUse(): Promise<void> {
+  const u = using.value;
+  if (!u) return;
+  const qty = parseFloat(u.qty);
+  if (u.mode === 'use' ? !(qty > 0) : !(qty >= 0)) return emit('error', u.mode === 'use' ? 'How many were used?' : 'How many are there?');
+  try {
+    if (u.mode === 'use') await useMaterial(u.m.id, qty, u.note.trim() || undefined);
+    else await countMaterial(u.m.id, qty);
+    using.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not save that.');
+  }
+}
+async function undoUse(u: MaterialUse): Promise<void> {
+  try {
+    await dropUse(u.id);
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not remove that.');
+  }
+}
 </script>
 
 <template>
@@ -62,8 +98,11 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
     <article v-for="m in list" :key="m.id" class="card">
       <div class="head">
         <span class="main"><strong>{{ m.name }}<em>{{ m.type }}</em></strong><small>{{ plural(materialTotals(m).qty, m.unit) }} bought · {{ fmtPrice(materialTotals(m).spent, currency) }} spent · used by {{ usedBy(m) }} recipe{{ usedBy(m) === 1 ? '' : 's' }}</small></span>
+        <span :class="['unit', 'hand', { low: low(m) }]"><strong>{{ onHand(m) }}</strong><small>{{ m.unit }}s on hand{{ low(m) ? ' · low' : '' }}</small></span>
         <span class="unit"><strong>{{ fmtPrice(materialTotals(m).unitCost, currency) }}</strong><small>per {{ m.unit }}</small></span>
         <button type="button" @click="openBuy(m)"><Icon name="plus" :size="14" /> Purchase</button>
+        <button type="button" @click="openUse(m, 'use')">Use</button>
+        <button type="button" class="quiet" @click="openUse(m, 'count')">Count</button>
         <button type="button" class="quiet" @click="editing = { ...m }">Edit</button>
         <button type="button" class="quiet danger" @click="remove('materials', m.id)">Remove</button>
       </div>
@@ -73,7 +112,15 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
           <button type="button" class="quiet" aria-label="Remove purchase" @click="dropPurchase(m, p.id)"><Icon name="x" :size="12" /></button>
         </li>
       </ul>
+      <ul v-if="usageOf(m)?.recent.length" class="purchases uses">
+        <li v-for="u in usageOf(m)!.recent" :key="u.id">
+          <span>{{ stamp(u.at) }}</span><span :class="['src', u.source]">{{ SOURCE[u.source] }}</span><span>{{ useText(u, m) }}</span><span class="muted">{{ u.note }}</span>
+          <button type="button" class="quiet" aria-label="Remove this use" @click="undoUse(u)"><Icon name="x" :size="12" /></button>
+        </li>
+      </ul>
     </article>
+
+    <PrinterKeys @error="emit('error', $event)" />
 
     <ModalShell v-if="editing" title="Material" @close="editing = null">
       <div class="form">
@@ -86,6 +133,7 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
           <label><span>Unit</span><input v-model="editing.unit" type="text" placeholder="sheet, ml, sleeve" /></label>
         </div>
         <label><span>Description</span><input v-model="editing.description" type="text" /></label>
+        <label><span>Running low at ({{ editing.unit || 'unit' }}s on hand, optional)</span><input v-model.number="editing.lowAt" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 20" /></label>
       </div>
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="editing = null">Cancel</button><button type="button" class="primary" @click="saveMaterial">Save</button></div></template>
     </ModalShell>
@@ -102,6 +150,17 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
         </div>
       </div>
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="buying = null">Cancel</button><button type="button" class="primary" @click="logPurchase">Log purchase</button></div></template>
+    </ModalShell>
+
+    <ModalShell v-if="using" :title="`${using.mode === 'use' ? 'Use' : 'Count'} · ${using.m.name}`" @close="using = null">
+      <div class="form">
+        <p class="hint">{{ using.mode === 'use' ? 'Paper used by hand - a print run, a misprint. The printing app logs its own prints.' : `What is really there. The books say ${onHand(using.m)}; the difference is logged as a recount.` }}</p>
+        <div class="two">
+          <label><span>{{ using.mode === 'use' ? 'Used' : 'On hand' }} ({{ using.m.unit }}s)</span><input v-model="using.qty" type="number" min="0" step="1" inputmode="decimal" /></label>
+          <label v-if="using.mode === 'use'"><span>Note</span><input v-model="using.note" type="text" maxlength="200" /></label>
+        </div>
+      </div>
+      <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="using = null">Cancel</button><button type="button" class="primary" @click="logUse">{{ using.mode === 'use' ? 'Log use' : 'Save count' }}</button></div></template>
     </ModalShell>
   </div>
 </template>
@@ -125,6 +184,11 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 .purchases li { display: grid; grid-template-columns: 6rem 7rem 7rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
 .purchases .quiet { min-height: 2.2rem; padding: 0 .3rem; }
 .muted { color: var(--zfy-muted, #5a6472); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hand { min-width: 5rem; }
+.hand.low strong, .hand.low small { color: var(--zfy-danger, #c6512f); }
+.src { font-weight: 600; }
+.src.printer { color: var(--zfy-accent-ink, #0a5a4a); }
+.src.count { color: var(--zfy-muted, #5a6472); }
 .form { display: flex; flex-direction: column; gap: .6rem; }
 label { display: flex; flex-direction: column; gap: .25rem; font-size: .875rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }

@@ -112,7 +112,22 @@ export interface Material {
   unit: string;
   description?: string;
   purchases: Purchase[];
+  /** Says it is running low at or below this many on hand. */
+  lowAt?: number;
   updatedAt?: number;
+}
+/** A use of a material: by hand, sent by the printing app, or what a recount found. */
+export interface MaterialUse {
+  id: string;
+  materialId: string;
+  qty: number;
+  at: number;
+  source: 'manual' | 'printer' | 'count';
+  note: string;
+}
+export interface MaterialUsage {
+  used: number;
+  recent: MaterialUse[];
 }
 export interface SourcingFile {
   id: string;
@@ -134,6 +149,8 @@ export interface Snapshot {
   issues: Issue[];
   materials: Material[];
   files: SourcingFile[];
+  /** Per material id; absent from an older server. */
+  usage?: Record<string, MaterialUsage>;
 }
 
 // Order reflects the real flow: quote, pay a deposit, confirmation, then production, shipping, arrival.
@@ -289,6 +306,10 @@ export function unitCost(m: Material): number {
   const qty = m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0);
   const cost = m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0);
   return qty > 0 ? round4(cost / qty) : 0;
+}
+/** What is on hand: everything bought less everything used. */
+export function materialOnHand(m: Material, usage: MaterialUsage | undefined): number {
+  return Math.round((materialTotals(m).qty - (usage?.used ?? 0)) * 1000) / 1000;
 }
 export function materialTotals(m: Material) {
   return { qty: m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0), spent: round2(m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0)), unitCost: unitCost(m) };

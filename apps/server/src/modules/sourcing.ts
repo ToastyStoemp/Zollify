@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { base64BodyLimit, maxBytesFor } from '@zollify/shared';
 import { checkQuota, decodeUpload, sendRefusal, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { USAGE_TABLES, forgetMaterialUse, migrateUsage, registerPrinterApi, registerUsage, usageSnapshot } from './sourcing-usage';
 
 /**
  * Sourcing - the server half, ported from ZollSource.
@@ -61,10 +62,16 @@ const isColl = (s: string): s is Coll => (COLLECTIONS as readonly string[]).incl
 export const sourcingServerModule: ServerModule = {
   id: 'sourcing',
   minRole: 'admin',
-  migrate,
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['sourcing_docs', 'sourcing_files']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  migrate: (db) => {
+    migrate(db);
+    migrateUsage(db);
   },
+  onAccountDeleted: (db, accountId) => {
+    for (const t of ['sourcing_docs', 'sourcing_files', ...USAGE_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
+  },
+
+  /** The printing app logging the paper it used, with a printer key (see sourcing-usage.ts). */
+  publicRoutes: (ctx) => async (app) => registerPrinterApi(app, ctx),
 
   routes: (ctx: ModuleContext) => async (app) => {
     /** Everything the cockpit needs, in one shot. */
@@ -76,8 +83,10 @@ export const sourcingServerModule: ServerModule = {
       const files = ctx.db
         .prepare('SELECT id, dossierId, kind, filename, mime, size, version, approval, note, createdAt FROM sourcing_files WHERE accountId = ? ORDER BY createdAt')
         .all(who.accountId);
-      return { ...out, files };
+      return { ...out, files, usage: usageSnapshot(ctx.db, who.accountId) };
     });
+
+    registerUsage(app, ctx);
 
     app.put<{ Params: { coll: string; id: string } }>('/:coll/:id', async (req, reply) => {
       const who = ctx.identity(req);
@@ -101,6 +110,7 @@ export const sourcingServerModule: ServerModule = {
       ctx.db.transaction(() => {
         ctx.db.prepare('DELETE FROM sourcing_docs WHERE accountId = ? AND coll = ? AND id = ?').run(who.accountId, req.params.coll, req.params.id);
         if (req.params.coll === 'dossiers') ctx.db.prepare('DELETE FROM sourcing_files WHERE accountId = ? AND dossierId = ?').run(who.accountId, req.params.id);
+        if (req.params.coll === 'materials') forgetMaterialUse(ctx.db, who.accountId, req.params.id);
         if (req.params.coll === 'suppliers') {
           ctx.db.prepare("DELETE FROM sourcing_docs WHERE accountId = ? AND coll = 'reps' AND json_extract(doc, '$.supplierId') = ?").run(who.accountId, req.params.id);
         }

@@ -80,6 +80,8 @@ export const CommissionCreateSchema = CommissionInputSchema.extend({
   customerId: z.string().min(1).max(80).optional(),
   customer: CustomerInputSchema.optional(),
   forceNewCustomer: z.boolean().default(false),
+  /** Made in test mode: listed, paid and erased with the test data, and its emails say TEST. */
+  test: z.boolean().optional(),
 }).refine((v) => !!v.customerId !== !!v.customer, { message: 'Pick a customer or enter a new one.', path: ['customer'] });
 export type CommissionCreateInput = z.infer<typeof CommissionCreateSchema>;
 
@@ -118,6 +120,13 @@ export interface Commission extends CommissionInput {
   createdAt: number;
   updatedAt: number;
   createdBy: string | null;
+  /**
+   * Made in test mode: shown only while a device is in test mode, paid only
+   * by test sales, and gone when test data is cleared.
+   */
+  test?: boolean;
+  /** Its customer was made with it, in test mode: erased with the test data unless a real commission is theirs too. */
+  testCustomer?: boolean;
 }
 
 /** A payment at the till, found by following the sale lines that point at the commission. */
@@ -290,6 +299,8 @@ export const isWatchedStatus = (s: CommissionStatus): boolean => !isClosedStatus
 
 /** What the tracking page gets, and all of it: nothing else about the customer or the commission leaves. */
 export interface PublicCommission {
+  /** Made in test mode: the page says so. */
+  test?: boolean;
   shop: string;
   title: string;
   status: CommissionStatus;

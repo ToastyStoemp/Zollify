@@ -51,6 +51,7 @@ const STYLE = `
 body{font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding:0 16px 48px}
 main{max-width:520px;margin:0 auto}
 header{padding:32px 0 16px}
+.testmark{border:2px solid #c6512f;color:#c6512f;font-weight:700;text-align:center}
 .shop{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-ink);font-weight:700;overflow-wrap:anywhere}
 h1{font-size:1.6rem;font-weight:800;letter-spacing:-.02em;margin-top:6px;overflow-wrap:anywhere;text-wrap:balance}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:14px}
@@ -190,6 +191,7 @@ export function renderCommission(c: PublicCommission, token = ''): string {
   return shell(
     `${c.title} - ${c.shop}`,
     `<header>${c.shop ? `<div class="shop">${h(c.shop)}</div>` : ''}<h1>${h(c.title)}</h1></header>
+${c.test ? '<div class="card testmark">TEST - made in test mode. Nothing here is a real order.</div>' : ''}
 <div class="card"><div class="status">${h(c.statusLabel)}</div>${progress}</div>
 ${push}${mail}${updates}${token ? briefCard(c, token) : ''}${due}${money}${pickup}
 <footer>Bookmark this page to check on your commission.<br />Times are shown in ${h(c.timeZone)}.</footer>`,

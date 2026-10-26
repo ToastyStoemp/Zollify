@@ -272,6 +272,9 @@ export function buildReceiptLines(
   const lines: ReceiptLine[] = [];
   const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
 
+  // Made in test mode: said first and last, so the slip can never pass for a real receipt.
+  if (tx.testRun) lines.push({ ...center('*** TEST - NOT A RECEIPT ***'), doubleHeight: true });
+
   // ── Header: logo + artist block ──
   if (logoB64) lines.push({ kind: 'image', imageB64: logoB64 });
   for (const s of sellerLines(tx, config, eventCountry)) lines.push(s.heading ? { ...center(s.text), doubleHeight: true } : center(s.text));
@@ -363,6 +366,7 @@ export function buildReceiptLines(
     lines.push({ kind: 'space' });
   }
   lines.push(center(`Receipt ${tx.receiptNumber ?? tx.id.slice(-8)}`));
+  if (tx.testRun) lines.push(center('*** TEST - nothing was paid ***'));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 

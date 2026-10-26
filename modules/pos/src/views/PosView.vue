@@ -37,6 +37,7 @@ import {
   total,
   GIVEN_AWAY,
   loadTestMode,
+  shellTestMode,
   testMode,
 } from '../cart';
 import { defaultProviderId, getProvider } from '../payments/registry';
@@ -741,7 +742,9 @@ const today = computed(() => {
   start.setHours(0, 0, 0, 0);
   let count = 0;
   let revenue = 0;
-  for (const tx of sdk().data.transactions.recent()) {
+  // In test mode the till sells into the test event: today is its test sales.
+  const sales = testMode.value && shellTestMode() ? shellTestMode()!.sales() : sdk().data.transactions.recent();
+  for (const tx of sales) {
     if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
     count++;
     revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
@@ -1065,7 +1068,7 @@ function lockTill(): void {
           <small v-else-if="activeEvent">{{ atStore ? 'Selling at the store' : 'Selling at this event' }}{{ today.count ? ` · ${today.count} sale${today.count === 1 ? '' : 's'} today` : '' }}</small>
           <small v-else>Open one under {{ sellsStores ? 'Stores or Events' : 'Events' }} - every sale is filed against one.</small>
         </div>
-        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Card terminal.">TEST MODE - nothing is recorded</router-link>
+        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" :title="shellTestMode() ? 'Test mode - sales go to the test event, never to your takings. Tap to switch it off.' : 'Test mode - sales are not recorded. Tap to switch it off under Card terminal.'">{{ shellTestMode() ? 'TEST MODE - test event' : 'TEST MODE - nothing is recorded' }}</router-link>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
         <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">

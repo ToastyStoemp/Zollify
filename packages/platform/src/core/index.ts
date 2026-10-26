@@ -28,8 +28,11 @@ export {
   resetSalesEventCache,
   eventPricing,
   copyEventPricing,
+  testEvent,
+  isTestEvent,
   type EventPricing,
 } from './sales-events';
+export { testState, startTestMode, stopTestMode, clearTestData, ensureTestEvent } from './test-mode';
 export { sellLockSettings, loadSellLockSettings, setSellLockSettings, sellLockFor, sellLocked, canForceSell, forceSell } from './sell-lock';
 export { autoEventSettings, loadAutoEventSettings, setAutoEventSettings, runAutoEvents, startAutoEvents, stopAutoEvents } from './auto-events';
 export {
@@ -62,6 +65,9 @@ export {
   loadTransactions,
   transactionsLoaded,
   recentTransactions,
+  testTransactions,
+  stockTransactions,
+  transactionsOfEvent,
   getTransaction,
   recordSale,
   revertTransaction,

@@ -52,6 +52,10 @@ const MAX_WAITING_REQUESTS = 100;
 const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 const bad = (message: string) => ({ error: 'invalid_request', message });
 
+
+/** A commission made in test mode says so wherever it reaches a person: email subjects and notifications. */
+export const testSubject = (c: Pick<Commission, 'test'>, subject: string): string => (c.test ? `[TEST] ${subject}` : subject);
+
 export function migrateCustomerSide(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS commission_files (
@@ -164,7 +168,7 @@ export async function pushUpdate(svc: Pick<ModuleServices, 'db' | 'problems'>, a
     ((target, payload) =>
       webpush.sendNotification(target, payload, { vapidDetails: { subject: vapidSubject(), publicKey: keys.publicKey, privateKey: keys.privateKey }, TTL: 3 * 86400, timeout: 10_000 }));
   const payload = JSON.stringify({
-    title: `${c.title}: ${COMMISSION_STATUS_LABEL[c.status]}`,
+    title: testSubject(c, `${c.title}: ${COMMISSION_STATUS_LABEL[c.status]}`),
     body: message ? `${shop ? `${shop}: ` : ''}${message}`.slice(0, 300) : shop ? `From ${shop}` : '',
     url: link,
     tag: `commission-${c.id}`,
@@ -455,7 +459,7 @@ export function registerCustomerSide(app: FastifyInstance, ctx: PublicModuleCont
       emailed = await ctx.mail.send({
         to: body.data.email,
         accountId: found.accountId,
-        subject: `Updates on ${found.c.title}`,
+        subject: testSubject(found.c, `Updates on ${found.c.title}`),
         text: [`${shop} will email you here as "${found.c.title}" moves on.`, '', `Your page: ${deps.originOf(req)}${COMMISSION_PUBLIC_PATH}${req.params.token}`, '', 'Not you? Reply to this email and we will remove the address.', '', `- ${shop}`].join('\n'),
         ...(replyTo ? { replyTo } : {}),
       });

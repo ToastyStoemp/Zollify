@@ -679,6 +679,28 @@ export interface Sdk {
     lookup(code: string): Promise<TillLookup | null>;
   };
 
+  /**
+   * Test mode: this device sells into the account's test event, and what it
+   * does there - sales, receipts, commissions - is logged as a test, never as
+   * takings. `state` is reactive, so a computed or template that reads
+   * `state.on` follows it. A module that keeps records of its own (a
+   * commission, say) marks those made while `on()` as tests too. Absent on
+   * older shells, so call it guarded.
+   */
+  testMode?: {
+    readonly state: { readonly on: boolean };
+    on(): boolean;
+    start(): Promise<void>;
+    /** Ends the run: its sales stop taking stock and changed counts and claims are put back. */
+    stop(): Promise<{ restored: number }>;
+    /** Removes every test sale on every device. */
+    clear(): Promise<void>;
+    /** The test event, once made. */
+    event(): SalesEvent | null;
+    /** Test sales, most recent first. */
+    sales(): Transaction[];
+  };
+
   /** Uploads this device's diagnostic log (console errors, breadcrumbs) to the server for support. */
   diagnostics: { sendLog(reason?: string): Promise<void> };
 

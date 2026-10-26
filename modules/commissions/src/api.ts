@@ -57,17 +57,24 @@ export interface CustomerDetail {
   keepCustomerDays: number;
 }
 
+/**
+ * This device is in test mode (see sdk().testMode): it lists and makes test
+ * commissions, which only test sales pay and clearing test data removes.
+ * False on a shell without test mode.
+ */
+export const inTestMode = (): boolean => sdk().testMode?.on() ?? false;
+
 export const api = {
-  list: () => sdk().http.get<CommissionList>('commissions'),
-  create: (input: CommissionCreateInput) => sdk().http.post<CommissionView>('commissions', input),
+  list: () => sdk().http.get<CommissionList>(inTestMode() ? 'commissions?test=1' : 'commissions'),
+  create: (input: CommissionCreateInput) => sdk().http.post<CommissionView>('commissions', inTestMode() ? { ...input, test: true } : input),
   save: (id: string, input: CommissionInput) => sdk().http.put<CommissionView>(`commissions/${id}`, input),
   update: (id: string, body: { status?: CommissionStatus; message: string; email: boolean }) =>
     sdk().http.post<{ commission: CommissionView; emailed: boolean }>(`commissions/${id}/updates`, body),
   emailLink: (id: string) => sdk().http.post<{ emailed: boolean }>(`commissions/${id}/email-link`),
   newLink: (id: string) => sdk().http.post<CommissionView>(`commissions/${id}/link`),
   remove: (id: string) => sdk().http.del<{ ok: true }>(`commissions/${id}`),
-  searchCustomers: (q: string) => sdk().http.get<{ customers: CustomerContact[] }>(`customers/search?q=${encodeURIComponent(q)}`),
-  customers: (q: string) => sdk().http.get<{ customers: CustomerSummary[]; keepCustomerDays: number }>(`customers?q=${encodeURIComponent(q)}`),
+  searchCustomers: (q: string) => sdk().http.get<{ customers: CustomerContact[] }>(`customers/search?q=${encodeURIComponent(q)}${inTestMode() ? '&test=1' : ''}`),
+  customers: (q: string) => sdk().http.get<{ customers: CustomerSummary[]; keepCustomerDays: number }>(`customers?q=${encodeURIComponent(q)}${inTestMode() ? '&test=1' : ''}`),
   customer: (id: string) => sdk().http.get<CustomerDetail>(`customers/${id}`),
   saveCustomer: (id: string, input: CustomerInput) => sdk().http.put<CustomerContact>(`customers/${id}`, input),
   eraseCustomer: (id: string) => sdk().http.post<{ ok: true; commissions: number }>(`customers/${id}/erase`),
@@ -100,7 +107,9 @@ export const localToday = (): string => {
 export function pendingPaid(commissionId: string, counted: CommissionPayment[]): number {
   const known = new Set(counted.map((p) => p.saleId));
   let sum = 0;
-  for (const tx of sdk().data.transactions.recent()) {
+  // A test commission is paid by test sales (test mode), a real one by real sales.
+  const sales = inTestMode() ? (sdk().testMode?.sales() ?? []) : sdk().data.transactions.recent();
+  for (const tx of sales) {
     if (tx.revertedAt || known.has(tx.id)) continue;
     for (const item of tx.items) if (item.ref?.moduleId === 'commissions' && item.ref.kind === COMMISSION_REF_KIND && item.ref.id === commissionId) sum += item.lineTotal;
   }

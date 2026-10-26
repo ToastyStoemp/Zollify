@@ -19,6 +19,11 @@ export const OpTypeSchema = z.enum([
   'discount.delete',
   'image.meta',
   'setting.upsert',
+  /** Test mode (see test-mode.ts): a test sale, its revert, the end of a test run, and wiping them all. */
+  'tx.test.create',
+  'tx.test.revert',
+  'tx.test.end',
+  'tx.test.clear',
 ]);
 
 export const OpSchema = z.object({

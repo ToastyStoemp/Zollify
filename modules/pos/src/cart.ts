@@ -81,22 +81,48 @@ export const isConverting = computed(
 export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
 
 /**
- * Test mode: the till runs every step of a sale - cart, discounts, the card
- * on a pretend terminal, the receipt screen - and records nothing. No
- * transaction, no stock movement, no books, nothing synced. For trying the
- * till out, training a helper, or checking a receipt layout, without a
- * refund to make afterwards. Device-local and switched on by hand, with a
- * banner on the till for as long as it is on.
+ * Test mode: the till sells into the account's test event, cards go to a
+ * pretend terminal, and every sale is recorded as a test - in History under
+ * the test event, with its receipt and anything a module hangs on it (a
+ * commission's deposit), but never in takings, books or exports. Stock moves
+ * as for real and is put back when test mode is switched off. Device-local,
+ * with a banner on the till for as long as it is on.
+ *
+ * Kept by the shell (sdk().testMode). On an older shell without it the till
+ * falls back to going through the motions and recording nothing.
  */
 export const TEST_MODE_KEY = 'testMode';
 export const testMode = ref(false);
+/** The shell's test mode, or null on a shell that predates it. */
+export const shellTestMode = () => sdk().testMode ?? null;
 export async function loadTestMode(): Promise<boolean> {
-  testMode.value = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  const shell = shellTestMode();
+  const legacy = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  if (shell) {
+    // Switched on before the shell kept test mode: carry it over once.
+    if (legacy) {
+      await sdk().config.remove(TEST_MODE_KEY);
+      if (!shell.on()) await shell.start();
+    }
+    testMode.value = shell.on();
+  } else {
+    testMode.value = legacy;
+  }
   return testMode.value;
 }
-export async function setTestMode(on: boolean): Promise<void> {
-  testMode.value = on;
-  await sdk().config.set(TEST_MODE_KEY, on);
+/** Switches test mode; off returns what it put back of the stock it moved. */
+export async function setTestMode(on: boolean): Promise<{ restored: number }> {
+  const shell = shellTestMode();
+  let restored = 0;
+  if (shell) {
+    if (on) await shell.start();
+    else restored = (await shell.stop()).restored;
+    testMode.value = shell.on();
+  } else {
+    testMode.value = on;
+    await sdk().config.set(TEST_MODE_KEY, on);
+  }
+  return { restored };
 }
 export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
 /**
@@ -327,7 +353,7 @@ export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
   sale?: SaleEvent;
-  /** Test mode: the sale went through the motions and was not recorded anywhere. */
+  /** Test mode on an older shell: the sale went through the motions and was not recorded anywhere. */
   test?: boolean;
   /** The seller abandoned this attempt (cancelCheckout) - nothing was recorded, whatever the terminal answered. */
   cancelled?: boolean;
@@ -549,9 +575,11 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       },
     };
 
-    // Test mode: the sale is handed back for the screen and never announced,
-    // so nothing records, books, restocks or syncs it.
-    if (testMode.value) {
+    // Test mode on a shell that cannot keep test sales apart: the sale is
+    // handed back for the screen and never announced, so nothing records it.
+    // With the shell's test mode it is announced like any other, into the
+    // test event, and the shell records it as a test.
+    if (testMode.value && !shellTestMode()) {
       clear();
       return { approved: true, sale, test: true };
     }

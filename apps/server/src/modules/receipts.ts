@@ -80,6 +80,9 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_ops_receipt_token
       ON ops (json_extract(payload, '$.receiptToken'))
       WHERE type = 'tx.create';
+    CREATE INDEX IF NOT EXISTS idx_ops_test_receipt_token
+      ON ops (json_extract(payload, '$.receiptToken'))
+      WHERE type = 'tx.test.create';
     CREATE TABLE IF NOT EXISTS pos_branding (
       accountId TEXT PRIMARY KEY,
       logo      TEXT,
@@ -207,28 +210,34 @@ interface Found {
 }
 
 function findSale(db: Database.Database, token: string): Found | null {
-  const row = db
-    .prepare(
-      `SELECT accountId, opId, payload FROM ops
-       WHERE type = 'tx.create' AND json_extract(payload, '$.receiptToken') = ?
-       LIMIT 1`,
-    )
-    .get(token) as { accountId: string; opId: string; payload: string } | undefined;
-  if (!row) return null;
-  const created = JSON.parse(row.payload) as Transaction;
-  // ZollTool wrote reverts as `txId`, Zollify writes `id` - check both.
-  const reverts = db
-    .prepare(
-      `SELECT opId, type, payload FROM ops
-       WHERE accountId = ? AND type = 'tx.revert'
-         AND (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.txId') = ?)`,
-    )
-    .all(row.accountId, created.id, created.id) as { opId: string; type: string; payload: string }[];
-  const [tx] = reduceTransactions([
-    { opId: row.opId, type: 'tx.create', payload: created },
-    ...reverts.map((r) => ({ opId: r.opId, type: r.type, payload: JSON.parse(r.payload) })),
-  ]);
-  return tx ? { accountId: row.accountId, tx } : null;
+  // A real sale, or one made in test mode (shown with a TEST mark): each kind
+  // has its own op type, and its own index, so both lookups stay quick.
+  for (const kind of ['tx.create', 'tx.test.create'] as const) {
+    const row = db
+      .prepare(
+        `SELECT accountId, opId, payload FROM ops
+         WHERE type = '${kind}' AND json_extract(payload, '$.receiptToken') = ?
+         LIMIT 1`,
+      )
+      .get(token) as { accountId: string; opId: string; payload: string } | undefined;
+    if (!row) continue;
+    const created = JSON.parse(row.payload) as Transaction;
+    const revertType = kind === 'tx.create' ? 'tx.revert' : 'tx.test.revert';
+    // ZollTool wrote reverts as `txId`, Zollify writes `id` - check both.
+    const reverts = db
+      .prepare(
+        `SELECT opId, type, payload FROM ops
+         WHERE accountId = ? AND type = ?
+           AND (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.txId') = ?)`,
+      )
+      .all(row.accountId, revertType, created.id, created.id) as { opId: string; type: string; payload: string }[];
+    const [tx] = reduceTransactions([
+      { opId: row.opId, type: 'tx.create', payload: created },
+      ...reverts.map((r) => ({ opId: r.opId, type: 'tx.revert', payload: JSON.parse(r.payload) })),
+    ]);
+    return tx ? { accountId: row.accountId, tx: kind === 'tx.test.create' ? { ...tx, testRun: tx.testRun ?? 'unknown' } : tx } : null;
+  }
+  return null;
 }
 
 function eventName(db: Database.Database, accountId: string, eventId: string): string {
@@ -276,6 +285,8 @@ export interface PublicReceipt {
   /** `charged`: what the card took, when it settled in another currency (cards in the base currency). */
   payments: { label: string; amount: number; charged?: { amount: number; currency: string } }[];
   status: 'paid' | 'voided';
+  /** Made in test mode: nothing was paid, and the page says so. */
+  test?: boolean;
   brand: { logo?: string; footer: string[] };
   /** Webstore and social links for the footer; absent when the booth set none. */
   links?: ReceiptFooterLink[];
@@ -336,6 +347,7 @@ export function publicReceipt(
         : {}),
     })),
     status: tx.revertedAt ? 'voided' : 'paid',
+    ...(tx.testRun ? { test: true } : {}),
     // Only what receiptLinksOf accepts - a public page of this server - and none on a cancelled sale.
     ...(!tx.revertedAt && receiptLinksOf(tx.items ?? []).length ? { follow: receiptLinksOf(tx.items ?? []) } : {}),
     brand: {
@@ -504,6 +516,7 @@ ${POW_SOLVER_JS}
 
   function render(r) {
     receiptEl.textContent = '';
+    if (r.test) receiptEl.appendChild(el('div', 'void', 'TEST - made in test mode, nothing was paid'));
     if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
     if (r.brand && r.brand.logo && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(r.brand.logo)) {
       var img = el('img', 'logo');

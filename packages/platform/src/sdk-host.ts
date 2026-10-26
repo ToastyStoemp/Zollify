@@ -30,7 +30,8 @@ import {
   getProduct,
   upsertProduct,
 } from './core/catalog';
-import { getTransaction, importTransactions, recentTransactions, revertTransaction, totalsFor } from './core/transactions';
+import { getTransaction, importTransactions, recentTransactions, revertTransaction, testTransactions, totalsFor } from './core/transactions';
+import { clearTestData, startTestMode, stopTestMode, testState } from './core/test-mode';
 import { imageUrl, importProductImage } from './core/images';
 import { onPaymentMessage, realtimeConnected, sendDisplayCart, sendPaymentMessage } from './core/realtime';
 import { deviceId } from './core/device';
@@ -64,6 +65,7 @@ import {
   stockForEvent,
   upsertSalesEvent,
   visibleEvents,
+  testEvent,
 } from './core/sales-events';
 import { getSyncedSetting, listSyncedSettings, setSyncedSetting } from './core/synced-settings';
 
@@ -410,6 +412,17 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         }
         return null;
       },
+    },
+    testMode: {
+      state: testState,
+      on: () => testState.on,
+      start: async () => {
+        await startTestMode();
+      },
+      stop: () => stopTestMode(),
+      clear: () => clearTestData(),
+      event: () => testEvent.value,
+      sales: () => [...testTransactions.value],
     },
     diagnostics: { sendLog: (reason) => sendDiagnosticLog(reason) },
     fx: {

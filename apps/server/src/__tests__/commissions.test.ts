@@ -204,6 +204,67 @@ describe('what was paid follows the till', () => {
   });
 });
 
+describe('test mode', () => {
+  const testPay = (txId: string, commissionId: string, amount: number) =>
+    push('tx.test.create', {
+      id: txId, eventId: 'test-ev', deviceId: 'till', timestamp: Date.now(), method: 'cash', payments: [], discounts: [], total: amount, currency: 'EUR', testRun: 'run-1',
+      items: [{ pid: `module:commission:${commissionId}`, vid: null, title: 'Deposit', qty: 1, unitPrice: amount, lineTotal: amount, ref: { moduleId: 'commissions', kind: 'commission', id: commissionId } }],
+    });
+  const SAM = { name: 'Sam Tester', email: 'sam@example.test', phone: '+41 79 555 09 09' };
+  let testId = '';
+  let realId = '';
+  let testPath = '';
+
+  it('keeps test commissions to devices in test mode', async () => {
+    const made = (await call(staff, 'POST', '/commissions', { ...NEW, customer: SAM, title: 'Practice piece', price: 80, test: true })).json();
+    testId = made.id;
+    testPath = made.publicPath;
+    realId = (await call(staff, 'POST', '/commissions', { ...NEW, title: 'Real piece', price: 80 })).json().id;
+    const real = (await call(staff, 'GET', '/commissions')).json().commissions.map((c: { id: string }) => c.id);
+    const tests = (await call(staff, 'GET', '/commissions?test=1')).json().commissions.map((c: { id: string }) => c.id);
+    expect(real).toContain(realId);
+    expect(real).not.toContain(testId);
+    expect(tests).toEqual([testId]);
+  });
+
+  it('pays a test commission with test sales only, and a real one with real sales only', async () => {
+    await testPay('tt-1', testId, 20);
+    await pay('rt-1', testId, 99);
+    await testPay('tt-2', realId, 99);
+    await pay('rt-2', realId, 30);
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).json()).toMatchObject({ paid: 20, balance: 60 });
+    expect((await call(staff, 'GET', `/commissions/${realId}`)).json()).toMatchObject({ paid: 30, balance: 50 });
+    await push('tx.test.revert', { id: 'tt-1', revertedAt: Date.now() });
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).json().paid).toBe(0);
+  });
+
+  it('says TEST in its emails and on its page', async () => {
+    sent.length = 0;
+    expect((await call(staff, 'POST', `/commissions/${testId}/email-link`)).json().emailed).toBe(true);
+    expect(sent.at(-1)?.subject).toBe('[TEST] Follow your commission: Practice piece');
+    const page = await app.inject({ method: 'GET', url: testPath });
+    expect(page.body).toContain('TEST - made in test mode');
+  });
+
+  it('lists its new customer only in test mode', async () => {
+    const names = async (q: string) => (await call(staff, 'GET', `/customers${q}`)).json().customers.map((c: { name: string }) => c.name);
+    expect(await names('?q=Sam')).toEqual([]);
+    expect(await names('?q=Sam&test=1')).toEqual(['Sam Tester']);
+    expect((await call(staff, 'GET', '/customers/search?q=Sam')).json().customers).toEqual([]);
+  });
+
+  it('goes, with its customer, when test data is cleared, and the test sales leave the log', async () => {
+    const res = await push('tx.test.clear', { at: Date.now() + 1 });
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).statusCode).toBe(404);
+    expect((await call(staff, 'GET', `/commissions/${realId}`)).json().paid).toBe(30);
+    expect((await call(staff, 'GET', '/customers?q=Sam&test=1')).json().customers).toEqual([]);
+    const left = app.zollify.db.prepare("SELECT count(*) AS n FROM ops WHERE accountId = ? AND type IN ('tx.test.create', 'tx.test.revert')").get(ownerAccountId) as { n: number };
+    expect(left.n).toBe(0);
+  });
+});
+
 describe('the customer page', () => {
   let path = '';
   let id = '';

@@ -14,6 +14,7 @@ import {
   refusedSales,
   lastSyncAt,
   recentTransactions,
+  transactionsOfEvent,
   setActiveEvent,
   syncState,
   visibleEvents,
@@ -103,9 +104,10 @@ const tillCheck = computed(() => tillEventCheck(event.value, visibleEvents.value
 const endedOn = computed(() => (tillCheck.value.endedOn ? new Date(`${tillCheck.value.endedOn}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''));
 
 const todaysSales = computed(() =>
-  recentTransactions.value.filter((t) => !t.revertedAt && t.timestamp >= startOfDay.value.getTime() && (!event.value || t.eventId === event.value.id)),
+  (event.value ? transactionsOfEvent(event.value.id) : recentTransactions.value).filter((t) => !t.revertedAt && t.timestamp >= startOfDay.value.getTime()),
 );
-const eventSales = computed(() => (event.value ? recentTransactions.value.filter((t) => !t.revertedAt && t.eventId === event.value!.id) : []));
+// In test mode the active event is the test event, and these are its test sales.
+const eventSales = computed(() => (event.value ? transactionsOfEvent(event.value.id).filter((t) => !t.revertedAt) : []));
 
 function sum(list: typeof recentTransactions.value, kind?: 'cash' | 'card'): number {
   let total = 0;

@@ -52,6 +52,8 @@ const EXPENSE_CATEGORIES = [
   { id: 'mileage', label: 'Mileage (own car)' },
   { id: 'accommodation', label: 'Accommodation' },
   { id: 'perdiem', label: 'Per diems (meals)' },
+  // What was actually bought to eat and drink at the event (snacks, lunch), as opposed to the per diem allowance.
+  { id: 'food', label: 'Food and drinks' },
   { id: 'shipping', label: 'Shipping and freight' },
   { id: 'customs', label: 'Customs and duties' },
   { id: 'marketing', label: 'Marketing and printing' },
@@ -63,6 +65,8 @@ const EXPENSE_CATEGORIES = [
   { id: 'other', label: 'Other' },
 ] as const;
 const CATEGORY_IDS = EXPENSE_CATEGORIES.map((c) => c.id) as unknown as [string, ...string[]];
+/** All a staff member may call: add an expense, with its receipt, and know the categories. */
+const STAFF_ROUTES = new Set(['GET /ledger/categories', 'POST /ledger/expenses', 'POST /ledger/expenses/:id/invoice']);
 
 function migrate(db: Database.Database): void {
   db.exec(`
@@ -114,6 +118,8 @@ function migrate(db: Database.Database): void {
   // How a computed expense came about (per diems, mileage, a shared cost's split), added later.
   const cols = (db.prepare('PRAGMA table_info(tax_expenses)').all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes('detail')) db.exec('ALTER TABLE tax_expenses ADD COLUMN detail TEXT');
+  // Who added it: staff add expenses too (the quick expense at an event); admins check and change them.
+  if (!cols.includes('createdBy')) db.exec('ALTER TABLE tax_expenses ADD COLUMN createdBy TEXT');
 }
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
@@ -171,7 +177,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
 
   return {
     id: 'tax',
-    minRole: 'admin',
+    // Staff only get to add an expense (see STAFF_ROUTES); the books are the admins'.
+    minRole: 'member',
     migrate,
     onAccountDeleted: (db, accountId) => {
       for (const t of ['tax_config', 'tax_cache', 'tax_expenses', 'tax_bookings', 'tax_ai_usage']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
@@ -263,6 +270,14 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         }[];
 
       const who = (req: FastifyRequest) => ctx.identity(req);
+
+      // Staff may log what they spent at an event - and nothing else of the books.
+      app.addHook('preHandler', async (req, reply) => {
+        if (ctx.identity(req).role !== 'member') return undefined;
+        const route = `${req.method} ${req.routeOptions.url?.replace(/^\/api\/m\/tax/, '') ?? ''}`;
+        if (STAFF_ROUTES.has(route)) return undefined;
+        return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can do that.' });
+      });
       /**
        * Runs a call to an outside service and tells Problems how it went: a failure opens a warning
        * (the HTTP status or error class only, never the service's words), a success closes it.
@@ -507,10 +522,12 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         invoiceAt: number | null;
         bookedVoucherId: string | null;
         detail: string | null;
+        createdBy: string | null;
         createdAt: number;
         updatedAt: number;
       }
-      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, detail, createdAt, updatedAt';
+      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, detail, createdBy, createdAt, updatedAt';
+      const emailOf = (userId: string): string | null => (db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined)?.email ?? null;
       const detailOf = (raw: string | null) => {
         if (!raw) return null;
         const parsed = ExpenseDetailSchema.safeParse(JSON.parse(raw));
@@ -528,6 +545,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         invoice: r.invoiceName ? { filename: r.invoiceName, uploadedAt: r.invoiceAt } : null,
         bookedVoucherId: r.bookedVoucherId,
         detail: detailOf(r.detail),
+        /** Who added it; null for expenses from before this was kept. */
+        createdBy: r.createdBy ? { userId: r.createdBy, email: emailOf(r.createdBy) } : null,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       });
@@ -541,17 +560,25 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         return { categories: EXPENSE_CATEGORIES, expenses: listExpenses(who(req).accountId, eventId || undefined) };
       });
 
+      /** What an expense can be filed under - all a staff member's quick expense needs, without the books. */
+      app.get('/ledger/categories', async () => ({ categories: EXPENSE_CATEGORIES }));
+
       app.post('/ledger/expenses', async (req, reply) => {
-        const { accountId } = who(req);
+        const me = who(req);
+        const { accountId } = me;
         const parsed = ExpenseBody.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: 'Check the expense fields.' });
         const e = parsed.data;
+        // A helper limited to some events logs costs for those only.
+        if (me.allowedEventIds && !me.allowedEventIds.includes(e.eventId)) return reply.code(403).send({ error: 'forbidden', message: 'That event is not one of yours.' });
+        // Per diems, mileage and split costs are worked out by an admin, not typed in by staff.
+        const detail = me.role === 'member' ? null : e.detail;
         const now = Date.now();
         const id = randomUUID();
         db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, now, now);
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, detail ? JSON.stringify(detail) : null, me.userId, now, now);
         return reply.code(201).send({ expense: listExpenses(accountId).find((x) => x.id === id) });
       });
 
@@ -574,8 +601,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const currency = e.currency.toUpperCase();
         const insert = db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         const made: string[] = [];
         db.transaction(() => {
@@ -583,7 +610,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
             const detail = { kind: 'shared' as const, groupId, method: e.method, total: e.amount, of: ids.length };
             const note = [e.note, describeDetail(detail, currency)].filter(Boolean).join(' · ');
             const id = randomUUID();
-            insert.run(accountId, id, s.id, e.category, Math.round(s.amount * 100), currency, e.date.slice(0, 10), e.vendor, note, JSON.stringify(detail), now, now);
+            insert.run(accountId, id, s.id, e.category, Math.round(s.amount * 100), currency, e.date.slice(0, 10), e.vendor, note, JSON.stringify(detail), who(req).userId, now, now);
             made.push(id);
           }
         })();
@@ -649,7 +676,12 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       });
 
       app.post<{ Params: { id: string } }>('/ledger/expenses/:id/invoice', { bodyLimit: base64BodyLimit(maxBytesFor('invoice')) }, async (req, reply) => {
-        const { accountId } = who(req);
+        const { accountId, role, userId } = who(req);
+        // Staff attach the receipt to an expense they just added, not to anyone else's.
+        if (role === 'member') {
+          const own = db.prepare('SELECT createdBy, invoiceName FROM tax_expenses WHERE accountId = ? AND id = ?').get(accountId, req.params.id) as { createdBy: string | null; invoiceName: string | null } | undefined;
+          if (!own || own.createdBy !== userId || own.invoiceName) return reply.code(403).send({ error: 'forbidden', message: 'Only owners and admins can change that expense.' });
+        }
         const body = (req.body ?? {}) as { base64?: string; filename?: string };
         const name = String(body.filename ?? 'invoice.pdf').slice(0, 200);
         const file = decodeUpload('invoice', body.base64, { name });

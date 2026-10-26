@@ -67,6 +67,8 @@ export interface Expense {
   bookedVoucherId: string | null;
   /** How a computed expense came about (per diems, mileage, a shared cost's split); null when typed in. */
   detail: ExpenseDetail | null;
+  /** Who added it; absent or null for expenses from before this was kept. */
+  createdBy?: { userId: string; email: string | null } | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -131,6 +133,8 @@ export const api = {
   bookings: () => sdk().http.get<{ bookings: Booking[] }>('bookings'),
 
   expenses: (eventId?: string) => sdk().http.get<{ categories: { id: string; label: string }[]; expenses: Expense[] }>('ledger/expenses' + q({ eventId })),
+  /** The categories alone - all a staff member's quick expense may read. */
+  categories: () => sdk().http.get<{ categories: { id: string; label: string }[] }>('ledger/categories'),
   addExpense: (e: Partial<Expense>) => sdk().http.post<{ expense: Expense }>('ledger/expenses', e),
   updateExpense: (id: string, e: Partial<Expense>) => sdk().http.put<{ expense: Expense }>(`ledger/expenses/${id}`, e),
   deleteExpense: (id: string) => sdk().http.del<{ ok: true }>(`ledger/expenses/${id}`),

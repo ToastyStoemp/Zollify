@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue';
 import { checkPickedFile } from '@zollify/shared';
-import { nextRef, type Dossier, type Issue, type Material, type Reorder, type Rep, type Snapshot, type SourcingFile, type Supplier } from './engine';
+import { nextRef, type Dossier, type Issue, type Material, type MaterialUsage, type Reorder, type Rep, type Snapshot, type SourcingFile, type Supplier } from './engine';
 import { sdk } from './runtime';
 
 /**
@@ -12,7 +12,7 @@ import { sdk } from './runtime';
 type Coll = 'suppliers' | 'reps' | 'dossiers' | 'reorders' | 'issues' | 'materials';
 type DocOf<C extends Coll> = C extends 'suppliers' ? Supplier : C extends 'reps' ? Rep : C extends 'dossiers' ? Dossier : C extends 'reorders' ? Reorder : C extends 'issues' ? Issue : Material;
 
-export const snap = ref<Snapshot>({ suppliers: [], reps: [], dossiers: [], reorders: [], issues: [], materials: [], files: [] });
+export const snap = ref<Snapshot>({ suppliers: [], reps: [], dossiers: [], reorders: [], issues: [], materials: [], files: [], usage: {} });
 export const loaded = ref(false);
 
 export async function refresh(): Promise<void> {
@@ -28,6 +28,45 @@ export async function save<C extends Coll>(coll: C, doc: DocOf<C>): Promise<DocO
   else list.push(saved);
   return saved;
 }
+
+// ── Materials on hand ───────────────────────────────────────────────────────
+
+function keepUsage(materialId: string, usage: MaterialUsage): void {
+  snap.value.usage = { ...(snap.value.usage ?? {}), [materialId]: usage };
+}
+/** Logs a use by hand (a print run, a misprint). */
+export async function useMaterial(materialId: string, qty: number, note?: string): Promise<void> {
+  const res = await sdk().http.post<{ usage: MaterialUsage }>(`materials/${materialId}/use`, { qty, ...(note ? { note } : {}) });
+  keepUsage(materialId, res.usage);
+}
+/** A recount: what is really there. The difference is logged. */
+export async function countMaterial(materialId: string, onHand: number): Promise<void> {
+  const res = await sdk().http.post<{ usage: MaterialUsage }>(`materials/${materialId}/count`, { onHand });
+  keepUsage(materialId, res.usage);
+}
+export async function dropUse(id: string): Promise<void> {
+  await sdk().http.del(`usage/${id}`);
+  await refresh();
+}
+
+/** Whether the server keeps product costs where the recipes and batch prices put them. */
+export const costSettings = {
+  get: () => sdk().http.get<{ followCosts: boolean }>('cost-settings'),
+  set: (followCosts: boolean) => sdk().http.put<{ followCosts: boolean; updated: number }>('cost-settings', { followCosts }),
+};
+
+/** A key the printing app uses to log what it prints; the secret is only ever in `create`'s answer. */
+export interface PrinterKey {
+  id: string;
+  label: string;
+  createdAt: number;
+  lastUsedAt: number | null;
+}
+export const printerKeys = {
+  list: async () => (await sdk().http.get<{ keys: PrinterKey[] }>('keys')).keys,
+  create: (label: string) => sdk().http.post<{ key: PrinterKey; secret: string }>('keys', { label }),
+  revoke: (id: string) => sdk().http.del<{ ok: true }>(`keys/${id}`),
+};
 
 export async function remove(coll: Coll, id: string): Promise<void> {
   await sdk().http.del(`${coll}/${id}`);

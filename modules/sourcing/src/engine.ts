@@ -1,4 +1,4 @@
-import type { SalesEvent, Transaction } from '@zollify/shared';
+import { averageUnitCost, currentLot, recipeCost, type SalesEvent, type Transaction } from '@zollify/shared';
 
 /**
  * Sourcing domain - ported from ZollSource. Records are plain documents kept
@@ -100,10 +100,21 @@ export interface Issue {
 }
 export interface Purchase {
   id: string;
+  /** What was ordered (and paid for), in the material's unit. */
   qty: number;
   cost: number;
   date?: string;
   note?: string;
+  /**
+   * What has arrived so far, when the order came in parts (a supplier short
+   * of stock). Absent: it all arrived with the order, as purchases always did.
+   */
+  deliveries?: Delivery[];
+}
+export interface Delivery {
+  id: string;
+  qty: number;
+  date: string;
 }
 export interface Material {
   id: string;
@@ -112,7 +123,25 @@ export interface Material {
   unit: string;
   description?: string;
   purchases: Purchase[];
+  /** Says it is running low at or below this many on hand. */
+  lowAt?: number;
+  /** How it comes packed - a box of 25 sheets, say - so orders and deliveries can be typed in boxes. */
+  packSize?: number;
+  packName?: string;
   updatedAt?: number;
+}
+/** A use of a material: by hand, sent by the printing app, or what a recount found. */
+export interface MaterialUse {
+  id: string;
+  materialId: string;
+  qty: number;
+  at: number;
+  source: 'manual' | 'printer' | 'count';
+  note: string;
+}
+export interface MaterialUsage {
+  used: number;
+  recent: MaterialUse[];
 }
 export interface SourcingFile {
   id: string;
@@ -134,6 +163,8 @@ export interface Snapshot {
   issues: Issue[];
   materials: Material[];
   files: SourcingFile[];
+  /** Per material id; absent from an older server. */
+  usage?: Record<string, MaterialUsage>;
 }
 
 // Order reflects the real flow: quote, pay a deposit, confirmation, then production, shipping, arrival.
@@ -285,26 +316,83 @@ export function leadTimeDays(supplierId: string, reorders: Reorder[]): number | 
 
 // ── Materials: home-print costing ───────────────────────────────────────────
 /** Weighted-average unit cost - total spent ÷ total units, so it self-adjusts with every purchase. */
+/** The average over everything ordered; what a print costs is the current batch (see printCost). */
 export function unitCost(m: Material): number {
-  const qty = m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0);
-  const cost = m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0);
-  return qty > 0 ? round4(cost / qty) : 0;
+  return averageUnitCost(m);
 }
+/** What one unit of an order cost: its price divided by what was ordered. */
+export const pricePerUnit = (p: Purchase): number => ((Number(p.qty) || 0) > 0 ? round4((Number(p.cost) || 0) / Number(p.qty)) : 0);
+
+/** A product whose recipe now costs something else than the cost on the product. */
+export interface CostChange {
+  dossierId: string;
+  pid: string;
+  vid: string | null;
+  title: string;
+  was: number | null;
+  now: number;
+}
+/**
+ * Products to bring up to date: every dossier with a recipe and a catalogue
+ * link whose print cost, at today's material prices, differs from the cost
+ * on the product.
+ */
+export function recipeCostChanges(
+  dossiers: Dossier[],
+  materials: Material[],
+  costOf: (pid: string, vid: string | null) => number | null | undefined,
+  usage?: Record<string, MaterialUsage>,
+): CostChange[] {
+  const out: CostChange[] = [];
+  for (const d of dossiers) {
+    if (!d.pid || !d.recipe.some((r) => r.materialId && Number(r.qty) > 0)) continue;
+    const was = costOf(d.pid, d.vid || null);
+    if (was === undefined) continue;
+    const now = printCost(d.recipe, materials, usage).total;
+    if (was === null || Math.abs(was - now) >= 0.005) out.push({ dossierId: d.id, pid: d.pid, vid: d.vid || null, title: d.title, was, now });
+  }
+  return out;
+}
+
+/** What of an order has arrived: all of it, unless deliveries are being logged. */
+export function receivedOf(p: Purchase): number {
+  return p.deliveries ? round4(p.deliveries.reduce((s, d) => s + (Number(d.qty) || 0), 0)) : Number(p.qty) || 0;
+}
+/** What of an order is still to come; never below zero. */
+export const outstandingOf = (p: Purchase): number => Math.max(0, round4((Number(p.qty) || 0) - receivedOf(p)));
+
+/** The batch now being used up and its price per unit; null when nothing is left. */
+export const currentBatch = (m: Material, usage: MaterialUsage | undefined) => currentLot(m, usage?.used ?? 0);
+
+/** What is on hand: everything received less everything used. */
+export function materialOnHand(m: Material, usage: MaterialUsage | undefined): number {
+  return Math.round((materialTotals(m).received - (usage?.used ?? 0)) * 1000) / 1000;
+}
+/** Ordered, received, still on order, spent - and the unit cost, from what was ordered and paid. */
 export function materialTotals(m: Material) {
-  return { qty: m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0), spent: round2(m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0)), unitCost: unitCost(m) };
+  return {
+    qty: m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0),
+    received: round4(m.purchases.reduce((s, p) => s + receivedOf(p), 0)),
+    onOrder: round4(m.purchases.reduce((s, p) => s + outstandingOf(p), 0)),
+    spent: round2(m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0)),
+    unitCost: unitCost(m),
+  };
 }
-/** Cost of one print from its recipe, valued at current material unit costs. */
-export function printCost(recipe: RecipeLine[], materials: Material[]) {
+/**
+ * Cost of one print from its recipe, each material at the price of the batch
+ * now being used (see material-cost.ts) - so it moves as batches run out.
+ * Without usage figures every batch is still whole: the oldest one's price.
+ */
+export function printCost(recipe: RecipeLine[], materials: Material[], usage?: Record<string, MaterialUsage>) {
   const byId = new Map(materials.map((m) => [m.id, m]));
-  const lines = recipe
-    .filter((r) => r.materialId)
-    .map((r) => {
-      const m = byId.get(r.materialId);
-      const uc = m ? unitCost(m) : 0;
-      const qty = Number(r.qty) || 0;
-      return { materialId: r.materialId, name: m?.name ?? '(removed material)', unit: m?.unit ?? '', qty, unitCost: uc, cost: round4(uc * qty) };
-    });
-  return { total: round2(lines.reduce((s, l) => s + l.cost, 0)), lines };
+  const { total, lines } = recipeCost(recipe, materials, (id) => usage?.[id]?.used ?? 0);
+  return {
+    total,
+    lines: lines.map((l) => {
+      const m = byId.get(l.materialId);
+      return { ...l, name: m?.name ?? '(removed material)', unit: m?.unit ?? '' };
+    }),
+  };
 }
 
 // ── Restock: sold per month, on hand, months of cover, suggested order ──────

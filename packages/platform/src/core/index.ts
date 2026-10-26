@@ -33,6 +33,7 @@ export {
   type EventPricing,
 } from './sales-events';
 export { testState, startTestMode, stopTestMode, clearTestData, ensureTestEvent } from './test-mode';
+export { fillSampleCatalogue, SAMPLE_PRODUCTS } from './sample-catalogue';
 export { sellLockSettings, loadSellLockSettings, setSellLockSettings, sellLockFor, sellLocked, canForceSell, forceSell } from './sell-lock';
 export { autoEventSettings, loadAutoEventSettings, setAutoEventSettings, runAutoEvents, startAutoEvents, stopAutoEvents } from './auto-events';
 export {

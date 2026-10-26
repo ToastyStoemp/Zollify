@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, deviceId, leaveOnPurpose, setSandbox, shellConfirm, signOut } from '@zollify/platform';
+import { authFetch, createShellUi, currentAccount, deviceId, fillSampleCatalogue, leaveOnPurpose, setSandbox, shellConfirm, signOut } from '@zollify/platform';
 import { signOutAndReload } from '../boot';
 import { Icon } from '@zollify/ui';
 
@@ -16,6 +16,21 @@ const account = currentAccount;
 const sandbox = computed(() => account.value?.profile.sandbox === true);
 const sandboxBusy = ref(false);
 const sandboxError = ref<string | null>(null);
+/** A test account starts empty; this gives it a catalogue to try things with. */
+const filling = ref(false);
+async function fillSamples(): Promise<void> {
+  filling.value = true;
+  sandboxError.value = null;
+  try {
+    const n = await fillSampleCatalogue();
+    createShellUi('core').toast(`${n} sample products added, with pictures and stock. Adding them again puts them back as they were.`, { kind: 'success' });
+  } catch (err) {
+    sandboxError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    filling.value = false;
+  }
+}
+
 async function toggleSandbox(): Promise<void> {
   const on = !sandbox.value;
   const ok = await shellConfirm(
@@ -255,6 +270,10 @@ onMounted(async () => {
         <span v-if="sandbox" class="sandbox-on">This is a test account</span>
         <span v-else class="hint">This is a real account</span>
         <button type="button" :disabled="sandboxBusy" @click="toggleSandbox">{{ sandbox ? 'Make it real…' : 'Make it a test account…' }}</button>
+      </div>
+      <div v-if="sandbox" class="row">
+        <span class="hint">Prints in sizes, keychains in 12 variants, stickers, pins, a zine at the reduced VAT rate, a one-off original, a sold-out tote colour and more - each with a picture and stock.</span>
+        <button type="button" :disabled="filling" @click="fillSamples">{{ filling ? 'Adding…' : 'Add sample products' }}</button>
       </div>
       <p v-if="sandboxError" class="error">{{ sandboxError }}</p>
     </article>

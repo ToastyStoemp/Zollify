@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { base64BodyLimit, maxBytesFor } from '@zollify/shared';
 import { checkQuota, decodeUpload, sendRefusal, type ModuleContext, type ServerModule } from '@zollify/server-core';
-import { USAGE_TABLES, forgetMaterialUse, migrateUsage, registerPrinterApi, registerUsage, usageSnapshot } from './sourcing-usage';
+import { USAGE_TABLES, followProductCosts, forgetMaterialUse, migrateUsage, registerPrinterApi, registerUsage, usageSnapshot } from './sourcing-usage';
 
 /**
  * Sourcing - the server half, ported from ZollSource.
@@ -101,6 +101,8 @@ export const sourcingServerModule: ServerModule = {
            ON CONFLICT(accountId, coll, id) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt`,
         )
         .run(who.accountId, req.params.coll, req.params.id, JSON.stringify(doc), updatedAt);
+      // A new purchase or a changed recipe moves what products cost.
+      if (req.params.coll === 'materials' || req.params.coll === 'dossiers') followProductCosts(ctx, who.accountId);
       return { doc };
     });
 

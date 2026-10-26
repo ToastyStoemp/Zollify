@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { materialOnHand, materialTotals, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type CostChange, type Material, type MaterialUse, type Purchase } from '../engine';
-import { countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
+import { currentBatch, materialOnHand, materialTotals, outstandingOf, pricePerUnit, receivedOf, recipeCostChanges, type CostChange, type Material, type MaterialUse, type Purchase } from '../engine';
+import { currentUnitCost } from '@zollify/shared';
+import { costSettings, countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
 import { sdk } from '../runtime';
 import PrinterKeys from './PrinterKeys.vue';
 
@@ -50,8 +51,26 @@ function productCost(pid: string, vid: string | null): number | null | undefined
   }
   return p.cost ?? null;
 }
-const costChanges = computed(() => recipeCostChanges(snap.value.dossiers, snap.value.materials, productCost));
+const costChanges = computed(() => recipeCostChanges(snap.value.dossiers, snap.value.materials, productCost, snap.value.usage));
 const reviewing = ref<CostChange[] | null>(null);
+/** On (the default): the server writes products' costs as batches run out and prices change. */
+const followCosts = ref(true);
+onMounted(async () => {
+  try {
+    followCosts.value = (await costSettings.get()).followCosts;
+  } catch {
+    /* an older server: the button below does it by hand */
+  }
+});
+async function toggleFollow(): Promise<void> {
+  try {
+    const res = await costSettings.set(!followCosts.value);
+    followCosts.value = res.followCosts;
+    if (res.followCosts) sdk().ui.toast(res.updated ? `Costs updated on ${res.updated} product${res.updated === 1 ? '' : 's'}; they follow the batches from now on.` : 'Product costs follow the batches from now on.', { kind: 'success' });
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not change that.');
+  }
+}
 async function applyCosts(): Promise<void> {
   const changes = reviewing.value ?? [];
   try {
@@ -149,6 +168,15 @@ const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
 
 // ── On hand: bought less used, by hand, by the printing app, or by a recount ─
 const usageOf = (m: Material) => snap.value.usage?.[m.id];
+/** What the next one costs: the batch now being used up (first in, first out). */
+const nowCost = (m: Material) => currentUnitCost(m, usageOf(m)?.used ?? 0);
+/** "box of 26 Oct, 18 left in it" - which batch that price is from. */
+function batchText(m: Material): string {
+  const lot = currentBatch(m, usageOf(m));
+  if (!lot) return m.purchases.length ? 'all used - the last price' : 'nothing bought yet';
+  const others = m.purchases.length > 1 ? ` of ${lot.date || 'the first order'}` : '';
+  return `batch${others}, ${plural(lot.remaining, m.unit)} left in it`;
+}
 const onHand = (m: Material) => materialOnHand(m, usageOf(m));
 const low = (m: Material) => typeof m.lowAt === 'number' && onHand(m) <= m.lowAt;
 const SOURCE: Record<MaterialUse['source'], string> = { manual: 'Used', printer: 'Printed', count: 'Recount' };
@@ -184,9 +212,10 @@ async function undoUse(u: MaterialUse): Promise<void> {
 <template>
   <div class="tab">
     <div class="tools">
-      <p class="hint">Unit cost = total spent ÷ total units ordered, so it follows the price of every order. Give a dossier a recipe and its cost per print follows - and when prices move, update the products' costs from here.</p>
+      <p class="hint">What a unit costs is the price of the batch now being used: the oldest one first, the next when it runs out. Give a dossier a recipe and its cost per print follows, batch by batch.</p>
       <span class="spacer"></span>
-      <button v-if="costChanges.length" type="button" @click="reviewing = costChanges">Update {{ costChanges.length }} product cost{{ costChanges.length === 1 ? '' : 's' }}</button>
+      <label class="follow"><input :checked="followCosts" type="checkbox" @change="toggleFollow" /> <span>Product costs follow the batches</span></label>
+      <button v-if="!followCosts && costChanges.length" type="button" @click="reviewing = costChanges">Update {{ costChanges.length }} product cost{{ costChanges.length === 1 ? '' : 's' }}</button>
       <button type="button" class="primary" @click="openNew"><Icon name="plus" :size="14" /> New material</button>
     </div>
     <p v-if="!list.length" class="empty">No materials yet. Start with the paper you print on.</p>
@@ -194,7 +223,7 @@ async function undoUse(u: MaterialUse): Promise<void> {
       <div class="head">
         <span class="main"><strong>{{ m.name }}<em>{{ m.type }}</em></strong><small>{{ plural(materialTotals(m).qty, m.unit) }} ordered<template v-if="materialTotals(m).onOrder"> · <span class="onorder">{{ amount(m, materialTotals(m).onOrder) }} still to come</span></template> · {{ fmtPrice(materialTotals(m).spent, currency) }} spent · used by {{ usedBy(m) }} recipe{{ usedBy(m) === 1 ? '' : 's' }}</small></span>
         <span :class="['unit', 'hand', { low: low(m) }]"><strong>{{ onHand(m) }}</strong><small>{{ m.unit }}s on hand{{ low(m) ? ' · low' : '' }}</small></span>
-        <span class="unit"><strong>{{ fmtPrice(materialTotals(m).unitCost, currency) }}</strong><small>per {{ m.unit }}</small></span>
+        <span class="unit" :title="`Average over every order: ${fmtPrice(materialTotals(m).unitCost, currency)} per ${m.unit}`"><strong>{{ fmtPrice(nowCost(m), currency) }}</strong><small>per {{ m.unit }} now</small><small class="batch">{{ batchText(m) }}</small></span>
         <button type="button" @click="openBuy(m)"><Icon name="plus" :size="14" /> Purchase</button>
         <button type="button" @click="openUse(m, 'use')">Use</button>
         <button type="button" class="quiet" @click="openUse(m, 'count')">Count</button>
@@ -340,6 +369,8 @@ async function undoUse(u: MaterialUse): Promise<void> {
 .onorder { color: var(--zfy-warning-ink, #8a5a12); font-weight: 600; }
 .acts { display: flex; align-items: center; gap: .2rem; }
 .price { display: flex; flex-direction: column; }
+.unit .batch { max-width: 11rem; text-align: right; }
+.follow { flex-direction: row; align-items: center; gap: .35rem; font-size: .8rem; }
 .price small { color: var(--zfy-muted, #5a6472); font-size: .7rem; }
 .changes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
 .changes li { display: grid; grid-template-columns: 1fr auto auto auto; gap: .5rem; align-items: center; font-variant-numeric: tabular-nums; }

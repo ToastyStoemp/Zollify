@@ -86,6 +86,8 @@ Authorization: Bearer zpk_…
 Content-Type: application/json
 
 { "material": "Hahnemühle A3", "qty": 10, "id": "job-1234", "note": "Harbour print run" }</pre>
+      <p class="hint">Or say what was printed, and every material of its dossier's recipe - paper and ink - is taken off at once:</p>
+      <pre>{ "print": "Harbour at dusk A3", "copies": 10, "id": "job-1235" }</pre>
       <p class="hint">Materials with what is on hand: <code>GET {{ listUrl }}</code> with the same header.</p>
     </div>
   </details>

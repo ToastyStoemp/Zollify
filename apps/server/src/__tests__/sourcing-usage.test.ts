@@ -146,3 +146,56 @@ describe('the printing app', () => {
     expect(left.n).toBe(0);
   });
 });
+
+describe('prints by recipe, and product costs that follow the batches', () => {
+  let key = '';
+  const latestCost = () => {
+    const rows = app.zollify.db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'product.upsert' AND json_extract(payload, '$.id') = 'p-harbour' ORDER BY seq").all(accountId) as { payload: string }[];
+    return (JSON.parse(rows.at(-1)!.payload) as { cost?: number }).cost;
+  };
+
+  it('writes a linked product\'s cost from its recipe at the current batch prices', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth(owner),
+      payload: { deviceId: 'dev-1', ops: [{ opId: 'op-product-harbour-0001', deviceId: 'dev-1', ts: 1, type: 'product.upsert', payload: { id: 'p-harbour', title: 'Harbour print', price: 35, cost: 9, forSale: true, unlisted: false, variants: [], sortOrder: 0, updatedAt: 1 } }] },
+    });
+    await call('PUT', '/materials/paper', { id: 'paper', name: 'Paper A3', type: 'paper', unit: 'sheet', purchases: [{ id: 'b1', qty: 25, cost: 50, date: '2026-09-01' }, { id: 'b2', qty: 25, cost: 60, date: '2026-10-01' }] });
+    await call('PUT', '/materials/ink', { id: 'ink', name: 'Ink', type: 'ink', unit: 'ml', purchases: [{ id: 'c1', qty: 70, cost: 35, date: '2026-08-01' }] });
+    await call('PUT', '/dossiers/d-harbour', { id: 'd-harbour', pid: 'p-harbour', vid: null, title: 'Harbour A3', recipe: [{ materialId: 'paper', qty: 1 }, { materialId: 'ink', qty: 2 }] });
+    // A sheet at 2.00 and 2 ml at 0.50.
+    expect(latestCost()).toBe(3);
+  });
+
+  it('takes a print\'s whole recipe off at once, counting a resent job once', async () => {
+    key = (await call('POST', '/keys', { label: 'Studio PC' })).json().secret;
+    const res = await printer('POST', '/usage', { print: 'harbour a3', copies: 10, id: 'job-recipe-1' }, key);
+    expect(res.statusCode).toBe(201);
+    expect(res.json().materials.map((m: { id: string; onHand: number }) => [m.id, m.onHand])).toEqual([['paper', 40], ['ink', 50]]);
+    const again = await printer('POST', '/usage', { print: 'harbour a3', copies: 10, id: 'job-recipe-1' }, key);
+    expect(again.json().duplicate).toBe(true);
+    expect((await call('GET', '/snapshot')).json().usage.ink.recent[0]).toMatchObject({ qty: 20, source: 'printer', note: '10 × Harbour A3' });
+  });
+
+  it('moves the product\'s cost when the first box runs out', async () => {
+    expect(latestCost()).toBe(3);
+    await printer('POST', '/usage', { print: 'Harbour A3', copies: 15, id: 'job-recipe-2' }, key);
+    // Box 1 is used up: 2.40 a sheet now, the ink still 0.50.
+    expect(latestCost()).toBe(3.4);
+  });
+
+  it('leaves product costs alone when switched off', async () => {
+    expect((await call('PUT', '/cost-settings', { followCosts: false })).json().followCosts).toBe(false);
+    await call('PUT', '/materials/ink', { id: 'ink', name: 'Ink', type: 'ink', unit: 'ml', purchases: [{ id: 'c1', qty: 70, cost: 70, date: '2026-08-01' }] });
+    expect(latestCost()).toBe(3.4);
+    expect((await call('PUT', '/cost-settings', { followCosts: true })).json()).toMatchObject({ followCosts: true, updated: 1 });
+    expect(latestCost()).toBe(4.4);
+  });
+
+  it('names a print it does not know, and one with no recipe', async () => {
+    expect((await printer('POST', '/usage', { print: 'Unknown', copies: 1 }, key)).statusCode).toBe(404);
+    await call('PUT', '/dossiers/d-empty', { id: 'd-empty', pid: null, vid: null, title: 'Empty', recipe: [] });
+    expect((await printer('POST', '/usage', { print: 'Empty', copies: 1 }, key)).statusCode).toBe(409);
+  });
+});

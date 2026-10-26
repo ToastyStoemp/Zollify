@@ -49,6 +49,12 @@ export async function dropUse(id: string): Promise<void> {
   await refresh();
 }
 
+/** Whether the server keeps product costs where the recipes and batch prices put them. */
+export const costSettings = {
+  get: () => sdk().http.get<{ followCosts: boolean }>('cost-settings'),
+  set: (followCosts: boolean) => sdk().http.put<{ followCosts: boolean; updated: number }>('cost-settings', { followCosts }),
+};
+
 /** A key the printing app uses to log what it prints; the secret is only ever in `create`'s answer. */
 export interface PrinterKey {
   id: string;

@@ -33,7 +33,7 @@ import {
 } from '@zollify/shared';
 import { isEnabled, reduceTransactions, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
 import { renderCommission, renderNotFound } from './commissions-page';
-import { deleteCustomerSide, eraseCustomerFiles, migrateCustomerSide, picturesOf, pushCount, pushUpdate, registerCustomerSide, registerOwnerSide, type CommissionDeps } from './commissions-customer';
+import { deleteCustomerSide, eraseCustomerFiles, migrateCustomerSide, picturesOf, pushCount, pushUpdate, registerCustomerSide, registerOwnerSide, testSubject, type CommissionDeps } from './commissions-customer';
 
 /**
  * Commissions - the server half.
@@ -316,6 +316,36 @@ export function sweepCustomers(db: Database.Database, now = Date.now()): number 
   return erased;
 }
 
+/** Customers whose every commission was made in test mode. */
+function testOnlyCustomers(db: Database.Database, accountId: string): Set<string> {
+  const real = new Set<string>();
+  const test = new Set<string>();
+  for (const { c } of commissionsOf(db, accountId)) if (c.customerId) (c.test ? test : real).add(c.customerId);
+  return new Set([...test].filter((id) => !real.has(id)));
+}
+
+/**
+ * Erases the commissions made in test mode, their pictures and briefs, and
+ * the customers made with them - unless a real commission is theirs too.
+ * Returns how many commissions went.
+ */
+export function clearTestCommissions(db: Database.Database, accountId: string): number {
+  const all = commissionsOf(db, accountId);
+  const tests = all.filter((r) => r.c.test);
+  if (!tests.length) return 0;
+  const realCustomers = new Set(all.filter((r) => !r.c.test).map((r) => r.c.customerId));
+  db.transaction(() => {
+    for (const { c } of tests) {
+      db.prepare('DELETE FROM commissions WHERE accountId = ? AND id = ?').run(accountId, c.id);
+      eraseCustomerFiles(db, accountId, c.id);
+      if (c.testCustomer && c.customerId && !realCustomers.has(c.customerId)) {
+        db.prepare('DELETE FROM commission_customers WHERE accountId = ? AND id = ?').run(accountId, c.customerId);
+      }
+    }
+  })();
+  return tests.length;
+}
+
 // ── What was paid, from the till's own records ──────────────────────────────
 
 /** A sale line's amount in the commission's currency (the book currency when the till converted). */
@@ -329,38 +359,59 @@ function lineAmount(tx: Transaction, lineTotal: number, baseLineTotal: number | 
  * was not reverted. Derived on each call, so a refund at the till gives the
  * balance back and an offline sale counts the moment it syncs.
  */
-export function paymentsByCommission(db: Database.Database, accountId: string, currencyOf: (id: string) => string | undefined): Map<string, CommissionPayment[]> {
-  // Only the sales that mention this module are parsed; the revert ops are few and tiny.
-  const creates = db
-    .prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type = 'tx.create' AND payload LIKE ? ORDER BY seq")
-    .all(accountId, `%${MODULE_ID}%`) as { opId: string; type: string; payload: string }[];
+export function paymentsByCommission(
+  db: Database.Database,
+  accountId: string,
+  commissionOf: (id: string) => Pick<Commission, 'currency' | 'test'> | undefined,
+): Map<string, CommissionPayment[]> {
   const out = new Map<string, CommissionPayment[]>();
-  if (!creates.length) return out;
-  const reverts = db.prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type = 'tx.revert' ORDER BY seq").all(accountId) as {
-    opId: string;
-    type: string;
-    payload: string;
-  }[];
-  const txs = reduceTransactions([...creates, ...reverts].map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) })));
+  // A real commission is paid by real sales, a test one (test mode) by test sales only:
+  // a deposit tried out in test mode never pays for a real piece, and the other way round.
+  for (const [create, revert, test] of [['tx.create', 'tx.revert', false], ['tx.test.create', 'tx.test.revert', true]] as const) {
+    // Only the sales that mention this module are parsed; the revert ops are few and tiny.
+    const creates = db
+      .prepare('SELECT opId, type, payload FROM ops WHERE accountId = ? AND type = ? AND payload LIKE ? ORDER BY seq')
+      .all(accountId, create, `%${MODULE_ID}%`) as { opId: string; type: string; payload: string }[];
+    if (!creates.length) continue;
+    const reverts = db.prepare('SELECT opId, type, payload FROM ops WHERE accountId = ? AND type = ? ORDER BY seq').all(accountId, revert) as {
+      opId: string;
+      type: string;
+      payload: string;
+    }[];
+    const txs = reduceTransactions([
+      ...creates.map((o) => ({ opId: o.opId, type: 'tx.create', payload: JSON.parse(o.payload) })),
+      ...reverts.map((o) => ({ opId: o.opId, type: 'tx.revert', payload: JSON.parse(o.payload) })),
+    ]);
+    collectPayments(txs, commissionOf, test, out);
+  }
+  return out;
+}
+
+function collectPayments(
+  txs: Transaction[],
+  commissionOf: (id: string) => Pick<Commission, 'currency' | 'test'> | undefined,
+  test: boolean,
+  out: Map<string, CommissionPayment[]>,
+): void {
   for (const tx of txs) {
     if (tx.revertedAt || tx.revertedBy) continue;
     for (const item of tx.items) {
       const ref = item.ref;
       if (!ref || ref.moduleId !== MODULE_ID || ref.kind !== COMMISSION_REF_KIND) continue;
-      const currency = currencyOf(ref.id);
-      if (!currency) continue;
+      const c = commissionOf(ref.id);
+      if (!c || !!c.test !== test) continue;
+      const currency = c.currency;
       const amount = lineAmount(tx, item.lineTotal, item.baseLineTotal, currency);
       const list = out.get(ref.id) ?? [];
       list.push({ saleId: tx.id, at: tx.timestamp, amount, label: item.title });
       out.set(ref.id, list);
     }
   }
-  return out;
 }
 
 function totalsFor(db: Database.Database, accountId: string, all: Commission[]): Map<string, CommissionTotals> {
   const byId = new Map(all.map((c) => [c.id, c]));
-  const payments = paymentsByCommission(db, accountId, (id) => byId.get(id)?.currency);
+  const payments = paymentsByCommission(db, accountId, (id) => byId.get(id));
   return new Map(all.map((c) => [c.id, commissionTotals(c.price, (payments.get(c.id) ?? []).sort((a, b) => a.at - b.at))]));
 }
 
@@ -389,6 +440,7 @@ function ownerView(req: FastifyRequest, c: Commission, token: string, totals: Co
 export function publicView(c: Commission, totals: CommissionTotals, settings: CommissionSettings, shop: string, pictures: BriefPicture[] = [], hasEmail = false, mailEnabled = false): PublicCommission {
   const pickup = { name: settings.pickupName, address: settings.pickupAddress, note: settings.pickupNote };
   return {
+    ...(c.test ? { test: true } : {}),
     shop: settings.shopName || shop,
     title: c.title,
     status: c.status,
@@ -440,7 +492,7 @@ async function tellCustomer(
   return ctx.mail.send({
     to: customer.email,
     accountId,
-    subject: update ? `${c.title}: ${COMMISSION_STATUS_LABEL[c.status]}` : `Follow your commission: ${c.title}`,
+    subject: testSubject(c, update ? `${c.title}: ${COMMISSION_STATUS_LABEL[c.status]}` : `Follow your commission: ${c.title}`),
     text,
     ...(replyTo ? { replyTo } : {}),
   });
@@ -484,6 +536,10 @@ export const commissionsServerModule: ServerModule = {
     for (const t of ['commissions', 'commission_customers', 'commissions_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
     deleteCustomerSide(db, accountId);
   },
+  // Test data cleared (test mode): the test commissions go with the test sales.
+  onOps: (svc, accountId, ops) => {
+    if (ops.some((o) => o.type === 'tx.test.clear')) clearTestCommissions(svc.db, accountId);
+  },
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;
@@ -515,9 +571,11 @@ export const commissionsServerModule: ServerModule = {
     timer.unref();
     app.addHook('onClose', async () => clearInterval(timer));
 
-    app.get('/commissions', async (req) => {
+    app.get<{ Querystring: { test?: string } }>('/commissions', async (req) => {
       const who = ctx.identity(req);
-      const rows = commissionsOf(db, who.accountId);
+      // A device in test mode sees the test commissions, any other the real ones.
+      const test = req.query.test === '1';
+      const rows = commissionsOf(db, who.accountId).filter((r) => !!r.c.test === test);
       const totals = totalsFor(db, who.accountId, rows.map((r) => r.c));
       const customers = customerMap(db, who.accountId);
       return {
@@ -538,7 +596,7 @@ export const commissionsServerModule: ServerModule = {
       const who = ctx.identity(req);
       const body = CommissionCreateSchema.safeParse(req.body);
       if (!body.success) return reply.code(400).send(bad(body.error.issues[0]?.message ?? 'That commission is not valid.'));
-      const { customerId, customer: typedIn, forceNewCustomer, ...input } = body.data;
+      const { customerId, customer: typedIn, forceNewCustomer, test, ...input } = body.data;
       const now = Date.now();
       // An existing customer, or a new one typed in the same form. A new one that looks like
       // someone we already have is offered back first; nothing is merged without the seller's say.
@@ -551,8 +609,10 @@ export const commissionsServerModule: ServerModule = {
         }
         customer = { id: randomUUID(), ...typedIn, keepFrom: 0, createdAt: now, updatedAt: now };
       }
+      const newCustomer = !customerId;
       const c: Commission = {
         ...input,
+        ...(test ? { test: true, ...(newCustomer ? { testCustomer: true } : {}) } : {}),
         customerId: customer!.id,
         customerErasedAt: null,
         id: randomUUID(),
@@ -659,19 +719,23 @@ export const commissionsServerModule: ServerModule = {
     });
 
     /** Search as you type, for picking a customer on a new commission. Name, email or phone. */
-    app.get<{ Querystring: { q?: string } }>('/customers/search', { config: { rateLimit: { max: 90, timeWindow: '1 minute' } } }, async (req) => {
+    app.get<{ Querystring: { q?: string; test?: string } }>('/customers/search', { config: { rateLimit: { max: 90, timeWindow: '1 minute' } } }, async (req) => {
       const who = ctx.identity(req);
       const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 80) : '';
       if (q.trim().length < 2) return { customers: [] };
-      return { customers: searchCustomers(db, who.accountId, q, SEARCH_LIMIT).map(contactOf) };
+      // Someone only made in test mode is only offered in test mode.
+      const hidden = req.query.test === '1' ? new Set<string>() : testOnlyCustomers(db, who.accountId);
+      return { customers: searchCustomers(db, who.accountId, q, SEARCH_LIMIT + hidden.size).filter((r) => !hidden.has(r.id)).slice(0, SEARCH_LIMIT).map(contactOf) };
     });
 
-    app.get<{ Querystring: { q?: string } }>('/customers', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
+    app.get<{ Querystring: { q?: string; test?: string } }>('/customers', { config: { rateLimit: { max: 60, timeWindow: '1 minute' } } }, async (req) => {
       const who = ctx.identity(req);
       const q = typeof req.query.q === 'string' ? req.query.q.slice(0, 80) : '';
       const days = readSettings(db, who.accountId).keepCustomerDays;
       const wanted = new Set(searchCustomers(db, who.accountId, q, MAX_CUSTOMER_LIST).map((r) => r.id));
-      const states = erasureStates(db, who.accountId, Date.now(), days).filter((s) => wanted.has(s.customer.id));
+      // Someone only made in test mode is listed only in test mode.
+      const testOnly = (s: { commissions: Commission[] }) => s.commissions.length > 0 && s.commissions.every((c) => c.test);
+      const states = erasureStates(db, who.accountId, Date.now(), days).filter((s) => wanted.has(s.customer.id) && (req.query.test === '1' || !testOnly(s)));
       const totals = totalsFor(db, who.accountId, states.flatMap((s) => s.commissions));
       return { customers: states.map((s) => summaryOf(s, totals)), keepCustomerDays: days };
     });

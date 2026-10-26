@@ -4,6 +4,7 @@ import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
+import { loadDeviceTestMode, testState } from './test-state';
 
 /**
  * Sales events - the conventions and markets a booth trades at.
@@ -36,6 +37,7 @@ function requireAccountId(): string {
 export async function loadSalesEvents(): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const rows = await db.events.toArray();
+  await loadDeviceTestMode(db);
   events.clear();
   for (const row of rows) {
     if (!row.deletedAt) events.set(row.id, row);
@@ -66,7 +68,8 @@ export async function loadSalesEvents(): Promise<void> {
  */
 export const visibleEvents = computed(() => {
   const account = getAccount();
-  const all = sortEvents(events.values());
+  // The test event is only ever sold into through test mode (see testEvent).
+  const all = sortEvents(events.values()).filter((e) => !e.test);
   const allowed = account?.allowedEventIds;
   if (!allowed || allowed.length === 0) return all;
   const set = new Set(allowed);
@@ -79,11 +82,24 @@ export const visibleEvents = computed(() => {
  * would refuse the sales for.
  */
 export const activeEvent = computed(() => {
+  // In test mode the till sells into the test event, whatever was picked.
+  if (testState.on && testEvent.value) return testEvent.value;
   const e = activeId.value ? events.get(activeId.value) : undefined;
   return e && visibleEvents.value.some((v) => v.id === e.id) ? e : null;
 });
 
-export const activeEventId = computed(() => activeId.value);
+export const activeEventId = computed(() => (testState.on && testEvent.value ? testEvent.value.id : activeId.value));
+
+/**
+ * The account's test event (see test-mode.ts), whoever may see it: test
+ * sales never reach the books, so a helper can try the till out too. Kept
+ * out of `visibleEvents`, so it is never picked, published or reported on as
+ * a real event.
+ */
+export const testEvent = computed(() => [...events.values()].filter((e) => e.test).sort((a, b) => a.id.localeCompare(b.id))[0] ?? null);
+
+/** Whether an event is the test event - its sales are test sales. */
+export const isTestEvent = (id: string | null | undefined): boolean => !!id && events.get(id)?.test === true;
 
 /** Every event, also those a helper is not given - for rules that span events (sell-lock.ts). */
 export function allSalesEvents(): SalesEvent[] {

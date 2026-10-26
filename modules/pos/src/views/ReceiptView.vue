@@ -209,6 +209,7 @@ async function print(): Promise<void> {
       <p v-if="tx.tax?.exempt && tx.tax.exNumber" class="exempt">EX: {{ tx.tax.exNumber }}</p>
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
+      <p v-if="tx.testRun" class="reverted">TEST - made in test mode, nothing was paid</p>
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ stamp(tx.revertedAt) }}</p>
       <p class="ref">Receipt {{ tx.receiptNumber ?? tx.id.slice(-8) }}</p>
     </article>

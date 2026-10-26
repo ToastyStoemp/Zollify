@@ -8,7 +8,7 @@ import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-c
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
-import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
+import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, shellTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
 import SumupSoloPairing from './SumupSoloPairing.vue';
 import Go2Connection from './Go2Connection.vue';
@@ -197,11 +197,38 @@ const ago = (ts: number): string => {
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
+/** The shell keeps test sales apart (see cart.ts); an older one only goes through the motions. */
+const keepsTests = computed(() => !!shellTestMode());
+// Both read the shell's reactive stores, so they follow sales and clearing as they happen.
+const testEvent = computed(() => shellTestMode()?.event() ?? null);
+const testSales = computed(() => shellTestMode()?.sales().length ?? 0);
+const clearing = ref(false);
+
 async function toggleTestMode(e: Event): Promise<void> {
   const on = (e.target as HTMLInputElement).checked;
-  await setTestMode(on);
-  sdk().ui.toast(on ? 'Test mode on - nothing the till does now is recorded.' : 'Test mode off - sales are recorded again.', { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
+  const { restored } = await setTestMode(on);
+  const off = keepsTests.value
+    ? `Test mode off - selling for real again.${restored ? ` Stock put back on ${restored} item${restored === 1 ? '' : 's'}.` : ''}`
+    : 'Test mode off - sales are recorded again.';
+  const onText = keepsTests.value ? `Test mode on - the till now sells into ${shellTestMode()?.event()?.name ?? 'the test event'}.` : 'Test mode on - nothing the till does now is recorded.';
+  sdk().ui.toast(on ? onText : off, { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
   void refreshStatuses();
+}
+
+async function clearTests(): Promise<void> {
+  const shell = shellTestMode();
+  if (!shell) return;
+  const ok = await sdk().ui.confirm('Every test sale, and every commission made in test mode, goes on all devices. Real sales are not touched.', 'Clear test data?', { confirm: 'Clear test data' });
+  if (!ok) return;
+  clearing.value = true;
+  try {
+    await shell.clear();
+    sdk().ui.toast('Test data cleared.', { kind: 'success' });
+  } catch (err) {
+    sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
+  } finally {
+    clearing.value = false;
+  }
 }
 
 async function saveCardInBase(): Promise<void> {
@@ -229,13 +256,24 @@ async function removeMethod(name: string): Promise<void> {
     <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
 
     <h3>Test mode</h3>
-    <label class="toggle">
+    <label v-if="keepsTests" class="toggle">
+      <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
+      <span class="main">
+        <span>Sell into the test event</span>
+        <small>Everything works as usual - cart, discounts, cash or card, receipts, commissions and their deposits - but it all happens in the test event: logged in History under that event, never in your takings, books, tax or exports. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). Stock moves as it would for real and is put back when you switch test mode off. The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
+      </span>
+    </label>
+    <label v-else class="toggle">
       <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
       <span class="main">
         <span>Try the till without recording anything</span>
         <small>Every step runs as usual - cart, discounts, cash or card, the receipt screen - but no sale is recorded: no transaction, no stock movement, nothing in the books, nothing synced. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
       </span>
     </label>
+    <div v-if="keepsTests && testEvent" class="testdata">
+      <span>{{ testSales }} test sale{{ testSales === 1 ? '' : 's' }} in <router-link :to="{ name: 'history', query: { event: testEvent.id } }">{{ testEvent.name }}</router-link></span>
+      <button type="button" class="danger" :disabled="clearing" @click="clearTests">{{ clearing ? 'Clearing…' : 'Clear test data' }}</button>
+    </div>
 
     <h3>Card payment terminal</h3>
     <ul class="providers">
@@ -377,6 +415,7 @@ code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius
 .methods .quiet { min-height: 1.7rem; font-size: .78rem; }
 .toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
 .toggle input { margin-top: .2rem; }
+.testdata { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; margin-top: .5rem; font-size: .875rem; }
 .add { display: flex; gap: .4rem; }
 .add input { flex: 1; min-width: 0; }
 .grow { flex: 1; }

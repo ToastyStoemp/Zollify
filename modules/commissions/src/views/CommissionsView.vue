@@ -16,12 +16,15 @@ import {
   type CommissionStatus,
 } from '@zollify/shared';
 import { QrCode } from '@zollify/ui';
-import { api, errorText, localToday, type CommissionView } from '../api';
+import { api, errorText, inTestMode, localToday, type CommissionView } from '../api';
 import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
 import CustomerPicker from './CustomerPicker.vue';
 import CustomersPanel from './CustomersPanel.vue';
 import CustomerBrief from './CustomerBrief.vue';
 import RequestPageLink from './RequestPageLink.vue';
+
+/** Test mode on this device: the list is the test commissions, and a new one is made as a test. */
+const testing = inTestMode();
 import { slipHtml } from '../slip';
 import { sdk } from '../runtime';
 
@@ -295,6 +298,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
       <h1>Commissions</h1>
       <button type="button" class="primary" @click="startNew()">New commission</button>
     </header>
+    <p v-if="testing" class="testnote">Test mode - these are the test commissions. Only test sales pay them, and clearing test data removes them. Switch test mode off to see the real ones.</p>
     <div class="chips tabs" role="tablist" aria-label="View">
       <button type="button" class="chip" role="tab" :class="{ on: tab === 'commissions' }" :aria-selected="tab === 'commissions'" @click="tab = 'commissions'">Commissions</button>
       <button type="button" class="chip" role="tab" :class="{ on: tab === 'customers' }" :aria-selected="tab === 'customers'" @click="customerFocus = null; tab = 'customers'">Customers</button>
@@ -452,6 +456,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
 </template>
 
 <style scoped>
+.testnote { margin: 0 0 .75rem; padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); font-size: .85rem; font-weight: 600; }
 .comm { display: flex; flex-direction: column; gap: .8rem; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }

@@ -48,6 +48,7 @@ export { createModuleHost, type ModuleHost, type HostServices } from './sdk-host
 export {
   applyLogin,
   applyUser,
+  setSandbox,
   updateProfile,
   clearSession,
   signOut,

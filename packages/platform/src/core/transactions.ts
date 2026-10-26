@@ -7,6 +7,8 @@ import { queueOp } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
 import { getProduct } from './catalog';
+import { isTestEvent } from './sales-events';
+import { TEST_CLEARED_AT_KEY, loadAccountTestState, testState } from './test-state';
 
 /**
  * Recorded sales.
@@ -34,6 +36,7 @@ function requireAccountId(): string {
 export async function loadTransactions(): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const rows = await db.transactions.orderBy('timestamp').reverse().toArray();
+  await loadAccountTestState(db);
   transactions.clear();
   for (const row of rows) transactions.set(row.id, row);
   loaded.value = true;
@@ -41,10 +44,34 @@ export async function loadTransactions(): Promise<void> {
 
 export const transactionsLoaded = computed(() => loaded.value);
 
-/** Most recent first. */
+/**
+ * The real sales, most recent first. Test sales (see test-mode.ts) are left
+ * out here, so takings, reports, exports, stock planning and every module
+ * that reads sales never see one; the few places that show them ask for
+ * `testTransactions`.
+ */
 export const recentTransactions = computed(() =>
-  [...transactions.values()].sort((a, b) => b.timestamp - a.timestamp),
+  [...transactions.values()].filter((t) => !t.testRun).sort((a, b) => b.timestamp - a.timestamp),
 );
+
+/** Test sales, most recent first - shown under the test event only. */
+export const testTransactions = computed(() =>
+  [...transactions.values()].filter((t) => !!t.testRun).sort((a, b) => b.timestamp - a.timestamp),
+);
+
+/**
+ * What stock is worked out from: the real sales, plus the test sales of a run
+ * still going. Ending a run (turning test mode off) takes its sales back out,
+ * so whatever they sold is on hand again without a write.
+ */
+export const stockTransactions = computed(() =>
+  [...transactions.values()].filter((t) => !t.testRun || !testState.endedRuns.has(t.testRun)),
+);
+
+/** An event's sales: the test sales for the test event, the real ones for any other. */
+export function transactionsOfEvent(eventId: string): Transaction[] {
+  return (isTestEvent(eventId) ? testTransactions.value : recentTransactions.value).filter((t) => t.eventId === eventId);
+}
 
 export function getTransaction(id: string): Transaction | undefined {
   return transactions.get(id);
@@ -146,6 +173,8 @@ export function saleToTransaction(
 const withConsignor = (consignorId: string | undefined): Pick<TxItem, 'consignorId'> => (consignorId ? { consignorId } : {});
 
 const RECEIPT_SEQ_KEY = 'core.receiptSeq';
+/** Test sales count in a series of their own, so the real numbers stay gap-free. */
+const TEST_RECEIPT_SEQ_KEY = 'core.testReceiptSeq';
 
 /** The series a till numbers its receipts in: the end of its device id, readable on paper. */
 export const receiptSeries = (device: string): string => device.replace(/-/g, '').slice(-6).toUpperCase();
@@ -156,30 +185,35 @@ export const receiptSeries = (device: string): string => device.replace(/-/g, ''
  * numbering gap-free offline; a device never shares its counter, so the
  * counter is a local setting, not a synced one.
  */
-async function nextReceiptNumber(db: CoreDb, device: string): Promise<string> {
-  const row = await db.settings.get(RECEIPT_SEQ_KEY);
+async function nextReceiptNumber(db: CoreDb, device: string, test = false): Promise<string> {
+  const key = test ? TEST_RECEIPT_SEQ_KEY : RECEIPT_SEQ_KEY;
+  const row = await db.settings.get(key);
   const n = (typeof row?.value === 'number' ? row.value : 0) + 1;
-  await db.settings.put({ key: RECEIPT_SEQ_KEY, value: n });
-  return `${receiptSeries(device)}-${String(n).padStart(4, '0')}`;
+  await db.settings.put({ key, value: n });
+  return `${test ? 'TEST-' : ''}${receiptSeries(device)}-${String(n).padStart(4, '0')}`;
 }
 
 export async function recordSale(sale: SaleEvent): Promise<Transaction> {
   const db = openCoreDb(requireAccountId());
   const who = getAccount();
   const device = await deviceId();
+  // A sale into the test event is a test sale, whoever rang it up: logged,
+  // shown under that event, never counted as takings.
+  const testRun = isTestEvent(sale.eventId) ? (testState.run ?? 'outside-test-mode') : undefined;
   const base = toPlain({
     ...saleToTransaction(sale, device, (id) => getProduct(id)?.consignorId),
     // The server stamps this too, from the signed-in user; this copy is so the till that made the sale knows without a round trip.
     ...(who ? { soldBy: { userId: who.userId, email: who.email } } : {}),
+    ...(testRun ? { testRun } : {}),
   });
 
   const tx = await db.transaction('rw', db.settings, db.transactions, async () => {
-    const numbered: Transaction = { ...base, receiptNumber: await nextReceiptNumber(db, device) };
+    const numbered: Transaction = { ...base, receiptNumber: await nextReceiptNumber(db, device, !!testRun) };
     await db.transactions.put(numbered);
     return numbered;
   });
   transactions.set(tx.id, tx);
-  await queueOp({ type: 'tx.create', payload: tx });
+  await queueOp({ type: testRun ? 'tx.test.create' : 'tx.create', payload: tx });
   return tx;
 }
 
@@ -201,7 +235,7 @@ export async function revertTransaction(id: string): Promise<void> {
 
   await db.transactions.put(reverted);
   transactions.set(id, reverted);
-  await queueOp({ type: 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
+  await queueOp({ type: existing.testRun ? 'tx.test.revert' : 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
 }
 
 /**
@@ -218,7 +252,7 @@ export async function importTransactions(rows: Transaction[]): Promise<number> {
     if (await db.transactions.get(tx.id)) continue;
     await db.transactions.put(tx);
     transactions.set(tx.id, tx);
-    await queueOp({ type: 'tx.create', payload: tx });
+    await queueOp({ type: tx.testRun ? 'tx.test.create' : 'tx.create', payload: tx });
     added++;
   }
   return added;
@@ -249,6 +283,8 @@ export function totalsFor(eventId?: string | null): SalesTotals[] {
 
   for (const tx of transactions.values()) {
     if (eventId !== undefined && eventId !== null && tx.eventId !== eventId) continue;
+    // Test sales only ever add up under the test event itself.
+    if (tx.testRun && !eventId) continue;
 
     const entry = byCurrency.get(tx.currency) ?? {
       currency: tx.currency,
@@ -266,6 +302,27 @@ export function totalsFor(eventId?: string | null): SalesTotals[] {
   }
 
   return [...byCurrency.values()].sort((a, b) => a.currency.localeCompare(b.currency));
+}
+
+/**
+ * Drops every test sale from this device - what `tx.test.clear` does when it
+ * arrives, and what the device that cleared does at once.
+ */
+export async function forgetTestTransactions(clearedAt: number): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  await db.transaction('rw', db.transactions, db.settings, async () => {
+    await removeTestRows(db, clearedAt);
+  });
+  for (const [id, tx] of transactions) if (tx.testRun && tx.timestamp <= clearedAt) transactions.delete(id);
+  testState.clearedAt = Math.max(testState.clearedAt, clearedAt);
+}
+
+/** The write behind clearing, inside a caller's Dexie transaction (sync applies it with the rest of a pull). */
+export async function removeTestRows(db: CoreDb, clearedAt: number): Promise<void> {
+  const ids = (await db.transactions.toArray()).filter((t) => t.testRun && t.timestamp <= clearedAt).map((t) => t.id);
+  if (ids.length) await db.transactions.bulkDelete(ids);
+  const row = await db.settings.get(TEST_CLEARED_AT_KEY);
+  if (!(typeof row?.value === 'number' && row.value >= clearedAt)) await db.settings.put({ key: TEST_CLEARED_AT_KEY, value: clearedAt });
 }
 
 export function resetTransactionCache(): void {

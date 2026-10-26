@@ -144,6 +144,8 @@ export interface PaymentFile {
   filename: string | null;
   included: { consignorId: string; name: string; amount: number; currency: string; reference: string }[];
   skipped: { consignorId: string; name: string; reason: string }[];
+  /** Made in a test account: marked TEST throughout, never to upload to a bank. */
+  test?: boolean;
 }
 export const loadInvoices = async (from: string): Promise<ArtistInvoice[]> => (await sdk().http.get<{ invoices: ArtistInvoice[] }>(`reports/${encodeURIComponent(from)}/invoices`)).invoices;
 export const issueInvoices = async (from: string): Promise<ArtistInvoice[]> => (await sdk().http.post<{ invoices: ArtistInvoice[] }>(`reports/${encodeURIComponent(from)}/invoices`, {})).invoices;

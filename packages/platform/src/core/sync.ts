@@ -18,7 +18,8 @@ import { deviceFlavor, deviceId, deviceName } from './device';
 import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
-import { loadTransactions } from './transactions';
+import { loadTransactions, removeTestRows } from './transactions';
+import { TEST_CLEARED_AT_KEY, TEST_ENDED_RUNS_KEY } from './test-state';
 import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { claimClearedAt, loadInventory, rememberClaimCleared } from './inventory';
@@ -218,6 +219,41 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
         return 1;
       }
       return 0;
+    }
+    // Test mode (test-mode.ts): kept like any sale, but apart from the real ones.
+    case 'tx.test.create': {
+      const incoming = op.payload as Transaction;
+      const cleared = (await db.settings.get(TEST_CLEARED_AT_KEY))?.value;
+      // Made before test data was cleared, by a device that synced late: already wiped.
+      if (typeof cleared === 'number' && incoming.timestamp <= cleared) return 0;
+      if (!(await db.transactions.get(incoming.id))) {
+        await db.transactions.put({ ...incoming, testRun: incoming.testRun ?? 'unknown' });
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.test.revert': {
+      const { id, revertedAt, revertedBy } = op.payload as { id: string; revertedAt: number; revertedBy: string };
+      const existing = await db.transactions.get(id);
+      if (existing && existing.testRun && !existing.revertedAt) {
+        await db.transactions.put({ ...existing, revertedAt, revertedBy });
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.test.end': {
+      const { run } = op.payload as { run: string };
+      const row = await db.settings.get(TEST_ENDED_RUNS_KEY);
+      const ended = Array.isArray(row?.value) ? (row.value as string[]) : [];
+      if (typeof run !== 'string' || ended.includes(run)) return 0;
+      await db.settings.put({ key: TEST_ENDED_RUNS_KEY, value: [...ended, run] });
+      return 1;
+    }
+    case 'tx.test.clear': {
+      const { at } = op.payload as { at: number };
+      if (typeof at !== 'number') return 0;
+      await removeTestRows(db, at);
+      return 1;
     }
     case 'discount.upsert': {
       const incoming = op.payload as DiscountRule & { updatedAt?: number };

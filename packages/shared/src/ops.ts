@@ -12,7 +12,11 @@ export type OpType =
   | 'discount.upsert'
   | 'discount.delete'
   | 'image.meta'
-  | 'setting.upsert';
+  | 'setting.upsert'
+  | 'tx.test.create'
+  | 'tx.test.revert'
+  | 'tx.test.end'
+  | 'tx.test.clear';
 
 export interface Op {
   /** uuidv7, client-generated, globally unique - the idempotency key. */
@@ -25,7 +29,7 @@ export interface Op {
 }
 
 /** The changes staff (role member) may make; the server drops anything else they push. */
-export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set'];
+export const STAFF_OP_TYPES: readonly string[] = ['tx.create', 'tx.revert', 'stock.set', 'tx.test.create', 'tx.test.revert', 'tx.test.end'];
 
 /**
  * Synced settings under this prefix are the team's, not the owner's: staff

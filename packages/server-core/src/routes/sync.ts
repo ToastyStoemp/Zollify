@@ -70,6 +70,12 @@ export function registerSyncRoutes(
   }
   // Catalog + account config that every seller needs regardless of event.
   const GLOBAL_TYPES = new Set(['product.upsert', 'product.delete', 'product.merge', 'discount.upsert', 'discount.delete', 'image.meta', 'setting.upsert']);
+  const TEST_TYPES = new Set(['tx.test.create', 'tx.test.revert', 'tx.test.end', 'tx.test.clear']);
+  // Clearing test data: the test ops made up to then go from the log for good, as on every device.
+  const dropTestOps = db.prepare(
+    `DELETE FROM ops WHERE accountId = ? AND type IN ('tx.test.create', 'tx.test.revert', 'tx.test.end')
+       AND COALESCE(json_extract(payload, '$.timestamp'), json_extract(payload, '$.revertedAt'), json_extract(payload, '$.at'), 0) <= ?`,
+  );
   const eventIdOf = (op: { type: string; payload: unknown }): string | undefined => {
     const p = op.payload as Record<string, unknown> | null;
     if (!p) return undefined;
@@ -79,6 +85,8 @@ export function registerSyncRoutes(
   // Which ops a restricted user is allowed to RECEIVE.
   function opReadable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (GLOBAL_TYPES.has(op.type)) return true;
+    // Test mode is open to everyone on the account: none of it is real.
+    if (TEST_TYPES.has(op.type)) return true;
     if (op.type === 'tx.revert') {
       const payload = op.payload as { txId?: string; id?: string } | null;
       const txId = payload?.txId ?? payload?.id;
@@ -93,6 +101,8 @@ export function registerSyncRoutes(
   // account settings).
   function opWritable(accountId: string, allowed: Set<string>, op: { type: string; payload: unknown }): boolean {
     if (isTeamSetting(op)) return true;
+    // A helper may try the till out in test mode, but not wipe everyone's test data.
+    if (TEST_TYPES.has(op.type)) return op.type !== 'tx.test.clear';
     if (op.type === 'tx.revert') {
       // Consult the canonical first sale, never a client-supplied duplicate.
       // Earlier accepted ops in this push are already in the transaction.
@@ -153,6 +163,10 @@ export function registerSyncRoutes(
           accepted++;
           fresh.push(op);
           if (op.type === 'tx.create') txCount++;
+          if (op.type === 'tx.test.clear') {
+            const at = (op.payload as { at?: unknown } | null)?.at;
+            if (typeof at === 'number') dropTestOps.run(claims.accountId, at);
+          }
         }
       }
       touchDevice(db, deviceId, claims.accountId, claims.sub, deviceName ?? null, flavor ?? null, Date.now(), parseDevice(req.headers['user-agent']));
@@ -247,7 +261,7 @@ const emailOf = (db: Database.Database, userId: string): string | null =>
  * that name.
  */
 function stampSeller(db: Database.Database, op: WireOp, claims: JwtClaims, staff: boolean, deviceId: string): WireOp {
-  if (op.type !== 'tx.create' || !op.payload || typeof op.payload !== 'object') return op;
+  if ((op.type !== 'tx.create' && op.type !== 'tx.test.create') || !op.payload || typeof op.payload !== 'object') return op;
   const payload = op.payload as { soldBy?: { userId?: string } };
   const named = payload.soldBy?.userId;
   // A sale recorded at a shared till, in the name of someone unlocked there: only believed

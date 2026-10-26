@@ -93,6 +93,11 @@ export interface SalesEvent {
    * (see sell-lock.ts). Only honoured while the account allows forcing.
    */
   sellLockForced?: boolean;
+  /**
+   * The account's test event: what a till in test mode sells into (see
+   * test-mode.ts). Its sales are logged apart and never count as takings.
+   */
+  test?: boolean;
   updatedAt: number;
   deletedAt?: number;
 }
@@ -427,6 +432,12 @@ export interface Transaction {
   tax?: SaleTax;
   /** Who rang it up - set by the server from the signed-in user, so staff cash-ups add up per person. */
   soldBy?: { userId: string; email: string | null };
+  /**
+   * Made in test mode, during this test run (see test-mode.ts): logged and
+   * shown under the test event, never in takings, books or exports. Synced
+   * as `tx.test.create`, so nothing that reads `tx.create` ever sees it.
+   */
+  testRun?: string;
 }
 
 export interface AsCharged {

@@ -11,7 +11,7 @@ import {
   poolKey,
   type PoolListing,
 } from '@zollify/shared';
-import { reduceEvents, type ModuleContext, type ModuleServices } from '@zollify/server-core';
+import { isSandbox, reduceEvents, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 
 /**
  * The shared event pool - the server half. Part of public-events: both publish
@@ -184,7 +184,8 @@ function factsOf(ev: SalesEventLike, today: string): Facts | null {
 }
 
 export const poolSharing = (db: Database.Database, accountId: string): boolean =>
-  Boolean((db.prepare('SELECT share FROM event_pool_settings WHERE accountId = ?').get(accountId) as { share: number } | undefined)?.share);
+  // A test account's events are made up: never shared with real ones.
+  !isSandbox(db, accountId) && Boolean((db.prepare('SELECT share FROM event_pool_settings WHERE accountId = ?').get(accountId) as { share: number } | undefined)?.share);
 
 function overLimit(db: Database.Database, accountId: string, kind: 'setting' | 'report', max: number, window: number): boolean {
   db.prepare('DELETE FROM event_pool_actions WHERE accountId = ? AND at < ?').run(accountId, Date.now() - DAY);

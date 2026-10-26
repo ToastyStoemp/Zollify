@@ -29,6 +29,7 @@ const VAT_TOKEN = 'VatVatVatVatVatVatVat3';
 const EXEMPT_TOKEN = 'ExemptExemptExemptExe4';
 const FOLLOW_TOKEN = 'FollowFollowFollowFol5';
 const FOLLOW_VOID_TOKEN = 'FollowVoidFollowVoidF6';
+const TEST_TOKEN = 'TestTestTestTestTestT7';
 /** A commission deposit line pointing at its tracking page, beside lines whose links must never reach the customer. */
 const followItems = [
   { pid: 'module:commission:c1', vid: null, title: 'Deposit · Dragon', qty: 1, unitPrice: 30, lineTotal: 30, link: { label: 'Follow your commission', path: '/p/commissions/abcdefghijklmnopqrstuvwx' } },
@@ -143,6 +144,8 @@ beforeAll(async () => {
         op(9, 'tx.create', sale('tx-follow', FOLLOW_TOKEN, { items: followItems, total: 40, payments: [{ kind: 'cash', amount: 40 }], method: 'cash' })),
         op(10, 'tx.create', sale('tx-follow-void', FOLLOW_VOID_TOKEN, { items: followItems, total: 40, payments: [{ kind: 'cash', amount: 40 }], method: 'cash' })),
         op(11, 'tx.revert', { id: 'tx-follow-void', revertedAt: Date.now() }),
+        // Made in test mode: its own op type, found all the same, and marked as a test.
+        op(12, 'tx.test.create', sale('tx-test', TEST_TOKEN, { testRun: 'run-1' })),
         op(8, 'tx.create', sale('tx-exempt', EXEMPT_TOKEN, { currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } })),
       ],
     },
@@ -194,6 +197,12 @@ describe('online receipts', () => {
     for (const secret of ['secret-device-id', 'PROC-REF-123', 'AUTH999', 'mypos', 'p-1', 'ev-1', 'tx-0000', TOKEN, '+41', 'home@example', 'EORI', accountId]) {
       expect(res.body).not.toContain(secret);
     }
+  });
+
+  it('shows a test sale, marked as a test', async () => {
+    const r = (await lookup(TEST_TOKEN)).json();
+    expect(r).toMatchObject({ test: true, status: 'paid' });
+    expect((await lookup(TOKEN)).json().test).toBeUndefined();
   });
 
   it('marks a reverted sale as cancelled', async () => {

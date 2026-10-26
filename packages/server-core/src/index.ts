@@ -69,3 +69,4 @@ export {
   type DecodedUpload,
 } from './upload-limits';
 export { runAutoEvents } from './auto-events';
+export { isSandbox, sameWorld, testMail } from './sandbox';

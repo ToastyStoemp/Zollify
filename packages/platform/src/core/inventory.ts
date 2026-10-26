@@ -5,9 +5,10 @@ import { openCoreDb } from './db';
 import { getAccount } from '../session';
 import { queueOp } from './outbox';
 import { toPlain } from './plain';
-import { recentTransactions } from './transactions';
+import { stockTransactions } from './transactions';
 import { allProducts } from './catalog';
 import { getSalesEvent } from './sales-events';
+import { journalStockWrite } from './test-state';
 
 /**
  * One inventory, with per-event claims on top.
@@ -106,6 +107,8 @@ export async function setOnHand(
     onHand: Math.max(0, Math.floor(onHand)),
     updatedAt: Date.now(),
   });
+  // In test mode, what the count was is kept so ending the run can put it back.
+  await journalStockWrite(db, 'inventory', stockKey(productId, variantId), items.get(stockKey(productId, variantId)), row.updatedAt);
   await db.inventory.put(row);
   items.set(stockKey(productId, variantId), row);
   await queueOp({ type: 'inventory.set', payload: row });
@@ -131,6 +134,7 @@ export async function setClaim(
     updatedAt: Date.now(),
     ...(carried && carried.qty > 0 && broughtQty > 0 ? { carried: { from: carried.from, qty: Math.min(Math.floor(carried.qty), broughtQty) } } : {}),
   });
+  await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), claims.get(claimKey(eventId, productId, variantId)), row.updatedAt);
   await db.eventStock.put(row);
   claims.set(claimKey(eventId, productId, variantId), row);
   await queueOp({ type: 'stock.set', payload: row });
@@ -167,6 +171,7 @@ export async function clearClaim(
   const db = openCoreDb(requireAccountId());
   const key: [string, string, string] = [eventId, productId, variantId ?? ''];
   const now = Date.now();
+  await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), claims.get(claimKey(eventId, productId, variantId)), now);
   await db.eventStock.delete(key);
   await rememberClaimCleared(db, key, now);
   claims.delete(claimKey(eventId, productId, variantId));
@@ -200,7 +205,7 @@ export async function replaceClaims(rows: EventStock[]): Promise<void> {
 /** Units sold per stock key, by event. Reverted sales do not count. */
 const soldByEventAndKey = computed(() => {
   const byEvent = new Map<string, Map<string, number>>();
-  for (const tx of recentTransactions.value) {
+  for (const tx of stockTransactions.value) {
     if (tx.revertedAt) continue;
     const forEvent = byEvent.get(tx.eventId) ?? new Map<string, number>();
     for (const item of tx.items) {
@@ -223,7 +228,7 @@ export function soldAt(eventId: string, productId: string, variantId: string | n
 /** Like soldByEventAndKey, but only sales made after the item's last count - the ones the count does not already reflect. */
 const soldSinceCountByEventAndKey = computed(() => {
   const byEvent = new Map<string, Map<string, number>>();
-  for (const tx of recentTransactions.value) {
+  for (const tx of stockTransactions.value) {
     if (tx.revertedAt) continue;
     const forEvent = byEvent.get(tx.eventId) ?? new Map<string, number>();
     for (const item of tx.items) {

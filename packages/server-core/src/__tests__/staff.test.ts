@@ -112,6 +112,26 @@ describe('staff accounts', () => {
     expect(keys).not.toContain('storage.location');
   });
 
+  it('may use test mode, stamped as the seller, but not wipe the test data', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/sync/push',
+      headers: auth(staff),
+      payload: {
+        deviceId: 'till-2',
+        ops: [
+          op('tx.test.create', { id: 'tt1', eventId: 'test-ev', items: [], total: 10, currency: 'CHF', testRun: 'r1', timestamp: 5 }),
+          op('tx.test.end', { run: 'r1', at: 6 }),
+          op('tx.test.clear', { at: 7 }),
+        ],
+      },
+    });
+    expect(res.json()).toMatchObject({ accepted: 2, refused: [expect.any(String)] });
+    const ops = await pull();
+    expect(ops.find((o) => o.type === 'tx.test.create')?.payload.soldBy).toMatchObject({ email: 'sam@shop.test' });
+    expect(ops.some((o) => o.type === 'tx.test.clear')).toBe(false);
+  });
+
   it('stamps the real seller on a staff sale, whatever the device said', async () => {
     const sale = (await pull()).find((o) => o.type === 'tx.create')!;
     expect(sale.payload.soldBy).toMatchObject({ email: 'sam@shop.test' });

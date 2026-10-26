@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
+import { isSandbox, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
 
 /**
  * SumUp Solo over SumUp's Cloud API: the till sends the amount to the server,
@@ -308,6 +308,8 @@ export function registerSumupCloud(app: FastifyInstance, ctx: ModuleContext, lin
 
   /** Sends the amount to the Solo; the till then asks for the outcome. */
   app.post('/sumup/cloud/payments', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    // A test account never charges a real card; its till uses the pretend terminal.
+    if (isSandbox(ctx.db, ctx.identity(req).accountId)) return reply.code(409).send({ error: 'sandbox', message: 'This is a test account - cards go to the pretend terminal, never a real one.' });
     const who = ctx.identity(req);
     const cfg = cfgOf();
     if (!cfg) return reply.code(409).send(off);

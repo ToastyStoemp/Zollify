@@ -27,7 +27,7 @@ import {
   type StoreReport,
   isStore,
 } from '@zollify/shared';
-import { isEnabled, reasonOf, reportProblem, resolveProblem, type ModuleContext, type ModuleServices } from '@zollify/server-core';
+import { isEnabled, isSandbox, reasonOf, reportProblem, resolveProblem, type ModuleContext, type ModuleServices } from '@zollify/server-core';
 import { MODULE_ID, accountName, consignorRow, consignorRows, parseDoc, payoutsFor, replay, toConsignor } from './consignment';
 import type { Side } from './consignment';
 import { accountEmail, get, rentalsOf, tellArtist } from './consignment-planner';
@@ -449,6 +449,8 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
         return reply.code(409).send({ error: 'no_payer', message: 'Add the account you pay from (name and IBAN) under Reports → Bookkeeping first.' });
       }
       const invoices = invoicesOf(db, who.accountId, period.from);
+      // A test account's payment file says TEST in its id, every transfer and its name - never one to upload to a bank.
+      const test = isSandbox(db, who.accountId);
       const included: { consignorId: string; name: string; amount: number; currency: string; reference: string }[] = [];
       const skipped: { consignorId: string; name: string; reason: string }[] = [];
       const payments = [];
@@ -460,19 +462,19 @@ export function registerBooks(app: FastifyInstance, ctx: ModuleContext, side: Si
           continue;
         }
         const reference = invoices.find((i) => i.consignorId === o.consignorId && i.currency === o.currency)?.number ?? `PAY-${period.from}-${o.consignorId.slice(0, 8)}`;
-        payments.push({ reference, name: o.name, iban: doc.iban, ...(doc.bic ? { bic: doc.bic } : {}), amount: o.amount, currency: o.currency, remittance: `${accountName(db, who.accountId) ?? 'Store'} ${reference} ${periodLabel(period)}` });
+        payments.push({ reference, name: o.name, iban: doc.iban, ...(doc.bic ? { bic: doc.bic } : {}), amount: o.amount, currency: o.currency, remittance: `${test ? 'TEST ' : ''}${accountName(db, who.accountId) ?? 'Store'} ${reference} ${periodLabel(period)}` });
         included.push({ consignorId: o.consignorId, name: o.name, amount: o.amount, currency: o.currency, reference });
       }
-      if (!payments.length) return { xml: null, filename: null, included, skipped };
+      if (!payments.length) return { xml: null, filename: null, included, skipped, ...(test ? { test } : {}) };
       const now = new Date();
       const xml = pain001({
-        messageId: `ZOLLIFY-${period.from}-${now.getTime().toString(36).toUpperCase()}`,
+        messageId: `${test ? 'TEST-' : ''}ZOLLIFY-${period.from}-${now.getTime().toString(36).toUpperCase()}`,
         createdAt: now,
         executionDate: body.data.date,
         debtor: { name: accounting.payerName, iban: accounting.payerIban, ...(accounting.payerBic ? { bic: accounting.payerBic } : {}) },
         payments,
       });
-      return { xml, filename: `payments-${period.from}.xml`, included, skipped };
+      return { xml, filename: `${test ? 'TEST-' : ''}payments-${period.from}.xml`, included, skipped, ...(test ? { test } : {}) };
     });
 
     /**

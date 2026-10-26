@@ -13,6 +13,8 @@ import {
   getSalesEvent,
   recentTransactions,
   revertTransaction,
+  testEvent,
+  transactionsOfEvent,
   transactionsToCsv,
   visibleEvents,
   saveFile,
@@ -67,7 +69,8 @@ const displayCurrency = computed(() => (mode.value === 'local' ? currency.value 
 const showTotals = computed(() => seesSalesTotals(account.value));
 const scoped = computed(() => {
   const mine = (t: Transaction): boolean => showTotals.value || t.soldBy?.userId === account.value?.userId;
-  const list = (allMode.value ? recentTransactions.value : recentTransactions.value.filter((t) => t.eventId === scope.value)).filter(mine);
+  // The test event shows its test sales; every other view only real ones.
+  const list = (allMode.value ? recentTransactions.value : transactionsOfEvent(scope.value)).filter(mine);
   return [...list].sort((a, b) => b.timestamp - a.timestamp);
 });
 const live = computed(() => scoped.value.filter((t) => !t.revertedAt));
@@ -416,6 +419,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       <select v-model="scope" aria-label="Event">
         <option value="all">All events</option>
         <option v-for="e in visibleEvents" :key="e.id" :value="e.id">{{ e.name }}{{ e.id === activeEventId ? ' (active)' : '' }}</option>
+        <option v-if="testEvent" :value="testEvent.id">{{ testEvent.name }} (test)</option>
       </select>
       <div v-if="showCurrencyToggle" class="seg" role="group" aria-label="Revenue currency">
         <button type="button" :class="{ on: revenueMode === 'local' }" @click="revenueMode = 'local'">{{ currency }}</button>
@@ -428,6 +432,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
       </div>
     </header>
+    <p v-if="scopeEvent?.test" class="testnote">Test event - sales made in test mode. They never count as takings and are left out of every report and export.</p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
@@ -586,6 +591,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
 </template>
 
 <style scoped>
+.testnote { margin: 0; padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); font-size: .85rem; font-weight: 600; }
 .history { display: flex; flex-direction: column; gap: 1rem; max-width: 72rem; }
 header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }

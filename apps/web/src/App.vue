@@ -337,6 +337,7 @@ const fmtAgo = (ms: number): string => {
     </aside>
 
     <main class="content">
+      <router-link v-if="account?.profile.sandbox" :to="{ name: 'settings', query: { panel: 'core.security' } }" class="sandbox-banner" title="This account is marked as a test account under Settings → Account & security">Test account - nothing here is real money</router-link>
       <router-view />
     </main>
 
@@ -513,6 +514,7 @@ nav { flex: 1; }
 @keyframes sync-slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 @media (prefers-reduced-motion: reduce) { .sync-progress .track i.indeterminate { animation: none; width: 100%; opacity: .5; } }
 .content { padding: 1.5rem; min-width: 0; width: 100%; max-width: min(96%, 120rem); margin: 0 auto; }
+.sandbox-banner { display: block; margin: 0 0 .75rem; padding: .35rem .75rem; border-radius: 8px; background: var(--zfy-danger, #c6512f); color: #fff; font-size: .8rem; font-weight: 700; text-align: center; text-decoration: none; letter-spacing: .02em; }
 /* POS is the one page built to actually use extra width well: the cart
    column stays a fixed 20rem and the product grid is auto-fill/minmax, so
    it just grows more columns instead of stretching tiles - no reason to

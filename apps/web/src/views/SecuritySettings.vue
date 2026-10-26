@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { authFetch, currentAccount, deviceId, leaveOnPurpose, shellConfirm, signOut } from '@zollify/platform';
+import { authFetch, currentAccount, deviceId, leaveOnPurpose, setSandbox, shellConfirm, signOut } from '@zollify/platform';
 import { signOutAndReload } from '../boot';
 import { Icon } from '@zollify/ui';
 
@@ -11,6 +11,32 @@ import { Icon } from '@zollify/ui';
  */
 
 const account = currentAccount;
+
+// ── Test account ────────────────────────────────────────────────────────────
+const sandbox = computed(() => account.value?.profile.sandbox === true);
+const sandboxBusy = ref(false);
+const sandboxError = ref<string | null>(null);
+async function toggleSandbox(): Promise<void> {
+  const on = !sandbox.value;
+  const ok = await shellConfirm(
+    on
+      ? 'Everything keeps working, but cards only go to the pretend terminal, emails say TEST, payout files are marked test, and this account can only link with other test accounts. Meant for a throwaway account, not your real one.'
+      : 'Real cards, unmarked emails and real payout files again. Only for an account that holds real business.',
+    on ? 'Make this a test account?' : 'Make this a real account again?',
+    { confirm: on ? 'Make it a test account' : 'Make it real' },
+  );
+  if (!ok) return;
+  sandboxBusy.value = true;
+  sandboxError.value = null;
+  try {
+    await setSandbox(on);
+  } catch (err) {
+    const body = (err as { body?: { message?: string } } | null)?.body;
+    sandboxError.value = body?.message ?? (err instanceof Error ? err.message : String(err));
+  } finally {
+    sandboxBusy.value = false;
+  }
+}
 const isAdmin = computed(() => account.value?.role === 'owner' || account.value?.role === 'admin');
 const error = ref<string | null>(null);
 
@@ -220,6 +246,19 @@ onMounted(async () => {
       </ul>
     </article>
 
+    <article v-if="isAdmin" class="card">
+      <h3>Test account</h3>
+      <p class="hint">
+        For trying everything out with a second, throwaway account - a test store and a test artist linked to each other, say. Everything works for real inside it, but cards only go to the pretend terminal, emails say TEST, payout files are marked test, and it only links with other test accounts. An artist who signs up from a test store's invite gets a test account too.
+      </p>
+      <div class="row">
+        <span v-if="sandbox" class="sandbox-on">This is a test account</span>
+        <span v-else class="hint">This is a real account</span>
+        <button type="button" :disabled="sandboxBusy" @click="toggleSandbox">{{ sandbox ? 'Make it real…' : 'Make it a test account…' }}</button>
+      </div>
+      <p v-if="sandboxError" class="error">{{ sandboxError }}</p>
+    </article>
+
     <article class="card danger-zone">
       <h3>Danger zone</h3>
       <p class="hint">
@@ -247,6 +286,7 @@ h2 { margin: 0; font-size: 1.05rem; }
 h3 { margin: 0; font-size: .95rem; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; align-items: flex-start; }
 .card.danger-zone { border-color: var(--zfy-danger, #c6512f); }
+.sandbox-on { color: var(--zfy-danger, #c6512f); font-weight: 700; }
 .head { display: flex; align-items: center; gap: .5rem; width: 100%; }
 .head h3 { flex: 1; }
 .hint { margin: 0; color: var(--zfy-muted, #5a6472); font-size: .85rem; }

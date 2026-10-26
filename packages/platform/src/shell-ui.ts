@@ -26,8 +26,8 @@ export interface ConfirmRequest {
 export const pendingConfirm = reactive<{ current: ConfirmRequest | null }>({ current: null });
 
 /** The shell's own confirm - the same dialog modules get, for core screens. */
-export const shellConfirm = (message: string, title?: string): Promise<boolean> =>
-  createShellUi('core').confirm(message, title);
+export const shellConfirm = (message: string, title?: string, labels?: { confirm?: string; cancel?: string }): Promise<boolean> =>
+  createShellUi('core').confirm(message, title, labels);
 
 /**
  * Shell services handed to modules.

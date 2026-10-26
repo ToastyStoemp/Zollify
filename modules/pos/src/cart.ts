@@ -93,6 +93,8 @@ export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
  */
 export const TEST_MODE_KEY = 'testMode';
 export const testMode = ref(false);
+/** A test account (Settings → Account & security): its cards only ever go to the pretend terminal. */
+export const sandboxAccount = (): boolean => sdk().account()?.profile?.sandbox === true;
 /** The shell's test mode, or null on a shell that predates it. */
 export const shellTestMode = () => sdk().testMode ?? null;
 export async function loadTestMode(): Promise<boolean> {
@@ -496,8 +498,8 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       if (cardInBase.value && !onCardSettled) {
         return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Card terminal.` };
       }
-      // In test mode every card goes to the pretend terminal, whatever is configured.
-      const provider = testMode.value ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
+      // In test mode, and in a test account, every card goes to the pretend terminal, whatever is configured.
+      const provider = testMode.value || sandboxAccount() ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
       activeProvider = provider;
       const result = await provider
         .startPayment(

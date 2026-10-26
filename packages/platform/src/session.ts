@@ -504,6 +504,15 @@ export async function authFetchAs(userId: string | null, path: string, options: 
   return body;
 }
 
+/**
+ * Makes this account a test account (sandbox) or a real one again. Admins
+ * only; refused while it is linked with an account on the other side.
+ */
+export async function setSandbox(on: boolean): Promise<void> {
+  const res = (await authFetch('/account/sandbox', { method: 'POST', body: JSON.stringify({ on }) })) as { user: TokenResponse['user'] };
+  applyUser(res.user);
+}
+
 /** Saves account-wide profile changes and adopts the server's view of the account. */
 export async function updateProfile(update: ProfileUpdate): Promise<void> {
   const res = (await authFetch('/account/profile', {

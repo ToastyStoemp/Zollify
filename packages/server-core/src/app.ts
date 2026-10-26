@@ -22,6 +22,7 @@ import { startAutoEvents } from './auto-events';
 import { registerDeviceRoutes } from './routes/devices';
 import { registerAccountRoutes } from './routes/account';
 import { registerAdminRoutes } from './routes/admin';
+import { isSandbox, registerSandboxRoute, testMail } from './sandbox';
 import { registerLogRoutes } from './routes/logs';
 import { registerFeedbackRoutes } from './routes/feedback';
 import { createServerSettings, registerServerSettingsRoutes } from './server-settings';
@@ -258,7 +259,9 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     get enabled() {
       return rawMail.enabled;
     },
-    async send(m) {
+    async send(message) {
+      // A test account's mail says so, whoever it goes to.
+      const m = message.accountId && isSandbox(db, message.accountId) ? testMail(message) : message;
       const ok = await rawMail.send(m);
       if (m.accountId && rawMail.enabled && isPlainEmail(m.to)) {
         if (ok) problems.resolve(m.accountId, 'email', 'smtp');
@@ -323,6 +326,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   registerProblemRoutes(app, db, problems);
   registerFxRoutes(app);
   registerAdminRoutes(app, db, opts.deployDir, opts.dataDir, opts.serverModules);
+  registerSandboxRoute(app, db, opts.serverModules);
   registerLogRoutes(app, db, opts.dataDir);
   registerFeedbackRoutes(app, db);
   registerServerSettingsRoutes(app, serverSettings);

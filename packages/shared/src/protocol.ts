@@ -184,6 +184,14 @@ export interface AccountProfile {
   sells?: SellsAt;
   /** Webstore and social links, cleaned on save. The receipt footer and the print path read them from here. */
   links?: ProfileLinks;
+  /**
+   * A sandbox account, for trying everything out (a test store and a test
+   * artist, say): it works for real inside, but cards only ever go to the
+   * pretend terminal, its emails say TEST, its payout files are marked test,
+   * and it links only with other sandboxes. Set with its own call
+   * (/api/account/sandbox), never through a profile update.
+   */
+  sandbox?: boolean;
 }
 
 /** What a business runs. Decides which of the Events and Stores pages it gets. */

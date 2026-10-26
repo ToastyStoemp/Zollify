@@ -128,6 +128,7 @@ async function downloadPayments(): Promise<void> {
     const left = res.skipped.map((s) => `${s.name} (${s.reason})`).join(', ');
     if (!res.xml) emit('error', left ? `No file made. ${left}` : 'Nothing is owed.');
     else if (left) emit('error', `File made without: ${left}`);
+    else if (res.test) sdk().ui.toast(`TEST payment file for ${res.included.length} artist${res.included.length === 1 ? '' : 's'} - this is a test account, so do not upload it to a bank. Record the payouts here to try the rest.`, { kind: 'warning', timeoutMs: 8000 });
     else sdk().ui.toast(`Payment file for ${res.included.length} artist${res.included.length === 1 ? '' : 's'}. Upload it in your bank, then record the payouts here.`, { kind: 'success' });
   } catch (err) {
     emit('error', errorText(err, 'Could not make the payment file.'));

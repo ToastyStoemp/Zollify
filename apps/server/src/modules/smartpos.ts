@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { reasonOf, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
+import { isSandbox, reasonOf, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
 
 /**
  * Nexi SmartPOS (Nets SmartPOS N950 in Denmark): card payments on the
@@ -452,6 +452,8 @@ export function registerSmartpos(app: FastifyInstance, ctx: ModuleContext, apps:
 
   /** Sends the amount to the terminal; the till then asks for the outcome. */
   app.post('/smartpos/payments', { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } }, async (req, reply) => {
+    // A test account never charges a real card; its till uses the pretend terminal.
+    if (isSandbox(ctx.db, ctx.identity(req).accountId)) return reply.code(409).send({ error: 'sandbox', message: 'This is a test account - cards go to the pretend terminal, never a real one.' });
     const setup = setupOf(req);
     if ('error' in setup) return reply.code(409).send(setup.error);
     const { cfg, client } = setup;

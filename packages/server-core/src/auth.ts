@@ -175,6 +175,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       staffSeesTotals: parsed.staffSeesTotals === true,
       ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
       ...storedLinks(parsed.links),
+      ...(parsed.sandbox === true ? { sandbox: true } : {}),
     };
   } catch {
     return emptyProfile();

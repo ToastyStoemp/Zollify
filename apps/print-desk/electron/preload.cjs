@@ -19,6 +19,11 @@ contextBridge.exposeInMainWorld('printDesk', {
     lastEventSold: invoke('zollify:lastEventSold'),
     addOnHand: invoke('zollify:addOnHand'),
   },
+  materials: {
+    setKey: invoke('materials:setKey'),
+    list: invoke('materials:list'),
+    use: invoke('materials:use'),
+  },
   photocraft: {
     printers: invoke('photocraft:printers'),
     size: invoke('photocraft:size'),

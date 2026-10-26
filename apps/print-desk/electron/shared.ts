@@ -78,6 +78,10 @@ export interface Settings {
   itemTargets: Record<string, Record<string, number>>;
   /** The unit print sizes and positions show in. */
   units: Units;
+  /** Paper size ("a3", "letter") -> the Zollify material (id) a printed copy of that size uses up. */
+  paperMaterials: Record<string, string>;
+  /** Whether a printer key for Zollify's materials is stored (the key itself stays in the main process). */
+  hasPrinterKey: boolean;
 }
 
 export type Units = 'cm' | 'mm' | 'in';

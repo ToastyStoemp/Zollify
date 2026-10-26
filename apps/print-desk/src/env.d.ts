@@ -1,5 +1,6 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DevModeSummary } from '../electron/devmode';
+import type { Material } from '../electron/materials';
 import type { EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
@@ -27,6 +28,14 @@ export interface PrintDeskApi {
     lastEventSold(): Promise<EventSold | null>;
     /** Adds copies to each item's stock as Zollify has it now; each item's new count. */
     addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]>;
+  };
+  /** Zollify's materials, through the printer key. */
+  materials: {
+    /** Stores the key once Zollify accepts it ('' removes it). */
+    setKey(key: string): Promise<Settings>;
+    list(): Promise<Material[]>;
+    /** Logs paper used; `job` names the copies, so the same copies sent again count once. */
+    use(use: { material: string; qty: number; note?: string; job: string }): Promise<{ material: Material; duplicate: boolean }>;
   };
   photocraft: {
     printers(): Promise<Printer[]>;

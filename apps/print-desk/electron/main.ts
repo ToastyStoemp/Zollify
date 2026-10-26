@@ -1,4 +1,5 @@
 import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'electron';
+import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
@@ -7,27 +8,35 @@ import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResu
 import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
 import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
+import { listMaterials, useMaterial, type MaterialUse } from './materials.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const store = new Store(join(app.getPath('userData'), 'print-desk.json'));
 if (!store.data.photocraft) store.data.photocraft = findExe();
 
-function readRefresh(): string {
-  const { refreshToken, refreshEncrypted } = store.data;
-  if (!refreshToken) return '';
-  if (!refreshEncrypted) return refreshToken;
+/** A secret as stored: safeStorage's ciphertext (base64) when `encrypted`, else as it is. */
+function readSecret(value: string | undefined, encrypted: boolean | undefined): string {
+  if (!value) return '';
+  if (!encrypted) return value;
   try {
-    return safeStorage.decryptString(Buffer.from(refreshToken, 'base64'));
+    return safeStorage.decryptString(Buffer.from(value, 'base64'));
   } catch {
     return '';
   }
 }
+function sealSecret(secret: string): { value: string; encrypted: boolean } {
+  const encrypted = !!secret && safeStorage.isEncryptionAvailable();
+  return { value: encrypted ? safeStorage.encryptString(secret).toString('base64') : secret, encrypted };
+}
+const readRefresh = (): string => readSecret(store.data.refreshToken, store.data.refreshEncrypted);
 function writeRefresh(token: string): void {
-  store.data.refreshEncrypted = !!token && safeStorage.isEncryptionAvailable();
-  store.data.refreshToken = store.data.refreshEncrypted ? safeStorage.encryptString(token).toString('base64') : token;
+  const { value, encrypted } = sealSecret(token);
+  store.data.refreshToken = value;
+  store.data.refreshEncrypted = encrypted;
   store.save();
 }
+const readPrinterKey = (): string => readSecret(store.data.printerKey, store.data.printerKeyEncrypted);
 
 /** IPC errors reach the renderer as a message only, so a 2FA prompt travels as a prefix. */
 const fail = (err: unknown): never => {
@@ -89,6 +98,31 @@ void app.whenReady().then(() => {
   ipcMain.handle('zollify:logout', () => zollify.logout());
   ipcMain.handle('zollify:catalog', () => zollify.catalog().catch(fail));
   ipcMain.handle('zollify:lastEventSold', () => zollify.lastEventSold().catch(fail));
+
+  // ── Zollify materials, through a printer key (Sourcing → Materials → Printing app) ──
+  /** Stores a printer key once Zollify accepts it; '' removes it. */
+  ipcMain.handle('materials:setKey', async (_e, key: string): Promise<Settings> => {
+    const k = String(key ?? '').trim();
+    if (k) await listMaterials(zollify.server, k).catch(fail);
+    const { value, encrypted } = sealSecret(k);
+    store.data.printerKey = value || undefined;
+    store.data.printerKeyEncrypted = encrypted;
+    store.save();
+    return store.settings();
+  });
+  ipcMain.handle('materials:list', () => (readPrinterKey() ? listMaterials(zollify.server, readPrinterKey()).catch(fail) : []));
+  /**
+   * Logs paper used. `job` names the copies (run, item, which copies), and the use's id is made
+   * from it, so sending the same copies again counts once.
+   */
+  ipcMain.handle('materials:use', (_e, use: Omit<MaterialUse, 'id'> & { job: string }) =>
+    useMaterial(zollify.server, readPrinterKey(), {
+      material: use.material,
+      qty: use.qty,
+      note: use.note,
+      id: `pd-${createHash('sha256').update(use.job).digest('hex').slice(0, 40)}`,
+    }).catch(fail),
+  );
   ipcMain.handle('zollify:addOnHand', (_e, items: { productId: string; variantId: string; add: number }[]) => zollify.addOnHand(items).catch(fail));
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));

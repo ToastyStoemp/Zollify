@@ -8,9 +8,12 @@ export interface Stored extends Settings {
   /** Refresh token, base64 of safeStorage's ciphertext when available. */
   refreshToken?: string;
   refreshEncrypted?: boolean;
+  /** Printer key for Zollify's materials, stored like the refresh token. */
+  printerKey?: string;
+  printerKeyEncrypted?: boolean;
 }
 
-export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0, sizeTargets: {}, itemTargets: {}, units: 'cm' };
+export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0, sizeTargets: {}, itemTargets: {}, units: 'cm', paperMaterials: {}, hasPrinterKey: false };
 
 export class Store {
   data: Stored;
@@ -32,7 +35,7 @@ export class Store {
     writeFileSync(this.file, JSON.stringify(this.data, null, 2));
   }
   settings(): Settings {
-    const { refreshToken: _r, refreshEncrypted: _e, ...rest } = this.data;
-    return rest;
+    const { refreshToken: _r, refreshEncrypted: _e, printerKey, printerKeyEncrypted: _k, ...rest } = this.data;
+    return { ...rest, hasPrinterKey: !!printerKey };
   }
 }

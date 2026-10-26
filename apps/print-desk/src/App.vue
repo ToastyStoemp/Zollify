@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 // Straight from its file, not the @zollify/ui barrel: the barrel pulls in @zollify/shared and zod.
 import QrCode from '@zollify/ui/QrCode.vue';
+import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
 import { effectiveParams, isPrintFile, targetFor, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
 import ItemOverrides from './ItemOverrides.vue';
@@ -243,6 +244,51 @@ const usesGlobal = (row: CatalogRow): boolean => !!globalParams.value && !links.
 const paramsFor = (row: CatalogRow): Record<string, unknown> => effectiveParams(links.value[row.key], globalParams.value, sizeOf(row)) ?? defaultParams();
 /** `open` for the global settings panel (no stock key looks like this). */
 const GLOBAL = '*global';
+/** `open` for the paper stock panel. */
+const PAPER = '*paper';
+
+// ── Paper stock: Zollify materials used up per printed copy ──
+const materials = ref<Material[]>([]);
+const keyInput = ref('');
+const paperNote = ref('');
+/**
+ * The paper sizes this catalogue prints on: what each item is set to, and the A size in its name
+ * (named sizes only: a custom size has no material).
+ */
+const paperSizes = computed(() => [...new Set(rows.value.flatMap((r) => [paperName(paramsFor(r).paper), sizeOf(r)]).filter((n): n is string => !!n))].sort());
+const materialOf = (id: string | undefined): Material | undefined => materials.value.find((m) => m.id === id);
+async function loadMaterials(): Promise<void> {
+  if (!settings.value?.hasPrinterKey) return;
+  try {
+    materials.value = await api.materials.list();
+    paperNote.value = '';
+  } catch (err) {
+    paperNote.value = `Could not read the materials: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+watch(open, (o) => {
+  if (o === PAPER) void loadMaterials();
+});
+async function saveKey(): Promise<void> {
+  paperNote.value = '';
+  try {
+    settings.value = await api.materials.setKey(keyInput.value);
+    keyInput.value = '';
+    await loadMaterials();
+  } catch (err) {
+    paperNote.value = err instanceof Error ? err.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : String(err);
+  }
+}
+async function removeKey(): Promise<void> {
+  settings.value = await api.materials.setKey('');
+  materials.value = [];
+}
+async function setPaperMaterial(size: string, id: string): Promise<void> {
+  const next = { ...(settings.value?.paperMaterials ?? {}) };
+  if (id) next[size] = id;
+  else delete next[size];
+  settings.value = await api.settings.set({ paperMaterials: next });
+}
 
 async function saveGlobal(params: Record<string, unknown> | null): Promise<void> {
   try {
@@ -495,7 +541,7 @@ let stockQueue: Promise<void> = Promise.resolve();
  * cancelled halfway counts only what printed. In order, so two updates never race.
  */
 function countPrinted(p: CopyProgress): Promise<void> {
-  stockQueue = stockQueue.then(async () => {
+  stockQueue = stockQueue.then(() => usePaper(p)).then(async () => {
     if (!settings.value?.addToStock) return;
     const delta = p.printed - (counted[p.key] ?? 0);
     const row = rows.value.find((r) => r.key === p.key);
@@ -514,6 +560,40 @@ function countPrinted(p: CopyProgress): Promise<void> {
   return stockQueue;
 }
 
+/** Per item of the current run: its paper size, and copies whose paper is already logged. */
+const runPaper: Record<string, string | null> = {};
+const paperCounted: Record<string, number> = {};
+const newRunId = (): string => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+/** Names this run's paper uses, so a run's copies are never taken for another's. */
+let runId = newRunId();
+/**
+ * Takes the paper of newly printed copies off the material set for their size, as they come out.
+ * The use is named by run, item and copies, so a report sent twice is logged once.
+ */
+async function usePaper(p: CopyProgress): Promise<void> {
+  const row = rows.value.find((r) => r.key === p.key);
+  // The paper the run was sent with; an item not in this run's list takes its settings now.
+  const size = p.key in runPaper ? runPaper[p.key] : row ? paperName(paramsFor(row).paper) : null;
+  const material = size ? settings.value?.paperMaterials?.[size] : undefined;
+  const from = paperCounted[p.key] ?? 0;
+  const delta = p.printed - from;
+  if (!material || !settings.value?.hasPrinterKey || delta <= 0) return;
+  try {
+    const res = await api.materials.use({
+      material,
+      qty: delta,
+      note: `${row ? (row.variant ? `${row.title} ${row.variant}` : row.title) : p.key} · Print Desk`,
+      job: `${runId}|${p.key}|${from}|${p.printed}`,
+    });
+    paperCounted[p.key] = p.printed;
+    const i = materials.value.findIndex((m) => m.id === res.material.id);
+    if (i >= 0) materials.value[i] = res.material;
+  } catch (err) {
+    // Not logged, so the next progress report for this item tries again.
+    error.value = `Could not take the paper off the materials: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 async function printAll(): Promise<void> {
   const jobs = queued.value.map((r) => ({ key: r.key, file: links.value[r.key]!.file, params: paramsFor(r), copies: qty[r.key]! }));
   // A new run starts a fresh count; rows from a finished run drop out of it.
@@ -521,7 +601,10 @@ async function printAll(): Promise<void> {
   for (const j of jobs) {
     progress[j.key] = { key: j.key, copies: j.copies, printed: 0, left: j.copies, status: 'Waiting', done: false };
     counted[j.key] = 0;
+    paperCounted[j.key] = 0;
+    runPaper[j.key] = paperName(j.params.paper);
   }
+  runId = newRunId();
   await guard(`Sending ${totalCopies.value} copies`, async () => {
     // Stock is added as copies come out (countPrinted), not here: a run can still be cancelled.
     const done = await api.photocraft.print(plain(jobs));
@@ -589,6 +672,7 @@ async function printAll(): Promise<void> {
       <input v-model="filter" type="search" placeholder="Filter products" />
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
       <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
+      <button type="button" :aria-expanded="open === PAPER" title="Take the paper of each printed copy off its material in Zollify (Sourcing → Materials)" @click="open = open === PAPER ? null : PAPER">Paper stock</button>
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to the copies the last closed event sold" @click="fillFromLastEvent">Fill from last event</button>
       <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
         Main target
@@ -607,6 +691,31 @@ async function printAll(): Promise<void> {
         <input type="number" min="0" max="999" :value="settings?.sizeTargets?.[s] ?? ''" :placeholder="String(settings?.target ?? 0)" @change="setSizeTarget(s, ($event.target as HTMLInputElement).valueAsNumber)" />
       </label>
     </div>
+    <section v-if="open === PAPER" class="global paper" aria-label="Paper stock">
+      <template v-if="!settings?.hasPrinterKey">
+        <p class="muted">Each printed copy can take its sheet off a material in Zollify. Make a printer key under <strong>Sourcing → Materials → Printing app</strong> and paste it here.</p>
+        <form class="key" @submit.prevent="saveKey">
+          <input v-model="keyInput" type="password" autocomplete="off" placeholder="zpk_…" aria-label="Printer key" />
+          <button type="submit" class="primary" :disabled="!keyInput.trim()">Save key</button>
+        </form>
+      </template>
+      <template v-else>
+        <p class="muted">Each copy that comes out of the printer takes one sheet off the material set for its paper size. A cancelled print takes only what printed.</p>
+        <div class="paper-sizes">
+          <label v-for="size in paperSizes" :key="size">
+            <span>{{ paperLabel(size) }}</span>
+            <select :value="settings?.paperMaterials?.[size] ?? ''" @change="setPaperMaterial(size, ($event.target as HTMLSelectElement).value)">
+              <option value="">Don't take off</option>
+              <option v-for="m in materials" :key="m.id" :value="m.id">{{ m.name }} ({{ m.onHand }} {{ m.unit }}{{ m.onHand === 1 ? '' : 's' }})</option>
+              <option v-if="settings?.paperMaterials?.[size] && !materialOf(settings.paperMaterials[size])" :value="settings.paperMaterials[size]">(a material Zollify no longer lists)</option>
+            </select>
+          </label>
+          <p v-if="!paperSizes.length" class="muted">No item has a named paper size yet.</p>
+        </div>
+        <button type="button" class="quiet" @click="removeKey">Remove the printer key</button>
+      </template>
+      <p v-if="paperNote" class="error" role="alert">{{ paperNote }}</p>
+    </section>
     <section v-if="open === GLOBAL" class="global" aria-label="Global print settings">
       <p class="muted">
         Every item without its own settings prints with these. Each still gets its own paper (from the A size in its name, else its own) and orientation (from its image),
@@ -724,6 +833,9 @@ tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .notice button { padding: 0 .4rem; }
 .global { padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-surface); }
 .global > p { margin: 0 0 .4rem; }
+.paper .key { display: flex; gap: .5rem; margin: .4rem 0; }
+.paper .key input { flex: 1; max-width: 24rem; }
+.paper-sizes { display: flex; flex-wrap: wrap; gap: .6rem .9rem; margin: .4rem 0; }
 .uses-global { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

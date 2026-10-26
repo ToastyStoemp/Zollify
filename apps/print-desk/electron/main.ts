@@ -1,0 +1,227 @@
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'electron';
+import { createHash } from 'node:crypto';
+import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
+import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
+import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
+import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
+import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
+import { Store } from './store.js';
+import { listMaterials, useMaterial, type MaterialUse } from './materials.js';
+import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
+
+const here = fileURLToPath(new URL('.', import.meta.url));
+const store = new Store(join(app.getPath('userData'), 'print-desk.json'));
+if (!store.data.photocraft) store.data.photocraft = findExe();
+
+/** A secret as stored: safeStorage's ciphertext (base64) when `encrypted`, else as it is. */
+function readSecret(value: string | undefined, encrypted: boolean | undefined): string {
+  if (!value) return '';
+  if (!encrypted) return value;
+  try {
+    return safeStorage.decryptString(Buffer.from(value, 'base64'));
+  } catch {
+    return '';
+  }
+}
+function sealSecret(secret: string): { value: string; encrypted: boolean } {
+  const encrypted = !!secret && safeStorage.isEncryptionAvailable();
+  return { value: encrypted ? safeStorage.encryptString(secret).toString('base64') : secret, encrypted };
+}
+const readRefresh = (): string => readSecret(store.data.refreshToken, store.data.refreshEncrypted);
+function writeRefresh(token: string): void {
+  const { value, encrypted } = sealSecret(token);
+  store.data.refreshToken = value;
+  store.data.refreshEncrypted = encrypted;
+  store.save();
+}
+const readPrinterKey = (): string => readSecret(store.data.printerKey, store.data.printerKeyEncrypted);
+
+/** IPC errors reach the renderer as a message only, so a 2FA prompt travels as a prefix. */
+const fail = (err: unknown): never => {
+  if (err instanceof ZollifyError && err.needs2fa) throw new Error(`2FA:${err.message}`);
+  throw new Error(err instanceof Error ? err.message : String(err));
+};
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1240,
+    height: 820,
+    title: 'Zollify Print Desk',
+    webPreferences: { preload: join(here, '..', 'electron', 'preload.cjs'), contextIsolation: true, sandbox: true },
+  });
+  win.setMenuBarVisibility(false);
+  void win.loadFile(join(here, '..', 'dist', 'index.html'));
+  return win;
+}
+
+void app.whenReady().then(() => {
+  const zollify = new Zollify(store.data.server, readRefresh(), store.data.deviceId, writeRefresh);
+  const owner = (e: Electron.IpcMainInvokeEvent): BrowserWindow => BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getAllWindows()[0]!;
+
+  // The page's prefers-color-scheme follows this, so the CSS needs no theme logic of its own.
+  nativeTheme.themeSource = store.data.theme;
+
+  ipcMain.handle('settings:get', (): Settings => store.settings());
+  ipcMain.handle('settings:set', (_e, patch: Partial<Settings>): Settings => {
+    Object.assign(store.data, patch);
+    store.save();
+    if (patch.theme) nativeTheme.themeSource = patch.theme;
+    return store.settings();
+  });
+  ipcMain.handle('pick:file', async (e) => {
+    const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], filters: [{ name: 'Images', extensions: [...PRINT_FILE_EXTENSIONS] }] });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  ipcMain.handle('pick:exe', async (e) => {
+    const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], title: 'Where is photocraft-cli?' });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle('zollify:resume', () => zollify.resume());
+  ipcMain.handle('zollify:login', async (_e, input: LoginInput) => {
+    const session = await zollify.login(input).catch(fail);
+    store.data.server = input.server;
+    store.save();
+    return session;
+  });
+  ipcMain.handle('zollify:linkStart', (_e, server: string) => zollify.linkStart(server).catch(fail));
+  ipcMain.handle('zollify:linkPoll', async (_e, id: string, pollSecret: string) => {
+    const r = await zollify.linkPoll(id, pollSecret).catch(fail);
+    if (r.status === 'approved') {
+      store.data.server = zollify.server;
+      store.save();
+    }
+    return r;
+  });
+  ipcMain.handle('zollify:logout', () => zollify.logout());
+  ipcMain.handle('zollify:catalog', () => zollify.catalog().catch(fail));
+  ipcMain.handle('zollify:lastEventSold', () => zollify.lastEventSold().catch(fail));
+
+  // ── Zollify materials, through a printer key (Sourcing → Materials → Printing app) ──
+  /** Stores a printer key once Zollify accepts it; '' removes it. */
+  ipcMain.handle('materials:setKey', async (_e, key: string): Promise<Settings> => {
+    const k = String(key ?? '').trim();
+    if (k) await listMaterials(zollify.server, k).catch(fail);
+    const { value, encrypted } = sealSecret(k);
+    store.data.printerKey = value || undefined;
+    store.data.printerKeyEncrypted = encrypted;
+    store.save();
+    return store.settings();
+  });
+  ipcMain.handle('materials:list', () => (readPrinterKey() ? listMaterials(zollify.server, readPrinterKey()).catch(fail) : []));
+  /**
+   * Logs paper used. `job` names the copies (run, item, which copies), and the use's id is made
+   * from it, so sending the same copies again counts once.
+   */
+  ipcMain.handle('materials:use', (_e, use: Omit<MaterialUse, 'id'> & { job: string }) =>
+    useMaterial(zollify.server, readPrinterKey(), {
+      material: use.material,
+      qty: use.qty,
+      note: use.note,
+      id: `pd-${createHash('sha256').update(use.job).digest('hex').slice(0, 40)}`,
+    }).catch(fail),
+  );
+  ipcMain.handle('zollify:addOnHand', (_e, items: { productId: string; variantId: string; add: number }[]) => zollify.addOnHand(items).catch(fail));
+
+  ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
+  ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));
+  ipcMain.handle('photocraft:lastPrint', () => lastPrint(store.data.photocraft).catch(fail));
+  // Driver settings hex as names; the printer's own names and options when its driver answers, codes otherwise.
+  ipcMain.handle('photocraft:describeSettings', async (_e, hex: string): Promise<DevModeSummary[] | null> => {
+    const dm = decodeDevMode(String(hex));
+    if (!dm) return null;
+    const [caps, options] = await Promise.all([printerCaps(dm.device).catch(() => undefined), driverOptions(dm.device, String(hex)).catch(() => ({}))]);
+    return describeDevMode(dm, caps, options);
+  });
+  // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
+  /** `sent`: pages the driver last reported; `goneAt`: when the job left the queue, while its outcome is looked up. */
+  const tracked = new Map<string, { printer: string; id: number; copies: number; since: number; sent: number; goneAt?: number }>();
+  /** How long to wait for Windows to log a job that left the queue before taking it as printed. */
+  const LOG_WAIT_MS = 15_000;
+  let watcher: ReturnType<typeof setInterval> | undefined;
+  let polling = false;
+  const report = (p: CopyProgress): void => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('spooler:progress', p);
+  };
+  async function poll(): Promise<void> {
+    if (polling) return;
+    polling = true;
+    try {
+      const snap = await snapshot();
+      if (!snap) return; // the query failed this time; keep the jobs and try again
+      for (const [key, t] of tracked) {
+        const job = snap.jobs.find((j) => j.printer === t.printer && j.id === t.id);
+        if (job) {
+          const p = progressOf(key, t.copies, job, snap.printers.find((pr) => pr.name === t.printer));
+          t.sent = p.printed;
+          report(p);
+          continue;
+        }
+        // Left the queue: printed or cancelled, which only Windows' print log tells apart.
+        t.goneAt ??= Date.now();
+        const outcome = await jobOutcome(t.printer, t.id, t.since);
+        if (!outcome && Date.now() - t.goneAt < LOG_WAIT_MS) {
+          report({ key, copies: t.copies, printed: t.sent, left: t.copies - t.sent, status: 'Finishing', done: false });
+          continue;
+        }
+        report(finishedOf(key, t.copies, t.sent, outcome));
+        tracked.delete(key);
+      }
+    } finally {
+      polling = false;
+      if (!tracked.size) {
+        clearInterval(watcher);
+        watcher = undefined;
+      }
+    }
+  }
+
+  ipcMain.handle('photocraft:print', async (_e, jobs: PrintJob[]): Promise<PrintResult[]> => {
+    // One at a time: the printer queue is sequential anyway, and the results stay in order.
+    const results: PrintResult[] = [];
+    for (const asked of jobs) {
+      report({ key: asked.key, copies: asked.copies, printed: 0, left: asked.copies, status: 'Sending to PhotoCraft', done: false });
+      let job: PrintJob;
+      try {
+        job = { ...asked, params: await fitDriverPaper(asked.params) };
+      } catch (err) {
+        const message = `Driver settings: ${err instanceof Error ? err.message : String(err)}`;
+        results.push({ key: asked.key, ok: false, message });
+        report({ key: asked.key, copies: asked.copies, printed: 0, left: 0, status: message, done: true, failed: true });
+        continue;
+      }
+      // A few seconds early, so the print log's events for this job are surely after it.
+      const since = Date.now() - 5000;
+      const before = await snapshot();
+      const r = await print(store.data.photocraft, job);
+      results.push(r);
+      if (!r.ok) {
+        report({ key: job.key, copies: job.copies, printed: 0, left: 0, status: r.message, done: true, failed: true });
+        continue;
+      }
+      const after = before && (await snapshot());
+      const printer = after ? targetPrinter(after, job.params.printer) : '';
+      const spooled = before && after ? newJob(before, after, printer, basename(job.file)) : undefined;
+      if (!spooled) {
+        // No Windows queue to follow, or the job already left it: sent is as far as we can see.
+        report({ key: job.key, copies: job.copies, printed: job.copies, left: 0, status: r.message, done: true });
+        continue;
+      }
+      tracked.set(job.key, { printer: spooled.printer, id: spooled.id, copies: job.copies, since, sent: Math.min(job.copies, spooled.pagesPrinted) });
+      report(progressOf(job.key, job.copies, spooled, after!.printers.find((p) => p.name === spooled.printer)));
+      watcher ??= setInterval(() => void poll(), 2000);
+    }
+    return results;
+  });
+
+  createWindow();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});

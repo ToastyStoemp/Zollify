@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { fmtPrice, localIsoDay } from '@zollify/shared';
 import { Icon, ModalShell } from '@zollify/ui';
-import { materialOnHand, materialTotals, type Material, type MaterialUse } from '../engine';
+import { materialOnHand, materialTotals, outstandingOf, receivedOf, type Material, type MaterialUse, type Purchase } from '../engine';
 import { countMaterial, dropUse, remove, save, snap, useMaterial } from '../api';
 import { sdk } from '../runtime';
 import PrinterKeys from './PrinterKeys.vue';
@@ -17,35 +17,101 @@ const currency = computed(() => sdk().account()?.profile.defaultCurrency ?? 'CHF
 const list = computed(() => [...snap.value.materials].sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)));
 const editing = ref<Material | null>(null);
 const buying = ref<Material | null>(null);
-const purchase = ref({ qty: '', cost: '', date: localIsoDay(), note: '' });
+const purchase = ref({ qty: '', inPacks: false, cost: '', date: localIsoDay(), note: '', allArrived: true, arrived: '' });
 function openNew(): void {
   editing.value = { id: crypto.randomUUID(), name: '', type: 'paper', unit: 'sheet', description: '', purchases: [] };
 }
 async function saveMaterial(): Promise<void> {
   if (!editing.value?.name.trim()) return emit('error', 'A material needs a name.');
   try {
-    const { lowAt, ...rest } = editing.value;
+    const { lowAt, packSize, packName, ...rest } = editing.value;
     const mark = Number(lowAt);
-    await save('materials', { ...rest, name: rest.name.trim(), unit: rest.unit.trim() || 'unit', ...(lowAt !== undefined && String(lowAt) !== '' && mark >= 0 ? { lowAt: mark } : {}) });
+    const pack = Number(packSize);
+    await save('materials', {
+      ...rest,
+      name: rest.name.trim(),
+      unit: rest.unit.trim() || 'unit',
+      ...(lowAt !== undefined && String(lowAt) !== '' && mark >= 0 ? { lowAt: mark } : {}),
+      ...(pack > 1 ? { packSize: pack, packName: packName?.trim() || 'box' } : {}),
+    });
     editing.value = null;
   } catch (err) {
     emit('error', err instanceof Error ? err.message : 'Could not save the material.');
   }
 }
+// ── Packs: a box of 25 sheets, typed as boxes and kept as sheets ────────────
+const packs = (m: Material) => (m.packSize && m.packSize > 1 ? m.packSize : 0);
+const packName = (m: Material) => m.packName || 'box';
+/** "boxes", "reams", "packs". */
+const packPlural = (m: Material) => (/(s|x|z|sh|ch)$/i.test(packName(m)) ? `${packName(m)}es` : `${packName(m)}s`);
+/** "75 sheets (3 boxes)" when it comes in packs and fills whole ones. */
+function amount(m: Material, n: number): string {
+  const per = packs(m);
+  if (!per || n <= 0 || n % per !== 0) return plural(n, m.unit);
+  const k = n / per;
+  return `${plural(n, m.unit)} (${k} ${k === 1 ? packName(m) : packPlural(m)})`;
+}
+const toUnits = (m: Material, value: number, inPacks: boolean) => (inPacks && packs(m) ? value * packs(m) : value);
+
 function openBuy(m: Material): void {
   buying.value = m;
-  purchase.value = { qty: '', cost: '', date: localIsoDay(), note: '' };
+  purchase.value = { qty: '', inPacks: !!packs(m), cost: '', date: localIsoDay(), note: '', allArrived: true, arrived: '' };
 }
 async function logPurchase(): Promise<void> {
   const m = buying.value;
-  const qty = parseFloat(purchase.value.qty);
-  const cost = parseFloat(purchase.value.cost);
+  const f = purchase.value;
+  const qty = toUnits(m!, parseFloat(f.qty), f.inPacks);
+  const cost = parseFloat(f.cost);
   if (!m || !(qty > 0) || !(cost >= 0)) return emit('error', 'Quantity and cost are required.');
+  // Part of it arrived (or none yet): the rest is on order until it is received.
+  const arrived = f.allArrived ? qty : toUnits(m, parseFloat(f.arrived) || 0, f.inPacks);
+  if (arrived > qty) return emit('error', 'More arrived than was ordered - log the order bigger.');
+  const next: Purchase = { id: crypto.randomUUID(), qty, cost, date: f.date, note: f.note };
+  if (!f.allArrived) next.deliveries = arrived > 0 ? [{ id: crypto.randomUUID(), qty: arrived, date: f.date }] : [];
   try {
-    await save('materials', { ...m, purchases: [...m.purchases, { id: crypto.randomUUID(), qty, cost, date: purchase.value.date, note: purchase.value.note }] });
+    await save('materials', { ...m, purchases: [...m.purchases, next] });
     buying.value = null;
   } catch (err) {
     emit('error', err instanceof Error ? err.message : 'Could not log the purchase.');
+  }
+}
+
+// ── Deliveries of an order that came in parts ───────────────────────────────
+const receiving = ref<{ m: Material; p: Purchase; qty: string; inPacks: boolean; date: string } | null>(null);
+function openReceive(m: Material, p: Purchase): void {
+  const left = outstandingOf(p);
+  const per = packs(m);
+  const inPacks = !!per && left % per === 0;
+  receiving.value = { m, p, qty: String(inPacks ? left / per : left), inPacks, date: localIsoDay() };
+}
+async function logDelivery(): Promise<void> {
+  const r = receiving.value;
+  if (!r) return;
+  const qty = toUnits(r.m, parseFloat(r.qty), r.inPacks);
+  if (!(qty > 0)) return emit('error', 'How many arrived?');
+  if (qty > outstandingOf(r.p) + 1e-9) return emit('error', `Only ${amount(r.m, outstandingOf(r.p))} is still to come on this order.`);
+  const purchases = r.m.purchases.map((p) => (p.id === r.p.id ? { ...p, deliveries: [...(p.deliveries ?? []), { id: crypto.randomUUID(), qty, date: r.date }] } : p));
+  try {
+    await save('materials', { ...r.m, purchases });
+    receiving.value = null;
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not log the delivery.');
+  }
+}
+/** The supplier will never send the rest: the order becomes what arrived, refunded at the price paid per unit. */
+async function closeShort(m: Material, p: Purchase): Promise<void> {
+  const got = receivedOf(p);
+  const ok = await sdk().ui.confirm(
+    `The order becomes the ${amount(m, got)} that arrived, and its cost ${fmtPrice(Math.round(((p.cost * got) / p.qty) * 100) / 100, currency.value)} - the same price per ${m.unit}, as if the rest was refunded. Edit the note if it was not.`,
+    'The rest is not coming?',
+    { confirm: 'Close the order' },
+  );
+  if (!ok) return;
+  const purchases = m.purchases.map((x) => (x.id === p.id ? { ...x, qty: got, cost: Math.round(((x.cost * got) / x.qty) * 100) / 100, note: [x.note, `closed short: ${amount(m, x.qty - got)} never came`].filter(Boolean).join(' · ') } : x));
+  try {
+    await save('materials', { ...m, purchases });
+  } catch (err) {
+    emit('error', err instanceof Error ? err.message : 'Could not close the order.');
   }
 }
 const dropPurchase = (m: Material, id: string) => save('materials', { ...m, purchases: m.purchases.filter((p) => p.id !== id) });
@@ -97,7 +163,7 @@ async function undoUse(u: MaterialUse): Promise<void> {
     <p v-if="!list.length" class="empty">No materials yet. Start with the paper you print on.</p>
     <article v-for="m in list" :key="m.id" class="card">
       <div class="head">
-        <span class="main"><strong>{{ m.name }}<em>{{ m.type }}</em></strong><small>{{ plural(materialTotals(m).qty, m.unit) }} bought · {{ fmtPrice(materialTotals(m).spent, currency) }} spent · used by {{ usedBy(m) }} recipe{{ usedBy(m) === 1 ? '' : 's' }}</small></span>
+        <span class="main"><strong>{{ m.name }}<em>{{ m.type }}</em></strong><small>{{ plural(materialTotals(m).qty, m.unit) }} ordered<template v-if="materialTotals(m).onOrder"> · <span class="onorder">{{ amount(m, materialTotals(m).onOrder) }} still to come</span></template> · {{ fmtPrice(materialTotals(m).spent, currency) }} spent · used by {{ usedBy(m) }} recipe{{ usedBy(m) === 1 ? '' : 's' }}</small></span>
         <span :class="['unit', 'hand', { low: low(m) }]"><strong>{{ onHand(m) }}</strong><small>{{ m.unit }}s on hand{{ low(m) ? ' · low' : '' }}</small></span>
         <span class="unit"><strong>{{ fmtPrice(materialTotals(m).unitCost, currency) }}</strong><small>per {{ m.unit }}</small></span>
         <button type="button" @click="openBuy(m)"><Icon name="plus" :size="14" /> Purchase</button>
@@ -107,9 +173,20 @@ async function undoUse(u: MaterialUse): Promise<void> {
         <button type="button" class="quiet danger" @click="remove('materials', m.id)">Remove</button>
       </div>
       <ul v-if="m.purchases.length" class="purchases">
-        <li v-for="p in sorted(m)" :key="p.id">
-          <span>{{ p.date || '-' }}</span><span>{{ plural(p.qty, m.unit) }}</span><span>{{ fmtPrice(p.cost, currency) }}</span><span class="muted">{{ p.note }}</span>
-          <button type="button" class="quiet" aria-label="Remove purchase" @click="dropPurchase(m, p.id)"><Icon name="x" :size="12" /></button>
+        <li v-for="p in sorted(m)" :key="p.id" :class="{ waiting: outstandingOf(p) > 0, parts: !!p.deliveries }">
+          <span>{{ p.date || '-' }}</span><span>{{ amount(m, p.qty) }}</span><span>{{ fmtPrice(p.cost, currency) }}</span>
+          <span class="muted">
+            <template v-if="p.deliveries">
+              <span class="got">{{ amount(m, receivedOf(p)) }} arrived<template v-if="outstandingOf(p) > 0">, {{ amount(m, outstandingOf(p)) }} to come</template></span>
+              <template v-for="d in p.deliveries" :key="d.id"> · {{ d.date }} +{{ d.qty }}</template>
+            </template>
+            <template v-if="p.note">{{ p.deliveries ? ' · ' : '' }}{{ p.note }}</template>
+          </span>
+          <span class="acts">
+            <button v-if="outstandingOf(p) > 0" type="button" class="receive" @click="openReceive(m, p)">Received</button>
+            <button v-if="outstandingOf(p) > 0" type="button" class="quiet" @click="closeShort(m, p)">Rest not coming</button>
+            <button type="button" class="quiet" aria-label="Remove purchase" @click="dropPurchase(m, p.id)"><Icon name="x" :size="12" /></button>
+          </span>
         </li>
       </ul>
       <ul v-if="usageOf(m)?.recent.length" class="purchases uses">
@@ -133,6 +210,10 @@ async function undoUse(u: MaterialUse): Promise<void> {
           <label><span>Unit</span><input v-model="editing.unit" type="text" placeholder="sheet, ml, sleeve" /></label>
         </div>
         <label><span>Description</span><input v-model="editing.description" type="text" /></label>
+        <div class="two">
+          <label><span>Comes in packs of (optional)</span><input v-model.number="editing.packSize" type="number" min="2" step="1" inputmode="numeric" placeholder="25" /></label>
+          <label><span>Pack is called</span><input v-model="editing.packName" type="text" maxlength="20" placeholder="box" /></label>
+        </div>
         <label><span>Running low at ({{ editing.unit || 'unit' }}s on hand, optional)</span><input v-model.number="editing.lowAt" type="number" min="0" step="1" inputmode="numeric" placeholder="e.g. 20" /></label>
       </div>
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="editing = null">Cancel</button><button type="button" class="primary" @click="saveMaterial">Save</button></div></template>
@@ -141,15 +222,45 @@ async function undoUse(u: MaterialUse): Promise<void> {
     <ModalShell v-if="buying" :title="`Purchase · ${buying.name}`" @close="buying = null">
       <div class="form">
         <div class="two">
-          <label><span>Quantity ({{ buying.unit }}s)</span><input v-model="purchase.qty" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+          <label>
+            <span>Ordered</span>
+            <span class="qty">
+              <input v-model="purchase.qty" type="number" min="0" step="0.01" inputmode="decimal" />
+              <select v-if="packs(buying)" v-model="purchase.inPacks" aria-label="Counted in"><option :value="true">{{ packPlural(buying) }} of {{ buying.packSize }}</option><option :value="false">{{ buying.unit }}s</option></select>
+              <small v-else>{{ buying.unit }}s</small>
+            </span>
+          </label>
           <label><span>Total cost ({{ currency }})</span><input v-model="purchase.cost" type="number" min="0" step="0.01" inputmode="decimal" /></label>
         </div>
+        <label class="check"><input v-model="purchase.allArrived" type="checkbox" /> <span>All of it arrived</span></label>
+        <label v-if="!purchase.allArrived">
+          <span>Arrived so far ({{ purchase.inPacks && packs(buying) ? packPlural(buying) : `${buying.unit}s` }}) - log the rest under Received when it comes</span>
+          <input v-model="purchase.arrived" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" />
+        </label>
         <div class="two">
           <label><span>Date</span><input v-model="purchase.date" type="date" /></label>
           <label><span>Note</span><input v-model="purchase.note" type="text" /></label>
         </div>
       </div>
       <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="buying = null">Cancel</button><button type="button" class="primary" @click="logPurchase">Log purchase</button></div></template>
+    </ModalShell>
+
+    <ModalShell v-if="receiving" :title="`Received · ${receiving.m.name}`" @close="receiving = null">
+      <div class="form">
+        <p class="hint">Still to come on this order: {{ amount(receiving.m, outstandingOf(receiving.p)) }}.</p>
+        <div class="two">
+          <label>
+            <span>Arrived</span>
+            <span class="qty">
+              <input v-model="receiving.qty" type="number" min="0" step="0.01" inputmode="decimal" />
+              <select v-if="packs(receiving.m)" v-model="receiving.inPacks" aria-label="Counted in"><option :value="true">{{ packPlural(receiving.m) }}</option><option :value="false">{{ receiving.m.unit }}s</option></select>
+              <small v-else>{{ receiving.m.unit }}s</small>
+            </span>
+          </label>
+          <label><span>Date</span><input v-model="receiving.date" type="date" /></label>
+        </div>
+      </div>
+      <template #footer><div class="footer"><span class="spacer"></span><button type="button" @click="receiving = null">Cancel</button><button type="button" class="primary" @click="logDelivery">Log delivery</button></div></template>
     </ModalShell>
 
     <ModalShell v-if="using" :title="`${using.mode === 'use' ? 'Use' : 'Count'} · ${using.m.name}`" @close="using = null">
@@ -181,7 +292,19 @@ async function undoUse(u: MaterialUse): Promise<void> {
 .unit small { color: var(--zfy-muted, #5a6472); font-size: .7rem; }
 .head button { min-height: 2.2rem; padding: .2rem .6rem; font-size: .78rem; }
 .purchases { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .15rem; font-size: .8rem; }
-.purchases li { display: grid; grid-template-columns: 6rem 7rem 7rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
+.purchases li { display: grid; grid-template-columns: 6rem 9rem 6rem 1fr auto; gap: .5rem; align-items: center; padding: .2rem .4rem; border-radius: 6px; background: var(--zfy-bg, #f1f4f6); font-variant-numeric: tabular-nums; }
+.purchases li.waiting { box-shadow: inset 3px 0 0 var(--zfy-warning, #d9942b); }
+/* An order's deliveries are worth reading in full, not cut off like a long note. */
+.purchases li.parts .muted { white-space: normal; }
+.got { color: var(--zfy-ink, #1a2230); }
+.onorder { color: var(--zfy-warning-ink, #8a5a12); font-weight: 600; }
+.acts { display: flex; align-items: center; gap: .2rem; }
+.acts .receive { min-height: 2rem; padding: .1rem .5rem; font-size: .74rem; }
+.acts .quiet { font-size: .74rem; }
+.qty { display: flex; gap: .4rem; align-items: center; }
+.qty input { flex: 1; min-width: 0; }
+.qty small { color: var(--zfy-muted, #5a6472); }
+.check { flex-direction: row; align-items: center; gap: .4rem; }
 .purchases .quiet { min-height: 2.2rem; padding: 0 .3rem; }
 .muted { color: var(--zfy-muted, #5a6472); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hand { min-width: 5rem; }

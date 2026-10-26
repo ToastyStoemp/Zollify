@@ -7,7 +7,8 @@ import type { ModuleContext, ModuleServices, PublicModuleContext } from '@zollif
 /**
  * Materials on hand - paper, ink, packaging used up by printing at home.
  *
- * What is on hand is everything bought (a material's purchases) less
+ * What is on hand is everything received (a material's purchases, or the
+ * deliveries logged against one that came in parts) less
  * everything used, and a use is a row here: logged by hand, sent by the
  * printing app as it prints, or the difference a recount found. Kept apart
  * from products: paper is not for sale, it is spent.
@@ -78,14 +79,18 @@ interface MaterialDoc {
   type?: string;
   unit?: string;
   lowAt?: number;
-  purchases?: { qty?: number }[];
+  purchases?: { qty?: number; deliveries?: { qty?: number }[] }[];
 }
 
 function materialsOf(db: Database.Database, accountId: string): MaterialDoc[] {
   return (db.prepare("SELECT doc FROM sourcing_docs WHERE accountId = ? AND coll = 'materials'").all(accountId) as { doc: string }[]).map((r) => JSON.parse(r.doc) as MaterialDoc);
 }
 
-const bought = (m: MaterialDoc): number => (m.purchases ?? []).reduce((s, p) => s + (Number(p.qty) || 0), 0);
+/** What has arrived: an order logging its deliveries counts those, any other all it ordered. */
+const received = (p: NonNullable<MaterialDoc['purchases']>[number]): number =>
+  p.deliveries ? p.deliveries.reduce((s, d) => s + (Number(d.qty) || 0), 0) : Number(p.qty) || 0;
+const bought = (m: MaterialDoc): number => (m.purchases ?? []).reduce((s, p) => s + received(p), 0);
+const onOrder = (m: MaterialDoc): number => round((m.purchases ?? []).reduce((s, p) => s + Math.max(0, (Number(p.qty) || 0) - received(p)), 0));
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 
 function usedOf(db: Database.Database, accountId: string, materialId: string): number {
@@ -221,7 +226,15 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
     return row;
   };
   const refused = { error: 'unauthorized', message: 'That printer key is not valid, was revoked, or Sourcing is switched off.' };
-  const view = (accountId: string, m: MaterialDoc) => ({ id: m.id, name: m.name, type: m.type ?? 'other', unit: m.unit ?? 'unit', onHand: onHandOf(ctx.db, accountId, m), ...(typeof m.lowAt === 'number' ? { lowAt: m.lowAt } : {}) });
+  const view = (accountId: string, m: MaterialDoc) => ({
+    id: m.id,
+    name: m.name,
+    type: m.type ?? 'other',
+    unit: m.unit ?? 'unit',
+    onHand: onHandOf(ctx.db, accountId, m),
+    onOrder: onOrder(m),
+    ...(typeof m.lowAt === 'number' ? { lowAt: m.lowAt } : {}),
+  });
 
   app.get('/materials', limit, async (req, reply) => {
     const key = keyOf(req);

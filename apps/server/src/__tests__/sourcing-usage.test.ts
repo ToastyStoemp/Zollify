@@ -74,6 +74,17 @@ describe('paper on hand', () => {
   });
 });
 
+describe('an order that comes in parts', () => {
+  it('counts only what arrived, and the rest as on order', async () => {
+    // 3 boxes of 25 ordered, 1 box sent so far.
+    await call('PUT', '/materials/a4', { id: 'a4', name: 'Matte A4', type: 'paper', unit: 'sheet', packSize: 25, packName: 'box', purchases: [{ id: 'o1', qty: 75, cost: 30, date: '2026-10-20', deliveries: [{ id: 'd1', qty: 25, date: '2026-10-22' }] }] });
+    expect((await call('POST', '/materials/a4/use', { qty: 1 })).json().onHand).toBe(24);
+    await call('PUT', '/materials/a4', { id: 'a4', name: 'Matte A4', type: 'paper', unit: 'sheet', packSize: 25, packName: 'box', purchases: [{ id: 'o1', qty: 75, cost: 30, date: '2026-10-20', deliveries: [{ id: 'd1', qty: 25, date: '2026-10-22' }, { id: 'd2', qty: 25, date: '2026-10-29' }] }] });
+    // A second box arrives a week later.
+    expect((await call('POST', '/materials/a4/use', { qty: 4 })).json().onHand).toBe(45);
+  });
+});
+
 describe('the printing app', () => {
   it('gets a key, shown once and kept hashed', async () => {
     const res = await call('POST', '/keys', { label: 'Studio PC' });
@@ -89,7 +100,7 @@ describe('the printing app', () => {
   it('lists the materials with what is on hand', async () => {
     const res = await printer('GET', '/materials');
     expect(res.statusCode).toBe(200);
-    expect(res.json().materials).toEqual([{ id: 'a3', name: 'Hahnemühle A3', type: 'paper', unit: 'sheet', onHand: 45, lowAt: 20 }]);
+    expect(res.json().materials.filter((m: { id: string }) => m.id === 'a3')).toEqual([{ id: 'a3', name: 'Hahnemühle A3', type: 'paper', unit: 'sheet', onHand: 45, onOrder: 0, lowAt: 20 }]);
   });
 
   it('takes off what it prints, by name, and counts a resent job once', async () => {
@@ -131,7 +142,7 @@ describe('the printing app', () => {
 
   it('forgets a removed material\'s uses', async () => {
     await call('DELETE', '/materials/a3');
-    const left = app.zollify.db.prepare('SELECT COUNT(*) AS n FROM sourcing_material_use WHERE accountId = ?').get(accountId) as { n: number };
+    const left = app.zollify.db.prepare("SELECT COUNT(*) AS n FROM sourcing_material_use WHERE accountId = ? AND materialId = 'a3'").get(accountId) as { n: number };
     expect(left.n).toBe(0);
   });
 });

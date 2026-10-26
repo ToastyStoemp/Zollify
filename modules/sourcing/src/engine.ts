@@ -100,10 +100,21 @@ export interface Issue {
 }
 export interface Purchase {
   id: string;
+  /** What was ordered (and paid for), in the material's unit. */
   qty: number;
   cost: number;
   date?: string;
   note?: string;
+  /**
+   * What has arrived so far, when the order came in parts (a supplier short
+   * of stock). Absent: it all arrived with the order, as purchases always did.
+   */
+  deliveries?: Delivery[];
+}
+export interface Delivery {
+  id: string;
+  qty: number;
+  date: string;
 }
 export interface Material {
   id: string;
@@ -114,6 +125,9 @@ export interface Material {
   purchases: Purchase[];
   /** Says it is running low at or below this many on hand. */
   lowAt?: number;
+  /** How it comes packed - a box of 25 sheets, say - so orders and deliveries can be typed in boxes. */
+  packSize?: number;
+  packName?: string;
   updatedAt?: number;
 }
 /** A use of a material: by hand, sent by the printing app, or what a recount found. */
@@ -307,12 +321,26 @@ export function unitCost(m: Material): number {
   const cost = m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0);
   return qty > 0 ? round4(cost / qty) : 0;
 }
-/** What is on hand: everything bought less everything used. */
-export function materialOnHand(m: Material, usage: MaterialUsage | undefined): number {
-  return Math.round((materialTotals(m).qty - (usage?.used ?? 0)) * 1000) / 1000;
+/** What of an order has arrived: all of it, unless deliveries are being logged. */
+export function receivedOf(p: Purchase): number {
+  return p.deliveries ? round4(p.deliveries.reduce((s, d) => s + (Number(d.qty) || 0), 0)) : Number(p.qty) || 0;
 }
+/** What of an order is still to come; never below zero. */
+export const outstandingOf = (p: Purchase): number => Math.max(0, round4((Number(p.qty) || 0) - receivedOf(p)));
+
+/** What is on hand: everything received less everything used. */
+export function materialOnHand(m: Material, usage: MaterialUsage | undefined): number {
+  return Math.round((materialTotals(m).received - (usage?.used ?? 0)) * 1000) / 1000;
+}
+/** Ordered, received, still on order, spent - and the unit cost, from what was ordered and paid. */
 export function materialTotals(m: Material) {
-  return { qty: m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0), spent: round2(m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0)), unitCost: unitCost(m) };
+  return {
+    qty: m.purchases.reduce((s, p) => s + (Number(p.qty) || 0), 0),
+    received: round4(m.purchases.reduce((s, p) => s + receivedOf(p), 0)),
+    onOrder: round4(m.purchases.reduce((s, p) => s + outstandingOf(p), 0)),
+    spent: round2(m.purchases.reduce((s, p) => s + (Number(p.cost) || 0), 0)),
+    unitCost: unitCost(m),
+  };
 }
 /** Cost of one print from its recipe, valued at current material unit costs. */
 export function printCost(recipe: RecipeLine[], materials: Material[]) {

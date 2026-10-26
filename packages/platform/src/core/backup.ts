@@ -355,7 +355,8 @@ export async function restoreBackup(raw: unknown, files: Record<string, Uint8Arr
   for (const event of events) await queueOp({ type: 'event.upsert', payload: event });
   for (const item of inventory) await queueOp({ type: 'inventory.set', payload: item });
   for (const entry of stock) await queueOp({ type: 'stock.set', payload: entry });
-  for (const tx of transactions) await queueOp({ type: 'tx.create', payload: tx });
+  // A test sale goes back as one, so a restore never turns it into takings.
+  for (const tx of transactions) await queueOp({ type: tx.testRun ? 'tx.test.create' : 'tx.create', payload: tx });
 
   // Images go through the same path a fresh photo does, one at a time - each
   // one queues its own thumbnail op, and there is no bulk equivalent worth

@@ -7,6 +7,9 @@ import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
 import { localIsoDay } from '@zollify/shared';
 import { vatByEvent } from '../ledger-vat';
+import ComputedCostForm from './ComputedCostForm.vue';
+import SharedCostForm from './SharedCostForm.vue';
+import RatesForm from './RatesForm.vue';
 
 /**
  * Ledger: per-event profit and loss. Revenue comes from the till; costs -
@@ -41,6 +44,32 @@ const scan = ref<InvoiceScan | null>(null);
 const scanFile = ref<{ base64: string; name: string } | null>(null);
 
 const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: localIsoDay(), vendor: '', note: '' });
+/** Which helper is open: per diems or mileage on an event, a shared cost or the rates on the overview. */
+const helper = ref<'perdiem' | 'mileage' | 'shared' | 'rates' | null>(null);
+/** The event's dates and country for the per diem helper: a day either side of the event for travel. */
+const tripOf = computed(() => {
+  const e = current.value ? sdk().data.events.get(current.value.eventId) : undefined;
+  const shift = (day: string | undefined, by: number): string => {
+    if (!day) return '';
+    const d = new Date(`${day}T12:00:00`);
+    d.setDate(d.getDate() + by);
+    return localIsoDay(d);
+  };
+  return { country: e?.venue?.country ?? current.value?.country ?? '', start: shift(e?.dateStart, -1), end: shift(e?.dateEnd ?? e?.dateStart, 1) };
+});
+function computedSaved(e: Expense): void {
+  expenses.value = [e, ...expenses.value];
+  helper.value = null;
+}
+async function sharedSaved(): Promise<void> {
+  helper.value = null;
+  await loadPnl();
+}
+/** Categories for the shared-cost form before any event was opened. */
+async function openShared(): Promise<void> {
+  if (!categories.value.length) categories.value = (await api.expenses()).categories;
+  helper.value = 'shared';
+}
 const form = ref(blank());
 const editingId = ref<string | null>(null);
 
@@ -78,6 +107,7 @@ async function loadPnl(): Promise<void> {
 
 async function openEvent(row: PnlRow & { vat: number }): Promise<void> {
   current.value = row;
+  helper.value = null;
   form.value = { ...blank(), eventId: row.eventId, currency: row.currency || 'EUR' };
   editingId.value = null;
   scan.value = null;
@@ -88,6 +118,7 @@ async function openEvent(row: PnlRow & { vat: number }): Promise<void> {
 
 async function back(): Promise<void> {
   current.value = null;
+  helper.value = null;
   await loadPnl();
 }
 
@@ -123,6 +154,9 @@ function edit(e: Expense): void {
   editingId.value = e.id;
   form.value = { eventId: e.eventId, category: e.category, amount: e.amount, currency: e.currency, date: e.date, vendor: e.vendor, note: e.note };
 }
+
+/** Who added it, when that was someone else than you - a helper's quick expense at the event, say. */
+const addedBy = (e: Expense): string | null => (e.createdBy && e.createdBy.userId !== sdk().account()?.userId ? (e.createdBy.email ?? 'a removed user').split('@')[0]! : null);
 
 async function remove(e: Expense): Promise<void> {
   if (!(await sdk().ui.confirm(`Delete ${e.vendor || 'this expense'} (${fmt(e.amount, e.currency)})?`, 'Delete expense'))) return;
@@ -209,6 +243,12 @@ async function openInvoice(e: Expense): Promise<void> {
 
     <!-- ── P&L overview ───────────────────────────────────────────────────── -->
     <template v-if="!current">
+      <div class="helpers">
+        <button type="button" :class="{ on: helper === 'shared' }" @click="helper === 'shared' ? (helper = null) : openShared()">A cost over several events</button>
+        <button type="button" :class="{ on: helper === 'rates' }" @click="helper = helper === 'rates' ? null : 'rates'">Rates</button>
+      </div>
+      <SharedCostForm v-if="helper === 'shared'" :categories="categories" :currency="totals.currency === 'mixed' ? 'EUR' : totals.currency" @saved="sharedSaved" @close="helper = null" />
+      <RatesForm v-if="helper === 'rates'" @close="helper = null" />
       <ul class="totals">
         <li><span class="label">Revenue <small>excl. VAT</small></span><strong class="good">{{ fmt(totals.revenue, totals.currency) }}</strong></li>
         <li><span class="label">Expenses</span><strong class="bad">{{ totals.expensesMixed ? 'mixed currencies' : '−' + fmt(totals.expenses, totals.currency) }}</strong></li>
@@ -243,6 +283,23 @@ async function openInvoice(e: Expense): Promise<void> {
         <li><span class="label">Margin</span><strong :class="expensesMixed ? '' : (current.revenue - expenseTotal >= 0 ? 'good' : 'bad')">{{ expensesMixed ? '—' : fmt(current.revenue - expenseTotal, current.currency) }}</strong></li>
       </ul>
       <p v-if="current.vat" class="hint">{{ fmt(current.vat, current.currency) }} VAT was charged on top and goes to the tax office, so it is not counted as revenue.</p>
+
+      <div class="helpers">
+        <button type="button" :class="{ on: helper === 'perdiem' }" @click="helper = helper === 'perdiem' ? null : 'perdiem'">Per diems from the dates</button>
+        <button type="button" :class="{ on: helper === 'mileage' }" @click="helper = helper === 'mileage' ? null : 'mileage'">Mileage</button>
+      </div>
+      <ComputedCostForm
+        v-if="helper === 'perdiem' || helper === 'mileage'"
+        :key="helper"
+        :kind="helper"
+        :event-id="current.eventId"
+        :currency="current.currency || 'EUR'"
+        :country="tripOf.country"
+        :start="tripOf.start"
+        :end="tripOf.end"
+        @saved="computedSaved"
+        @close="helper = null"
+      />
 
       <form class="card" @submit.prevent="save">
         <div class="formhead">
@@ -281,8 +338,8 @@ async function openInvoice(e: Expense): Promise<void> {
           <tbody>
             <tr v-for="e in expenses" :key="e.id">
               <td class="mono">{{ e.date || '-' }}</td>
-              <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span></td>
-              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}</td>
+              <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span><span v-if="addedBy(e)" class="sub by"> · added by {{ addedBy(e) }}</span></td>
+              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · worked out</span></td>
               <td class="num">{{ fmt(e.amount, e.currency) }}</td>
               <td>
                 <button v-if="e.invoice" type="button" class="quiet link" @click="openInvoice(e)">{{ e.invoice.filename }}</button>
@@ -329,6 +386,8 @@ tr.row:hover { background: var(--zfy-surface-2, #e9edf1); }
 .grid label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
 .grid .wide { grid-column: 1 / -1; }
 .actions, .rowactions { display: flex; gap: .4rem; }
+.helpers { display: flex; gap: .4rem; flex-wrap: wrap; }
+.helpers .on { background: var(--zfy-accent, #0e7c66); color: #fff; }
 .scan, .attach { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; padding: .45rem .95rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; cursor: pointer; font-size: .875rem; }
 .attach { min-height: 2.2rem; padding: .2rem .6rem; font-size: .8rem; }
 .scan input, .attach input { display: none; }

@@ -41,13 +41,19 @@ export const notifyKinds = ref<string[]>(readKinds());
 // ── System notifications on Android ─────────────────────────────────────────
 // Capacitor's WebView has no Notification API; the app posts them through
 // @capacitor/local-notifications. Loaded on demand so the web bundle stays out of it.
-const localNotifications = () => import('@capacitor/local-notifications').then((m) => m.LocalNotifications);
+//
+// Never resolve a promise with the plugin itself: a promise asks what it is
+// given for `.then`, and a Capacitor plugin answers every unknown method with
+// "LocalNotifications.then() is not implemented" - so the permission check
+// failed on every start and no notification was ever posted. The module, not
+// the plugin, goes through the promise.
+const notificationsModule = () => import('@capacitor/local-notifications');
 /** The Android permission, kept here so `systemNotificationState` can answer without a round trip to the plugin. */
 let nativePermission: NotificationPermission | null = null;
 const toPermission = (state: string): NotificationPermission => (state === 'granted' || state === 'denied' ? state : 'default');
 if (isNative()) {
-  localNotifications()
-    .then((ln) => ln.checkPermissions())
+  notificationsModule()
+    .then((m) => m.LocalNotifications.checkPermissions())
     .then((r) => (nativePermission = toPermission(r.display)))
     .catch(() => undefined);
 }
@@ -69,7 +75,7 @@ export async function setNotifyKinds(kinds: string[]): Promise<void> {
   if (kinds.length) {
     if (isNative()) {
       try {
-        nativePermission = toPermission((await (await localNotifications()).requestPermissions()).display);
+        nativePermission = toPermission((await (await notificationsModule()).LocalNotifications.requestPermissions()).display);
       } catch {
         /* an app without the plugin: toasts only */
       }
@@ -90,8 +96,8 @@ function showOnScreen(n: AppNotification): void {
   if (document.visibilityState === 'visible') return;
   if (isNative()) {
     if (nativePermission !== 'granted') return;
-    localNotifications()
-      .then((ln) => ln.schedule({ notifications: [{ id: notificationNumber(n.id), title: n.title, body: n.body }] }))
+    notificationsModule()
+      .then((m) => m.LocalNotifications.schedule({ notifications: [{ id: notificationNumber(n.id), title: n.title, body: n.body }] }))
       .catch(() => undefined);
     return;
   }

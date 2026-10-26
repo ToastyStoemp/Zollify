@@ -27,6 +27,15 @@ const FX_TOKEN = 'FxFxFxFxFxFxFxFxFxFx01';
 const DISC_TOKEN = 'DiscDiscDiscDiscDisc02';
 const VAT_TOKEN = 'VatVatVatVatVatVatVat3';
 const EXEMPT_TOKEN = 'ExemptExemptExemptExe4';
+const FOLLOW_TOKEN = 'FollowFollowFollowFol5';
+const FOLLOW_VOID_TOKEN = 'FollowVoidFollowVoidF6';
+const TEST_TOKEN = 'TestTestTestTestTestT7';
+/** A commission deposit line pointing at its tracking page, beside lines whose links must never reach the customer. */
+const followItems = [
+  { pid: 'module:commission:c1', vid: null, title: 'Deposit · Dragon', qty: 1, unitPrice: 30, lineTotal: 30, link: { label: 'Follow your commission', path: '/p/commissions/abcdefghijklmnopqrstuvwx' } },
+  { pid: 'module:x1', vid: null, title: 'Elsewhere', qty: 1, unitPrice: 5, lineTotal: 5, link: { label: 'Claim a prize', path: 'https://evil.example/p/x' } },
+  { pid: 'module:x2', vid: null, title: 'Upward', qty: 1, unitPrice: 5, lineTotal: 5, link: { label: 'Admin', path: '/p/../api/admin' } },
+];
 
 let app: FastifyInstance;
 let dataDir: string;
@@ -132,6 +141,11 @@ beforeAll(async () => {
           asCharged: { listTotals: [40], discounts: [{ name: 'Bundle deal', amount: 4 }] },
         })),
         op(7, 'tx.create', sale('tx-vat', VAT_TOKEN, { currency: 'EUR', tax: { country: 'DE', exempt: false, rates: [19, 7] } })),
+        op(9, 'tx.create', sale('tx-follow', FOLLOW_TOKEN, { items: followItems, total: 40, payments: [{ kind: 'cash', amount: 40 }], method: 'cash' })),
+        op(10, 'tx.create', sale('tx-follow-void', FOLLOW_VOID_TOKEN, { items: followItems, total: 40, payments: [{ kind: 'cash', amount: 40 }], method: 'cash' })),
+        op(11, 'tx.revert', { id: 'tx-follow-void', revertedAt: Date.now() }),
+        // Made in test mode: its own op type, found all the same, and marked as a test.
+        op(12, 'tx.test.create', sale('tx-test', TEST_TOKEN, { testRun: 'run-1' })),
         op(8, 'tx.create', sale('tx-exempt', EXEMPT_TOKEN, { currency: 'EUR', tax: { country: 'NL', exempt: true, rates: [null, null], note: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' } })),
       ],
     },
@@ -185,6 +199,12 @@ describe('online receipts', () => {
     }
   });
 
+  it('shows a test sale, marked as a test', async () => {
+    const r = (await lookup(TEST_TOKEN)).json();
+    expect(r).toMatchObject({ test: true, status: 'paid' });
+    expect((await lookup(TOKEN)).json().test).toBeUndefined();
+  });
+
   it('marks a reverted sale as cancelled', async () => {
     expect((await lookup(VOID_TOKEN)).json().status).toBe('voided');
   });
@@ -217,6 +237,20 @@ describe('online receipts', () => {
     const body = (await lookup(EXEMPT_TOKEN)).json();
     expect(body.vat).toEqual({ rows: [], exemptNote: 'VAT exempt under the EU SME scheme', exNumber: 'DE123456789EX' });
     expect(body.seller.vatId).toBeUndefined();
+  });
+
+  it('links the pages a sale’s lines point to, and only public pages of this server', async () => {
+    const body = (await lookup(FOLLOW_TOKEN)).json();
+    expect(body.follow).toEqual([{ label: 'Follow your commission', path: '/p/commissions/abcdefghijklmnopqrstuvwx' }]);
+    expect(JSON.stringify(body)).not.toContain('evil.example');
+    expect(JSON.stringify(body)).not.toContain('admin');
+    expect((await lookup(TOKEN)).json().follow).toBeUndefined();
+  });
+
+  it('links nothing from a cancelled sale', async () => {
+    const body = (await lookup(FOLLOW_VOID_TOKEN)).json();
+    expect(body.status).toBe('voided');
+    expect(body.follow).toBeUndefined();
   });
 
   it('refuses a lookup without a solved challenge', async () => {

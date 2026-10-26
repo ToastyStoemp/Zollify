@@ -204,6 +204,67 @@ describe('what was paid follows the till', () => {
   });
 });
 
+describe('test mode', () => {
+  const testPay = (txId: string, commissionId: string, amount: number) =>
+    push('tx.test.create', {
+      id: txId, eventId: 'test-ev', deviceId: 'till', timestamp: Date.now(), method: 'cash', payments: [], discounts: [], total: amount, currency: 'EUR', testRun: 'run-1',
+      items: [{ pid: `module:commission:${commissionId}`, vid: null, title: 'Deposit', qty: 1, unitPrice: amount, lineTotal: amount, ref: { moduleId: 'commissions', kind: 'commission', id: commissionId } }],
+    });
+  const SAM = { name: 'Sam Tester', email: 'sam@example.test', phone: '+41 79 555 09 09' };
+  let testId = '';
+  let realId = '';
+  let testPath = '';
+
+  it('keeps test commissions to devices in test mode', async () => {
+    const made = (await call(staff, 'POST', '/commissions', { ...NEW, customer: SAM, title: 'Practice piece', price: 80, test: true })).json();
+    testId = made.id;
+    testPath = made.publicPath;
+    realId = (await call(staff, 'POST', '/commissions', { ...NEW, title: 'Real piece', price: 80 })).json().id;
+    const real = (await call(staff, 'GET', '/commissions')).json().commissions.map((c: { id: string }) => c.id);
+    const tests = (await call(staff, 'GET', '/commissions?test=1')).json().commissions.map((c: { id: string }) => c.id);
+    expect(real).toContain(realId);
+    expect(real).not.toContain(testId);
+    expect(tests).toEqual([testId]);
+  });
+
+  it('pays a test commission with test sales only, and a real one with real sales only', async () => {
+    await testPay('tt-1', testId, 20);
+    await pay('rt-1', testId, 99);
+    await testPay('tt-2', realId, 99);
+    await pay('rt-2', realId, 30);
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).json()).toMatchObject({ paid: 20, balance: 60 });
+    expect((await call(staff, 'GET', `/commissions/${realId}`)).json()).toMatchObject({ paid: 30, balance: 50 });
+    await push('tx.test.revert', { id: 'tt-1', revertedAt: Date.now() });
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).json().paid).toBe(0);
+  });
+
+  it('says TEST in its emails and on its page', async () => {
+    sent.length = 0;
+    expect((await call(staff, 'POST', `/commissions/${testId}/email-link`)).json().emailed).toBe(true);
+    expect(sent.at(-1)?.subject).toBe('[TEST] Follow your commission: Practice piece');
+    const page = await app.inject({ method: 'GET', url: testPath });
+    expect(page.body).toContain('TEST - made in test mode');
+  });
+
+  it('lists its new customer only in test mode', async () => {
+    const names = async (q: string) => (await call(staff, 'GET', `/customers${q}`)).json().customers.map((c: { name: string }) => c.name);
+    expect(await names('?q=Sam')).toEqual([]);
+    expect(await names('?q=Sam&test=1')).toEqual(['Sam Tester']);
+    expect((await call(staff, 'GET', '/customers/search?q=Sam')).json().customers).toEqual([]);
+  });
+
+  it('goes, with its customer, when test data is cleared, and the test sales leave the log', async () => {
+    const res = await push('tx.test.clear', { at: Date.now() + 1 });
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await call(staff, 'GET', `/commissions/${testId}`)).statusCode).toBe(404);
+    expect((await call(staff, 'GET', `/commissions/${realId}`)).json().paid).toBe(30);
+    expect((await call(staff, 'GET', '/customers?q=Sam&test=1')).json().customers).toEqual([]);
+    const left = app.zollify.db.prepare("SELECT count(*) AS n FROM ops WHERE accountId = ? AND type IN ('tx.test.create', 'tx.test.revert')").get(ownerAccountId) as { n: number };
+    expect(left.n).toBe(0);
+  });
+});
+
 describe('the customer page', () => {
   let path = '';
   let id = '';
@@ -233,7 +294,9 @@ describe('the customer page', () => {
     expect(html).toContain('Marktgasse 5, 3011 Bern');
     expect(html).toContain('Ink &amp; Charcoal');
     // Everything typed is escaped, and there is no script on the page.
-    expect(html).not.toContain('<script');
+    // The one script is the page's own file; nothing typed ever becomes one.
+    expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/p/commissions/commission.js">']);
+    expect(html).toContain('Started &lt;script&gt;alert(1)&lt;/script&gt; today');
     expect(html).not.toContain('<b>print');
     expect(html).toContain('Tiger &lt;b&gt;print&lt;/b&gt;');
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
@@ -311,6 +374,12 @@ describe('times on the customer page', () => {
     balance: 0,
     updates: [],
     pickup: null,
+    brief: null,
+    pictures: [],
+    canAddBrief: true,
+    hasEmail: true,
+    mailEnabled: true,
+    push: true,
   };
   // 23:30 UTC on 5 Jan 2099: already the next day in Zurich, still the same afternoon in Los Angeles.
   const lateEvening = Date.UTC(2099, 0, 5, 23, 30);
@@ -337,12 +406,39 @@ describe('times on the customer page', () => {
     expect(renderCommission({ ...base, timeZone: '<b>' })).toContain('Times are shown in &lt;b&gt;.');
   });
 
-  it('refreshes by itself only while the commission is open, with no script', () => {
+  it('refreshes by itself only while the commission is open, and never runs inline script', () => {
+    const token = 'A'.repeat(32);
     for (const status of ['requested', 'accepted', 'in_progress', 'ready'] as const) {
-      const html = renderCommission({ ...base, status });
-      expect(html).toContain('<meta http-equiv="refresh" content="300" />');
-      expect(html).not.toContain('<script');
+      const html = renderCommission({ ...base, status }, token);
+      // Without script, a plain refresh; with it, the script waits while the customer types.
+      expect(html).toContain('<noscript><meta http-equiv="refresh" content="300" /></noscript>');
+      expect(html).toContain('data-watch="1"');
+      expect(html.match(/<script[^>]*>/g)).toEqual(['<script src="/p/commissions/commission.js">']);
     }
-    for (const status of ['collected', 'cancelled'] as const) expect(renderCommission({ ...base, status })).not.toContain('http-equiv');
+    for (const status of ['collected', 'cancelled'] as const) {
+      const html = renderCommission({ ...base, status, canAddBrief: false }, token);
+      expect(html).not.toContain('http-equiv');
+      expect(html).not.toContain('id="push"');
+    }
+    // Rendered without its token (a preview) it has no forms and no script at all.
+    expect(renderCommission(base)).not.toContain('<script');
+  });
+
+  it('shows the brief escaped, a form while open, read-only once closed', () => {
+    const token = 'B'.repeat(32);
+    const withBrief = { ...base, brief: { text: 'A fox <b>please</b>', budget: '150', wantedBy: '2099-01-31' }, pictures: [{ id: 'p1', name: 'ref<1>.png', mime: 'image/png', size: 10, createdAt: 1 }] };
+    const open = renderCommission(withBrief, token);
+    expect(open).toContain('id="brief"');
+    expect(open).toContain('A fox &lt;b&gt;please&lt;/b&gt;</textarea>');
+    expect(open).toContain('Budget: 150 · Wanted by 31 Jan 2099');
+    expect(open).toContain(`/p/commissions/${token}/pictures/p1`);
+    expect(open).toContain('alt="ref&lt;1&gt;.png"');
+    expect(open).toContain('data-remove="p1"');
+    expect(open).toContain('id="push"');
+    expect(open).toContain(`/p/commissions/${token}/manifest.webmanifest`);
+    const closed = renderCommission({ ...withBrief, status: 'collected', canAddBrief: false }, token);
+    expect(closed).not.toContain('id="brief"');
+    expect(closed).toContain('What you asked for');
+    expect(closed).not.toContain('data-remove');
   });
 });

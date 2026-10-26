@@ -4,9 +4,10 @@ import * as shared from '@zollify/shared';
 import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
-import { receiptQrPng } from './lib/after-sale';
+import { lineLinkQrs, receiptQrPng, saleLineLinks } from './lib/after-sale';
 import { serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from './lib/given-away';
 
 /**
  * Receipt building for the myPOS Carbon's built-in thermal printer (carbon
@@ -264,12 +265,15 @@ export async function receiptSeller(tx: Pick<Transaction, 'tax'>, eventCountry?:
 export function buildReceiptLines(
   tx: Transaction,
   eventName: string,
-  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[]; /** Optional header fields to print; absent ones follow RECEIPT_FIELD_DEFAULTS. */ fields?: Partial<Record<ReceiptField, boolean>> },
+  config: { artist: ArtistInfo; logoB64: string; footerText: string; /** Online-receipt QR, full paper width. */ qrB64?: string; /** Pages the sale's lines point to (a commission to follow), each a QR with its label. */ linkQrs?: { label: string; qrB64: string }[]; /** Plain-text link lines (webstore, socials), when the account prints them. */ linkLines?: string[]; /** Optional header fields to print; absent ones follow RECEIPT_FIELD_DEFAULTS. */ fields?: Partial<Record<ReceiptField, boolean>> },
   eventCountry?: string,
 ): ReceiptLine[] {
   const { logoB64, footerText } = config;
   const lines: ReceiptLine[] = [];
   const center = (text: string): ReceiptLine => ({ kind: 'text', text, align: 'center' });
+
+  // Made in test mode: said first and last, so the slip can never pass for a real receipt.
+  if (tx.testRun) lines.push({ ...center('*** TEST - NOT A RECEIPT ***'), doubleHeight: true });
 
   // ── Header: logo + artist block ──
   if (logoB64) lines.push({ kind: 'image', imageB64: logoB64 });
@@ -325,6 +329,8 @@ export function buildReceiptLines(
   }
 
   // ── Payment legs ──
+  // A sale given away took nothing, so it has no legs; say so instead.
+  if (!tx.payments.length && tx.method === GIVEN_AWAY) lines.push({ kind: 'text', text: row(GIVEN_AWAY_LABEL, fmtPrice(0, tx.currency)) });
   for (const leg of tx.payments) {
     lines.push({ kind: 'text', text: row(paymentLabel(tx, leg), fmtPrice(leg.amount, tx.currency)) });
     // Charged on the card in another currency (cards in the base currency).
@@ -349,12 +355,18 @@ export function buildReceiptLines(
     lines.push({ kind: 'space' });
     for (const text of config.linkLines) for (const part of wrap(text, WIDTH)) lines.push(center(part));
   }
+  for (const link of config.linkQrs ?? []) {
+    lines.push({ kind: 'image', imageB64: link.qrB64 });
+    for (const part of wrap(link.label, WIDTH)) lines.push(center(part));
+    lines.push({ kind: 'space' });
+  }
   if (config.qrB64) {
     lines.push({ kind: 'image', imageB64: config.qrB64 });
     lines.push(center('Scan for your receipt online'));
     lines.push({ kind: 'space' });
   }
   lines.push(center(`Receipt ${tx.receiptNumber ?? tx.id.slice(-8)}`));
+  if (tx.testRun) lines.push(center('*** TEST - nothing was paid ***'));
   lines.push({ kind: 'space' });
   lines.push({ kind: 'space' });
 
@@ -376,22 +388,25 @@ async function printedLinkLines(): Promise<string[]> {
 
 /**
  * The receipt as this device prints it: the saved receipt settings, plus the
- * online-receipt QR when that is switched on and the sale has a link.
+ * online-receipt QR when that is switched on and the sale has a link. A page
+ * a line points to (a commission to follow) is printed whatever that setting:
+ * the module asked for it, and the paper is the customer's way back to it.
  */
 export async function printableReceipt(tx: Transaction, eventName: string, eventCountry?: string): Promise<ReceiptLine[]> {
   const config = await loadReceiptConfig();
   const size = await loadLogoSize();
-  const [qrB64, logoB64, shared, linkLines] = await Promise.all([
+  const [qrB64, logoB64, shared, linkLines, linkQrs] = await Promise.all([
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     (config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo()).then((b) => (b ? sizePrintLogo(b, size) : b)),
     config.footerText ? Promise.resolve(null) : serverBranding(),
     printedLinkLines(),
+    lineLinkQrs(saleLineLinks(tx)),
   ]);
   return buildReceiptLines(
     tx,
     eventName,
-    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64, linkLines },
+    { ...config, artist: withProfileFallback(config.artist), logoB64: logoB64 ?? '', footerText: config.footerText || shared?.footer || '', qrB64, linkQrs, linkLines },
     eventCountry,
   );
 }

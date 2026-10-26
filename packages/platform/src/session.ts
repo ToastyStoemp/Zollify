@@ -299,12 +299,18 @@ export async function refreshAccessToken(): Promise<boolean> {
   refreshInFlight = (async () => {
     try {
       const native = nativeAuthInit();
-      const res = await fetch(`${apiBase}/auth/refresh`, {
-        method: 'POST',
-        credentials: 'same-origin',
-        ...native,
-        headers: { accept: 'application/json', ...(native.headers as Record<string, string> | undefined) },
+      // Every request waits on this one: it must not wait forever on a stalled connection.
+      const answer = await withTimeout(REFRESH_TIMEOUT_MS, null, async (signal) => {
+        const res = await fetch(`${apiBase}/auth/refresh`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          ...native,
+          signal,
+          headers: { accept: 'application/json', ...(native.headers as Record<string, string> | undefined) },
+        });
+        return { res, body: res.ok ? ((await res.json()) as LoginResult) : null };
       });
+      const { res } = answer;
       if (!res.ok) {
         // Only a refusal ends the session. A 5xx is the gateway restarting or
         // a proxy with nothing behind it - signing the booth out for that would
@@ -312,7 +318,7 @@ export async function refreshAccessToken(): Promise<boolean> {
         if (res.status === 401 || res.status === 403 || res.status === 400) clearSession();
         return false;
       }
-      const body = (await res.json()) as LoginResult;
+      const body = answer.body!;
       applyLogin(body);
       return true;
     } catch {
@@ -330,6 +336,65 @@ function tokenIsFresh(): boolean {
 }
 
 // ── Authenticated fetch ─────────────────────────────────────────────────────
+
+/**
+ * How long a request may take - answer and body - before it counts as failed.
+ *
+ * On mobile data a connection can stall without ever erroring: a cell
+ * handover, a carrier dropping a connection it thinks is idle. The request
+ * then waited forever, and since sync shares one run and every request
+ * shares one token refresh, a single stalled request stopped all syncing
+ * until the app was restarted - fine on Wi-Fi, "often fails" on data.
+ */
+export const REQUEST_TIMEOUT_MS = 30_000;
+const REFRESH_TIMEOUT_MS = 20_000;
+
+/** Options for a request to the server: `timeoutMs` overrides the default limit (0: none). */
+export type ServerRequest = RequestInit & { timeoutMs?: number };
+
+/** Thrown when the server did not answer in time; `timeout` tells it apart from a refusal. */
+export interface TimeoutError extends Error {
+  timeout: true;
+}
+
+function timeoutError(ms: number): TimeoutError {
+  const err = new Error(`The server did not answer within ${Math.round(ms / 1000)} s - the connection may be weak.`) as TimeoutError;
+  err.timeout = true;
+  return err;
+}
+
+/**
+ * Runs `run` with a signal that aborts after `ms`, or when the caller's own
+ * signal does. Past the limit the call fails with a TimeoutError whatever
+ * `run` is still waiting on - the abort tells fetch to let go, and the race
+ * makes sure nothing waits on it anyway.
+ */
+async function withTimeout<T>(ms: number, outer: AbortSignal | null | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctl = new AbortController();
+  const onAbort = (): void => ctl.abort(outer?.reason);
+  if (outer) {
+    if (outer.aborted) ctl.abort(outer.reason);
+    else outer.addEventListener('abort', onAbort, { once: true });
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    if (ms > 0) {
+      timer = setTimeout(() => {
+        ctl.abort();
+        reject(timeoutError(ms));
+      }, ms);
+    }
+  });
+  const work = run(ctl.signal);
+  // Once the limit has answered, a late failure of the abandoned request is nobody's business.
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, limit]);
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener('abort', onAbort);
+  }
+}
 
 function httpError(status: number, body: unknown, message: string): HttpError {
   const err = new Error(message) as HttpError;
@@ -350,7 +415,7 @@ async function parseBody(res: Response): Promise<unknown> {
  * refresh cookie from ever being attached to a cross-origin request, and the
  * caller cannot override it.
  */
-export async function authFetch(path: string, init: RequestInit = {}): Promise<unknown> {
+export async function authFetch(path: string, init: ServerRequest = {}): Promise<unknown> {
   return authFetchAs(activeUserId.value, path, init);
 }
 
@@ -358,7 +423,7 @@ export async function authFetch(path: string, init: RequestInit = {}): Promise<u
  * As the device session's own user, whoever is using the app - for what only
  * the device may do: unlocking people, renewing their tokens.
  */
-export function deviceFetch(path: string, init: RequestInit = {}): Promise<unknown> {
+export function deviceFetch(path: string, init: ServerRequest = {}): Promise<unknown> {
   return authFetchAs(null, path, init);
 }
 
@@ -392,16 +457,17 @@ async function renewPerson(userId: string): Promise<boolean> {
 }
 
 /** A request as one person on the device - null for the device session's user. */
-export async function authFetchAs(userId: string | null, path: string, init: RequestInit = {}): Promise<unknown> {
+export async function authFetchAs(userId: string | null, path: string, options: ServerRequest = {}): Promise<unknown> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...init } = options;
   const person = (): PersonSession | null => (userId ? (people.get(userId) ?? null) : null);
   if (userId && !person()) throw httpError(401, null, 'Locked - enter the PIN again.');
   // Unlocked offline: requests go as the device, which never outranks them (see till-lock.ts).
-  if (userId && !person()!.token) return authFetchAs(null, path, init);
+  if (userId && !person()!.token) return authFetchAs(null, path, options);
   if (userId) {
     if (Date.now() >= person()!.expiresAt - REFRESH_SKEW_MS) await renewPerson(userId);
   } else if (!tokenIsFresh() && account.value !== null) await refreshAccessToken();
 
-  const send = async (): Promise<Response> => {
+  const send = async (signal: AbortSignal): Promise<Response> => {
     const headers = new Headers(init.headers ?? {});
     headers.set('accept', 'application/json');
     for (const [k, v] of Object.entries(nativeHeaders())) headers.set(k, v);
@@ -410,19 +476,25 @@ export async function authFetchAs(userId: string | null, path: string, init: Req
     if (init.body !== undefined && !headers.has('content-type')) {
       headers.set('content-type', 'application/json');
     }
-    return fetch(`${apiBase}${path}`, { ...init, headers, credentials: 'same-origin' });
+    return fetch(`${apiBase}${path}`, { ...init, headers, credentials: 'same-origin', signal });
   };
 
   if (userId && !person()) throw httpError(401, null, 'Locked - enter the PIN again.');
-  let res = await send();
+  // The limit covers the answer and its body; a retry after a refresh gets a limit of its own.
+  const exchange = (): Promise<{ res: Response; body: unknown }> =>
+    withTimeout(timeoutMs, init.signal, async (signal) => {
+      const res = await send(signal);
+      return { res, body: res.status === 401 ? null : await parseBody(res) };
+    });
+  let { res, body } = await exchange();
 
   // One retry after a refresh: covers a token that expired between the freshness
   // check and the request actually landing.
   if (res.status === 401 && (userId ? await renewPerson(userId) : await refreshAccessToken())) {
-    res = await send();
+    ({ res, body } = await exchange());
   }
+  if (res.status === 401 && body === null) body = await parseBody(res).catch(() => null);
 
-  const body = await parseBody(res);
   if (!res.ok) {
     const said = typeof body === 'object' && body !== null ? (body as { message?: unknown; error?: unknown }) : {};
     const message =
@@ -430,6 +502,15 @@ export async function authFetchAs(userId: string | null, path: string, init: Req
     throw httpError(res.status, body, message);
   }
   return body;
+}
+
+/**
+ * Makes this account a test account (sandbox) or a real one again. Admins
+ * only; refused while it is linked with an account on the other side.
+ */
+export async function setSandbox(on: boolean): Promise<void> {
+  const res = (await authFetch('/account/sandbox', { method: 'POST', body: JSON.stringify({ on }) })) as { user: TokenResponse['user'] };
+  applyUser(res.user);
 }
 
 /** Saves account-wide profile changes and adopts the server's view of the account. */

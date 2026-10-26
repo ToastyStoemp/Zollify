@@ -26,6 +26,8 @@ import {
 } from '@zollify/shared';
 import {
   isEnabled,
+  isSandbox,
+  sameWorld,
   setEnabled,
   parseProfile,
   reduceEvents,
@@ -222,6 +224,21 @@ function venueOf(event: SalesEvent | undefined, id: string): ConsignmentVenue {
   };
 }
 
+// ── Test accounts ───────────────────────────────────────────────────────────
+
+/** Why a link was refused: a test account (sandbox) only ever links with another. */
+function crossWorld(db: Database.Database, accountId: string) {
+  return isSandbox(db, accountId)
+    ? { error: 'sandbox', message: 'This is a test account, and that store is a real one. A test account only links with other test accounts.' }
+    : { error: 'sandbox', message: 'That store is a test account. A real account never links with a test account.' };
+}
+
+/** Makes an account a test account (see sandbox.ts in server-core). */
+function markSandbox(db: Database.Database, accountId: string): void {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  db.prepare('UPDATE accounts SET profile = ? WHERE id = ?').run(JSON.stringify({ ...parseProfile(row?.profile), sandbox: true }), accountId);
+}
+
 // ── Request bodies ──────────────────────────────────────────────────────────
 
 const IdParam = z.string().min(1).max(80);
@@ -322,6 +339,8 @@ export const consignmentArtistServerModule: ServerModule = {
     if (!row) return;
     db.prepare('UPDATE consignors SET offerAccountId = ?, linkCodeHash = NULL, linkExpiresAt = NULL, inviteCode = NULL WHERE accountId = ? AND id = ?').run(e.accountId, row.accountId, row.id);
     setEnabled(db, e.accountId, ARTIST_MODULE_ID, true);
+    // Invited by a test store: the new account is a test account too, so the two can link.
+    if (isSandbox(db, row.accountId)) markSandbox(db, e.accountId);
     svc.notify(e.accountId, {
       kind: 'sharing',
       level: 'urgent',
@@ -530,6 +549,7 @@ function registerArtistSide(app: FastifyInstance, ctx: ModuleContext): void {
       .prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?')
       .get(row.accountId, who.accountId, row.id);
     if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
+    if (!sameWorld(db, row.accountId, who.accountId)) return reply.code(409).send(crossWorld(db, who.accountId));
     db.transaction(() => {
       // Linked with the code: the same code can no longer create an account.
       if (row.inviteCode) db.prepare('DELETE FROM invites WHERE code = ? AND usedBy IS NULL').run(row.inviteCode);
@@ -570,6 +590,7 @@ function registerArtistSide(app: FastifyInstance, ctx: ModuleContext): void {
     }
     const other = db.prepare('SELECT id FROM consignors WHERE accountId = ? AND linkedAccountId = ? AND id != ?').get(row.accountId, who.accountId, row.id);
     if (other) return reply.code(409).send({ error: 'already_linked', message: 'Your account is already linked to another artist at this store.' });
+    if (!sameWorld(db, row.accountId, who.accountId)) return reply.code(409).send(crossWorld(db, who.accountId));
     db.prepare('UPDATE consignors SET linkedAccountId = ?, offerAccountId = NULL WHERE accountId = ? AND id = ?').run(who.accountId, row.accountId, row.id);
     ctx.notify(row.accountId, { kind: 'sharing', level: 'normal', title: `${name} accepted your invite`, body: 'They can now share items with you.', link: '/m/consignment', minRole: 'admin' });
     return { storeAccountName: accountName(db, row.accountId) ?? '', consignorName: name };

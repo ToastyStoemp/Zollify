@@ -58,6 +58,7 @@ const BUNDLED_MODULES: Record<string, () => Promise<unknown>> = {
   economic: () => import('@zollify/economic'),
   'tax-deadlines': () => import('@zollify/tax-deadlines'),
   'sme-scheme': () => import('@zollify/sme-scheme'),
+  wholesale: () => import('@zollify/wholesale'),
 };
 
 /** False until the session, core data and modules are in; the shell shows a splash meanwhile. */
@@ -202,8 +203,16 @@ export async function loadEnabledModules(router: Router): Promise<LoadOutcome[]>
   // brings up the till and the rest from the bundles already on the device.
   const manifestKey = `zollify.manifest.${account.accountId}`;
   let manifest: ManifestResponse;
+  // With the last answer on the device, a weak signal must not hold the splash
+  // screen for the full request limit: start from that answer sooner.
+  let haveCached = false;
   try {
-    manifest = (await authFetch('/modules/manifest')) as ManifestResponse;
+    haveCached = localStorage.getItem(manifestKey) !== null;
+  } catch {
+    haveCached = false;
+  }
+  try {
+    manifest = (await authFetch('/modules/manifest', haveCached ? { timeoutMs: 10_000 } : {})) as ManifestResponse;
     try {
       localStorage.setItem(manifestKey, JSON.stringify(manifest));
     } catch {

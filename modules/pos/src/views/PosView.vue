@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
 import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
@@ -35,7 +35,10 @@ import {
   subtotal,
   toCharged,
   total,
+  GIVEN_AWAY,
   loadTestMode,
+  sandboxAccount,
+  shellTestMode,
   testMode,
 } from '../cart';
 import { defaultProviderId, getProvider } from '../payments/registry';
@@ -44,6 +47,7 @@ import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
 import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
+import { tillLinkFrom } from '../lib/till-link';
 import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
@@ -122,8 +126,10 @@ async function sellAtToday(): Promise<void> {
 }
 const products = computed(() => sdk().data.products.forSale());
 const providerId = ref('manual');
-const provider = computed(() => (testMode.value ? testTerminalProvider : getProvider(providerId.value as never)));
-const hasTerminal = computed(() => testMode.value || providerId.value !== 'manual');
+// Test mode and a test account both take cards on the pretend terminal, whatever is set up.
+const pretendCards = computed(() => testMode.value || sandboxAccount());
+const provider = computed(() => (pretendCards.value ? testTerminalProvider : getProvider(providerId.value as never)));
+const hasTerminal = computed(() => pretendCards.value || providerId.value !== 'manual');
 const customMethods = ref<string[]>([]);
 
 // ── Terminal connection indicator: polled while the till is open ────────────
@@ -652,10 +658,24 @@ function applyDiscount(): void {
 const tillActions = computed(() => sdk().till.actions());
 const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
 const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
-const openAction = shallowRef<{ action: TillAction; view: Component } | null>(null);
-function runAction(action: TillAction): void {
-  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>) };
+const openAction = shallowRef<{ action: TillAction; view: Component; focus: string | null } | null>(null);
+function runAction(action: TillAction, focus: string | null = null): void {
+  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>), focus };
 }
+// A link naming one of these actions (see lib/till-link) opens it once, then
+// drops the query so a reload or Back does not open it again.
+const route = useRoute();
+watch(
+  [() => route.query, tillActions],
+  ([query, actions]) => {
+    const link = tillLinkFrom(query, actions);
+    if (!link) return;
+    runAction(link.action, link.focus);
+    const { action: _a, focus: _f, ...rest } = query;
+    void router.replace({ query: rest });
+  },
+  { immediate: true },
+);
 const offTill = sdk().till.onAddLine((line) => {
   if (!activeEvent.value) {
     toast('Pick an active event first (Events).', 'bad');
@@ -725,7 +745,9 @@ const today = computed(() => {
   start.setHours(0, 0, 0, 0);
   let count = 0;
   let revenue = 0;
-  for (const tx of sdk().data.transactions.recent()) {
+  // In test mode the till sells into the test event: today is its test sales.
+  const sales = testMode.value && shellTestMode() ? shellTestMode()!.sales() : sdk().data.transactions.recent();
+  for (const tx of sales) {
     if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
     count++;
     revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
@@ -775,7 +797,9 @@ const confirmDisabled = computed(() => {
   if (payment.method === 'split') return !splitState.value.ok;
   return false;
 });
-const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', split: 'Split payment' })[payment.method] ?? `${payment.method} payment`);
+const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', split: 'Split payment', [GIVEN_AWAY]: 'Give away' })[payment.method] ?? `${payment.method} payment`);
+/** A cart that comes to nothing (a 100% discount): there is nothing to pay, so it is given away instead. */
+const givesAway = computed(() => itemCount.value > 0 && Math.abs(total.value) < 0.005);
 
 function startPayment(method: string): void {
   if (!itemCount.value) return;
@@ -889,7 +913,8 @@ async function confirmPayment(): Promise<void> {
   if (outcome.cancelled) return;
   if (!outcome.approved) return toast(outcome.error ?? 'Could not record the sale.', 'bad');
   const count = outcome.sale!.lines.reduce((s, l) => s + l.qty, 0);
-  finish(outcome.sale!, `Payment confirmed - ${count} item${count === 1 ? '' : 's'} sold`, outcome.test);
+  const items = `${count} item${count === 1 ? '' : 's'}`;
+  finish(outcome.sale!, payment.method === GIVEN_AWAY ? `Given away - ${items}` : `Payment confirmed - ${items} sold`, outcome.test);
 }
 
 function finish(sale: SaleEvent, message: string, test = false): void {
@@ -1046,7 +1071,8 @@ function lockTill(): void {
           <small v-else-if="activeEvent">{{ atStore ? 'Selling at the store' : 'Selling at this event' }}{{ today.count ? ` · ${today.count} sale${today.count === 1 ? '' : 's'} today` : '' }}</small>
           <small v-else>Open one under {{ sellsStores ? 'Stores or Events' : 'Events' }} - every sale is filed against one.</small>
         </div>
-        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" title="Test mode - sales are not recorded. Tap to switch it off under Card terminal.">TEST MODE - nothing is recorded</router-link>
+        <router-link v-if="!testMode && sandboxAccount()" :to="{ name: 'settings', query: { panel: 'core.security' } }" class="testmode" title="A test account: cards go to the pretend terminal and nothing here is real money.">TEST ACCOUNT</router-link>
+        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" :title="shellTestMode() ? 'Test mode - sales go to the test event, never to your takings. Tap to switch it off.' : 'Test mode - sales are not recorded. Tap to switch it off under Card terminal.'">{{ shellTestMode() ? 'TEST MODE - test event' : 'TEST MODE - nothing is recorded' }}</router-link>
         <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
         <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
         <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
@@ -1201,7 +1227,10 @@ function lockTill(): void {
           <button type="button" @click="openMisc">+ Misc item</button>
           <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
         </div>
-        <div class="pay">
+        <div v-if="givesAway" class="pay">
+          <button type="button" class="free" :disabled="sellBlocked" @click="startPayment(GIVEN_AWAY)">Give away</button>
+        </div>
+        <div v-else class="pay">
           <button type="button" class="cash" :disabled="!itemCount || sellBlocked" @click="startPayment('cash')">Cash</button>
           <button type="button" class="card" :disabled="!itemCount || sellBlocked" @click="startPayment('card')">Card</button>
           <button type="button" class="split" :disabled="!itemCount || sellBlocked" @click="startPayment('split')">Split</button>
@@ -1268,7 +1297,7 @@ function lockTill(): void {
 
     <!-- ── A screen another module put on the till ───────────────────────── -->
     <ModalShell v-if="openAction" :title="openAction.action.label" @close="openAction = null">
-      <component :is="openAction.view" @close="openAction = null" />
+      <component :is="openAction.view" :focus="openAction.focus ?? undefined" @close="openAction = null" />
     </ModalShell>
 
     <!-- ── Misc item ─────────────────────────────────────────────────────── -->
@@ -1356,6 +1385,10 @@ function lockTill(): void {
           <p v-if="cardInBase && Number(payment.splitCard) > 0 && onCard(Number(payment.splitCard))" class="hint">Charge <strong>{{ onCard(Number(payment.splitCard)) }}</strong> on the card · {{ cardRateLabel }}</p>
         </template>
 
+        <template v-else-if="payment.method === GIVEN_AWAY">
+          <p>Nothing to pay - the items leave stock and the sale is kept on record as given away.</p>
+        </template>
+
         <template v-else>
           <p>Confirm the {{ payment.method === 'card' ? 'card' : payment.method }} payment was completed{{ payment.method === 'card' && !hasTerminal ? ' on the terminal' : '' }}.</p>
         </template>
@@ -1363,7 +1396,7 @@ function lockTill(): void {
       <template #footer>
         <div class="actions">
           <button type="button" @click="cancelPayment">Cancel</button>
-          <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">Confirm sale</button>
+          <button v-if="payment.phase === 'confirm'" type="button" :class="['primary', 'confirm', payment.method]" :disabled="confirmDisabled || cart.busy" @click="confirmPayment">{{ payment.method === GIVEN_AWAY ? 'Give away' : 'Confirm sale' }}</button>
           <button v-if="payment.phase === 'failed'" type="button" class="primary" @click="retryCard">Retry card</button>
           <button v-if="payment.phase === 'terminal' || payment.phase === 'failed' || payment.phase === 'needsLogin'" type="button" @click="completeByHand">{{ payment.phase === 'needsLogin' ? 'Enter card by hand' : 'Complete by hand' }}</button>
           <button v-if="payment.phase === 'needsLogin' && provider.configure" type="button" class="primary" @click="connectReader">Log in</button>
@@ -1486,6 +1519,8 @@ function lockTill(): void {
 .pay .cash, .confirm.cash { background: #0e7c66; }
 .pay .card, .confirm.card { background: #2f6fb8; }
 .pay .split, .confirm.split { background: #b8742f; }
+.pay .free, .confirm.free { background: #8a4fb8; }
+.pay .free { grid-column: 1 / -1; }
 .pay button:hover:not(:disabled), .confirm:hover:not(:disabled) { filter: brightness(1.08); }
 
 .form { display: flex; flex-direction: column; gap: .6rem; }

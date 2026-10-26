@@ -72,6 +72,21 @@ describe('recording sales', () => {
     expect(t.items[0]).toMatchObject({ consignorId: 'ana', commissionPct: 30, ref: { moduleId: 'consignment', kind: 'workshop-signup', id: 's1' } });
   });
 
+  it('keeps the page a line points the customer to, and drops one that is not a public page here', () => {
+    const link = { label: 'Follow your commission', path: '/p/commissions/abcdefghijklmnopqrstuvwx' };
+    const t = tx.saleToTransaction(
+      sale({
+        lines: [
+          { productId: 'module:c1', sku: null, name: 'Deposit', qty: 1, unitPrice: 30, lineTotal: 30, taxRate: null, link },
+          { productId: 'module:c2', sku: null, name: 'Other', qty: 1, unitPrice: 5, lineTotal: 5, taxRate: null, link: { label: 'Prize', path: 'https://evil.example' } },
+        ],
+      }),
+      'dev',
+    );
+    expect(t.items[0]!.link).toEqual(link);
+    expect(t.items[1]!.link).toBeUndefined();
+  });
+
   it('keeps the consignment artist a line belonged to when it sold', async () => {
     const product = { id: 'p1', title: 'Anchor print', forSale: true, unlisted: false, price: 35, variants: [], sortOrder: 0, updatedAt: 1 };
     await catalog.upsertProduct({ ...product, consignorId: 'artist-1' });
@@ -95,6 +110,13 @@ describe('recording sales', () => {
     expect(manual.method).toBe('cash');
     expect(card.method).toBe('card');
     expect(card.payments[0]?.provider).toBe('mypos-go2');
+  });
+
+  it('records a sale given away with no payment at all - not a cash leg of nothing', () => {
+    const t = tx.saleToTransaction(sale({ total: 0, lines: [{ productId: 'p1', sku: 'ANCH', name: 'Anchor print', qty: 1, unitPrice: 35, lineTotal: 0, taxRate: null }], payment: { provider: 'free', approved: true, method: 'free', legs: [] } }), 'dev');
+    expect(t.method).toBe('free');
+    expect(t.payments).toEqual([]);
+    expect(t.items[0]).toMatchObject({ qty: 1 });
   });
 
   it('records a sale made with no active event rather than dropping it', async () => {

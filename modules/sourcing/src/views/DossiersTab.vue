@@ -73,7 +73,7 @@ function openEdit(d: Dossier): void {
   price.value = d.lastUnitPrice != null ? String(d.lastUnitPrice) : '';
   cover.value = d.targetCoverMonths != null ? String(d.targetCoverMonths) : '';
 }
-const recipeCost = computed(() => (editing.value ? printCost(editing.value.recipe, snap.value.materials) : null));
+const recipeCost = computed(() => (editing.value ? printCost(editing.value.recipe, snap.value.materials, snap.value.usage) : null));
 async function saveDossier(): Promise<void> {
   if (!editing.value?.title.trim()) return emit('error', 'A dossier needs a title.');
   try {
@@ -152,7 +152,7 @@ const kb = (n: number): string => (n < 1024 * 1024 ? `${Math.round(n / 1024)} KB
               <small>
                 <template v-if="d.specs.size">{{ d.specs.size }} · </template><template v-if="d.specs.moq">MOQ {{ d.specs.moq }} · </template>
                 {{ filesFor(d.id).length }} file{{ filesFor(d.id).length === 1 ? '' : 's' }}
-                <template v-if="d.recipe.length"> · recipe {{ fmtPrice(printCost(d.recipe, snap.materials).total, currency) }}</template>
+                <template v-if="d.recipe.length"> · recipe {{ fmtPrice(printCost(d.recipe, snap.materials, snap.usage).total, currency) }}</template>
               </small>
             </span>
             <strong v-if="d.lastUnitPrice != null">{{ fmtPrice(d.lastUnitPrice, d.currency || currency) }}</strong>

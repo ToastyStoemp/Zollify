@@ -174,3 +174,29 @@ export async function openFileBlob(filename: string, blob: Blob, mimeType: strin
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
   return Boolean(win);
 }
+
+/**
+ * Puts text on the clipboard. The clipboard API where the WebView allows it,
+ * else the old select-and-copy; false when neither did.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    /* blocked or missing: the fallback below */
+  }
+  try {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0;';
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand('copy');
+    area.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}

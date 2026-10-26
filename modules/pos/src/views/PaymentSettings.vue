@@ -4,14 +4,14 @@ import { checkPickedFile, type DeviceSummary } from '@zollify/shared';
 import { allProviders, defaultProviderId, onActiveProviderChanged } from '../payments/registry';
 import type { PaymentProvider, PaymentProviderId } from '../payments/provider';
 import { SUMUP_KEY_SETTING } from '../payments/sumup';
-import { GO2_HOST_SETTING, GO2_PORT_SETTING, GO2_TRANSPORT_SETTING, connectGo2, type Go2Transport } from '../payments/mypos-go2';
 import { loadSumupCloudStatus, type SumupCloudStatus } from '../payments/sumup-cloud';
 import { REMOTE_CARBON_DEVICE_KEY } from '../payments/mypos-carbon-remote';
 import { SMARTPOS_TERMINAL_SETTING, loadSmartposStatus, loadSmartposTerminals, removeSmartposApp, saveSmartposApp, type SmartposStatus, type SmartposTerminal } from '../payments/nexi-smartpos';
 import { getSetting, setSetting } from '../lib/settings';
-import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, testMode } from '../cart';
+import { CARD_IN_BASE_KEY, loadCardFx, loadTestMode, setTestMode, shellTestMode, testMode } from '../cart';
 import { sdk } from '../runtime';
 import SumupSoloPairing from './SumupSoloPairing.vue';
+import Go2Connection from './Go2Connection.vue';
 
 /**
  * Payments - ZollTool's settings: every terminal with its live status,
@@ -40,20 +40,6 @@ async function refreshStatuses(): Promise<void> {
 }
 const sumupCloud = ref<SumupCloudStatus | null>(null);
 
-const go2 = ref({ transport: 'bluetooth' as Go2Transport, host: '', port: '8080' });
-async function saveGo2(): Promise<void> {
-  await setSetting(GO2_TRANSPORT_SETTING, go2.value.transport);
-  await setSetting(GO2_HOST_SETTING, go2.value.host.trim());
-  await setSetting(GO2_PORT_SETTING, Number(go2.value.port) || 8080);
-  if (active.value === 'mypos-go2') {
-    try {
-      await connectGo2();
-    } catch (err) {
-      sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
-    }
-  }
-  void refreshStatuses();
-}
 const sumupKey = ref('');
 const editingKey = ref(false);
 const hasKey = computed(() => !!sumupKey.value.trim());
@@ -74,11 +60,6 @@ onMounted(async () => {
   cardInBase.value = (await getSetting<boolean>(CARD_IN_BASE_KEY)) ?? false;
   void loadTestMode();
   sumupKey.value = (await getSetting<string>(SUMUP_KEY_SETTING)) ?? '';
-  go2.value = {
-    transport: ((await getSetting<string>(GO2_TRANSPORT_SETTING)) === 'wifi' ? 'wifi' : 'bluetooth') as Go2Transport,
-    host: (await getSetting<string>(GO2_HOST_SETTING)) ?? '',
-    port: String((await getSetting<number | string>(GO2_PORT_SETTING)) ?? 8080),
-  };
   remoteCarbonId.value = (await getSetting<string>(REMOTE_CARBON_DEVICE_KEY)) ?? '';
   void refreshCarbons();
   smartposTerminal.value = (await getSetting<SmartposTerminal>(SMARTPOS_TERMINAL_SETTING))?.deviceId ?? '';
@@ -216,11 +197,38 @@ const ago = (ts: number): string => {
   return h < 24 ? `${h} h ago` : `${Math.round(h / 24)} days ago`;
 };
 
+/** The shell keeps test sales apart (see cart.ts); an older one only goes through the motions. */
+const keepsTests = computed(() => !!shellTestMode());
+// Both read the shell's reactive stores, so they follow sales and clearing as they happen.
+const testEvent = computed(() => shellTestMode()?.event() ?? null);
+const testSales = computed(() => shellTestMode()?.sales().length ?? 0);
+const clearing = ref(false);
+
 async function toggleTestMode(e: Event): Promise<void> {
   const on = (e.target as HTMLInputElement).checked;
-  await setTestMode(on);
-  sdk().ui.toast(on ? 'Test mode on - nothing the till does now is recorded.' : 'Test mode off - sales are recorded again.', { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
+  const { restored } = await setTestMode(on);
+  const off = keepsTests.value
+    ? `Test mode off - selling for real again.${restored ? ` Stock put back on ${restored} item${restored === 1 ? '' : 's'}.` : ''}`
+    : 'Test mode off - sales are recorded again.';
+  const onText = keepsTests.value ? `Test mode on - the till now sells into ${shellTestMode()?.event()?.name ?? 'the test event'}.` : 'Test mode on - nothing the till does now is recorded.';
+  sdk().ui.toast(on ? onText : off, { kind: on ? 'warning' : 'success', timeoutMs: 5000 });
   void refreshStatuses();
+}
+
+async function clearTests(): Promise<void> {
+  const shell = shellTestMode();
+  if (!shell) return;
+  const ok = await sdk().ui.confirm('Every test sale, and every commission made in test mode, goes on all devices. Real sales are not touched.', 'Clear test data?', { confirm: 'Clear test data' });
+  if (!ok) return;
+  clearing.value = true;
+  try {
+    await shell.clear();
+    sdk().ui.toast('Test data cleared.', { kind: 'success' });
+  } catch (err) {
+    sdk().ui.toast(err instanceof Error ? err.message : String(err), { kind: 'error' });
+  } finally {
+    clearing.value = false;
+  }
 }
 
 async function saveCardInBase(): Promise<void> {
@@ -248,13 +256,24 @@ async function removeMethod(name: string): Promise<void> {
     <p class="hint">Zollify never holds the money - the terminal settles straight to your bank.</p>
 
     <h3>Test mode</h3>
-    <label class="toggle">
+    <label v-if="keepsTests" class="toggle">
+      <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
+      <span class="main">
+        <span>Sell into the test event</span>
+        <small>Everything works as usual - cart, discounts, cash or card, receipts, commissions and their deposits - but it all happens in the test event: logged in History under that event, never in your takings, books, tax or exports. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). Stock moves as it would for real and is put back when you switch test mode off. The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
+      </span>
+    </label>
+    <label v-else class="toggle">
       <input :checked="testMode" type="checkbox" @change="toggleTestMode" />
       <span class="main">
         <span>Try the till without recording anything</span>
         <small>Every step runs as usual - cart, discounts, cash or card, the receipt screen - but no sale is recorded: no transaction, no stock movement, nothing in the books, nothing synced. Cards go to a pretend terminal that approves after a moment (an amount ending in .01 is declined, to try that path too). The till shows a red TEST MODE badge for as long as this is on. This device only.</small>
       </span>
     </label>
+    <div v-if="keepsTests && testEvent" class="testdata">
+      <span>{{ testSales }} test sale{{ testSales === 1 ? '' : 's' }} in <router-link :to="{ name: 'history', query: { event: testEvent.id } }">{{ testEvent.name }}</router-link></span>
+      <button type="button" class="danger" :disabled="clearing" @click="clearTests">{{ clearing ? 'Clearing…' : 'Clear test data' }}</button>
+    </div>
 
     <h3>Card payment terminal</h3>
     <ul class="providers">
@@ -265,24 +284,10 @@ async function removeMethod(name: string): Promise<void> {
         <button v-if="p.configure && statuses[p.id]?.available" type="button" class="quiet" @click="run(p, 'configure', 'Connecting…')">Connect</button>
         <button v-if="p.pairReader && statuses[p.id]?.connected" type="button" class="quiet" @click="run(p, 'pairReader', 'Reader settings closed')">Pair reader</button>
         <button v-if="p.disconnect && statuses[p.id]?.connected" type="button" class="quiet danger" @click="run(p, 'disconnect', 'Disconnected')">Log out</button>
+        <!-- Opens right under the Go2 once it is picked: Wi-Fi or Bluetooth, before Connect means anything. -->
+        <Go2Connection v-if="p.id === 'mypos-go2' && active === 'mypos-go2' && statuses[p.id]?.available" class="expand" connect @saved="refreshStatuses" />
       </li>
     </ul>
-
-    <template v-if="active === 'mypos-go2' && statuses['mypos-go2']?.available">
-      <div class="carbon">
-        <div class="row"><span class="label">How this device reaches the Go2</span></div>
-        <label class="inline"><input v-model="go2.transport" type="radio" value="bluetooth" @change="saveGo2" /> <span>Bluetooth</span></label>
-        <label class="inline"><input v-model="go2.transport" type="radio" value="wifi" @change="saveGo2" /> <span>Wi-Fi (same network)</span></label>
-        <template v-if="go2.transport === 'wifi'">
-          <div class="row">
-            <label class="field grow"><span>Terminal IP address</span><input v-model="go2.host" type="text" inputmode="decimal" autocomplete="off" placeholder="192.168.1.100" @change="saveGo2" /></label>
-            <label class="field port"><span>Port</span><input v-model="go2.port" type="number" inputmode="numeric" min="1" max="65535" @change="saveGo2" /></label>
-          </div>
-          <p class="hint">Put the Go2 in slave mode on the same Wi-Fi as this device. Its IP address is under the terminal’s connection settings. Port 8080 unless you changed it there. Then tap <strong>Connect</strong> above.</p>
-        </template>
-        <p v-else class="hint">Bluetooth only works on a Go2 ordered with the Bluetooth module - a plain Go2 has none, however long it scans. If pairing never finds the terminal, use Wi-Fi.</p>
-      </div>
-    </template>
 
     <template v-if="statuses['sumup']?.available">
       <p class="hint">Tap <strong>Connect</strong> and sign in with your SumUp account once. <strong>Pair reader</strong> connects your Solo or Air over Bluetooth; <strong>Log out</strong> disconnects this device from your SumUp account.</p>
@@ -388,8 +393,9 @@ h3 { font-size: .95rem; margin: .5rem 0 0; }
 .hint { color: var(--zfy-muted, #5a6472); margin: 0; font-size: .85rem; }
 .error { color: var(--zfy-danger, #c6512f); margin: 0; font-size: .85rem; }
 .providers { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-.providers li { display: flex; align-items: center; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
+.providers li { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
 .providers li.off { opacity: .55; }
+.providers li .expand { flex-basis: 100%; }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: .875rem; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--zfy-line, #d6dde4); flex-shrink: 0; }
@@ -409,9 +415,8 @@ code { font-family: ui-monospace, monospace; padding: .3rem .5rem; border-radius
 .methods .quiet { min-height: 1.7rem; font-size: .78rem; }
 .toggle { display: flex; align-items: flex-start; gap: .6rem; padding: .5rem .7rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); }
 .toggle input { margin-top: .2rem; }
+.testdata { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; margin-top: .5rem; font-size: .875rem; }
 .add { display: flex; gap: .4rem; }
 .add input { flex: 1; min-width: 0; }
-.port { max-width: 7rem; }
 .grow { flex: 1; }
-label.inline { display: flex; align-items: center; gap: .4rem; font-size: .875rem; }
 </style>

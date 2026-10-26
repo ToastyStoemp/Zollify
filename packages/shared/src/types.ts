@@ -93,6 +93,11 @@ export interface SalesEvent {
    * (see sell-lock.ts). Only honoured while the account allows forcing.
    */
   sellLockForced?: boolean;
+  /**
+   * The account's test event: what a till in test mode sells into (see
+   * test-mode.ts). Its sales are logged apart and never count as takings.
+   */
+  test?: boolean;
   updatedAt: number;
   deletedAt?: number;
 }
@@ -305,8 +310,16 @@ export interface CostBatch {
   deletedAt?: number;
 }
 
-/** Built-in methods plus user-defined ones (e.g. "TWINT", "PayPal QR"). */
-export type PaymentMethod = 'cash' | 'card' | 'split' | (string & {});
+/**
+ * Built-in methods plus user-defined ones (e.g. "TWINT", "PayPal QR").
+ * `free`: given away - a sale that came to nothing (a 100% discount), with no
+ * payment at all; its items still leave stock.
+ */
+export type PaymentMethod = 'cash' | 'card' | 'split' | 'free' | (string & {});
+
+/** The method of a sale given away; see PaymentMethod. */
+export const GIVEN_AWAY = 'free';
+export const GIVEN_AWAY_LABEL = 'Given away';
 
 export interface PaymentLeg {
   kind: 'cash' | 'card';
@@ -352,6 +365,8 @@ export interface TxItem {
   commissionPct?: number;
   /** The module record this line paid for - e.g. a workshop booking. */
   ref?: { moduleId: string; kind: string; id: string };
+  /** A public page of this server the receipt points the customer to - see receiptLinksOf. */
+  link?: { label: string; path: string };
 }
 
 export interface TxDiscount {
@@ -417,6 +432,12 @@ export interface Transaction {
   tax?: SaleTax;
   /** Who rang it up - set by the server from the signed-in user, so staff cash-ups add up per person. */
   soldBy?: { userId: string; email: string | null };
+  /**
+   * Made in test mode, during this test run (see test-mode.ts): logged and
+   * shown under the test event, never in takings, books or exports. Synced
+   * as `tx.test.create`, so nothing that reads `tx.create` ever sees it.
+   */
+  testRun?: string;
 }
 
 export interface AsCharged {

@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Transaction, TxDiscount, TxItem } from '@zollify/shared';
-import { chargedLineTotals, fmtPrice, localIsoDay, needsRateLookup, round2, seesSalesTotals, toBaseFactor } from '@zollify/shared';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL, chargedLineTotals, fmtPrice, localIsoDay, needsRateLookup, round2, seesSalesTotals, toBaseFactor } from '@zollify/shared';
 import { Icon, ModalShell, TypeaheadPicker, typeColor, type PickerOption } from '@zollify/ui';
 import {
   activeEventId,
@@ -13,6 +13,8 @@ import {
   getSalesEvent,
   recentTransactions,
   revertTransaction,
+  testEvent,
+  transactionsOfEvent,
   transactionsToCsv,
   visibleEvents,
   saveFile,
@@ -67,7 +69,8 @@ const displayCurrency = computed(() => (mode.value === 'local' ? currency.value 
 const showTotals = computed(() => seesSalesTotals(account.value));
 const scoped = computed(() => {
   const mine = (t: Transaction): boolean => showTotals.value || t.soldBy?.userId === account.value?.userId;
-  const list = (allMode.value ? recentTransactions.value : recentTransactions.value.filter((t) => t.eventId === scope.value)).filter(mine);
+  // The test event shows its test sales; every other view only real ones.
+  const list = (allMode.value ? recentTransactions.value : transactionsOfEvent(scope.value)).filter(mine);
   return [...list].sort((a, b) => b.timestamp - a.timestamp);
 });
 const live = computed(() => scoped.value.filter((t) => !t.revertedAt));
@@ -253,6 +256,21 @@ const bestAll = computed(() => {
   return [...map.values()].sort(byRevenue ? (a, b) => b.value - a.value : (a, b) => b.qty - a.qty);
 });
 const bestSellers = computed(() => (bestExpanded.value ? bestAll.value : bestAll.value.slice(0, 8)));
+/**
+ * Each row's share of the whole, in what the list ranks by: items sold for
+ * Products and Types, revenue for the revenue lists. Out of every row, not
+ * only the eight shown.
+ */
+const bestTotal = computed(() => {
+  const byRevenue = bestMode.value === 'revenue' || bestMode.value === 'revenueByType';
+  return { byRevenue, sum: bestAll.value.reduce((s, b) => s + (byRevenue ? b.value : b.qty), 0) };
+});
+function bestShare(b: { qty: number; value: number }): string {
+  const { byRevenue, sum } = bestTotal.value;
+  if (sum <= 0) return '';
+  const pct = ((byRevenue ? b.value : b.qty) / sum) * 100;
+  return pct > 0 && pct < 1 ? '<1%' : `${Math.round(pct)}%`;
+}
 
 // ── Per day / per hour ──────────────────────────────────────────────────────
 const compareDaily = ref(false);
@@ -388,7 +406,8 @@ function exportCsv(): void {
 }
 
 const fmtTime = (ts: number): string => new Date(ts).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const methodIcon = (m: string): string => ({ cash: 'banknote', card: 'credit-card', split: 'zap' })[m] ?? 'smartphone';
+const methodIcon = (m: string): string => ({ cash: 'banknote', card: 'credit-card', split: 'zap', [GIVEN_AWAY]: 'gift' })[m] ?? 'smartphone';
+const methodName = (m: string): string => (m === GIVEN_AWAY ? GIVEN_AWAY_LABEL.toLowerCase() : m);
 const money = (n: number, c: string) => fmtPrice(n, c);
 </script>
 
@@ -400,6 +419,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
       <select v-model="scope" aria-label="Event">
         <option value="all">All events</option>
         <option v-for="e in visibleEvents" :key="e.id" :value="e.id">{{ e.name }}{{ e.id === activeEventId ? ' (active)' : '' }}</option>
+        <option v-if="testEvent" :value="testEvent.id">{{ testEvent.name }} (test)</option>
       </select>
       <div v-if="showCurrencyToggle" class="seg" role="group" aria-label="Revenue currency">
         <button type="button" :class="{ on: revenueMode === 'local' }" @click="revenueMode = 'local'">{{ currency }}</button>
@@ -412,6 +432,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
         <router-link v-if="!allMode && canRevert" :to="{ name: 'cashup' }" class="btn"><Icon name="banknote" :size="14" /> Cash up</router-link>
       </div>
     </header>
+    <p v-if="scopeEvent?.test" class="testnote">Test event - sales made in test mode. They never count as takings and are left out of every report and export.</p>
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
@@ -461,6 +482,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
             <span class="name" :style="b.type ? { color: typeColor(b.type) } : undefined">{{ b.label }}</span>
             <span class="muted">{{ b.qty }}×</span>
             <strong>{{ money(b.value, displayCurrency) }}</strong>
+            <span class="share" :title="bestTotal.byRevenue ? 'Share of revenue' : 'Share of items sold'">{{ bestShare(b) }}</span>
           </li>
         </ol>
         <button v-if="bestAll.length > 8" type="button" class="quiet more" :aria-expanded="bestExpanded" @click="bestExpanded = !bestExpanded">{{ bestExpanded ? 'Show less' : `Show all ${bestAll.length}` }}</button>
@@ -488,11 +510,18 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <button v-if="daily.length > 1" type="button" :class="['toggle', { on: compareDaily }]" @click="compareDaily = !compareDaily">vs. day before</button>
         </div>
         <p v-if="!daily.length" class="hint">No sales yet.</p>
-        <div v-else class="days">
+        <div v-else class="days daily">
           <div v-for="d in daily" :key="d.day" class="dayrow">
             <span class="muted">{{ d.day.slice(5) }}</span>
-            <div class="bar"><div :style="{ width: d.pct + '%' }"></div></div>
-            <span v-if="compareDaily && d.delta != null" :class="['delta', d.delta > 0 ? 'good' : d.delta < 0 ? 'bad' : 'muted']">{{ d.delta > 0 ? '+' : '' }}{{ d.deltaPct }}%</span>
+            <div class="bar">
+              <div :style="{ width: d.pct + '%' }"></div>
+              <!-- The change on the bar itself, so it takes no room from it: just past the fill, or inside a nearly full one. -->
+              <span
+                v-if="compareDaily && d.delta != null"
+                :class="['delta', d.pct > 70 ? 'in' : d.deltaPct == null || d.delta === 0 ? 'muted' : d.delta > 0 ? 'good' : 'bad']"
+                :style="d.pct > 70 ? { right: `calc(${100 - d.pct}% + .35rem)` } : { left: `calc(${d.pct}% + .35rem)` }"
+              >{{ d.deltaPct == null ? '-' : `${d.delta > 0 ? '+' : ''}${d.deltaPct}%` }}</span>
+            </div>
             <strong>{{ money(d.value, displayCurrency) }}</strong>
           </div>
         </div>
@@ -522,7 +551,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
     <div class="filters">
       <input v-model="txSearch" type="search" placeholder="Find an item or discount…" aria-label="Find a sale" class="txsearch" />
       <div class="seg">
-        <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ m }}</button>
+        <button v-for="m in methodOptions" :key="m" type="button" :class="{ on: methodFilter === m }" @click="methodFilter = m">{{ methodName(m) }}</button>
       </div>
       <select v-if="sellerOptions.length > 1" v-model="sellerFilter" aria-label="Sold by">
         <option value="">Everyone</option>
@@ -538,6 +567,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
           <Icon :name="methodIcon(tx.method)" :size="16" />
           <strong>{{ money(amountOf(tx), currencyOf(tx)) }}</strong>
           <span v-if="allMode" class="chip">{{ eventName(tx.eventId) }}</span>
+          <span v-if="tx.method === GIVEN_AWAY" class="chip">{{ methodName(tx.method) }}</span>
           <span v-if="tx.revertedAt" class="chip bad">reverted</span>
           <span class="spacer"></span>
           <span class="muted time">{{ fmtTime(tx.timestamp) }}<template v-if="tx.soldBy?.email && showSeller"> · {{ tx.soldBy.email.split('@')[0] }}</template></span>
@@ -561,6 +591,7 @@ const money = (n: number, c: string) => fmtPrice(n, c);
 </template>
 
 <style scoped>
+.testnote { margin: 0; padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); font-size: .85rem; font-weight: 600; }
 .history { display: flex; flex-direction: column; gap: 1rem; max-width: 72rem; }
 header { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
@@ -600,14 +631,23 @@ header button, .btn { display: inline-flex; align-items: center; gap: .35rem; }
 .rank { width: 1.4rem; text-align: right; font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .best strong { min-width: 5.5rem; text-align: right; font-variant-numeric: tabular-nums; }
+.share { min-width: 2.6rem; text-align: right; font-size: .78rem; color: var(--zfy-muted, #5a6472); font-variant-numeric: tabular-nums; }
 .more { align-self: flex-start; color: var(--zfy-accent-ink, #0a5a4a); font-size: .78rem; min-height: 2.2rem; padding: 0 .3rem; }
 .days { display: flex; flex-direction: column; gap: .35rem; font-size: .78rem; }
 .dayrow .small { font-size: .66rem; min-width: 3rem; text-align: right; }
 .dayrow { display: flex; align-items: center; gap: .5rem; }
 .dayrow > .muted { width: 3rem; flex-shrink: 0; }
 .bar { flex: 1; height: 1rem; border-radius: 4px; background: var(--zfy-bg, #f1f4f6); overflow: hidden; }
-.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); opacity: .75; }
-.delta { width: 3.2rem; text-align: right; flex-shrink: 0; }
+/* Full strength, so the change written on a full bar stays readable in either theme. */
+.bar div { height: 100%; border-radius: 4px; background: var(--zfy-accent, #0e7c66); }
+.delta { width: 3.2rem; text-align: right; flex-shrink: 0; white-space: nowrap; }
+/* One grid for all the days, so a wider amount on one row cannot make its bar shorter than the rest. */
+.days.daily { display: grid; grid-template-columns: 3rem 1fr minmax(6rem, auto); column-gap: .5rem; }
+.daily .dayrow { display: contents; }
+.daily strong { width: auto; white-space: nowrap; }
+.daily .bar { position: relative; }
+.daily .delta { position: absolute; top: 0; width: auto; line-height: 1rem; font-size: .7rem; font-weight: 600; }
+.daily .delta.in { color: var(--zfy-on-accent, #fff); }
 .dayrow strong { width: 6rem; text-align: right; font-variant-numeric: tabular-nums; }
 .hours { display: flex; align-items: stretch; gap: .25rem; height: 7rem; }
 .hour { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: .2rem; }

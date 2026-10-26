@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import {
   COMMISSION_STATUSES,
   COMMISSION_STATUS_LABEL,
@@ -9,15 +10,21 @@ import {
   fmtPrice,
   isClosedStatus,
   isOverdue,
+  nextCommissionPayment,
   nextStatuses,
   type CommissionSettings,
   type CommissionStatus,
 } from '@zollify/shared';
 import { QrCode } from '@zollify/ui';
-import { api, errorText, localToday, type CommissionView } from '../api';
+import { api, errorText, inTestMode, localToday, type CommissionView } from '../api';
 import { choiceOf, customerFields, duplicatesIn, emptyChoice, type CustomerChoice, type CustomerContact } from '../customer-form';
 import CustomerPicker from './CustomerPicker.vue';
 import CustomersPanel from './CustomersPanel.vue';
+import CustomerBrief from './CustomerBrief.vue';
+import RequestPageLink from './RequestPageLink.vue';
+
+/** Test mode on this device: the list is the test commissions, and a new one is made as a test. */
+const testing = inTestMode();
 import { slipHtml } from '../slip';
 import { sdk } from '../runtime';
 
@@ -37,6 +44,17 @@ const notice = ref<string | null>(null);
 const busy = ref(false);
 
 const tab = ref<'commissions' | 'customers'>('commissions');
+const router = useRouter();
+/** The till is POS's; open it with this commission picked, when POS is on. */
+const tillOn = computed(() => router.hasRoute('pos:index'));
+function takePayment(c: CommissionView): void {
+  void router.push({ name: 'pos:index', query: { action: 'commissions:commission', focus: c.id } });
+}
+/** "Take the deposit at the till", or the full price, or the balance - whatever the till will offer first. */
+function tillLabel(c: CommissionView): string {
+  const next = nextCommissionPayment(c, c.paid, settings.value.paymentMode ?? 'deposit');
+  return next.kind === 'Payment' ? 'Take a payment at the till' : `Take the ${next.kind.toLowerCase()} at the till`;
+}
 const isAdmin = computed(() => sdk().account()?.role !== 'member');
 const today = localToday();
 
@@ -280,6 +298,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
       <h1>Commissions</h1>
       <button type="button" class="primary" @click="startNew()">New commission</button>
     </header>
+    <p v-if="testing" class="testnote">Test mode - these are the test commissions. Only test sales pay them, and clearing test data removes them. Switch test mode off to see the real ones.</p>
     <div class="chips tabs" role="tablist" aria-label="View">
       <button type="button" class="chip" role="tab" :class="{ on: tab === 'commissions' }" :aria-selected="tab === 'commissions'" @click="tab = 'commissions'">Commissions</button>
       <button type="button" class="chip" role="tab" :class="{ on: tab === 'customers' }" :aria-selected="tab === 'customers'" @click="customerFocus = null; tab = 'customers'">Customers</button>
@@ -320,7 +339,14 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
         </button>
 
         <details v-if="isAdmin" class="settings" :open="showSettings" @toggle="showSettings = ($event.target as HTMLDetailsElement).open">
-          <summary>Pickup details on the customer's page</summary>
+          <summary>Payment, customer page and request page</summary>
+          <h3>At the till</h3>
+          <div class="choices" role="radiogroup" aria-label="How customers pay">
+            <label class="inline"><input v-model="pickup.paymentMode" type="radio" value="deposit" /> A deposit first, the rest later</label>
+            <label class="inline"><input v-model="pickup.paymentMode" type="radio" value="full" /> The full price at once</label>
+          </div>
+          <p class="hint">{{ pickup.paymentMode === 'full' ? 'No deposit field on new commissions; the till takes the whole price in one payment. A commission that already has a deposit set keeps it.' : 'New commissions have a deposit field; the till asks for the deposit first, then the balance. Without a deposit it asks the full price.' }}</p>
+          <h3>Customer page</h3>
           <label>Shop name <small>(blank: your account name)</small><input v-model="pickup.shopName" type="text" maxlength="80" /></label>
           <label>Collect from <input v-model="pickup.pickupName" type="text" maxlength="120" placeholder="Store or event name" /></label>
           <label>Address <textarea v-model="pickup.pickupAddress" rows="2" maxlength="300" /></label>
@@ -330,6 +356,11 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Keep customer details after the last commission closes <small>days, 0 to 365; 0 erases at the next check (every few hours). Then name, email, phone, notes and messages are erased.</small>
             <input v-model.number="pickup.keepCustomerDays" type="number" min="0" max="365" step="1" class="short" />
           </label>
+          <h3>Request page</h3>
+          <p class="hint">A public page where people ask for a commission: what they want, a budget, a date and reference pictures. Each request lands here as Requested, and they get their tracking link.</p>
+          <label class="inline"><input v-model="pickup.requestsOpen" type="checkbox" /> Take requests</label>
+          <label>What the page says above the form <small>what you take on, prices, how long it takes</small><textarea v-model="pickup.requestIntro" rows="3" maxlength="1000" /></label>
+          <RequestPageLink v-if="showSettings" :key="String(settings.requestsOpen)" />
           <button type="button" :disabled="busy" @click="saveSettings">Save</button>
         </details>
       </section>
@@ -343,7 +374,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
           <label>Details <small>private to you and staff</small><textarea v-model="form.description" rows="3" maxlength="4000" /></label>
           <div class="two">
             <label>Price ({{ form.currency }}) <input v-model="form.price" type="text" inputmode="decimal" /></label>
-            <label>Deposit asked <input v-model="form.depositAsked" type="text" inputmode="decimal" /></label>
+            <label v-if="settings.paymentMode !== 'full' || form.depositAsked">Deposit asked <input v-model="form.depositAsked" type="text" inputmode="decimal" /></label>
           </div>
           <label>Due date <input v-model="form.dueDate" type="date" /></label>
           <label>Internal notes <small>never shown to the customer</small><textarea v-model="form.notes" rows="2" maxlength="4000" /></label>
@@ -369,8 +400,12 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
             <dt>Paid so far</dt><dd>{{ money(current.paid, current) }}<span v-if="current.depositAsked > 0 && current.paid < current.depositAsked" class="hint"> (deposit asked {{ money(current.depositAsked, current) }})</span></dd>
             <dt>Balance</dt><dd><strong>{{ money(current.balance, current) }}</strong></dd>
           </dl>
-          <p class="hint">Take a deposit or the balance from the till: Commission button.</p>
+          <div v-if="!isClosedStatus(current.status)" class="till">
+            <button v-if="tillOn" type="button" class="primary" @click="takePayment(current)">{{ tillLabel(current) }}</button>
+            <p class="hint">{{ tillOn ? 'Opens the till with this commission picked; the payment is an ordinary sale.' : 'Switch on the till (POS) to take payments.' }} It is also the Commission tile on the till.</p>
+          </div>
           <p v-if="current.description" class="text">{{ current.description }}</p>
+          <CustomerBrief :commission="current" @changed="load" />
           <p v-if="current.notes" class="text note"><strong>Internal note:</strong> {{ current.notes }}</p>
 
           <div v-if="nextStatuses(current.status).length" class="statuses" role="group" aria-label="Move to">
@@ -421,6 +456,7 @@ const stamp = (at: number): string => new Date(at).toLocaleString(undefined, { d
 </template>
 
 <style scoped>
+.testnote { margin: 0 0 .75rem; padding: .55rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); background: var(--zfy-signal-soft, #f6e5df); font-size: .85rem; font-weight: 600; }
 .comm { display: flex; flex-direction: column; gap: .8rem; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }
 h1 { margin: 0; font-size: 1.35rem; }
@@ -457,6 +493,7 @@ label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .link { align-self: flex-start; padding: 0; min-height: 0; border: 0; background: none; color: var(--zfy-accent-ink, #0a5a4a); text-decoration: underline; font-size: .84rem; font-weight: 400; }
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
 .foot { justify-content: space-between; margin-top: .4rem; }
+.till { display: flex; flex-direction: column; align-items: flex-start; gap: .3rem; }
 .statuses { display: flex; gap: .4rem; flex-wrap: wrap; }
 .money { display: grid; grid-template-columns: auto 1fr; gap: .2rem 1rem; margin: 0; font-size: .92rem; }
 .money dd { margin: 0; }
@@ -470,6 +507,7 @@ label small { color: var(--zfy-muted, #5a6472); font-size: .76rem; }
 .url { font-size: .75rem; overflow-wrap: anywhere; }
 .settings { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; padding: .6rem .8rem; display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
 .settings summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.choices { display: flex; flex-direction: column; gap: .3rem; }
 .settings[open] > :not(summary) { margin-top: .5rem; }
 @media (max-width: 800px) { .layout { grid-template-columns: 1fr; } .two { grid-template-columns: 1fr; } }
 </style>

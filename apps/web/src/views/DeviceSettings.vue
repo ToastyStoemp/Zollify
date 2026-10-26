@@ -32,6 +32,9 @@ import {
   setNotifyKinds,
   systemNotificationState,
   sendDiagnosticLog,
+  diagnosticLogText,
+  copyText,
+  saveFile,
   setDeviceName,
   shellConfirm,
   setTheme,
@@ -141,6 +144,24 @@ async function reloadNow(): Promise<void> {
 }
 const progressPct = (): number => (updateDownload.totalBytes > 0 ? Math.round((updateDownload.bytesWritten / updateDownload.totalBytes) * 100) : 0);
 
+/** The log as it stands, to paste into a message or keep as a file. */
+const logNote = ref<string | null>(null);
+function logFileName(): string {
+  const who = (name.value || 'device').replace(/[^A-Za-z0-9_-]+/g, '-').toLowerCase();
+  return `zollify-log-${who}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.txt`;
+}
+async function copyLog(): Promise<void> {
+  logNote.value = (await copyText(diagnosticLogText() || '(no diagnostic entries recorded)')) ? 'Log copied.' : 'Could not copy - download it instead.';
+  setTimeout(() => (logNote.value = null), 4000);
+}
+async function downloadLog(): Promise<void> {
+  try {
+    await saveFile(logFileName(), diagnosticLogText() || '(no diagnostic entries recorded)', 'text/plain');
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not save the log.';
+  }
+}
+
 async function sendLog(): Promise<void> {
   sending.value = true;
   error.value = null;
@@ -195,6 +216,7 @@ async function removeDevice(d: DeviceSummary): Promise<void> {
   }
 }
 import SharedTillSettings from './SharedTillSettings.vue';
+import DisplayVideosSettings from '../components/DisplayVideosSettings.vue';
 
 // ── Notifications on this device ────────────────────────────────────────────
 const notifyError = ref<string | null>(null);
@@ -233,6 +255,8 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
     <h3>Customer display</h3>
     <p class="hint">Turn this device into a second screen that mirrors another register's cart live - a tablet facing the customer. Sales still happen on the register.</p>
     <router-link :to="{ name: 'display' }" class="btn">Open customer display</router-link>
+    <h3>Videos on the customer display</h3>
+    <DisplayVideosSettings />
 
     <h3>After a sale</h3>
     <p class="hint">What this screen shows once a payment goes through - on a register and on a customer display alike. Set on each device on its own, so the till and the screen facing the customer can differ.</p>
@@ -366,8 +390,13 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
     </template>
 
     <h3>Diagnostics</h3>
-    <p class="hint">Sends this device's recent warnings, errors and payment breadcrumbs to the server so support can look at them. No sale amounts or card data are included.</p>
-    <button type="button" :disabled="sending" @click="sendLog">{{ sending ? 'Sending…' : sent ? 'Log sent' : 'Send diagnostic log' }}</button>
+    <p class="hint">This device's recent warnings, errors, sync problems and payment breadcrumbs. Send it to the server so support can look at it, or copy or download it yourself. No sale amounts or card data are included.</p>
+    <div class="log-actions">
+      <button type="button" :disabled="sending" @click="sendLog">{{ sending ? 'Sending…' : sent ? 'Log sent' : 'Send diagnostic log' }}</button>
+      <button type="button" @click="copyLog">Copy log</button>
+      <button type="button" @click="downloadLog">Download log</button>
+    </div>
+    <p v-if="logNote" class="ok" role="status">{{ logNote }}</p>
   </section>
 </template>
 
@@ -400,6 +429,7 @@ h3 { margin: .75rem 0 0; font-size: .95rem; }
 .themes .label { font-size: .875rem; font-weight: 600; }
 .themes .sub { font-size: .75rem; color: var(--zfy-muted, #5a6472); }
 .toggles { display: flex; flex-direction: column; gap: .5rem; width: 100%; }
+.log-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .toggles label { display: flex; align-items: flex-start; gap: .6rem; padding: .6rem .75rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 10px; background: var(--zfy-surface, #fff); cursor: pointer; }
 .toggles input { margin-top: .2rem; }
 .toggles .body { display: flex; flex-direction: column; }

@@ -28,8 +28,12 @@ export {
   resetSalesEventCache,
   eventPricing,
   copyEventPricing,
+  testEvent,
+  isTestEvent,
   type EventPricing,
 } from './sales-events';
+export { testState, startTestMode, stopTestMode, clearTestData, ensureTestEvent } from './test-mode';
+export { fillSampleCatalogue, SAMPLE_PRODUCTS } from './sample-catalogue';
 export { sellLockSettings, loadSellLockSettings, setSellLockSettings, sellLockFor, sellLocked, canForceSell, forceSell } from './sell-lock';
 export { autoEventSettings, loadAutoEventSettings, setAutoEventSettings, runAutoEvents, startAutoEvents, stopAutoEvents } from './auto-events';
 export {
@@ -62,6 +66,9 @@ export {
   loadTransactions,
   transactionsLoaded,
   recentTransactions,
+  testTransactions,
+  stockTransactions,
+  transactionsOfEvent,
   getTransaction,
   recordSale,
   revertTransaction,
@@ -167,4 +174,21 @@ export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotif
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced-settings';
-export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, type AfterSalePrefs } from './after-sale';
+export { afterSalePrefs, loadAfterSalePrefs, setAfterSalePrefs, receiptUrlFor, publicUrlFor, type AfterSalePrefs } from './after-sale';
+export {
+  addDisplayVideos,
+  DIM_MAX_PCT,
+  dimLayer,
+  displayVideoBlob,
+  displayVideoPrefs,
+  listDisplayVideos,
+  loadDisplayVideoPrefs,
+  moveDisplayVideo,
+  removeDisplayVideo,
+  requestPersistentStorage,
+  setDisplayVideoPrefs,
+  storageEstimate,
+  type DisplayVideoInfo,
+  type DisplayVideoMode,
+  type DisplayVideoPrefs,
+} from './display-videos';

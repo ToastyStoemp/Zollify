@@ -2,9 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { fmtPrice, receiptDateTime } from '@zollify/shared';
+import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from '../lib/given-away';
 import { paymentLabel, receiptAmounts, receiptSeller, receiptVat, vatRateLabel, printReceipt, printableReceipt, printingAvailable } from '../receipt';
 import { sdk } from '../runtime';
-import { QrCode, receiptUrl as receiptUrlFor, type PrintState } from '../lib/after-sale';
+import { QrCode, receiptUrl as receiptUrlFor, saleLineLinks, type PrintState } from '../lib/after-sale';
 import { screenLogo } from '../lib/branding';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 
@@ -73,6 +74,8 @@ const letterFor = (i: number): string => {
 };
 /** The customer's online receipt, for one who asks after the fact. A cancelled sale gets none. */
 const receiptUrl = computed(() => (QrCode && !tx.value?.revertedAt && receiptUrlFor(tx.value?.receiptToken)) || '');
+/** Pages the sale's lines point the customer to - a commission to follow, say. */
+const lineLinks = computed(() => (QrCode && tx.value ? saleLineLinks(tx.value) : []));
 /**
  * Dates as the country of the sale writes them, as on the printed copy - not
  * the browser's locale, which put US month-first dates on receipts in Europe.
@@ -105,6 +108,7 @@ const paidWith = computed(() => {
   const sale = tx.value;
   if (!sale) return '';
   const legs = sale.payments ?? [];
+  if (!legs.length && sale.method === GIVEN_AWAY) return GIVEN_AWAY_LABEL;
   return legs
     .map((leg) =>
       [
@@ -205,6 +209,7 @@ async function print(): Promise<void> {
       <p v-if="tx.tax?.exempt && tx.tax.exNumber" class="exempt">EX: {{ tx.tax.exNumber }}</p>
 
       <p class="row paid"><span>Paid</span><span>{{ paidWith }}</span></p>
+      <p v-if="tx.testRun" class="reverted">TEST - made in test mode, nothing was paid</p>
       <p v-if="tx.revertedAt" class="reverted">Reverted {{ stamp(tx.revertedAt) }}</p>
       <p class="ref">Receipt {{ tx.receiptNumber ?? tx.id.slice(-8) }}</p>
     </article>
@@ -212,6 +217,10 @@ async function print(): Promise<void> {
     <div v-if="receiptUrl" class="online">
       <component :is="QrCode" :value="receiptUrl" :size="160" label="QR code for the online receipt" />
       <p>Online receipt - the customer scans this to keep a copy. It opens once this sale has synced.</p>
+    </div>
+    <div v-for="link in lineLinks" :key="link.url" class="online follow">
+      <component :is="QrCode" :value="link.url" :size="160" :label="`QR code: ${link.label}`" />
+      <p><strong>{{ link.label }}</strong><span class="hint"> - printed on the receipt too, and linked from the online one.</span></p>
     </div>
 
     <AfterSaleOverlay
@@ -272,6 +281,9 @@ h1 { font-size: 1.25rem; margin: 0; }
 @media print {
   .bar, .empty, .result { display: none; }
   .online p { display: none; }
+  /* On paper the code still needs saying what it is for. */
+  .online.follow p { display: block; color: #000; }
+  .online .hint { display: none; }
   .paper { border: 0; max-width: none; }
 }
 </style>

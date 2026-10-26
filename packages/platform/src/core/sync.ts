@@ -18,12 +18,14 @@ import { deviceFlavor, deviceId, deviceName } from './device';
 import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
-import { loadTransactions } from './transactions';
+import { loadTransactions, removeTestRows } from './transactions';
+import { TEST_CLEARED_AT_KEY, TEST_ENDED_RUNS_KEY } from './test-state';
 import { materializeMerge } from './merge';
 import { loadDiscounts } from './discounts';
 import { claimClearedAt, loadInventory, rememberClaimCleared } from './inventory';
 import { loadSellLockSettings } from './sell-lock';
 import { base64ToBlob } from './images';
+import { logDiagnostic } from './diagnostics';
 
 /**
  * Offline-first sync.
@@ -218,6 +220,41 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       }
       return 0;
     }
+    // Test mode (test-mode.ts): kept like any sale, but apart from the real ones.
+    case 'tx.test.create': {
+      const incoming = op.payload as Transaction;
+      const cleared = (await db.settings.get(TEST_CLEARED_AT_KEY))?.value;
+      // Made before test data was cleared, by a device that synced late: already wiped.
+      if (typeof cleared === 'number' && incoming.timestamp <= cleared) return 0;
+      if (!(await db.transactions.get(incoming.id))) {
+        await db.transactions.put({ ...incoming, testRun: incoming.testRun ?? 'unknown' });
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.test.revert': {
+      const { id, revertedAt, revertedBy } = op.payload as { id: string; revertedAt: number; revertedBy: string };
+      const existing = await db.transactions.get(id);
+      if (existing && existing.testRun && !existing.revertedAt) {
+        await db.transactions.put({ ...existing, revertedAt, revertedBy });
+        return 1;
+      }
+      return 0;
+    }
+    case 'tx.test.end': {
+      const { run } = op.payload as { run: string };
+      const row = await db.settings.get(TEST_ENDED_RUNS_KEY);
+      const ended = Array.isArray(row?.value) ? (row.value as string[]) : [];
+      if (typeof run !== 'string' || ended.includes(run)) return 0;
+      await db.settings.put({ key: TEST_ENDED_RUNS_KEY, value: [...ended, run] });
+      return 1;
+    }
+    case 'tx.test.clear': {
+      const { at } = op.payload as { at: number };
+      if (typeof at !== 'number') return 0;
+      await removeTestRows(db, at);
+      return 1;
+    }
     case 'discount.upsert': {
       const incoming = op.payload as DiscountRule & { updatedAt?: number };
       const existing = (await db.discounts.get(incoming.id)) as
@@ -316,6 +353,16 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
 const PUSH_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
+ * Time limits on mobile data. A page of pulled changes can carry hundreds of
+ * thumbnails; a push gets the usual 30 s plus time for its size at a slow
+ * 256 kbit/s upload, so a full batch on a weak signal is not cut off and
+ * retried forever.
+ */
+const PULL_TIMEOUT_MS = 90_000;
+const SLOW_UPLOAD_BYTES_PER_S = 32 * 1024;
+const pushTimeoutMs = (bytes: number): number => 30_000 + Math.ceil(bytes / SLOW_UPLOAD_BYTES_PER_S) * 1000;
+
+/**
  * Drains the outbox in batches bounded by op count and by bytes. Counting ops
  * alone let a restore with a few hundred thumbnails build one request the
  * server refused, after which nothing on the device ever synced again.
@@ -354,10 +401,8 @@ async function push(): Promise<number> {
 
     let res: PushResponse;
     try {
-      res = (await authFetchAs(by, '/sync/push', {
-        method: 'POST',
-        body: JSON.stringify({ ...deviceInfo, ops: batch.map(({ seq: _seq, synced: _synced, userId: _userId, ...wire }) => wire) }),
-      })) as PushResponse;
+      const body = JSON.stringify({ ...deviceInfo, ops: batch.map(({ seq: _seq, synced: _synced, userId: _userId, ...wire }) => wire) });
+      res = (await authFetchAs(by, '/sync/push', { method: 'POST', body, timeoutMs: pushTimeoutMs(body.length) })) as PushResponse;
     } catch (err) {
       // That person's session ended mid-push: their changes go round again as the device.
       if (by && !personSession(by)) continue;
@@ -404,7 +449,7 @@ async function drain(first: PullResponse, since: number, query: string): Promise
       if (track) syncProgress.value = { done: Math.min(total, cursor - since), total };
       if (cursor >= page.latestSeq) break;
       await writeCursor(cursor, page.epoch ?? 0);
-      page = (await deviceFetch(`/sync/pull?since=${cursor}${query}`)) as PullResponse;
+      page = (await deviceFetch(`/sync/pull?since=${cursor}${query}`, { timeoutMs: PULL_TIMEOUT_MS })) as PullResponse;
     }
   } finally {
     if (track) syncProgress.value = null;
@@ -422,7 +467,7 @@ async function pull(): Promise<number> {
   if (since === 0) syncProgress.value = { done: 0, total: 0 };
   let res: PullResponse;
   try {
-    res = (await deviceFetch(`/sync/pull?since=${since}${query}`)) as PullResponse;
+    res = (await deviceFetch(`/sync/pull?since=${since}${query}`, { timeoutMs: PULL_TIMEOUT_MS })) as PullResponse;
   } catch (err) {
     syncProgress.value = null;
     throw err;
@@ -442,7 +487,7 @@ async function pull(): Promise<number> {
       await Promise.all([db.products.clear(), db.events.clear(), db.eventStock.clear()]);
     });
     await writeCursor(0, serverEpoch);
-    const fresh = (await deviceFetch('/sync/pull?since=0')) as PullResponse;
+    const fresh = (await deviceFetch('/sync/pull?since=0', { timeoutMs: PULL_TIMEOUT_MS })) as PullResponse;
     const result = await drain(fresh, 0, '');
     await writeCursor(result.cursor, fresh.epoch ?? serverEpoch);
     return result.applied;
@@ -451,6 +496,18 @@ async function pull(): Promise<number> {
   const result = await drain(res, since, query);
   await writeCursor(result.cursor, serverEpoch);
   return result.applied;
+}
+
+/** Failed syncs in a row - logged when it starts failing and when it works again, not on every retry. */
+let failuresInRow = 0;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+/** After a failure, try again soon and then less often; the minute's poll takes over past these. */
+const RETRY_AFTER_MS = [5_000, 15_000, 30_000, 60_000];
+
+/** What the device says its connection is ("cellular/4g", "wifi"), for the log; unknown where it does not say. */
+function networkKind(): string {
+  const c = typeof navigator !== 'undefined' ? (navigator as Navigator & { connection?: { type?: string; effectiveType?: string } }).connection : undefined;
+  return [c?.type, c?.effectiveType].filter(Boolean).join('/') || 'unknown';
 }
 
 /**
@@ -484,12 +541,22 @@ export async function syncNow(): Promise<SyncResult> {
 
       lastSyncAt.value = Date.now();
       syncState.value = 'idle';
+      if (failuresInRow > 0) logDiagnostic(`sync working again after ${failuresInRow} failed attempt${failuresInRow === 1 ? '' : 's'} (network: ${networkKind()})`);
+      failuresInRow = 0;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
       return { pushed, pulled, ok: true };
     } catch (err) {
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       syncState.value = offline ? 'offline' : 'error';
       const message = err instanceof Error ? err.message : String(err);
       lastSyncError.value = message;
+      failuresInRow++;
+      // In the device log a support request sends: the first failure, then every tenth.
+      if (failuresInRow === 1 || failuresInRow % 10 === 0) {
+        console.warn(`[zollify] sync failed (attempt ${failuresInRow}, network: ${networkKind()}${offline ? ', offline' : ''}): ${message}`);
+      }
+      scheduleRetry(offline);
       // Not a thrown error: being offline is the normal state at a booth, and
       // callers should not have to treat it as exceptional.
       return { pushed: 0, pulled: 0, ok: false, error: message };
@@ -549,11 +616,27 @@ export function startAutoSync(): void {
   if (typeof window !== 'undefined') {
     window.addEventListener('online', onOnline);
   }
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
   void syncNow();
 }
 
 function onOnline(): void {
   void syncNow();
+}
+
+/** Back in front - the screen woke, the app reopened: a connection held while asleep is likely gone, so sync now. */
+function onVisible(): void {
+  if (document.visibilityState === 'visible') void syncNow();
+}
+
+/** A failed sync is tried again soon while auto-sync runs; offline, the `online` event does it instead. */
+function scheduleRetry(offline: boolean): void {
+  if (!timer || offline || retryTimer) return;
+  const wait = RETRY_AFTER_MS[Math.min(failuresInRow, RETRY_AFTER_MS.length) - 1]!;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void syncNow();
+  }, wait);
 }
 
 export function stopAutoSync(): void {
@@ -563,5 +646,8 @@ export function stopAutoSync(): void {
   pushSoon = null;
   stopWatchingOutbox?.();
   stopWatchingOutbox = null;
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
   if (typeof window !== 'undefined') window.removeEventListener('online', onOnline);
+  if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
 }

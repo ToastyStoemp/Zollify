@@ -121,6 +121,8 @@ export function registerAccountRoutes(
       staffSeesTotals: body.staffSeesTotals ?? current.staffSeesTotals ?? false,
       ...(body.sells ?? current.sells ? { sells: body.sells ?? current.sells } : {}),
       ...(links ? { links } : {}),
+      // Only its own call changes this (sandbox.ts), where the links are checked.
+      ...(current.sandbox ? { sandbox: true } : {}),
     };
 
     db.transaction(() => {

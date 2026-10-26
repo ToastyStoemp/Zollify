@@ -31,6 +31,21 @@ export function customerFields(choice: CustomerChoice, force = false): Pick<Comm
   return { customer: { name: choice.name, email: choice.email, phone: choice.phone }, forceNewCustomer: force };
 }
 
+/**
+ * The quick form at the till: only a name is needed for a customer record,
+ * and at a busy booth the seller may not ask - the commission is then filed
+ * under "Walk-in, 22 Oct" (renamed later, under Customers), and the customer
+ * follows it by scanning the code on the till's screen.
+ */
+export function walkInName(at: Date = new Date()): string {
+  return `Walk-in, ${at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+}
+
+/** The customer fields from the till's quick form: what was typed, a walk-in name when nothing was. */
+export function quickCustomer(name: string, email: string, force = false, at: Date = new Date()): Pick<CommissionCreateInput, 'customer' | 'forceNewCustomer'> {
+  return { customer: { name: name.trim() || walkInName(at), email: email.trim(), phone: '' }, forceNewCustomer: force };
+}
+
 /** The rule, in one line, for the form and the customer's page. */
 export function retentionLine(days: number): string {
   if (days <= 0) return 'Details are erased as soon as their last commission closes.';

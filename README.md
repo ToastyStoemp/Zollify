@@ -47,6 +47,7 @@ modules/
   consignment-artist/  the artist's own view of the stores that carry their work
   commissions/    custom work for a customer: deposit at the till, QR tracking page (client + server half)
   peppol-be/      Belgian Peppol e-invoices and credit notes (client + server half)
+  wholesale/      trade prices and tiers, catalogue, trade customers and orders (client + server half)
   migration/      single-use ZollTool backup importer (.json, or .zip with photos)
 apps/
   web/            the shell (first target)
@@ -170,7 +171,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Wholesale.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -191,6 +192,17 @@ stock or write off stock that is gone (those change the counted total).
 Allocations and device picks are synced settings under `team.`, the prefix
 staff may write; every row is its own key, so two devices editing different
 rows never overwrite each other. A place holding less than nothing is flagged.
+
+*Sourcing forecast* - the **Forecast** tab in Sourcing gives each item's
+average sales per event day: units sold at events over the days those events
+ran (a day with no sales counts when the event's dates say you were there;
+stores are left out). Pick one or more upcoming events and each one gets a
+size factor: what its earlier editions sold per day against the average, 1
+when there is no history. Days and size can both be changed. Expected units
+are rate × days × size. The suggestion adds a buffer and takes off what is on
+hand and on reorders not yet received, rounded up to the MOQ. Ticked rows
+become reorders per supplier, like Restock. Items with no dossier can be
+copied as a list to make yourself.
 
 *Stores and consignment* - a venue is either a dated **event** or a **store**: a
 brick-and-mortar shop with no end date (`SalesEvent.kind = 'store'`). Stores sell
@@ -220,7 +232,9 @@ the store hears back the same way.
 **Commissions** track custom work from request to pickup (Requested, Accepted,
 In progress, Ready for pickup, Collected, Cancelled). The record and the
 customer's contact details stay on the server, never in the synced op-log. A
-"Commission" button over the till takes a deposit or the final balance as an
+"Commission" tile beside the products (there with an empty cart, so on a phone
+too), or "Take the deposit at the till" on a commission's page, which opens
+the till with it picked, takes a deposit or the final balance as an
 ordinary free-price sale line whose `ref` names the commission, so payment
 providers, receipts, VAT and cash-up work as for any sale; the paid-so-far is
 derived from those sale lines (a reverted sale gives the balance back). The
@@ -232,6 +246,42 @@ and the pickup address - no contact details and no internal notes. Times are
 shown in the time zone set in the module's settings, and an open page reloads
 itself every five minutes until the commission is collected or cancelled. At
 the till, a commission already in the sale can have its amount replaced.
+**Deposit or in full**: under Commissions -> Payment, customer page and request
+page, an admin picks how the till takes payment - a deposit first, then the
+balance (the default), or the full price at once, which drops the deposit
+field from new commissions and has the till offer the whole price as one
+"Full price" line (a commission that already has a deposit set keeps it).
+**At the till**, New commission asks only what it is and the price (deposit,
+when the shop takes deposits, and due date if wanted); name and email are optional - without a name it is
+filed as "Walk-in, 22 Oct", to rename under Customers. Saving shows a large QR
+code of the customer's page for them to scan, then takes the deposit. A
+customer with no email on file can leave one on that page for updates (only
+while none is on file, and only on a server that can send email); the shop is
+told and the customer gets a note. Someone already on file is still a search
+away. Every receipt for a commission payment carries the page too: the
+printed receipt has a "Follow your commission" QR code (whatever the receipt
+QR setting), and the on-screen and online receipts link to it. This is the
+till line's `link` in the SDK, open to any module: a label and a public path
+of this server (`/p/...`); anything else is dropped, and a cancelled sale
+links nothing.
+
+**What the customer brings.** On their tracking page the customer writes what
+they want and adds up to six reference pictures (PNG, JPEG or WebP, 5 MB
+each) while the commission is open; the owner sees both on the commission,
+can save or remove a picture, and is told when they change. An admin can open
+a **request page**, `/p/commissions/request/<token>` (Customer page and request
+page, under Commissions): name, email, what they would like, the brief,
+budget, a date wish and pictures; it costs a proof-of-work, is rate limited and
+has a honeypot, and each request lands as a Requested commission for a new
+customer record, rings the bell, and mails the customer their tracking link.
+The address has a QR code and can be replaced. The tracking page also offers
+**browser notifications**: "Notify me on this device" subscribes the browser
+(Web Push, VAPID keys made by the server on first start; see `VAPID_SUBJECT`),
+and every step and message the owner posts reaches up to five devices. It
+works in Chrome, Firefox and Edge; on an iPhone only once the page is added
+to the home screen (the page says so). Email stays the channel that reaches
+everyone. The brief, pictures and devices are erased with the customer's
+other details.
 A customer is one record per account (name, email, phone) that commissions point
 at, so a returning customer is picked from a search instead of retyped, a
 Customers tab shows everything one customer ordered, paid and still owes, and a
@@ -316,6 +366,21 @@ some days or until ended. It becomes an ordinary rule in the store (every
 till applies it, offline too), the store can end it under Discounts, and
 both sides are told.
 
+*Customer display* - any device can mirror a register's cart live, facing
+the customer (Settings → This device → Open customer display), and shows a
+thank-you and the receipt QR once paid. Between sales it can play videos -
+the booth's art on a screen: added under Settings → This device, kept on
+that device only (IndexedDB, persistent storage asked for) so they play with
+no connection and never sync, back up or use the server's storage; muted,
+one after another, starting over at the end, the screen kept awake. When a
+cart comes in it either sits on a panel over the video, which plays on
+dimmed, or takes the screen while the video waits paused; either way the
+video carries on after the sale. Over the video, each device sets how
+strongly and with what colour it dims (0 to 80%, black by default) and the
+panel's background, text and total colours (the app's own by default), with
+a preview over a frame of the first video. A file the device cannot play is skipped;
+MP4 plays everywhere.
+
 *Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as
 signed JSON anywhere: each sale, a daily or weekly summary (in the webhook's
 time zone), and the in-app notifications by category - rentals and setups,
@@ -396,6 +461,42 @@ event P&L from op-log revenue against booth / travel / accommodation costs,
 invoices attached, optional Claude invoice scanning behind daily caps.
 Credentials live encrypted per account under Settings → Integrations.
 
+*Ledger costs worked out from the event* - the ledger's categories cover
+what doing an event costs (booth, travel, mileage, accommodation, per diems,
+shipping, customs, marketing, furniture, staff, insurance, fees, stock,
+other; ids are stable because bookings refer to them). Three costs are
+computed rather than typed: **per diems** from the event's dates and
+country (the day of arrival and of departure at the reduced rate, the days
+between in full, times the people who went; a one-day trip once at the
+reduced rate), **mileage** from a distance (there and back, times the
+trips, at the rate per kilometre), and **a cost over several events**
+(insurance, a van, one trip to two shows) split across them by the days
+each runs or evenly, in whole cents, each event getting its share as its
+own expense. Each computed expense keeps its calculation (`detail`) and
+says it in its note, so the books read how the figure came about. The
+rates are the account's own table under *Rates* on the ledger: started
+from the defaults for the business's country (Germany's BMF letter for
+2025 with the destinations a booth most often visits, Luxembourg's rate as
+the fallback; Belgium's daily allowance, country list with departure and
+return days at half, and kilometre rate) and corrected by an admin as the
+yearly letters come out - the app cannot fetch them, so check the defaults
+before relying on them. Rules live in `@zollify/shared` (`travel-costs.ts`),
+shared by the app and the server.
+
+*Event ranking* - a third screen in Tax & books reads the sales and events
+the device holds against the ledger's costs, so every figure is the ledger's
+(revenue excluding VAT): every past event ranked by profit per day, with
+days, costs, units and the average sale, sortable and as CSV; stores apart,
+over a period, with the days they sold on standing in for event days; the
+same show year over year, editions grouped by their series (or by name with
+the year taken out when they were never linked) with the change against the
+edition before; what sold at one event by type and item with each one's
+share; and dead stock - items on hand that sold at none of the last N events
+nor in the last N months, valued at cost where one is known. A home card
+shows the last event that is over against the average of its earlier
+editions. Nothing to enter; a gift card spent is not a sale of goods, so it
+is left out of units and items.
+
 *Tax deadlines* - when to file and pay, worked out from the business's tax
 setup rather than fetched: no tax office publishes deadlines as data, but the
 rules are fixed in law. The setup (country, state, legal form, VAT status and
@@ -425,6 +526,37 @@ from the slug and refuses unless the module is enabled for it. Hall, booth numbe
 link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
 Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
 handle) and legacy booth values, which fill in wherever the event has none.
+
+*Wholesale* - the `wholesale` module (admins) sells to shops outright, the
+reverse of consignment. **Trade prices**: per product, whether it is offered
+to the trade, price tiers by quantity (the highest tier a line reaches
+applies, else the list price), minimum order, pack size (orders round up to
+whole packs), lead time in working days, and the description, materials and
+dimensions the catalogue shows - kept apart from the catalogue, keyed by
+product id. **Customers**: the shops, with contact, VAT and enterprise
+numbers, address, currency, terms and a discount off the tier price.
+**Orders** go draft, confirmed, packed, shipped, invoiced, paid, or
+cancelled on the way; lines are priced from the tiers and the customer's
+discount when added and can be changed by hand, a line shows what is in
+stock, and a packing slip prints. Stock and revenue stay core's: the module
+makes a store-kind event named *Wholesale* once (kept out of the event
+pool), a confirmed or packed order claims its units on it the way an event
+claim does, and shipping records the order as a sale there, paid "on
+invoice", at the account's own VAT, so stock, the books and the reports
+follow with nothing re-entered. The expected ship date (the longest lead
+time among the lines, in working days from confirmation) shows on the home
+calendar. **Variants**: tiers are entered against the product's price, and
+a variant with a price of its own gets the same discount off it (A4 at 20
+going for 10 makes the 30 A3 go for 15), in orders and the catalogue alike.
+Per product, the catalogue shows variants as items of their own (the zodiac
+animals of one keychain, each with its photo, SKU and prices), as sizes of
+one item (a row each with its price), or automatically: a variant with a
+photo of its own is an item of its own. The **catalogue** is built on the
+device from the catalogue and its photos (written into the page, so they
+show in the PDF and in the Android viewer), narrowed by type, with tier
+prices or one customer's own, as a PDF or a page to print. Invoicing goes through Peppol or by hand for now;
+reverse charge for a VAT-registered customer abroad is the invoice's, not
+the till's. Writes are refused from a shared till.
 
 *Deployment* - multi-stage Dockerfile, compose, `deploy.sh` that backs up before
 restarting (and `--auto` for an unattended timer), `/health`, and the gateway

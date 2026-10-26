@@ -2,6 +2,7 @@ import { computed, reactive, ref } from 'vue';
 import type { SaleEvent, SaleLine, SaleLineRef, TillLine, TillLineInfo } from '@zollify/sdk';
 import type { CardSettlement, SalesEvent } from '@zollify/shared';
 import { round2, toLocalPrice } from '@zollify/shared';
+
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
 import type { PaymentProvider, PaymentResult } from './payments/provider';
@@ -15,6 +16,10 @@ import {
   type CartLine as DiscountCartLine,
   type CustomDiscount,
 } from './discounts';
+
+import { GIVEN_AWAY } from './lib/given-away';
+
+export { GIVEN_AWAY };
 
 export interface CartLine extends SaleLine {
   lineId: string;
@@ -76,22 +81,50 @@ export const isConverting = computed(
 export const CARD_IN_BASE_KEY = 'cardInBaseCurrency';
 
 /**
- * Test mode: the till runs every step of a sale - cart, discounts, the card
- * on a pretend terminal, the receipt screen - and records nothing. No
- * transaction, no stock movement, no books, nothing synced. For trying the
- * till out, training a helper, or checking a receipt layout, without a
- * refund to make afterwards. Device-local and switched on by hand, with a
- * banner on the till for as long as it is on.
+ * Test mode: the till sells into the account's test event, cards go to a
+ * pretend terminal, and every sale is recorded as a test - in History under
+ * the test event, with its receipt and anything a module hangs on it (a
+ * commission's deposit), but never in takings, books or exports. Stock moves
+ * as for real and is put back when test mode is switched off. Device-local,
+ * with a banner on the till for as long as it is on.
+ *
+ * Kept by the shell (sdk().testMode). On an older shell without it the till
+ * falls back to going through the motions and recording nothing.
  */
 export const TEST_MODE_KEY = 'testMode';
 export const testMode = ref(false);
+/** A test account (Settings → Account & security): its cards only ever go to the pretend terminal. */
+export const sandboxAccount = (): boolean => sdk().account()?.profile?.sandbox === true;
+/** The shell's test mode, or null on a shell that predates it. */
+export const shellTestMode = () => sdk().testMode ?? null;
 export async function loadTestMode(): Promise<boolean> {
-  testMode.value = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  const shell = shellTestMode();
+  const legacy = (await sdk().config.get<boolean>(TEST_MODE_KEY)) ?? false;
+  if (shell) {
+    // Switched on before the shell kept test mode: carry it over once.
+    if (legacy) {
+      await sdk().config.remove(TEST_MODE_KEY);
+      if (!shell.on()) await shell.start();
+    }
+    testMode.value = shell.on();
+  } else {
+    testMode.value = legacy;
+  }
   return testMode.value;
 }
-export async function setTestMode(on: boolean): Promise<void> {
-  testMode.value = on;
-  await sdk().config.set(TEST_MODE_KEY, on);
+/** Switches test mode; off returns what it put back of the stock it moved. */
+export async function setTestMode(on: boolean): Promise<{ restored: number }> {
+  const shell = shellTestMode();
+  let restored = 0;
+  if (shell) {
+    if (on) await shell.start();
+    else restored = (await shell.stop()).restored;
+    testMode.value = shell.on();
+  } else {
+    testMode.value = on;
+    await sdk().config.set(TEST_MODE_KEY, on);
+  }
+  return { restored };
 }
 export const cardFx = reactive({ enabled: false, rate: null as number | null, at: 0 });
 /**
@@ -322,7 +355,7 @@ export interface CheckoutOutcome {
   approved: boolean;
   error?: string;
   sale?: SaleEvent;
-  /** Test mode: the sale went through the motions and was not recorded anywhere. */
+  /** Test mode on an older shell: the sale went through the motions and was not recorded anywhere. */
   test?: boolean;
   /** The seller abandoned this attempt (cancelCheckout) - nothing was recorded, whatever the terminal answered. */
   cancelled?: boolean;
@@ -398,6 +431,7 @@ export function addModuleLine(line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef 
     ...(line.consignorId ? { consignorId: line.consignorId } : {}),
     ...(typeof line.commissionPct === 'number' ? { commissionPct: line.commissionPct } : {}),
     ...(line.ref ? { ref: line.ref } : {}),
+    ...(line.link ? { link: line.link } : {}),
   });
   return true;
 }
@@ -440,7 +474,13 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
 
   const charged = total.value;
   const base = baseTotal.value;
-  if (charged <= 0) return { approved: false, error: 'The total is zero - nothing to charge.' };
+  // A sale that comes to nothing (a 100% discount) is given away - nothing
+  // to charge, but its items still leave stock and it is on record. Only
+  // such a sale can be, so nothing with a price slips out as a gift.
+  const free = Math.abs(charged) < 0.005;
+  if (charged < 0) return { approved: false, error: 'The total is below zero.' };
+  if (free && pay.method !== GIVEN_AWAY) return { approved: false, error: 'The total is zero - complete it with Give away.' };
+  if (!free && pay.method === GIVEN_AWAY) return { approved: false, error: 'Only a sale that comes to nothing can be given away.' };
 
   cart.busy = true;
   const thisAttempt = ++attempt;
@@ -458,8 +498,8 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       if (cardInBase.value && !onCardSettled) {
         return { approved: false, error: `No ${cart.baseCurrency}/${cart.currency} exchange rate on this device yet - go online once, or turn off charging cards in ${cart.baseCurrency} under Settings → Card terminal.` };
       }
-      // In test mode every card goes to the pretend terminal, whatever is configured.
-      const provider = testMode.value ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
+      // In test mode, and in a test account, every card goes to the pretend terminal, whatever is configured.
+      const provider = testMode.value || sandboxAccount() ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
       activeProvider = provider;
       const result = await provider
         .startPayment(
@@ -528,7 +568,8 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
         provider: pay.method === 'card' ? providerName : pay.method,
         approved: true,
         method: pay.method,
-        legs: pay.legs,
+        // Given away: nothing was paid, so no leg - not a cash leg of 0 in the count.
+        legs: free ? [] : pay.legs,
         cashReceived: pay.cashReceived,
         txRef,
         cardBrand,
@@ -536,9 +577,11 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       },
     };
 
-    // Test mode: the sale is handed back for the screen and never announced,
-    // so nothing records, books, restocks or syncs it.
-    if (testMode.value) {
+    // Test mode on a shell that cannot keep test sales apart: the sale is
+    // handed back for the screen and never announced, so nothing records it.
+    // With the shell's test mode it is announced like any other, into the
+    // test event, and the shell records it as a test.
+    if (testMode.value && !shellTestMode()) {
       clear();
       return { approved: true, sale, test: true };
     }

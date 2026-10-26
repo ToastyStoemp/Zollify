@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import {
   EMPTY_PROFILE_LINKS,
+  GIVEN_AWAY,
+  GIVEN_AWAY_LABEL,
   adoptLegacyLinks,
   base64BodyLimit,
   cleanProfileLinks,
@@ -11,6 +13,7 @@ import {
   maxBytesFor,
   receiptBreakdown,
   receiptFooterLinks,
+  receiptLinksOf,
   vatBreakdown,
   vatIdLabel,
   vatNumberFor,
@@ -77,6 +80,9 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_ops_receipt_token
       ON ops (json_extract(payload, '$.receiptToken'))
       WHERE type = 'tx.create';
+    CREATE INDEX IF NOT EXISTS idx_ops_test_receipt_token
+      ON ops (json_extract(payload, '$.receiptToken'))
+      WHERE type = 'tx.test.create';
     CREATE TABLE IF NOT EXISTS pos_branding (
       accountId TEXT PRIMARY KEY,
       logo      TEXT,
@@ -204,28 +210,34 @@ interface Found {
 }
 
 function findSale(db: Database.Database, token: string): Found | null {
-  const row = db
-    .prepare(
-      `SELECT accountId, opId, payload FROM ops
-       WHERE type = 'tx.create' AND json_extract(payload, '$.receiptToken') = ?
-       LIMIT 1`,
-    )
-    .get(token) as { accountId: string; opId: string; payload: string } | undefined;
-  if (!row) return null;
-  const created = JSON.parse(row.payload) as Transaction;
-  // ZollTool wrote reverts as `txId`, Zollify writes `id` - check both.
-  const reverts = db
-    .prepare(
-      `SELECT opId, type, payload FROM ops
-       WHERE accountId = ? AND type = 'tx.revert'
-         AND (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.txId') = ?)`,
-    )
-    .all(row.accountId, created.id, created.id) as { opId: string; type: string; payload: string }[];
-  const [tx] = reduceTransactions([
-    { opId: row.opId, type: 'tx.create', payload: created },
-    ...reverts.map((r) => ({ opId: r.opId, type: r.type, payload: JSON.parse(r.payload) })),
-  ]);
-  return tx ? { accountId: row.accountId, tx } : null;
+  // A real sale, or one made in test mode (shown with a TEST mark): each kind
+  // has its own op type, and its own index, so both lookups stay quick.
+  for (const kind of ['tx.create', 'tx.test.create'] as const) {
+    const row = db
+      .prepare(
+        `SELECT accountId, opId, payload FROM ops
+         WHERE type = '${kind}' AND json_extract(payload, '$.receiptToken') = ?
+         LIMIT 1`,
+      )
+      .get(token) as { accountId: string; opId: string; payload: string } | undefined;
+    if (!row) continue;
+    const created = JSON.parse(row.payload) as Transaction;
+    const revertType = kind === 'tx.create' ? 'tx.revert' : 'tx.test.revert';
+    // ZollTool wrote reverts as `txId`, Zollify writes `id` - check both.
+    const reverts = db
+      .prepare(
+        `SELECT opId, type, payload FROM ops
+         WHERE accountId = ? AND type = ?
+           AND (json_extract(payload, '$.id') = ? OR json_extract(payload, '$.txId') = ?)`,
+      )
+      .all(row.accountId, revertType, created.id, created.id) as { opId: string; type: string; payload: string }[];
+    const [tx] = reduceTransactions([
+      { opId: row.opId, type: 'tx.create', payload: created },
+      ...reverts.map((r) => ({ opId: r.opId, type: 'tx.revert', payload: JSON.parse(r.payload) })),
+    ]);
+    return tx ? { accountId: row.accountId, tx: kind === 'tx.test.create' ? { ...tx, testRun: tx.testRun ?? 'unknown' } : tx } : null;
+  }
+  return null;
 }
 
 function eventName(db: Database.Database, accountId: string, eventId: string): string {
@@ -273,9 +285,13 @@ export interface PublicReceipt {
   /** `charged`: what the card took, when it settled in another currency (cards in the base currency). */
   payments: { label: string; amount: number; charged?: { amount: number; currency: string } }[];
   status: 'paid' | 'voided';
+  /** Made in test mode: nothing was paid, and the page says so. */
+  test?: boolean;
   brand: { logo?: string; footer: string[] };
   /** Webstore and social links for the footer; absent when the booth set none. */
   links?: ReceiptFooterLink[];
+  /** Pages of this server the sale's lines point to (a commission to follow); `path` is always `/p/...`. */
+  follow?: { label: string; path: string }[];
   /** The next public events (ISO dates), when the booth switched that on and publishes the events page. */
   nextEvents?: { name: string; city: string; start: string; end: string }[];
   /** VAT included per rate, or the exemption the sale was made under. */
@@ -322,7 +338,8 @@ export function publicReceipt(
     lines: chargedLines(tx),
     discounts: receiptBreakdown(tx).discounts.map((d) => ({ name: String(d.name ?? '').slice(0, 80), amount: Number(d.amount) || 0 })),
     total: tx.total,
-    payments: (tx.payments ?? []).map((p) => ({
+    // A sale given away took nothing: no legs, one line saying so.
+    payments: !tx.payments?.length && tx.method === GIVEN_AWAY ? [{ label: GIVEN_AWAY_LABEL, amount: 0 }] : (tx.payments ?? []).map((p) => ({
       label: paymentLabel(tx, p.kind, p.cardBrand),
       amount: Number(p.amount) || 0,
       ...(p.settled && Number.isFinite(Number(p.settled.amount)) && /^[A-Z]{3}$/.test(String(p.settled.currency))
@@ -330,6 +347,9 @@ export function publicReceipt(
         : {}),
     })),
     status: tx.revertedAt ? 'voided' : 'paid',
+    ...(tx.testRun ? { test: true } : {}),
+    // Only what receiptLinksOf accepts - a public page of this server - and none on a cancelled sale.
+    ...(!tx.revertedAt && receiptLinksOf(tx.items ?? []).length ? { follow: receiptLinksOf(tx.items ?? []) } : {}),
     brand: {
       // Inline, so the logo needs no URL of its own that could name the account.
       logo: extra.branding?.logo ? `data:image/png;base64,${extra.branding.logo}` : undefined,
@@ -404,6 +424,7 @@ hr { border: 0; border-top: 1px dashed var(--line); margin: 1rem 0; }
 .foot { white-space: pre-wrap; margin: .15rem 0; }
 .linkrow { margin: .3rem 0; overflow-wrap: anywhere; }
 .linkrow a { color: var(--accent); }
+.follow { display: block; text-align: center; font-weight: 600; color: var(--accent); border: 1px solid var(--accent); border-radius: 8px; padding: .55rem 1rem; margin: .5rem 0; text-decoration: none; }
 .void { color: var(--bad); font-weight: 700; text-align: center; border: 2px solid var(--bad); border-radius: 8px; padding: .4rem; margin-bottom: 1rem; }
 .status { text-align: center; padding: 2rem 1rem; }
 button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: .55rem 1rem; cursor: pointer; }
@@ -476,6 +497,18 @@ ${POW_SOLVER_JS}
     receiptEl.appendChild(box);
     receiptEl.appendChild(el('hr'));
   }
+  // What the sale's lines point to (a commission to follow): only ever a page of
+  // this same server, so the anchor is built from the path alone.
+  function follow(r) {
+    var links = (r.follow || []).filter(function (l) { return typeof l.path === 'string' && /^\/p\/[A-Za-z0-9][A-Za-z0-9\/_.-]*$/.test(l.path); });
+    if (!links.length) return;
+    links.forEach(function (l) {
+      var a = el('a', 'follow', l.label);
+      a.href = l.path;
+      receiptEl.appendChild(a);
+    });
+    receiptEl.appendChild(el('hr'));
+  }
   function dates(start, end) {
     function f(s) { var d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); }
     return end && end !== start ? f(start) + ' - ' + f(end) : f(start);
@@ -483,6 +516,7 @@ ${POW_SOLVER_JS}
 
   function render(r) {
     receiptEl.textContent = '';
+    if (r.test) receiptEl.appendChild(el('div', 'void', 'TEST - made in test mode, nothing was paid'));
     if (r.status === 'voided') receiptEl.appendChild(el('div', 'void', 'This sale was cancelled'));
     if (r.brand && r.brand.logo && /^data:image\/png;base64,[A-Za-z0-9+\/=]+$/.test(r.brand.logo)) {
       var img = el('img', 'logo');
@@ -520,6 +554,7 @@ ${POW_SOLVER_JS}
       if (p.charged) receiptEl.appendChild(row('charged', money(p.charged.amount, p.charged.currency), 'muted net'));
     });
     receiptEl.appendChild(el('hr'));
+    follow(r);
     footer(r);
     ((r.brand && r.brand.footer) || []).forEach(function (line) { receiptEl.appendChild(el('p', 'c foot', line)); });
     receiptEl.appendChild(el('p', 'muted c', 'Receipt ' + r.number));

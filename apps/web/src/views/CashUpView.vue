@@ -5,7 +5,8 @@ import {
   activeEventId,
   currentAccount,
   getSalesEvent,
-  recentTransactions,
+  transactionsOfEvent,
+  testEvent,
   visibleEvents,
 } from '@zollify/platform';
 
@@ -63,13 +64,15 @@ watch(
 );
 const sellers = computed(() => {
   const seen = new Map<string, string>();
-  for (const tx of recentTransactions.value) if (tx.eventId === eventId.value && tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
+  for (const tx of eventSales.value) if (tx.soldBy) seen.set(tx.soldBy.userId, tx.soldBy.email ?? 'Unknown');
   return [...seen.entries()].map(([id, email]) => ({ id, email })).sort((a, b) => a.email.localeCompare(b.email));
 });
 const bySeller = (tx: { soldBy?: { userId: string } }): boolean => !seller.value || tx.soldBy?.userId === seller.value;
+/** The event's sales - its test sales when it is the test event, so a till in test mode can practise the count too. */
+const eventSales = computed(() => (eventId.value ? transactionsOfEvent(eventId.value) : []));
 
 const sales = computed(() =>
-  recentTransactions.value.filter((tx) => tx.eventId === eventId.value && !tx.revertedAt && bySeller(tx)),
+  eventSales.value.filter((tx) => !tx.revertedAt && bySeller(tx)),
 );
 
 const currency = computed(
@@ -104,8 +107,8 @@ const takings = computed(() => {
 
 const reverted = computed(() =>
   round2(
-    recentTransactions.value
-      .filter((tx) => tx.eventId === eventId.value && tx.revertedAt && bySeller(tx))
+    eventSales.value
+      .filter((tx) => tx.revertedAt && bySeller(tx))
       .reduce((n, tx) => n + tx.total, 0),
   ),
 );
@@ -156,6 +159,7 @@ function isCoin(value: number): boolean {
           <option v-for="event in visibleEvents" :key="event.id" :value="event.id">
             {{ event.name }}{{ event.id === activeEventId ? ' (active)' : '' }}
           </option>
+          <option v-if="testEvent" :value="testEvent.id">{{ testEvent.name }} (test)</option>
         </select>
       </label>
       <label v-if="!isStaff && sellers.length" class="scope">

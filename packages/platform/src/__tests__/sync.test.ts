@@ -13,7 +13,7 @@ const account: AccountSnapshot = {
 };
 
 /** Requests the fake server has seen, so tests can assert on ordering. */
-const calls: { path: string; body?: unknown; as?: string | null }[] = [];
+const calls: { path: string; body?: unknown; as?: string | null; timeoutMs?: number }[] = [];
 let pushResponse: unknown = { accepted: 0, duplicates: 0, latestSeq: 0 };
 let failPush = false;
 let pullResponses: unknown[] = [];
@@ -22,8 +22,8 @@ let pullResponses: unknown[] = [];
 const heldPeople = new Set<string>();
 let actingAs: string | null = null;
 let deviceRole = 'owner';
-const fakeFetch = async (path: string, init?: RequestInit, as: string | null = null) => {
-  calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined, as });
+const fakeFetch = async (path: string, init?: RequestInit & { timeoutMs?: number }, as: string | null = null) => {
+  calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined, as, timeoutMs: init?.timeoutMs });
   if (path.startsWith('/sync/push')) {
     if (failPush) throw new Error('network down');
     return pushResponse;
@@ -89,6 +89,34 @@ describe('sync on a shared till', () => {
     ]);
     expect((await outbox.unsyncedOps()).map((o) => o.type)).toEqual(['product.upsert']);
     expect(pushes.flatMap((p) => p.ids)).not.toContain('p9');
+  });
+});
+
+describe('sync on a weak connection', () => {
+  it('gives a pull 90 s and a push 30 s plus time for its size', async () => {
+    await catalog.upsertProduct(product('p1', 'Print', 1));
+    await sync.syncNow();
+    const push = calls.find((c) => c.path === '/sync/push')!;
+    const pull = calls.find((c) => c.path.startsWith('/sync/pull'))!;
+    expect(pull.timeoutMs).toBe(90_000);
+    expect(push.timeoutMs).toBeGreaterThanOrEqual(31_000);
+    expect(push.timeoutMs).toBeLessThan(40_000);
+  });
+
+  it('notes in the log when sync starts failing, and when it works again', async () => {
+    const { diagnosticLogText } = await import('../core/diagnostics');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await catalog.upsertProduct(product('p1', 'Print', 1));
+    failPush = true;
+    expect((await sync.syncNow()).ok).toBe(false);
+    expect((await sync.syncNow()).ok).toBe(false);
+    // The first failure is noted, the next ones are not repeated every minute.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/sync failed \(attempt 1, network: .+\): network down/);
+    failPush = false;
+    expect((await sync.syncNow()).ok).toBe(true);
+    expect(diagnosticLogText()).toMatch(/sync working again after 2 failed attempts/);
+    warn.mockRestore();
   });
 });
 

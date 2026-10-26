@@ -75,7 +75,9 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/^(?!GET)/, /^\/api\/(device-users|sessions|devices|users\/[^/]+\/events)(\/|$)/],
   [/./, /^\/api\/modules\/(toggle|reload)$/],
   [/^(?!GET)/, /^\/api\/m\/(tax\/config|peppol-be\/access-point|economic\/grant)(\/|$|\?)/],
-  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
+  [/^(?!GET)/, /^\/api\/m\/commissions\/(settings|request-page|commissions\/[^/]+\/link|customers\/(erase-closed|[^/]+\/erase))(\/|$)/],
+  // Trade prices, customers and orders need the admin's own sign-in.
+  [/^(?!GET)/, /^\/api\/m\/wholesale\//],
 ];
 
 /**
@@ -173,6 +175,7 @@ export function parseProfile(raw: string | null | undefined): AccountProfile {
       staffSeesTotals: parsed.staffSeesTotals === true,
       ...(SellsAtSchema.safeParse(parsed.sells).success ? { sells: SellsAtSchema.parse(parsed.sells) } : {}),
       ...storedLinks(parsed.links),
+      ...(parsed.sandbox === true ? { sandbox: true } : {}),
     };
   } catch {
     return emptyProfile();

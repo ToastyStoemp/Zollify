@@ -155,6 +155,9 @@ function edit(e: Expense): void {
   form.value = { eventId: e.eventId, category: e.category, amount: e.amount, currency: e.currency, date: e.date, vendor: e.vendor, note: e.note };
 }
 
+/** Who added it, when that was someone else than you - a helper's quick expense at the event, say. */
+const addedBy = (e: Expense): string | null => (e.createdBy && e.createdBy.userId !== sdk().account()?.userId ? (e.createdBy.email ?? 'a removed user').split('@')[0]! : null);
+
 async function remove(e: Expense): Promise<void> {
   if (!(await sdk().ui.confirm(`Delete ${e.vendor || 'this expense'} (${fmt(e.amount, e.currency)})?`, 'Delete expense'))) return;
   await api.deleteExpense(e.id);
@@ -335,7 +338,7 @@ async function openInvoice(e: Expense): Promise<void> {
           <tbody>
             <tr v-for="e in expenses" :key="e.id">
               <td class="mono">{{ e.date || '-' }}</td>
-              <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span></td>
+              <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span><span v-if="addedBy(e)" class="sub by"> · added by {{ addedBy(e) }}</span></td>
               <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · worked out</span></td>
               <td class="num">{{ fmt(e.amount, e.currency) }}</td>
               <td>

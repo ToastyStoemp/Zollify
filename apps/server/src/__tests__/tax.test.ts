@@ -26,6 +26,7 @@ beforeAll(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zollify-tax-'));
   process.env.OWNER_EMAIL = OWNER_EMAIL;
   process.env.OWNER_PASSWORD = OWNER_PASSWORD;
+  process.env.REQUIRE_CAPTCHA = '0';
   app = await buildGateway({
     dataDir,
     moduleStoreDir: join(dataDir, 'modules'),
@@ -78,6 +79,7 @@ afterAll(async () => {
   }
   delete process.env.OWNER_EMAIL;
   delete process.env.OWNER_PASSWORD;
+  delete process.env.REQUIRE_CAPTCHA;
 });
 
 describe('tax module', () => {
@@ -239,5 +241,37 @@ describe('costs worked out from the event', () => {
     expect((await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: { ...edited, mileagePerKm: -1 } })).statusCode).toBe(400);
     const reset = await app.inject({ method: 'POST', url: `${M}/ledger/rates/reset`, headers: auth(), payload: { homeCountry: 'BE' } });
     expect(reset.json().rates).toMatchObject({ homeCountry: 'BE', domestic: { full: 20.8 } });
+  });
+});
+
+describe('expenses from staff', () => {
+  let staff = '';
+  const as = (t: string) => ({ authorization: `Bearer ${t}` });
+  const pdf = Buffer.from('%PDF-1.4 receipt').toString('base64');
+
+  it('lets staff add an expense, kept with their name, and read the categories', async () => {
+    const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: auth(), payload: { role: 'member' } });
+    staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'helper@example.test', password: OWNER_PASSWORD, inviteCode: invite.json().code } })).json().accessToken;
+    expect((await app.inject({ method: 'GET', url: `${M}/ledger/categories`, headers: as(staff) })).json().categories.map((c: { id: string }) => c.id)).toContain('food');
+    const add = await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: as(staff), payload: { eventId: 'ev-1', category: 'food', amount: 15, currency: 'EUR', date: '2026-03-07', vendor: 'Snacks', detail: { kind: 'perdiem', country: 'DE', start: '2026-03-07', end: '2026-03-08', people: 9, rate: { full: 99, reduced: 99 }, year: 2026 } } });
+    expect(add.statusCode).toBe(201);
+    expect(add.json().expense).toMatchObject({ amount: 15, category: 'food', detail: null, createdBy: { email: 'helper@example.test' } });
+    // Their receipt, once.
+    const id = add.json().expense.id;
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/${id}/invoice`, headers: as(staff), payload: { base64: pdf, filename: 'snacks.pdf' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/${id}/invoice`, headers: as(staff), payload: { base64: pdf, filename: 'other.pdf' } })).statusCode).toBe(403);
+  });
+
+  it('keeps the books, and changing or deleting, to admins', async () => {
+    expect((await app.inject({ method: 'GET', url: `${M}/ledger/expenses?eventId=ev-1`, headers: as(staff) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'GET', url: `${M}/ledger/pnl`, headers: as(staff) })).statusCode).toBe(403);
+    const list = (await app.inject({ method: 'GET', url: `${M}/ledger/expenses?eventId=ev-1`, headers: auth() })).json().expenses;
+    const theirs = list.find((e: { vendor: string }) => e.vendor === 'Snacks');
+    const mine = list.find((e: { vendor: string }) => e.vendor === 'Hotel');
+    expect(theirs.createdBy.email).toBe('helper@example.test');
+    expect((await app.inject({ method: 'PUT', url: `${M}/ledger/expenses/${theirs.id}`, headers: as(staff), payload: { ...theirs, amount: 1 } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `${M}/ledger/expenses/${theirs.id}`, headers: as(staff) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/${mine.id}/invoice`, headers: as(staff), payload: { base64: pdf, filename: 'x.pdf' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `${M}/ledger/expenses/${theirs.id}`, headers: auth() })).statusCode).toBe(200);
   });
 });

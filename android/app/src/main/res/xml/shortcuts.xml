@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the Zollify icon, or drag one onto the home screen. Each opens
+     the app on a zollify:// link that the web layer routes (shortcuts.ts). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="expense"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_expense"
+        android:shortcutShortLabel="@string/shortcut_expense_short"
+        android:shortcutLongLabel="@string/shortcut_expense_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="zollify://expense"
+            android:targetPackage="com.phuongninjin.zollify"
+            android:targetClass="com.phuongninjin.zollify.MainActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="sell"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_sell"
+        android:shortcutShortLabel="@string/shortcut_sell_short"
+        android:shortcutLongLabel="@string/shortcut_sell_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="zollify://sell"
+            android:targetPackage="com.phuongninjin.zollify"
+            android:targetClass="com.phuongninjin.zollify.MainActivity" />
+    </shortcut>
+</shortcuts>

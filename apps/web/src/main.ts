@@ -33,6 +33,7 @@ import './styles.css';
 import App from './App.vue';
 import { router } from './router';
 import { connectRouter, followTillPerson, loadEnabledModules, markBooted } from './boot';
+import { wireShortcuts } from './shortcuts';
 
 // Before anything renders, so the first frame is already the right theme.
 applyStoredTheme();
@@ -69,6 +70,7 @@ async function start(): Promise<void> {
   followTillPerson(router);
   void wireBackButton();
   const ready = boot();
+  void wireShortcuts(router, ready);
   createApp(App).use(router).mount('#app');
   await ready;
 }

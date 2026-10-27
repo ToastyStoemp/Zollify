@@ -111,6 +111,8 @@ const q = (params: Record<string, string | undefined>): string =>
   '?' + new URLSearchParams(Object.fromEntries(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])))).toString();
 
 export const api = {
+  /** A period's books as one zip - sales, lines, expenses and their invoices - for the accountant. */
+  export: (from: string, to: string) => sdk().http.get<{ filename: string; base64: string; counts: { sales: number; lines: number; expenses: number; invoices: number } }>(`export${q({ from, to })}`),
   status: () => sdk().http.get<TaxStatus>('status'),
   config: () => sdk().http.get<{ groups: ConfigGroup[]; values: Record<string, string | boolean>; enabled: Record<string, boolean> }>('config'),
   saveConfig: (patch: { set?: Record<string, string>; clear?: string[]; enabled?: Record<string, boolean> }) =>

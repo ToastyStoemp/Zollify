@@ -24,6 +24,7 @@ import { ShopifyOrdersClient, loadShopifyConfig } from './shopify';
 import { LexwareClient, buildFeeVoucher, buildRevenueVoucher, resolveCategoryId } from './lexware';
 import { loadAiConfig, matchEvent, parseInvoicePdf, pingAiKey } from './invoice-ai';
 import { round2, type KvCache } from './types';
+import { buildBooksZip } from './export';
 
 /**
  * Tax - the server half (the ZollTax port).
@@ -748,6 +749,25 @@ export function taxServerModule(jwtSecret: string): ServerModule {
           })
           .sort((a, b) => b.start.localeCompare(a.start));
         return { rows };
+      });
+
+      // ── For the accountant: a period's books in one zip ────────────────
+      const ExportQuery = z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) });
+      app.get('/export', async (req, reply) => {
+        const q = ExportQuery.safeParse(req.query);
+        if (!q.success || q.data.from > q.data.to) return reply.code(400).send({ error: 'invalid_request', message: 'Give the period as two dates, first to last.' });
+        const { accountId } = who(req);
+        const { from, to } = q.data;
+        const out = buildBooksZip({
+          from,
+          to,
+          events: eventsFor(accountId),
+          transactions: transactionsFor(accountId),
+          expenses: listExpenses(accountId).filter((e) => e.date >= from && e.date <= to),
+          categories: EXPENSE_CATEGORIES,
+          invoiceBytes: (id) => (db.prepare('SELECT invoiceBytes FROM tax_expenses WHERE accountId = ? AND id = ?').get(accountId, id) as { invoiceBytes: Buffer | null } | undefined)?.invoiceBytes ?? null,
+        });
+        return { filename: out.filename, base64: Buffer.from(out.bytes).toString('base64'), counts: out.counts };
       });
 
       // ── Invoice scanning ────────────────────────────────────────────────

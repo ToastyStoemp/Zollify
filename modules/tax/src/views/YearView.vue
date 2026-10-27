@@ -115,6 +115,7 @@ const print = (): void => window.print();
               <span class="track"><span class="fill bad-fill" :style="{ width: `${(v / b.expenses) * 100}%` }"></span></span>
             </li>
           </ul>
+          <p v-if="b.mealsCovered" class="hint">{{ money(b.mealsCovered, b.currency) }} of the food was bought on days a per diem covers. It counts here, since the money went; for income tax the per diem already stands for those meals, so your accountant leaves them out or cuts the per diem instead.</p>
         </article>
       </div>
 

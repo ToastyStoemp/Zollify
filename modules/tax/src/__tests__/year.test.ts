@@ -47,6 +47,16 @@ describe('a year in review', () => {
     expect(eur.profit).toBe(212.4);
   });
 
+  it('says how much of the food a per diem covers', () => {
+    expect(eur.mealsCovered).toBe(0);
+    const perdiem: YearExpense = { ...exp('con', '2026-04-30', 'perdiem', 84), detail: { kind: 'perdiem', country: 'DE', start: '2026-04-30', end: '2026-05-04', people: 1, rate: { full: 28, reduced: 14 }, year: 2025, auto: true } };
+    const withPerDiem = yearReview(2026, events, sales, [...costs, perdiem, exp('con', '2026-05-06', 'food', 9)]).blocks[0]!;
+    // The lunch on 1 May is covered; the one on 6 May is after the trip.
+    expect(withPerDiem.mealsCovered).toBe(15);
+    expect(withPerDiem.expenses).toBe(318);
+    expect(withPerDiem.byCategory.food).toBe(24);
+  });
+
   it('ranks the events by profit and names the sellers', () => {
     expect(eur.events.map((e) => [e.name, e.revenue, e.expenses, e.profit])).toEqual([
       ['FurCon 2026', 400, 165, 235],

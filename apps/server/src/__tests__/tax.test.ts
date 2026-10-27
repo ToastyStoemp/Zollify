@@ -252,6 +252,67 @@ describe('costs worked out from the event', () => {
   });
 });
 
+describe('automatic per diems', () => {
+  const op = (opId: string, type: string, payload: unknown) => ({ opId: opId.padEnd(16, '0'), deviceId: 'dev-1', ts: 2, type, payload });
+  const closed = (id: string, extra: Record<string, unknown> = {}) => ({ id, name: id, dateStart: '2026-04-10', dateEnd: '2026-04-12', venue: { country: 'Germany' }, currency: 'EUR', status: 'closed', updatedAt: 2, ...extra });
+  const perDiemsOn = async (eventId: string) => (await app.inject({ method: 'GET', url: `${M}/ledger/expenses?eventId=${eventId}`, headers: auth() })).json().expenses.filter((e: { category: string }) => e.category === 'perdiem');
+  const settle = () => new Promise((r) => setTimeout(r, 40));
+
+  it('turning the setting on gives the closed events their per diems, and says how many', async () => {
+    // Closed before the setting existed, a store and the test event alongside; ev-1 has a per diem already.
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: [op('ea', 'event.upsert', closed('ev-auto')), op('es', 'event.upsert', closed('ev-shop', { kind: 'store' })), op('et', 'event.upsert', closed('ev-test', { test: true }))] } });
+    await settle();
+    expect(await perDiemsOn('ev-auto')).toEqual([]);
+
+    const rates = (await app.inject({ method: 'POST', url: `${M}/ledger/rates/reset`, headers: auth(), payload: { homeCountry: 'DE' } })).json().rates;
+    const saved = await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: { ...rates, auto: { on: true, people: 2, travelDays: true, from: '2026-01-01' } } });
+    expect(saved.statusCode).toBe(200);
+    // Other closed events from the tests above get theirs too.
+    expect(saved.json().added).toBeGreaterThanOrEqual(1);
+    const [pd] = await perDiemsOn('ev-auto');
+    // 9 to 13 April for two: three full days at 28 and two travel days at 14, twice.
+    expect(pd).toMatchObject({ amount: 224, currency: 'EUR', date: '2026-04-09', createdBy: null, paidFrom: null, detail: { kind: 'perdiem', country: 'DE', start: '2026-04-09', end: '2026-04-13', people: 2, auto: true } });
+    expect(pd.note).toContain('Per diems 2026-04-09 to 2026-04-13');
+    expect(await perDiemsOn('ev-shop')).toEqual([]);
+    expect(await perDiemsOn('ev-test')).toEqual([]);
+    expect(await perDiemsOn('ev-1')).toHaveLength(1);
+    // Saving again adds nothing more.
+    expect((await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: saved.json().rates })).json().added).toBe(0);
+  });
+
+  it('an event closing gets its per diem; one deleted stays gone', async () => {
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: [op('eb', 'event.upsert', closed('ev-later', { status: 'active' }))] } });
+    await settle();
+    expect(await perDiemsOn('ev-later')).toEqual([]);
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: [op('eb2', 'event.upsert', closed('ev-later', { updatedAt: 3 }))] } });
+    await settle();
+    const [pd] = await perDiemsOn('ev-later');
+    expect(pd).toMatchObject({ amount: 224, detail: { auto: true } });
+
+    expect((await app.inject({ method: 'DELETE', url: `${M}/ledger/expenses/${pd.id}`, headers: auth() })).statusCode).toBe(200);
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: [op('eb3', 'event.upsert', closed('ev-later', { updatedAt: 4, notes: 'stand 12' }))] } });
+    await settle();
+    expect(await perDiemsOn('ev-later')).toEqual([]);
+
+    // Off again: a new closing adds nothing.
+    const rates = (await app.inject({ method: 'GET', url: `${M}/ledger/rates`, headers: auth() })).json().rates;
+    await app.inject({ method: 'PUT', url: `${M}/ledger/rates`, headers: auth(), payload: { ...rates, auto: { ...rates.auto, on: false } } });
+    await app.inject({ method: 'POST', url: '/api/sync/push', headers: auth(), payload: { deviceId: 'dev-1', ops: [op('ec', 'event.upsert', closed('ev-off'))] } });
+    await settle();
+    expect(await perDiemsOn('ev-off')).toEqual([]);
+  });
+
+  it('a food expense on a covered day is flagged in the accountant export', async () => {
+    await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: 'ev-auto', category: 'food', amount: 4.5, currency: 'EUR', date: '2026-04-11', vendor: 'Hotdog stand' } });
+    await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: 'ev-auto', category: 'food', amount: 7, currency: 'EUR', date: '2026-04-20', vendor: 'Bakery' } });
+    const res = await app.inject({ method: 'GET', url: `${M}/export?from=2026-04-01&to=2026-04-30`, headers: auth() });
+    const lines = strFromU8(unzipSync(Buffer.from(res.json().base64, 'base64'))['expenses.csv']!).trim().split('\n');
+    expect(lines[0]).toContain(',Paid with,Per diem covers it,Added by,');
+    expect(lines.find((l) => l.includes('Hotdog stand'))).toMatch(/,yes,/);
+    expect(lines.find((l) => l.includes('Bakery'))).not.toMatch(/,yes,/);
+  });
+});
+
 describe('expenses from staff', () => {
   let staff = '';
   const as = (t: string) => ({ authorization: `Bearer ${t}` });
@@ -307,7 +368,7 @@ describe('the accountant export', () => {
       '1970-01-01,00:00:00,t3,Leipzig Con,Germany,reverted,cash,EUR,99,0,99,EUR,99,t3',
     ]);
     const expenses = strFromU8(files['expenses.csv']!).trim().split('\n');
-    expect(expenses).toContain(`2026-03-01,Booth / table fee,Messe Leipzig,table 12,150,EUR,Leipzig Con,invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf,,,${OWNER_EMAIL},${id}`);
+    expect(expenses).toContain(`2026-03-01,Booth / table fee,Messe Leipzig,table 12,150,EUR,Leipzig Con,invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf,,,,${OWNER_EMAIL},${id}`);
     expect(expenses.some((l) => l.startsWith('2027-01-10'))).toBe(false);
     expect(Buffer.from(files[`invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf`]!)).toEqual(pdf);
     expect(strFromU8(files['README.txt']!)).toContain('sales.csv       One row per sale (3)');

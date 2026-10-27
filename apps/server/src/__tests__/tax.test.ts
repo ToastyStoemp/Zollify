@@ -65,6 +65,13 @@ beforeAll(async () => {
   expect(push.statusCode).toBe(200);
 });
 
+describe('the year in review', () => {
+  it('has no materials figure without Sourcing', async () => {
+    const res = await app.inject({ method: 'GET', url: `${M}/year/2026`, headers: auth() });
+    expect(res.json()).toEqual({ materials: { spent: 0, orders: 0, byType: {} }, waste: { qty: 0, cost: 0, byMaterial: [] } });
+  });
+});
+
 afterAll(async () => {
   try {
     app.zollify?.db?.close();

@@ -1,6 +1,6 @@
 # Selling in Denmark: legal compliance for Zollify
 
-Status: 15 October 2026, checked against Skat's own technical material (digital signature guideline v1.5.2, April 2025; supplier FAQ, July 2025; SAF-T Cash Register technical description v1.5.3). This is not tax or legal advice. Confirm the VAT points and the retention rules with a Danish accountant (revisor) before relying on them.
+Status: 16 October 2026, checked against Skat's own technical material (digital signature guideline v1.5.2, April 2025; supplier FAQ, July 2025; SAF-T Cash Register technical description v1.5.3). This is not tax or legal advice. Confirm the VAT points and the retention rules with a Danish accountant (revisor) before relying on them.
 
 ## Short answer
 
@@ -82,16 +82,16 @@ Source: momsbekendtgørelsen § 63-64 (BEK 2246 of 30 November 2021, renumbered 
 
 | # | Change | Status today | Why |
 |---|--------|--------------|-----|
-| A1 | **Sequential, gap-free receipt numbers** per account (series per till allowed, reset per financial year allowed), on the printed and the online receipt | Receipt number is the last 8 characters of the sale's UUID (`receipts.ts:314`, `receipt.ts:271`) - random, not sequential | § 64 simplified invoice. Required for every Danish business, not only Tier B |
-| A2 | **Receipt content check for DK**: CVR number as "CVR", seller name and address, VAT amount shown; a full-invoice path (buyer name and address) for sales over DKK 3,000 or on request | VAT id per country already prints; no invoice-from-sale with buyer details | § 58 / § 64 |
-| A3 | **Retention guarantee**: no deletion of sales for 5 years after the financial year; account deletion must export the sales log first (or refuse while records are inside the period) | The op log is append-only (reverts are new entries) but account delete wipes it; the online receipt link stops after `RECEIPT_TTL_DAYS` (400), which is fine | Bookkeeping act, momsbekendtgørelsen |
-| A4 | **e-conomic**: book shelf/space rent to its own income account at 25 %, and VAT codes for the 25 % rate on sales | Daily voucher exists; rent lines share the sales account | Bookkeeping act, VAT on rent |
-| A5 | **Self-billing statements**: written self-billing agreement with each artist (a checkbox and a stored text), both CVR numbers, no VAT line for unregistered artists | Artist invoices exist with numbers; VAT status of the artist not modelled | § 58 self-billing |
-| A6 | **Data processing agreement** template and a statement of hosting location | Hosted in Frankfurt, Germany (EU) - fine; the DPA text is not written | GDPR |
-| A7 | **MobilePay** offered as a ready-made payment method for Danish accounts | Possible today as a custom method name (like TWINT); nothing suggests it | Market expectation; cash acceptance is already there |
-| A8 | **Cash up (kasseafstemning)**: a daily cash count per store that books the difference, so the daily voucher matches the drawer | Cash-up view exists per event; not tied to the e-conomic voucher | Bookkeeping act "daily cash reconciliation" |
+| A1 | **Sequential, gap-free receipt numbers** per account (series per till allowed, reset per financial year allowed), on the printed and the online receipt | **Done** (#78): one gap-free series per till, on paper and online receipts | § 64 simplified invoice. Required for every Danish business, not only Tier B |
+| A2 | **Receipt content check for DK**: CVR number as "CVR", seller name and address, VAT amount shown; a full-invoice path (buyer name and address) for sales over DKK 3,000 or on request | **Partly done**: the seller's tax number is labelled "CVR" for Danish sellers (#80), name, address and VAT amount print. **Open**: a full invoice from a sale with the buyer's name and address | § 58 / § 64 |
+| A3 | **Retention guarantee**: no deletion of sales for 5 years after the financial year; account deletion must export the sales log first (or refuse while records are inside the period) | **Done** (#79): sales are kept for 10 years (`SALES_RETENTION_YEARS`); an account with sales inside the period cannot be deleted outright. The online receipt link still stops after `RECEIPT_TTL_DAYS` (400), which is fine | Bookkeeping act, momsbekendtgørelsen |
+| A4 | **e-conomic**: book shelf/space rent to its own income account at 25 %, and VAT codes for the 25 % rate on sales | **Done** (#79): rent books to its own account | Bookkeeping act, VAT on rent |
+| A5 | **Self-billing statements**: written self-billing agreement with each artist (a checkbox and a stored text), both CVR numbers, no VAT line for unregistered artists | **Done** (#81): each artist carries a tax number, VAT-registered yes/no and the date the self-billing agreement was made; statements and the journal export show them, and an unregistered artist gets no VAT line | § 58 self-billing |
+| A6 | **Data processing agreement** template and a statement of hosting location | Hosting in Frankfurt, Germany (EU) is stated (#77). **Open**: the DPA text itself | GDPR |
+| A7 | **MobilePay** offered as a ready-made payment method for Danish accounts | **In review** (#82): MobilePay by QR code from the till | Market expectation; cash acceptance is already there |
+| A8 | **Cash up (kasseafstemning)**: a daily cash count per store that books the difference, so the daily voucher matches the drawer | **Open**: the cash-up view exists per event, but the count is not tied to the e-conomic voucher | Bookkeeping act "daily cash reconciliation" |
 
-A1 is the one real code change for the prospect; A3 and A4 are small; the rest is settings and text.
+Still open after #78-#81: the full-invoice path in A2, the DPA text in A6, the cash-up booking in A8, and MobilePay once #82 lands. None of them stops a Danish consignment shop from using Zollify today; a revisor would ask for A2 the first time a customer wants a proper invoice.
 
 ### Tier B - only for the four sectors or on Skat's order
 
@@ -111,7 +111,7 @@ Rough size of Tier B: three to five developer-weeks plus the auditor. It also co
 
 ## Recommendation
 
-1. Do Tier A now; A1 (sequential receipt numbers) is the only item a Danish revisor will flag on day one.
+1. Finish Tier A: the full-invoice path (A2), the DPA text (A6) and cash-up booking (A8). The receipt numbering a revisor flags first (A1) is done.
 2. State in the product and the sales pitch: "Not a digital salgsregistreringssystem under momsbekendtgørelsen § 63. Suitable for shops outside the four named sectors. Cafés, restaurants, grocers and kiosks need a Tier B till." This keeps the prospect honest about a shop that also runs a café as its main activity.
 3. Build Tier B only against a paying customer in one of the four sectors, and decide the offline question first (online-only signing is the cheapest honest answer).
 

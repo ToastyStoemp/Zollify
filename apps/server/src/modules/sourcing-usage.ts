@@ -372,12 +372,13 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
       if (!lines.length) return reply.code(409).send({ error: 'no_recipe', message: `"${d.title}" has no recipe yet - give its dossier the materials one print uses.` });
       const note = [`${job.data.copies} × ${d.title}`, job.data.note].filter(Boolean).join(' · ');
       const source: UseSource = job.data.waste ? 'waste' : 'printer';
+      const tag = job.data.waste ? 'waste' : 'print';
       const out = [];
       let duplicate = true;
       for (const line of lines) {
         const m = all.find((x) => x.id === line.materialId);
         if (!m) continue;
-        const res = logUse(ctx, key.accountId, m, { id: job.data.id && `${source}-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source, note, keyId: key.id });
+        const res = logUse(ctx, key.accountId, m, { id: job.data.id && `${tag}-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source, note, keyId: key.id });
         duplicate &&= res.duplicate;
         out.push({ ...view(key.accountId, m), onHand: res.onHand });
       }
@@ -389,7 +390,8 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
     const m = all.find((x) => x.id === body.data.material) ?? all.find((x) => x.name.trim().toLowerCase() === wanted);
     if (!m) return reply.code(404).send({ error: 'unknown_material', message: `No material "${body.data.material}". Add it under Sourcing → Materials, or send its id.` });
     const source: UseSource = body.data.waste ? 'waste' : 'printer';
-    const { duplicate, onHand } = logUse(ctx, key.accountId, m, { id: body.data.id && `${source}-${body.data.id}`, qty: body.data.qty, source, note: body.data.note, keyId: key.id });
+    // A print keeps the id it always had, so a job resent across this change still counts once.
+    const { duplicate, onHand } = logUse(ctx, key.accountId, m, { id: body.data.id && `${body.data.waste ? 'waste' : 'print'}-${body.data.id}`, qty: body.data.qty, source, note: body.data.note, keyId: key.id });
     return reply.code(duplicate ? 200 : 201).send({ material: { ...view(key.accountId, m), onHand }, duplicate });
   });
 }

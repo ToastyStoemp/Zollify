@@ -216,5 +216,7 @@ describe('misprints', () => {
     expect(spoiled.json().material.onHand).toBe(9);
     expect((await call('GET', '/snapshot')).json().usage.a2).toMatchObject({ used: 11, wasted: 3 });
     expect((await printer('POST', '/usage', { material: 'a2', qty: 1, id: 'job-0500', waste: true }, key)).json().duplicate).toBe(true);
+    // A print stores under the id it always had: a job logged before misprints existed, resent, counts once.
+    expect(app.zollify.db.prepare("SELECT id FROM sourcing_material_use WHERE accountId = ? AND source = 'printer' AND materialId = 'a2'").get(accountId)).toEqual({ id: 'print-job-0500' });
   });
 });

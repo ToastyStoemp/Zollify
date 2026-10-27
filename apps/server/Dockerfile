@@ -53,6 +53,9 @@ WORKDIR /repo
 # just never reached this stage before.
 ARG ZOLLIFY_COMMIT=unknown
 ENV ZOLLIFY_COMMIT=$ZOLLIFY_COMMIT
+# The version's patch number, counted by docker.yml for the same reason (scripts/build-version.mjs).
+ARG ZOLLIFY_BUILD=
+ENV ZOLLIFY_BUILD=$ZOLLIFY_BUILD
 COPY . .
 RUN npm run build -w @zollify/web
 # Publishes each module bundle plus its manifest and SHA-256 into the store the

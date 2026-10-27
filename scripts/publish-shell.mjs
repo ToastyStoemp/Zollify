@@ -17,11 +17,12 @@
  * directory that is still there.
  */
 import archiver from 'archiver';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildStamp } from './build-version.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const webDir = join(root, 'apps', 'web');
@@ -30,38 +31,6 @@ const viteBin = join(root, 'node_modules', 'vite', 'bin', 'vite.js');
 const store = process.env.ZOLLIFY_SHELL_STORE
   ? resolve(process.env.ZOLLIFY_SHELL_STORE)
   : join(root, 'apps', 'server', 'shell-store');
-
-/**
- * Identical to apps/web/vite.config.ts's buildStamp() - the published version
- * has to match what that same build baked into __ZOLLIFY_VERSION__, or the
- * app's own "build" display and the server's idea of "latest" would disagree.
- *
- * ZOLLIFY_COMMIT first, `git rev-parse` only as a local-dev fallback: the
- * Docker build context has no .git at all (.dockerignore excludes it), so
- * git always failed silently there, producing the same bare version on
- * every build - and since a version's directory is immutable, that meant
- * exactly one real publish ever, followed by silent no-ops on every deploy
- * since (confirmed live: production was still serving "0.1.0" with nothing
- * newer, weeks of commits later).
- *
- * `-`, not the semver-conventional `+`: this string becomes a URL path
- * segment (the bundle.zip route below), and `+` has special meaning in URL
- * encoding - confirmed live, the shell-updater plugin's native downloader
- * failed on a `+`-containing URL while the identical URL opened fine in a
- * browser. `-` needs no encoding in a path at all.
- */
-function buildStamp() {
-  const version = JSON.parse(readFileSync(join(webDir, 'package.json'), 'utf8')).version;
-  let sha = process.env.ZOLLIFY_COMMIT && process.env.ZOLLIFY_COMMIT !== 'unknown' ? process.env.ZOLLIFY_COMMIT.slice(0, 7) : '';
-  if (!sha) {
-    try {
-      sha = execSync('git rev-parse --short HEAD', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch {
-      /* no git, and no env override either - version stays bare */
-    }
-  }
-  return sha ? `${version}-${sha}` : version;
-}
 
 function zipDist(outPath) {
   return new Promise((resolvePromise, reject) => {

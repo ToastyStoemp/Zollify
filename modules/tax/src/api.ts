@@ -54,6 +54,7 @@ export interface ConfigGroup {
   fields: ConfigField[];
 }
 
+export type PaidFrom = 'card' | 'cash' | 'other';
 export interface Expense {
   id: string;
   eventId: string;
@@ -69,6 +70,8 @@ export interface Expense {
   detail: ExpenseDetail | null;
   /** Who added it; absent or null for expenses from before this was kept. */
   createdBy?: { userId: string; email: string | null } | null;
+  /** Where the money came from; null for expenses from before this was asked. Cash up takes cash off the box. */
+  paidFrom: PaidFrom | null;
   createdAt: number;
   updatedAt: number;
 }

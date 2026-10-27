@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { checkPickedFile, fmtPrice, localIsoDay, type SalesEvent } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
-import { api, type CardPayment, type Expense } from '../api';
+import { api, type CardPayment, type Expense, type PaidFrom } from '../api';
 import { syncWalletPayments, walletAccess } from '../wallet';
 import { sdk } from '../runtime';
 
@@ -43,6 +43,13 @@ const QUICK = ['food', 'travel', 'furniture', 'marketing', 'shipping', 'other'];
 const categories = ref<{ id: string; label: string }[]>([]);
 const quick = computed(() => QUICK.map((id) => categories.value.find((c) => c.id === id)).filter((c): c is { id: string; label: string } => !!c));
 const category = ref('food');
+/** Card by default; cash when it came out of the till's box - cash up takes it off what the box should hold. */
+const paidFrom = ref<PaidFrom>('card');
+const PAID: { id: PaidFrom; label: string }[] = [
+  { id: 'card', label: 'Card' },
+  { id: 'cash', label: 'Cash from the till' },
+  { id: 'other', label: 'Other' },
+];
 const amount = ref('');
 const what = ref('');
 const photo = ref<{ base64: string; name: string } | null>(null);
@@ -135,7 +142,7 @@ async function save(): Promise<void> {
   error.value = null;
   busy.value = true;
   try {
-    let saved = (await api.addExpense({ eventId: eventId.value, category: category.value, amount: value, currency: currency.value, date: today, vendor: what.value.trim(), note: '' })).expense;
+    let saved = (await api.addExpense({ eventId: eventId.value, category: category.value, amount: value, currency: currency.value, date: today, vendor: what.value.trim(), note: '', paidFrom: paidFrom.value })).expense;
     if (photo.value) saved = (await api.attachInvoice(saved.id, photo.value.base64, photo.value.name)).expense;
     added.value = [saved, ...added.value];
     sdk().ui.toast(`${fmtPrice(value, currency.value)} ${labelOf(category.value).toLowerCase()} added to ${event.value?.name ?? 'the event'}.`, { kind: 'success' });
@@ -187,6 +194,10 @@ function done(): void {
       </div>
 
       <input v-model="what" type="text" maxlength="120" placeholder="What was it? (snacks, parking…)" aria-label="What was it" enterkeyhint="done" />
+
+      <div class="seg paid" role="group" aria-label="Paid with">
+        <button v-for="p in PAID" :key="p.id" type="button" :class="{ on: paidFrom === p.id }" @click="paidFrom = p.id">{{ p.label }}</button>
+      </div>
 
       <div class="chips" role="group" aria-label="Category">
         <button v-for="c in quick" :key="c.id" type="button" :class="['chip', { on: category === c.id }]" @click="category = c.id">{{ c.label }}</button>
@@ -244,6 +255,7 @@ header h1 { margin: 0; font-size: 1.3rem; }
 .cur { font-size: 1.1rem; font-weight: 600; color: var(--zfy-muted, #5a6472); }
 .seg { display: flex; gap: .25rem; }
 .seg button { min-height: 2.6rem; padding: 0 .7rem; }
+.paid button { flex: 1; font-size: .85rem; }
 .seg button.on { background: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); border-color: var(--zfy-accent, #0e7c66); }
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip { min-height: 2.4rem; padding: 0 .8rem; border-radius: 999px; font-size: .85rem; }

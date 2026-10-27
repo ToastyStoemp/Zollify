@@ -73,6 +73,7 @@ const STAFF_ROUTES = new Set([
   'POST /ledger/expenses',
   'POST /ledger/expenses/:id/invoice',
   'GET /cards',
+  'GET /ledger/cash-spent',
   'GET /card-payments',
   'POST /card-payments',
   'POST /card-payments/:id/add',
@@ -153,6 +154,9 @@ function migrate(db: Database.Database): void {
   if (!cols.includes('detail')) db.exec('ALTER TABLE tax_expenses ADD COLUMN detail TEXT');
   // Who added it: staff add expenses too (the quick expense at an event); admins check and change them.
   if (!cols.includes('createdBy')) db.exec('ALTER TABLE tax_expenses ADD COLUMN createdBy TEXT');
+  // Where the money came from: the card, the cash in the till's box, or something else. Cash up takes
+  // cash out of what the box should hold; expenses from before this was asked have no answer.
+  if (!cols.includes('paidFrom')) db.exec('ALTER TABLE tax_expenses ADD COLUMN paidFrom TEXT');
 }
 
 // ── Schemas ─────────────────────────────────────────────────────────────────
@@ -205,7 +209,9 @@ const CardBody = z.object({
   role: z.enum(['business', 'personal']),
   label: z.string().trim().max(60).default(''),
 });
+const PaidFrom = z.enum(['card', 'cash', 'other']);
 const ExpenseBody = z.object({
+  paidFrom: PaidFrom.nullable().optional(),
   eventId: z.string().max(64).default(''),
   category: z.enum(CATEGORY_IDS).default('other'),
   amount: z.number().finite().nonnegative(),
@@ -576,10 +582,11 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         bookedVoucherId: string | null;
         detail: string | null;
         createdBy: string | null;
+        paidFrom: string | null;
         createdAt: number;
         updatedAt: number;
       }
-      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, detail, createdBy, createdAt, updatedAt';
+      const EXPENSE_COLS = 'id, eventId, category, amountMinor, currency, date, vendor, note, invoiceName, invoiceAt, bookedVoucherId, detail, createdBy, paidFrom, createdAt, updatedAt';
       const emailOf = (userId: string): string | null => (db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined)?.email ?? null;
       const detailOf = (raw: string | null) => {
         if (!raw) return null;
@@ -600,6 +607,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         detail: detailOf(r.detail),
         /** Who added it; null for expenses from before this was kept. */
         createdBy: r.createdBy ? { userId: r.createdBy, email: emailOf(r.createdBy) } : null,
+        /** Null for expenses from before this was asked. */
+        paidFrom: r.paidFrom as 'card' | 'cash' | 'other' | null,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
       });
@@ -629,9 +638,9 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const id = randomUUID();
         db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, detail ? JSON.stringify(detail) : null, me.userId, now, now);
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, paidFrom, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(accountId, id, e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, detail ? JSON.stringify(detail) : null, me.userId, e.paidFrom ?? null, now, now);
         return reply.code(201).send({ expense: listExpenses(accountId).find((x) => x.id === id) });
       });
 
@@ -714,10 +723,10 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const e = parsed.data;
         const info = db
           .prepare(
-            `UPDATE tax_expenses SET eventId = ?, category = ?, amountMinor = ?, currency = ?, date = ?, vendor = ?, note = ?, detail = ?, updatedAt = ?
+            `UPDATE tax_expenses SET eventId = ?, category = ?, amountMinor = ?, currency = ?, date = ?, vendor = ?, note = ?, detail = ?, paidFrom = ?, updatedAt = ?
              WHERE accountId = ? AND id = ?`,
           )
-          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, Date.now(), accountId, req.params.id);
+          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, e.paidFrom ?? null, Date.now(), accountId, req.params.id);
         if (!info.changes) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
         return { expense: listExpenses(accountId).find((x) => x.id === req.params.id) };
       });
@@ -765,6 +774,21 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       });
 
       /** Per-event P&L: op-log revenue against ledger expenses. */
+      /**
+       * The cash paid out of an event's box for expenses, for cash up to take off what the box should
+       * hold. Staff see only the cash they paid themselves; the owner and admins see all of it.
+       */
+      app.get('/ledger/cash-spent', async (req, reply) => {
+        const me = who(req);
+        const eventId = (req.query as { eventId?: string }).eventId ?? '';
+        if (!eventId) return reply.code(400).send({ error: 'invalid_request', message: 'Which event?' });
+        if (me.allowedEventIds && !me.allowedEventIds.includes(eventId)) return reply.code(403).send({ error: 'forbidden', message: 'That event is not one of yours.' });
+        const rows = listExpenses(me.accountId, eventId).filter((x) => x.paidFrom === 'cash' && (me.role !== 'member' || x.createdBy?.userId === me.userId));
+        return {
+          expenses: rows.map((x) => ({ id: x.id, amount: x.amount, currency: x.currency, date: x.date, vendor: x.vendor, category: x.category, createdBy: x.createdBy?.userId ?? null })),
+        };
+      });
+
       app.get('/ledger/pnl', async (req) => {
         const { accountId } = who(req);
         const expenses = listExpenses(accountId);
@@ -911,8 +935,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const id = randomUUID();
         const date = new Date(row.at).toISOString().slice(0, 10);
         db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, createdBy, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, createdBy, paidFrom, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'card', ?, ?)`,
         ).run(me.accountId, id, e.eventId, e.category, row.amountMinor, row.currency, date, e.vendor || row.merchant, e.note, me.userId, now, now);
         db.prepare('UPDATE tax_card_payments SET addedExpenseId = ? WHERE accountId = ? AND id = ?').run(id, me.accountId, req.params.id);
         return reply.code(201).send({ expense: listExpenses(me.accountId).find((x) => x.id === id) });

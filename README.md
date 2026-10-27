@@ -503,7 +503,20 @@ the fallback; Belgium's daily allowance, country list with departure and
 return days at half, and kilometre rate) and corrected by an admin as the
 yearly letters come out - the app cannot fetch them, so check the defaults
 before relying on them. Rules live in `@zollify/shared` (`travel-costs.ts`),
-shared by the app and the server.
+shared by the app and the server. *Automatic per diems*, under the same
+Rates: switched on, every event gets its per diems the moment it closes
+(the server adds them as event ops arrive, and once for the events already
+closed when the setting is saved) - for the people set, at the rate for the
+venue's country, with the day before and after as travel days when asked,
+for events ending from a date (this year by default). An event with a per
+diem already, a store and the test event get none; an automatic per diem
+that was deleted stays deleted. Food bought on a day a per diem on the same
+event covers is marked *a per diem covers it* on the ledger, in the
+accountant export (a column) and in the year in review (a total under the
+costs): it stays in the event's profit, since the money went, but the flat
+rate already stands for the traveller's meals at tax time (Germany: §4 Abs.
+5 Nr. 5 EStG), so the accountant leaves it out or cuts the per diem for a
+meal the business gave a helper. The mark is worked out, never stored.
 
 *Event ranking* - a third screen in Tax & books reads the sales and events
 the device holds against the ledger's costs, so every figure is the ledger's

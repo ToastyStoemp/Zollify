@@ -177,7 +177,8 @@ export const api = {
   deleteExpense: (id: string) => sdk().http.del<{ ok: true }>(`ledger/expenses/${id}`),
   addShared: (e: SharedExpenseInput) => sdk().http.post<{ expenses: Expense[] }>('ledger/expenses/shared', e),
   rates: () => sdk().http.get<{ rates: TravelRates; defaults: string[] }>('ledger/rates'),
-  saveRates: (rates: TravelRates) => sdk().http.put<{ rates: TravelRates }>('ledger/rates', rates),
+  /** `added`: the closed events that got their per diem by the save, when the automatic per diems are on. */
+  saveRates: (rates: TravelRates) => sdk().http.put<{ rates: TravelRates; added: number }>('ledger/rates', rates),
   resetRates: (homeCountry: string) => sdk().http.post<{ rates: TravelRates }>('ledger/rates/reset', { homeCountry }),
   invoice: (id: string) => sdk().http.get<{ filename: string; base64: string }>(`ledger/expenses/${id}/invoice`),
   attachInvoice: (id: string, base64: string, filename: string) => sdk().http.post<{ expense: Expense }>(`ledger/expenses/${id}/invoice`, { base64, filename }),

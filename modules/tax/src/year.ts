@@ -1,4 +1,4 @@
-import { GIVEN_AWAY, localIsoDay, round2, toBaseFactor, vatBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
+import { GIVEN_AWAY, coveredByPerDiem, localIsoDay, round2, toBaseFactor, vatBreakdown, type ExpenseDetail, type SalesEvent, type Transaction } from '@zollify/shared';
 
 /**
  * A year in review: what the whole year came to, from the same figures the
@@ -17,6 +17,8 @@ export interface YearExpense {
   currency: string;
   /** YYYY-MM-DD. */
   date: string;
+  /** How a computed expense came about; a per diem's says which days it covers. */
+  detail?: ExpenseDetail | null;
 }
 
 export interface YearEventRow {
@@ -45,6 +47,8 @@ export interface YearBlock {
   vat: number;
   expenses: number;
   byCategory: Record<string, number>;
+  /** Food bought on days a per diem covers: in the costs, since the money went, but the flat rate already stands for it at tax time. */
+  mealsCovered: number;
   profit: number;
   sales: number;
   units: number;
@@ -82,7 +86,7 @@ export function yearReview(year: number, events: SalesEvent[], transactions: Tra
   const block = (currency: string): YearBlock => {
     let b = blocks.get(currency);
     if (!b) {
-      b = { currency, revenue: 0, vat: 0, expenses: 0, byCategory: {}, profit: 0, sales: 0, units: 0, givenAway: 0, byMonth: Array(12).fill(0), events: [], products: [] };
+      b = { currency, revenue: 0, vat: 0, expenses: 0, byCategory: {}, mealsCovered: 0, profit: 0, sales: 0, units: 0, givenAway: 0, byMonth: Array(12).fill(0), events: [], products: [] };
       blocks.set(currency, b);
     }
     return b;
@@ -133,11 +137,13 @@ export function yearReview(year: number, events: SalesEvent[], transactions: Tra
     }
   }
 
+  const covered = new Set(coveredByPerDiem(expenses));
   for (const e of expenses) {
     if (!e.date || yearOf(e.date) !== year) continue;
     const b = block(e.currency);
     b.expenses += e.amount;
     b.byCategory[e.category] = (b.byCategory[e.category] ?? 0) + e.amount;
+    if (covered.has(e)) b.mealsCovered += e.amount;
     if (e.eventId) eventRow(b, e.eventId).expenses += e.amount;
   }
 
@@ -146,6 +152,7 @@ export function yearReview(year: number, events: SalesEvent[], transactions: Tra
     b.revenue = round2(b.revenue);
     b.vat = round2(b.vat);
     b.expenses = round2(b.expenses);
+    b.mealsCovered = round2(b.mealsCovered);
     b.profit = round2(b.revenue - b.expenses);
     b.byMonth = b.byMonth.map(round2);
     for (const c of Object.keys(b.byCategory)) b.byCategory[c] = round2(b.byCategory[c]!);

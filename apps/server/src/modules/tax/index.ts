@@ -3,11 +3,11 @@ import type Database from 'better-sqlite3';
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ExpenseDetailSchema, TRAVEL_RATE_DEFAULTS, TravelRatesSchema, base64BodyLimit, defaultTravelRates, describeDetail, eventDays, maxBytesFor, splitShared, toBaseFactor, type SalesEvent, type Transaction, type TravelRates } from '@zollify/shared';
+import { RATES_KEY, addDuePerDiems, eventsFor as eventsOf, kvFor, opsFor as opsForAccount, readRates as readRatesOf } from './auto-perdiem';
 import {
   checkQuota,
   decodeUpload,
   makeSecretBox,
-  reduceEvents,
   reduceMerges,
   reduceTransactions,
   reasonOf,
@@ -243,6 +243,18 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       for (const t of ['tax_config', 'tax_cache', 'tax_expenses', 'tax_bookings', 'tax_ai_usage']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
     },
 
+    // An event closing, with the automatic per diems on, gets its per diem.
+    onOps: (svc, accountId, ops) => {
+      if (!ops.some((op) => op.type === 'event.upsert' || op.type === 'event.close')) return;
+      try {
+        addDuePerDiems(svc.db, accountId);
+        resolveProblem(svc, accountId, 'tax.perdiem');
+      } catch (err) {
+        // The hook must not throw; the add is tried again on the next event op.
+        reportProblem(svc, accountId, { kind: 'tax.perdiem', severity: 'warning', message: 'The automatic per diems could not be added', detail: reasonOf(undefined, err), link: '/m/tax/ledger' });
+      }
+    },
+
     routes: (ctx: ModuleContext) => async (app) => {
       const db = ctx.db;
 
@@ -262,19 +274,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
            ON CONFLICT(accountId) DO UPDATE SET blob = excluded.blob, updatedAt = excluded.updatedAt`,
         ).run(accountId, box.encrypt(cfg), Date.now());
       };
-      const cacheFor = (accountId: string): KvCache => ({
-        get: <T>(key: string): T | null => {
-          const row = db.prepare('SELECT value FROM tax_cache WHERE accountId = ? AND key = ?').get(accountId, key) as { value: string } | undefined;
-          return row ? (JSON.parse(row.value) as T) : null;
-        },
-        set: (key, value) => {
-          db.prepare('INSERT INTO tax_cache (accountId, key, value) VALUES (?, ?, ?) ON CONFLICT(accountId, key) DO UPDATE SET value = excluded.value').run(
-            accountId,
-            key,
-            JSON.stringify(value),
-          );
-        },
-      });
+      const cacheFor = (accountId: string): KvCache => kvFor(db, accountId);
 
       // Clients are rebuilt per request from the stored config: cheap, and a
       // saved edit is live on the very next call without a cache to invalidate.
@@ -294,13 +294,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         };
       };
 
-      const opsFor = (accountId: string, types: string[]) =>
-        (db
-          .prepare(`SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN (${types.map(() => '?').join(',')}) ORDER BY seq`)
-          .all(accountId, ...types) as { opId: string; type: string; payload: string }[]).map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) as unknown }));
-
-      const eventsFor = (accountId: string): SalesEvent[] =>
-        reduceEvents(opsFor(accountId, ['event.upsert', 'event.close'])).filter((e) => !e.deletedAt);
+      const opsFor = (accountId: string, types: string[]) => opsForAccount(db, accountId, types);
+      const eventsFor = (accountId: string): SalesEvent[] => eventsOf(db, accountId);
 
       const transactionsFor = (accountId: string): Transaction[] => {
         const ops = opsFor(accountId, ['tx.create', 'tx.revert', 'product.merge']);
@@ -683,28 +678,15 @@ export function taxServerModule(jwtSecret: string): ServerModule {
       // ── Rates for per diems and mileage ─────────────────────────────────
       // The account's own table, started from the defaults for its country
       // and corrected by an admin as the yearly letters change.
-      const RATES_KEY = 'ledger.rates';
-      const readRates = (accountId: string): TravelRates => {
-        const stored = cacheFor(accountId).get<unknown>(RATES_KEY);
-        const parsed = stored ? TravelRatesSchema.safeParse(stored) : null;
-        if (parsed?.success) return parsed.data;
-        // The business's own country, from its profile; Germany's rules until it says.
-        const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
-        let home = '';
-        try {
-          home = String((JSON.parse(row?.profile ?? '{}') as { artist?: { countryOfOrigin?: string } }).artist?.countryOfOrigin ?? '');
-        } catch {
-          /* no profile yet */
-        }
-        return defaultTravelRates(home || 'DE');
-      };
+      const readRates = (accountId: string): TravelRates => readRatesOf(db, accountId);
       app.get('/ledger/rates', async (req) => ({ rates: readRates(who(req).accountId), defaults: Object.keys(TRAVEL_RATE_DEFAULTS) }));
+      /** Saving with the automatic per diems on gives the closed events theirs at once; `added` says how many. */
       app.put('/ledger/rates', async (req, reply) => {
         const { accountId } = who(req);
         const parsed = TravelRatesSchema.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: parsed.error.issues[0]?.message ?? 'Check the rates.' });
         cacheFor(accountId).set(RATES_KEY, parsed.data);
-        return { rates: parsed.data };
+        return { rates: parsed.data, added: addDuePerDiems(db, accountId) };
       });
       /** Back to the defaults for a home country. */
       app.post('/ledger/rates/reset', async (req, reply) => {

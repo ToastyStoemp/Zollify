@@ -86,6 +86,7 @@ export interface SharedExpenseInput {
   date: string;
   vendor: string;
   note: string;
+  paidFrom?: PaidFrom | null;
 }
 
 export interface PnlRow {

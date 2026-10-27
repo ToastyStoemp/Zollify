@@ -307,7 +307,7 @@ describe('the accountant export', () => {
       '1970-01-01,00:00:00,t3,Leipzig Con,Germany,reverted,cash,EUR,99,0,99,EUR,99,t3',
     ]);
     const expenses = strFromU8(files['expenses.csv']!).trim().split('\n');
-    expect(expenses).toContain(`2026-03-01,Booth / table fee,Messe Leipzig,table 12,150,EUR,Leipzig Con,invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf,,${OWNER_EMAIL},${id}`);
+    expect(expenses).toContain(`2026-03-01,Booth / table fee,Messe Leipzig,table 12,150,EUR,Leipzig Con,invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf,,,${OWNER_EMAIL},${id}`);
     expect(expenses.some((l) => l.startsWith('2027-01-10'))).toBe(false);
     expect(Buffer.from(files[`invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf`]!)).toEqual(pdf);
     expect(strFromU8(files['README.txt']!)).toContain('sales.csv       One row per sale (3)');

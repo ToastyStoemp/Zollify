@@ -663,8 +663,8 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const now = Date.now();
         const currency = e.currency.toUpperCase();
         const insert = db.prepare(
-          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, createdAt, updatedAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, detail, createdBy, paidFrom, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         const made: string[] = [];
         db.transaction(() => {
@@ -672,7 +672,7 @@ export function taxServerModule(jwtSecret: string): ServerModule {
             const detail = { kind: 'shared' as const, groupId, method: e.method, total: e.amount, of: ids.length };
             const note = [e.note, describeDetail(detail, currency)].filter(Boolean).join(' · ');
             const id = randomUUID();
-            insert.run(accountId, id, s.id, e.category, Math.round(s.amount * 100), currency, e.date.slice(0, 10), e.vendor, note, JSON.stringify(detail), who(req).userId, now, now);
+            insert.run(accountId, id, s.id, e.category, Math.round(s.amount * 100), currency, e.date.slice(0, 10), e.vendor, note, JSON.stringify(detail), who(req).userId, e.paidFrom ?? null, now, now);
             made.push(id);
           }
         })();
@@ -721,12 +721,17 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const parsed = ExpenseBody.safeParse(req.body);
         if (!parsed.success) return reply.code(400).send({ error: 'invalid', message: 'Check the expense fields.' });
         const e = parsed.data;
+        // Only what the body names changes: null clears a field, an absent one keeps it.
+        const kept = db.prepare('SELECT detail, paidFrom FROM tax_expenses WHERE accountId = ? AND id = ?').get(accountId, req.params.id) as { detail: string | null; paidFrom: string | null } | undefined;
+        if (!kept) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
+        const paidFrom = e.paidFrom === undefined ? kept.paidFrom : e.paidFrom;
+        const detail = e.detail === undefined ? kept.detail : e.detail ? JSON.stringify(e.detail) : null;
         const info = db
           .prepare(
             `UPDATE tax_expenses SET eventId = ?, category = ?, amountMinor = ?, currency = ?, date = ?, vendor = ?, note = ?, detail = ?, paidFrom = ?, updatedAt = ?
              WHERE accountId = ? AND id = ?`,
           )
-          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, e.detail ? JSON.stringify(e.detail) : null, e.paidFrom ?? null, Date.now(), accountId, req.params.id);
+          .run(e.eventId, e.category, Math.round(e.amount * 100), e.currency.toUpperCase(), e.date.slice(0, 10), e.vendor, e.note, detail, paidFrom, Date.now(), accountId, req.params.id);
         if (!info.changes) return reply.code(404).send({ error: 'not_found', message: 'No such expense.' });
         return { expense: listExpenses(accountId).find((x) => x.id === req.params.id) };
       });

@@ -41,7 +41,8 @@ beforeAll(async () => {
   await app.ready();
   owner = (await app.inject({ method: 'POST', url: '/api/auth/login', payload: { email: OWNER, password: PASSWORD, deviceName: 'Test' } })).json().accessToken;
   const invite = await app.inject({ method: 'POST', url: '/api/invites', headers: as(owner), payload: { role: 'member' } });
-  staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'helper@example.test', password: PASSWORD, inviteCode: invite.json().code } })).json().accessToken;
+  staff = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { email: 'helper@example.test', password: PASSWORD, inviteCode: invite.json().code } })).json().accessToken;  // A shared cost is split over real events, so the test has them.
+  await app.inject({ method: 'POST', url: '/api/sync/push', headers: as(owner), payload: { deviceId: 'dev-1', ops: [{ opId: 'ev'.padEnd(16, '0'), deviceId: 'dev-1', ts: 1, type: 'event.upsert', payload: { id: 'ev-1', name: 'Leipzig Con', dateStart: '2026-03-07', dateEnd: '2026-03-08', venue: { country: 'Germany' }, currency: 'EUR', status: 'closed', updatedAt: 1 } }] } });
 });
 
 afterAll(async () => {
@@ -87,8 +88,30 @@ describe('expenses paid from cash', () => {
     expect(forStaff.map((e: { vendor: string }) => e.vendor)).toEqual(['Snacks']);
   });
 
-  it('refuses a missing event, and a helper limited to other events', async () => {
+  it('refuses a missing event', async () => {
     expect((await app.inject({ method: 'GET', url: `${M}/ledger/cash-spent`, headers: as(owner) })).statusCode).toBe(400);
-    expect((await app.inject({ method: 'GET', url: `${M}/ledger/cash-spent?eventId=ev-1`, headers: as(staff) })).statusCode).toBe(200);
+  });
+
+  it('refuses a helper limited to other events, for the cash and for adding to them', async () => {
+    const helperId = (app.zollify.db.prepare("SELECT id FROM users WHERE email = 'helper@example.test'").get() as { id: string }).id;
+    app.zollify.db.prepare('UPDATE users SET allowedEventIds = ? WHERE id = ?').run(JSON.stringify(['ev-2']), helperId);
+    expect((await app.inject({ method: 'GET', url: `${M}/ledger/cash-spent?eventId=ev-1`, headers: as(staff) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: as(staff), payload: expense({ paidFrom: 'cash', vendor: 'Nope' }) })).statusCode).toBe(403);
+    app.zollify.db.prepare('UPDATE users SET allowedEventIds = NULL WHERE id = ?').run(helperId);
+  });
+
+  it('keeps how it was paid when an edit leaves it out, and clears it only on null', async () => {
+    const saved = (await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: as(owner), payload: expense({ paidFrom: 'cash', vendor: 'Ice', amount: 2 }) })).json().expense;
+    const edited = await app.inject({ method: 'PUT', url: `${M}/ledger/expenses/${saved.id}`, headers: as(owner), payload: expense({ vendor: 'Ice', amount: 2.5 }) });
+    expect(edited.json().expense).toMatchObject({ amount: 2.5, paidFrom: 'cash' });
+    const cleared = await app.inject({ method: 'PUT', url: `${M}/ledger/expenses/${saved.id}`, headers: as(owner), payload: expense({ vendor: 'Ice', amount: 2.5, paidFrom: null }) });
+    expect(cleared.json().expense.paidFrom).toBeNull();
+  });
+
+  it('takes a shared cost paid in cash off the till of every event it is split over', async () => {
+    const shared = await app.inject({ method: 'POST', url: `${M}/ledger/expenses/shared`, headers: as(owner), payload: { category: 'insurance', amount: 30, currency: 'EUR', date: '2026-03-07', vendor: 'Van', note: '', paidFrom: 'cash', eventIds: ['ev-1'], method: 'even' } });
+    expect(shared.statusCode).toBe(201);
+    const list = (await app.inject({ method: 'GET', url: `${M}/ledger/cash-spent?eventId=ev-1`, headers: as(owner) })).json().expenses;
+    expect(list.map((e: { vendor: string }) => e.vendor)).toContain('Van');
   });
 });

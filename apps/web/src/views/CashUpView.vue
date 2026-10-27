@@ -132,7 +132,15 @@ async function loadSpent(id: string): Promise<typeof spent.value> {
     return [];
   }
 }
-watch(eventId, async (id) => (spent.value = id ? await loadSpent(id) : []), { immediate: true });
+watch(
+  eventId,
+  async (id) => {
+    const next = id ? await loadSpent(id) : [];
+    // Switching events while this loads must not leave the last event's expenses on this one.
+    if (id === eventId.value) spent.value = next;
+  },
+  { immediate: true },
+);
 const cashSpent = computed(() => {
   const mine = spent.value.filter((e) => !seller.value || e.createdBy === seller.value);
   const sameCurrency = mine.filter((e) => e.currency === currency.value);

@@ -68,7 +68,16 @@ const EXPENSE_CATEGORIES = [
 ] as const;
 const CATEGORY_IDS = EXPENSE_CATEGORIES.map((c) => c.id) as unknown as [string, ...string[]];
 /** All a staff member may call: add an expense, with its receipt, and know the categories. */
-const STAFF_ROUTES = new Set(['GET /ledger/categories', 'POST /ledger/expenses', 'POST /ledger/expenses/:id/invoice']);
+const STAFF_ROUTES = new Set([
+  'GET /ledger/categories',
+  'POST /ledger/expenses',
+  'POST /ledger/expenses/:id/invoice',
+  'GET /cards',
+  'GET /card-payments',
+  'POST /card-payments',
+  'POST /card-payments/:id/add',
+  'DELETE /card-payments/:id',
+]);
 
 function migrate(db: Database.Database): void {
   db.exec(`
@@ -116,6 +125,28 @@ function migrate(db: Database.Database): void {
       calls     INTEGER NOT NULL,
       tokens    INTEGER NOT NULL
     );
+    -- Card payments seen on the phone (Google Wallet notifications): the last four digits and the
+    -- merchant, never the rest of the notification. A card marked personal keeps nothing here.
+    CREATE TABLE IF NOT EXISTS tax_cards (
+      accountId TEXT NOT NULL,
+      last4     TEXT NOT NULL,
+      role      TEXT,
+      label     TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (accountId, last4)
+    );
+    CREATE TABLE IF NOT EXISTS tax_card_payments (
+      accountId      TEXT NOT NULL,
+      id             TEXT NOT NULL,
+      at             INTEGER NOT NULL,
+      amountMinor    INTEGER NOT NULL,
+      currency       TEXT NOT NULL,
+      merchant       TEXT NOT NULL,
+      last4          TEXT NOT NULL,
+      addedExpenseId TEXT,
+      dismissedAt    INTEGER,
+      createdBy      TEXT,
+      PRIMARY KEY (accountId, id)
+    );
   `);
   // How a computed expense came about (per diems, mileage, a shared cost's split), added later.
   const cols = (db.prepare('PRAGMA table_info(tax_expenses)').all() as { name: string }[]).map((c) => c.name);
@@ -154,6 +185,26 @@ const BookBody = z.object({
   filename: z.string().max(120).optional(),
 });
 
+const CardPaymentBody = z.object({
+  /** The phone's own id for the notification: sending it again counts once. */
+  id: z.string().trim().min(8).max(80),
+  at: z.number().int().positive(),
+  amount: z.number().positive().max(10_000_000),
+  currency: z.string().length(3),
+  merchant: z.string().trim().max(120).default(''),
+  /** The last four digits of the card; empty when the notification did not name one. */
+  last4: z.string().regex(/^(\d{4})?$/).default(''),
+});
+const AddCardPaymentBody = z.object({
+  eventId: z.string().min(1).max(64),
+  category: z.enum(CATEGORY_IDS).default('other'),
+  vendor: z.string().trim().max(200).optional(),
+  note: z.string().trim().max(1000).default(''),
+});
+const CardBody = z.object({
+  role: z.enum(['business', 'personal']),
+  label: z.string().trim().max(60).default(''),
+});
 const ExpenseBody = z.object({
   eventId: z.string().max(64).default(''),
   category: z.enum(CATEGORY_IDS).default('other'),
@@ -778,6 +829,98 @@ export function taxServerModule(jwtSecret: string): ServerModule {
         const year = Number(req.params.year);
         if (!Number.isInteger(year) || year < 2000 || year > 2100) return reply.code(400).send({ error: 'invalid_request', message: 'Which year?' });
         return yearMaterials(db, who(req).accountId, year);
+      });
+
+      // ── Card payments: what the phone saw paid by card, to quick-add as expenses ──
+      // A card marked personal is never stored: its unadded payments go when it is marked, and
+      // a payment that arrives for one is dropped on the spot.
+      const cardRole = (accountId: string, last4: string): string | null | undefined =>
+        (db.prepare('SELECT role FROM tax_cards WHERE accountId = ? AND last4 = ?').get(accountId, last4) as { role: string | null } | undefined)?.role;
+      const cardPaymentRow = (r: { id: string; at: number; amountMinor: number; currency: string; merchant: string; last4: string; addedExpenseId: string | null }) => ({
+        id: r.id,
+        at: r.at,
+        amount: r.amountMinor / 100,
+        currency: r.currency,
+        merchant: r.merchant,
+        last4: r.last4,
+        addedExpenseId: r.addedExpenseId,
+      });
+
+      app.get('/cards', async (req) => {
+        const { accountId } = who(req);
+        const marked = db.prepare('SELECT last4, role, label FROM tax_cards WHERE accountId = ?').all(accountId) as { last4: string; role: string | null; label: string }[];
+        const seen = db.prepare('SELECT DISTINCT last4 FROM tax_card_payments WHERE accountId = ? AND dismissedAt IS NULL').all(accountId) as { last4: string }[];
+        const known = new Map(marked.map((c) => [c.last4, c]));
+        for (const { last4 } of seen) if (!known.has(last4)) known.set(last4, { last4, role: null, label: '' });
+        return { cards: [...known.values()].sort((a, b) => a.last4.localeCompare(b.last4)) };
+      });
+
+      app.put<{ Params: { last4: string } }>('/cards/:last4', async (req, reply) => {
+        const { accountId } = who(req);
+        const last4 = req.params.last4;
+        if (!/^\d{4}$/.test(last4)) return reply.code(400).send({ error: 'invalid_request', message: 'A card is named by its last four digits.' });
+        const body = CardBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Mark the card business or personal.' });
+        db.prepare('INSERT INTO tax_cards (accountId, last4, role, label) VALUES (?, ?, ?, ?) ON CONFLICT (accountId, last4) DO UPDATE SET role = excluded.role, label = excluded.label').run(accountId, last4, body.data.role, body.data.label);
+        if (body.data.role === 'personal') db.prepare('DELETE FROM tax_card_payments WHERE accountId = ? AND last4 = ? AND addedExpenseId IS NULL').run(accountId, last4);
+        return { ok: true };
+      });
+
+      app.get('/card-payments', async (req) => {
+        const { accountId } = who(req);
+        const rows = db
+          .prepare(
+            `SELECT p.id, p.at, p.amountMinor, p.currency, p.merchant, p.last4, p.addedExpenseId
+               FROM tax_card_payments p
+               LEFT JOIN tax_cards c ON c.accountId = p.accountId AND c.last4 = p.last4
+              WHERE p.accountId = ? AND p.dismissedAt IS NULL AND (c.role IS NULL OR c.role <> 'personal')
+              ORDER BY p.at DESC LIMIT 200`,
+          )
+          .all(accountId) as Parameters<typeof cardPaymentRow>[0][];
+        return { payments: rows.map(cardPaymentRow) };
+      });
+
+      app.post('/card-payments', async (req, reply) => {
+        const { accountId, userId } = who(req);
+        const body = CardPaymentBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Check the payment fields.' });
+        const p = body.data;
+        if (cardRole(accountId, p.last4) === 'personal') return reply.code(200).send({ stored: false, duplicate: false });
+        if (p.last4) db.prepare('INSERT OR IGNORE INTO tax_cards (accountId, last4, role, label) VALUES (?, ?, NULL, ?)').run(accountId, p.last4, '');
+        const res = db
+          .prepare('INSERT OR IGNORE INTO tax_card_payments (accountId, id, at, amountMinor, currency, merchant, last4, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(accountId, p.id, p.at, Math.round(p.amount * 100), p.currency.toUpperCase(), p.merchant, p.last4, userId);
+        return reply.code(res.changes ? 201 : 200).send({ stored: true, duplicate: !res.changes });
+      });
+
+      app.post<{ Params: { id: string } }>('/card-payments/:id/add', async (req, reply) => {
+        const me = who(req);
+        const row = db
+          .prepare(
+            `SELECT p.at, p.amountMinor, p.currency, p.merchant, p.last4, p.dismissedAt, c.role
+               FROM tax_card_payments p LEFT JOIN tax_cards c ON c.accountId = p.accountId AND c.last4 = p.last4
+              WHERE p.accountId = ? AND p.id = ?`,
+          )
+          .get(me.accountId, req.params.id) as { at: number; amountMinor: number; currency: string; merchant: string; last4: string; dismissedAt: number | null; role: string | null } | undefined;
+        if (!row || row.dismissedAt || row.role === 'personal') return reply.code(404).send({ error: 'not_found', message: 'No such card payment.' });
+        const body = AddCardPaymentBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: 'invalid', message: 'Pick the event and the category.' });
+        const e = body.data;
+        if (me.allowedEventIds && !me.allowedEventIds.includes(e.eventId)) return reply.code(403).send({ error: 'forbidden', message: 'That event is not one of yours.' });
+        const now = Date.now();
+        const id = randomUUID();
+        const date = new Date(row.at).toISOString().slice(0, 10);
+        db.prepare(
+          `INSERT INTO tax_expenses (accountId, id, eventId, category, amountMinor, currency, date, vendor, note, createdBy, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(me.accountId, id, e.eventId, e.category, row.amountMinor, row.currency, date, e.vendor || row.merchant, e.note, me.userId, now, now);
+        db.prepare('UPDATE tax_card_payments SET addedExpenseId = ? WHERE accountId = ? AND id = ?').run(id, me.accountId, req.params.id);
+        return reply.code(201).send({ expense: listExpenses(me.accountId).find((x) => x.id === id) });
+      });
+
+      app.delete<{ Params: { id: string } }>('/card-payments/:id', async (req) => {
+        db.prepare('UPDATE tax_card_payments SET dismissedAt = ? WHERE accountId = ? AND id = ?').run(Date.now(), who(req).accountId, req.params.id);
+        return { ok: true };
       });
 
       // ── Invoice scanning ────────────────────────────────────────────────

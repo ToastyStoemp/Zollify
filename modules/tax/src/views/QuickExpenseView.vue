@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { checkPickedFile, fmtPrice, localIsoDay, type SalesEvent } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
-import { api, type Expense } from '../api';
+import { api, type CardPayment, type Expense } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -48,6 +48,9 @@ const photo = ref<{ base64: string; name: string } | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
 const added = ref<Expense[]>([]);
+/** Card payments the phone saw, newest first: one tap adds one to this event as an expense. */
+const payments = ref<CardPayment[]>([]);
+const addingPayment = ref<string | null>(null);
 
 function pickEvent(id: string): void {
   eventId.value = id;
@@ -66,7 +69,35 @@ onMounted(async () => {
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load the categories.';
   }
+  await loadPayments();
 });
+
+async function loadPayments(): Promise<void> {
+  try {
+    payments.value = (await api.cardPayments()).payments;
+  } catch {
+    // Without the list the form still works; the card payments simply are not offered.
+    payments.value = [];
+  }
+}
+
+/** Adds a card payment to the event picked here, with the category picked here. */
+async function addPayment(p: CardPayment): Promise<void> {
+  if (!eventId.value) return void (error.value = 'Pick the event this was for.');
+  addingPayment.value = p.id;
+  error.value = null;
+  try {
+    const saved = (await api.addCardPayment(p.id, { eventId: eventId.value, category: category.value })).expense;
+    added.value = [saved, ...added.value];
+    sdk().ui.toast(`${fmtPrice(p.amount, p.currency)} at ${p.merchant || 'the card'} added to ${event.value?.name ?? 'the event'}.`, { kind: 'success' });
+    await loadPayments();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not add that payment.';
+  } finally {
+    addingPayment.value = null;
+  }
+}
+const dateOf = (t: number) => new Date(t).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' });
 
 async function pickPhoto(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
@@ -161,6 +192,18 @@ function done(): void {
       <button type="submit" class="primary save" :disabled="busy">{{ busy ? 'Adding…' : 'Add expense' }}</button>
     </form>
 
+    <article v-if="payments.length" class="card">
+      <h2>Card payments</h2>
+      <p class="hint">Paid by card on the phone, most recent first. Add one to the event above, with the category picked above.</p>
+      <ul class="payments">
+        <li v-for="p in payments" :key="p.id">
+          <span class="who"><strong>{{ p.merchant || 'Card payment' }}</strong><small>{{ dateOf(p.at) }}<template v-if="p.last4"> · •••• {{ p.last4 }}</template><template v-if="p.addedExpenseId"> · added before</template></small></span>
+          <strong>{{ fmtPrice(p.amount, p.currency) }}</strong>
+          <button type="button" :disabled="addingPayment === p.id" @click="addPayment(p)">{{ addingPayment === p.id ? '…' : p.addedExpenseId ? 'Add again' : 'Add' }}</button>
+        </li>
+      </ul>
+    </article>
+
     <article v-if="added.length" class="card">
       <h2>Just added<template v-if="addedTotal !== null"> · {{ fmtPrice(addedTotal, currency) }}</template></h2>
       <ul class="added">
@@ -198,4 +241,11 @@ header h1 { margin: 0; font-size: 1.3rem; }
 .added li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: center; }
 .muted { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .ledger { font-size: .85rem; }
+.hint { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.payments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.payments li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: center; font-size: .9rem; }
+.payments .who { display: flex; flex-direction: column; min-width: 0; }
+.payments .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payments small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
+.payments button { min-height: 2.4rem; padding: 0 .8rem; }
 </style>

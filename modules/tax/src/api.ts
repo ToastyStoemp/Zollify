@@ -116,7 +116,30 @@ export interface YearMaterials {
   waste: { qty: number; cost: number; byMaterial: { id: string; name: string; unit: string; qty: number; cost: number }[] };
 }
 
+/** A card the phone has named by its last four digits; `role` is null until the owner marks it. */
+export interface CardRow {
+  last4: string;
+  role: 'business' | 'personal' | null;
+  label: string;
+}
+/** A payment the phone saw on a card (Google Wallet), kept until dismissed. */
+export interface CardPayment {
+  id: string;
+  at: number;
+  amount: number;
+  currency: string;
+  merchant: string;
+  last4: string;
+  addedExpenseId: string | null;
+}
+
 export const api = {
+  cards: () => sdk().http.get<{ cards: CardRow[] }>('cards'),
+  markCard: (last4: string, role: 'business' | 'personal', label: string) => sdk().http.put<{ ok: boolean }>(`cards/${last4}`, { role, label }),
+  cardPayments: () => sdk().http.get<{ payments: CardPayment[] }>('card-payments'),
+  /** Quick-adds a card payment as an expense on the event; the same payment can be added again. */
+  addCardPayment: (id: string, body: { eventId: string; category: string; vendor?: string; note?: string }) => sdk().http.post<{ expense: Expense }>(`card-payments/${id}/add`, body),
+  dismissCardPayment: (id: string) => sdk().http.del<{ ok: boolean }>(`card-payments/${id}`),
   /** A period's books as one zip - sales, lines, expenses and their invoices - for the accountant. */
   export: (from: string, to: string) => sdk().http.get<{ filename: string; base64: string; counts: { sales: number; lines: number; expenses: number; invoices: number } }>(`export${q({ from, to })}`),
   year: (year: number) => sdk().http.get<YearMaterials>(`year/${year}`),

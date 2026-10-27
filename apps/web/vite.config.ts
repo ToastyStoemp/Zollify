@@ -1,8 +1,7 @@
-import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import { buildStamp } from '../../scripts/build-version.mjs';
 
 /**
  * Host entries published at stable, unhashed paths so `index.html` can carry a
@@ -16,39 +15,10 @@ const hostInputs = Object.fromEntries(
 );
 
 /**
- * Build stamp shown in the sidebar and attached to diagnostic uploads:
- * version + short commit.
- *
- * ZOLLIFY_COMMIT first, `git rev-parse` only as a local-dev fallback: inside
- * the server's Docker build .git isn't even in the build context
- * (.dockerignore excludes it), so git always failed silently there and this
- * baked a bare, sha-less version into every Docker-built bundle - the same
- * bug that left scripts/publish-shell.mjs's published version frozen, since
- * that script computes this identically and treats a version as immutable
- * once its directory exists.
- *
- * `-`, not the semver-conventional `+`: this string is used verbatim as a
- * URL path segment (publish-shell.mjs's bundle.zip route), and `+` has
- * special meaning in URL encoding - confirmed live, the shell-updater
- * plugin's own native downloader failed on a `+`-containing URL while the
- * exact same URL opened fine in a browser (more lenient about it). `-` is
- * unambiguous in a path with zero encoding involved, at the minor cost of
- * this no longer being a strict semver build-metadata suffix - nothing here
- * ever semver-parses it, only compares it for exact string equality.
+ * Build stamp shown in the sidebar and attached to diagnostic uploads,
+ * MAJOR.MINOR.PATCH-<commit> - worked out in scripts/build-version.mjs, which
+ * publish-shell.mjs uses too, so the app and the server agree on it.
  */
-function buildStamp(): string {
-  const version = (JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string }).version;
-  let sha = process.env.ZOLLIFY_COMMIT && process.env.ZOLLIFY_COMMIT !== 'unknown' ? process.env.ZOLLIFY_COMMIT.slice(0, 7) : '';
-  if (!sha) {
-    try {
-      sha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch {
-      /* no git, and no env override either - version stays bare */
-    }
-  }
-  return sha ? `${version}-${sha}` : version;
-}
-
 export default defineConfig({
   define: { __ZOLLIFY_VERSION__: JSON.stringify(buildStamp()) },
   plugins: [vue()],

@@ -21,6 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The whole history: the patch number counts commits since the version was set.
+          fetch-depth: 0
+
+      # The build has no .git, so the version's patch number is worked out here (scripts/build-version.mjs).
+      - id: version
+        run: echo "patch=$(node scripts/build-version.mjs)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -41,6 +48,8 @@ jobs:
           tags: |
             ${{ steps.meta.outputs.image }}:latest
             ${{ steps.meta.outputs.image }}:${{ github.sha }}
-          build-args: ZOLLIFY_COMMIT=${{ github.sha }}
+          build-args: |
+            ZOLLIFY_COMMIT=${{ github.sha }}
+            ZOLLIFY_BUILD=${{ steps.version.outputs.patch }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

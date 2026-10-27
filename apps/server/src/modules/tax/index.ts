@@ -24,6 +24,7 @@ import { ShopifyOrdersClient, loadShopifyConfig } from './shopify';
 import { LexwareClient, buildFeeVoucher, buildRevenueVoucher, resolveCategoryId } from './lexware';
 import { loadAiConfig, matchEvent, parseInvoicePdf, pingAiKey } from './invoice-ai';
 import { round2, type KvCache } from './types';
+import { yearMaterials } from './year-materials';
 
 /**
  * Tax - the server half (the ZollTax port).
@@ -748,6 +749,15 @@ export function taxServerModule(jwtSecret: string): ServerModule {
           })
           .sort((a, b) => b.start.localeCompare(a.start));
         return { rows };
+      });
+
+      // ── Year in review ──────────────────────────────────────────────────
+      // Sales and the ledger's costs the page adds up itself; what the year's
+      // materials and misprints cost lives with Sourcing, read here.
+      app.get<{ Params: { year: string } }>('/year/:year', async (req, reply) => {
+        const year = Number(req.params.year);
+        if (!Number.isInteger(year) || year < 2000 || year > 2100) return reply.code(400).send({ error: 'invalid_request', message: 'Which year?' });
+        return yearMaterials(db, who(req).accountId, year);
       });
 
       // ── Invoice scanning ────────────────────────────────────────────────

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_expense_label">+ Expense</string>
+    <string name="widget_expense_description">Add something you spent at the event, in a few taps.</string>
+    <string name="wallet_listener_label">Zollify card payments</string>
+</resources>

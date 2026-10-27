@@ -9,6 +9,7 @@ import { sumupProvider } from './sumup';
 import { sumupCloudProvider } from './sumup-cloud';
 import { myposCarbonRemoteProvider } from './mypos-carbon-remote';
 import { nexiSmartposProvider } from './nexi-smartpos';
+import { adyenTerminalProvider } from './adyen-terminal';
 
 const providers: PaymentProvider[] = [
   manualProvider,
@@ -19,6 +20,7 @@ const providers: PaymentProvider[] = [
   sumupProvider,
   sumupCloudProvider,
   nexiSmartposProvider,
+  adyenTerminalProvider,
 ];
 
 export function allProviders(): PaymentProvider[] {

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { checkPickedFile } from '@zollify/shared';
+import { checkPickedFile, coveredByPerDiem } from '@zollify/shared';
 import { api, type Expense, type InvoiceScan, type PaidFrom, type PnlRow } from '../api';
 import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
@@ -96,6 +96,8 @@ const canScan = computed(() => Boolean(status.value?.ai.configured));
 // and show a total when they all agree with the event's currency, same as
 // the overview - otherwise adding e.g. USD to EUR would silently mislead.
 const expenseTotal = computed(() => expenses.value.reduce((s, e) => s + e.amount, 0));
+/** Food bought on days a per diem on this event covers: in the profit, but the flat rate already stands for it at tax time. */
+const covered = computed(() => new Set(coveredByPerDiem(expenses.value)));
 const expensesMixed = computed(() => expenses.value.some((e) => e.currency && e.currency !== (current.value?.currency || 'EUR')));
 
 async function loadPnl(): Promise<void> {
@@ -352,7 +354,7 @@ async function openInvoice(e: Expense): Promise<void> {
             <tr v-for="e in expenses" :key="e.id">
               <td class="mono">{{ e.date || '-' }}</td>
               <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span><span v-if="addedBy(e)" class="sub by"> · added by {{ addedBy(e) }}</span></td>
-              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · worked out</span><span v-if="e.paidFrom === 'cash'" class="sub"> · paid in cash</span></td>
+              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · {{ e.detail.kind === 'perdiem' && e.detail.auto ? 'automatic' : 'worked out' }}</span><span v-if="covered.has(e)" class="sub" title="Bought on a day a per diem covers: counted in the profit, but the per diem already stands for the meals at tax time"> · a per diem covers it</span><span v-if="e.paidFrom === 'cash'" class="sub"> · paid in cash</span></td>
               <td class="num">{{ fmt(e.amount, e.currency) }}</td>
               <td>
                 <button v-if="e.invoice" type="button" class="quiet link" @click="openInvoice(e)">{{ e.invoice.filename }}</button>

@@ -48,13 +48,18 @@ async function save(): Promise<void> {
   }
   busy.value = true;
   try {
-    take((await api.saveRates(parsed.data)).rates);
-    ok.value = 'Saved.';
+    const res = await api.saveRates(parsed.data);
+    take(res.rates);
+    ok.value = res.added ? `Saved. ${res.added} closed event${res.added === 1 ? ' got its' : 's got their'} per diems.` : 'Saved.';
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not save the rates.';
   } finally {
     busy.value = false;
   }
+}
+/** Switching the automatic per diems on starts them at this year unless a date is set, so a long history is not filled in unasked. */
+function autoToggled(): void {
+  if (rates.value.auto.on && !rates.value.auto.from) rates.value.auto.from = `${new Date().getFullYear()}-01-01`;
 }
 async function reset(code: string): Promise<void> {
   busy.value = true;
@@ -88,6 +93,14 @@ async function reset(code: string): Promise<void> {
       <label><span>At home, arrival / departure</span><input v-model.number="rates.domestic.reduced" type="number" min="0" step="0.01" /></label>
       <label><span>Elsewhere, full day</span><input v-model.number="rates.fallback.full" type="number" min="0" step="0.01" /></label>
       <label><span>Elsewhere, arrival / departure</span><input v-model.number="rates.fallback.reduced" type="number" min="0" step="0.01" /></label>
+    </div>
+    <h3>Automatic per diems</h3>
+    <p class="hint">On, every event gets its per diems the moment it closes - for the people below, at the rate for its country, with the day before and after as travel days when you say so - and nobody has to remember the button. An event that has a per diem already gets none; delete an automatic one and it stays gone. Food bought on the days a per diem covers is marked as such on the ledger and in the accountant's export, since the flat rate already stands for the meals.</p>
+    <div class="grid">
+      <label class="check"><input v-model="rates.auto.on" type="checkbox" @change="autoToggled" /> Add per diems when an event closes</label>
+      <label><span>People who go</span><input v-model.number="rates.auto.people" type="number" min="1" max="100" step="1" :disabled="!rates.auto.on" /></label>
+      <label class="check"><input v-model="rates.auto.travelDays" type="checkbox" :disabled="!rates.auto.on" /> The day before and after are travel days</label>
+      <label><span>For events ending from</span><input v-model="rates.auto.from" type="date" :disabled="!rates.auto.on" /></label>
     </div>
     <h3>By destination</h3>
     <div class="table-scroll">
@@ -124,6 +137,7 @@ h3 { margin: .2rem 0 0; font-size: .95rem; }
 .ok { margin: 0; color: var(--zfy-accent-ink, #0a5a4a); font-size: .875rem; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: .6rem; }
 .grid label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
+.grid label.check { flex-direction: row; align-items: center; gap: .4rem; min-height: 2.4rem; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); font-size: .9rem; }
 th { font-size: .7rem; text-transform: uppercase; letter-spacing: .05em; color: var(--zfy-muted, #5a6472); }

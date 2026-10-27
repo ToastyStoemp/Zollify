@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { round2 } from './money';
+import type { SalesEvent } from './types';
 import { countryCodeOf } from './vat';
 
 /**
@@ -25,6 +26,22 @@ export interface PerDiemRate {
 
 export const PerDiemRateSchema = z.object({ full: z.number().finite().min(0).max(1000), reduced: z.number().finite().min(0).max(1000) });
 
+/**
+ * Per diems added by themselves when an event closes, so nobody has to
+ * remember the button after every show: for the people who always go, with
+ * the day before and after as travel days when `travelDays` is on, for
+ * events ending on or after `from` (empty: any). An event that already has
+ * a per diem, a store, a test event or one without dates gets none.
+ */
+export const AutoPerDiemSchema = z.object({
+  on: z.boolean().default(false),
+  people: z.number().int().min(1).max(100).default(1),
+  travelDays: z.boolean().default(true),
+  from: z.string().regex(/^(\d{4}-\d{2}-\d{2})?$/).default(''),
+});
+export type AutoPerDiem = z.infer<typeof AutoPerDiemSchema>;
+export const AUTO_PER_DIEM_OFF: AutoPerDiem = { on: false, people: 1, travelDays: true, from: '' };
+
 export const TravelRatesSchema = z.object({
   /** Which country's rules: the business's own. */
   homeCountry: z.string().trim().toUpperCase().length(2).default('DE'),
@@ -38,6 +55,7 @@ export const TravelRatesSchema = z.object({
   fallback: PerDiemRateSchema.default({ full: 63, reduced: 42 }),
   /** Per kilometre, by car. */
   mileagePerKm: z.number().finite().min(0).max(10).default(0.3),
+  auto: AutoPerDiemSchema.default({ ...AUTO_PER_DIEM_OFF }),
 });
 export type TravelRates = z.infer<typeof TravelRatesSchema>;
 
@@ -77,6 +95,7 @@ export const TRAVEL_RATE_DEFAULTS: Record<string, TravelRates> = {
     },
     fallback: { full: 63, reduced: 42 },
     mileagePerKm: 0.3,
+    auto: { ...AUTO_PER_DIEM_OFF },
   },
   BE: {
     homeCountry: 'BE',
@@ -101,6 +120,7 @@ export const TRAVEL_RATE_DEFAULTS: Record<string, TravelRates> = {
     },
     fallback: { full: 80, reduced: 40 },
     mileagePerKm: 0.4316,
+    auto: { ...AUTO_PER_DIEM_OFF },
   },
 };
 
@@ -122,6 +142,7 @@ export function perDiemRateFor(rates: TravelRates, destinationCountry: string): 
 
 const DAY = 86_400_000;
 const daysInclusive = (start: string, end: string): number => Math.round((Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / DAY) + 1;
+const shiftDay = (day: string, by: number): string => new Date(Date.parse(`${day}T12:00:00Z`) + by * DAY).toISOString().slice(0, 10);
 
 export interface PerDiemInput {
   /** The trip, both days included - by default the event's dates, a day either side for travel. */
@@ -191,14 +212,14 @@ export function splitShared(amount: number, events: { id: string; days: number }
   });
 }
 
-/** What a computed expense remembers, so it can be read and recomputed later. */
+/** What a computed expense remembers, so it can be read and recomputed later. `auto` marks a per diem the account added by itself. */
 export type ExpenseDetail =
-  | { kind: 'perdiem'; country: string; start: string; end: string; people: number; rate: PerDiemRate; year: number }
+  | { kind: 'perdiem'; country: string; start: string; end: string; people: number; rate: PerDiemRate; year: number; auto?: boolean }
   | { kind: 'mileage'; km: number; roundTrip: boolean; trips: number; ratePerKm: number }
   | { kind: 'shared'; groupId: string; method: SplitMethod; total: number; of: number };
 
 export const ExpenseDetailSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('perdiem'), country: z.string().max(2), start: z.string().max(10), end: z.string().max(10), people: z.number().int().min(0).max(100), rate: PerDiemRateSchema, year: z.number().int() }),
+  z.object({ kind: z.literal('perdiem'), country: z.string().max(2), start: z.string().max(10), end: z.string().max(10), people: z.number().int().min(0).max(100), rate: PerDiemRateSchema, year: z.number().int(), auto: z.boolean().optional() }),
   z.object({ kind: z.literal('mileage'), km: z.number().finite().min(0), roundTrip: z.boolean(), trips: z.number().int().min(0).max(100), ratePerKm: z.number().finite().min(0) }),
   z.object({ kind: z.literal('shared'), groupId: z.string().max(64), method: z.enum(['days', 'even']), total: z.number().finite().min(0), of: z.number().int().min(1).max(500) }),
 ]);
@@ -217,4 +238,77 @@ export function describeDetail(d: ExpenseDetail, currency: string): string {
     case 'shared':
       return `Share of ${money(d.total)} split ${d.method === 'days' ? 'by days' : 'evenly'} over ${d.of} events`;
   }
+}
+
+/** What the automatic per diems need to know of an event. */
+export type PerDiemEvent = Pick<SalesEvent, 'id' | 'kind' | 'status' | 'dateStart' | 'dateEnd' | 'venue' | 'currency' | 'test' | 'deletedAt'>;
+
+/** A per diem expense an event is due, ready to store. */
+export interface DuePerDiem {
+  eventId: string;
+  currency: string;
+  /** The first day of the trip. */
+  date: string;
+  amount: number;
+  detail: Extract<ExpenseDetail, { kind: 'perdiem' }>;
+  note: string;
+}
+
+/**
+ * The per diems to add by themselves: one per closed event (not a store,
+ * not the test event) with dates, ending on or after the setting's `from`,
+ * that is not in `done` - the events that have a per diem already or had
+ * their automatic one once (deleting it is a decision, not a gap). The trip
+ * is the event's dates with a travel day either side when the setting says,
+ * at the rate for the venue's country, for the people set. Pure; the
+ * caller stores them.
+ */
+export function perDiemsDue(events: Iterable<PerDiemEvent>, done: ReadonlySet<string>, rates: TravelRates): DuePerDiem[] {
+  const auto = rates.auto ?? AUTO_PER_DIEM_OFF;
+  if (!auto.on) return [];
+  const out: DuePerDiem[] = [];
+  for (const e of events) {
+    if (e.deletedAt || e.test || e.kind === 'store' || e.status !== 'closed' || done.has(e.id)) continue;
+    const first = e.dateStart || e.dateEnd;
+    const last = e.dateEnd || e.dateStart;
+    if (!first || !last || last < first) continue;
+    if (auto.from && last < auto.from) continue;
+    const start = auto.travelDays ? shiftDay(first, -1) : first;
+    const end = auto.travelDays ? shiftDay(last, 1) : last;
+    const country = e.venue?.country ?? '';
+    const { rate } = perDiemRateFor(rates, country);
+    const r = perDiem({ start, end, people: auto.people, rate });
+    if (!r || !(r.amount > 0)) continue;
+    const code = countryCodeOf(country) || country.trim().slice(0, 2).toUpperCase();
+    const detail: DuePerDiem['detail'] = { kind: 'perdiem', country: code, start, end, people: auto.people, rate: { ...rate }, year: rates.year, auto: true };
+    out.push({ eventId: e.id, currency: e.currency || rates.currency, date: start, amount: r.amount, detail, note: describeDetail(detail, e.currency || rates.currency) });
+  }
+  return out;
+}
+
+/** The least an expense must carry to be matched against the per diems on its event. */
+export interface CoverableExpense {
+  eventId: string;
+  category: string;
+  /** YYYY-MM-DD; an expense without a date is never covered. */
+  date: string;
+  detail?: ExpenseDetail | null;
+}
+
+/**
+ * Food bought on a day a per diem on the same event covers. It stays in the
+ * event's profit - the money went - but for income tax the flat rate already
+ * stands for the traveller's meals (Germany: §4 Abs. 5 Nr. 5 EStG), so the
+ * accountant leaves these out, or cuts the per diem by the meal when the
+ * business fed a helper. The same objects back, so the caller can mark them.
+ */
+export function coveredByPerDiem<T extends CoverableExpense>(expenses: readonly T[]): T[] {
+  const ranges = new Map<string, { start: string; end: string }[]>();
+  for (const e of expenses) {
+    if (e.detail?.kind !== 'perdiem' || !e.eventId || !e.detail.start || !e.detail.end) continue;
+    const list = ranges.get(e.eventId) ?? [];
+    list.push({ start: e.detail.start, end: e.detail.end });
+    ranges.set(e.eventId, list);
+  }
+  return expenses.filter((e) => e.category === 'food' && e.date && (ranges.get(e.eventId) ?? []).some((r) => e.date >= r.start && e.date <= r.end));
 }

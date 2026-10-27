@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { csvCell, vatBreakdown, type SalesEvent, type Transaction } from '@zollify/shared';
+import { coveredByPerDiem, csvCell, vatBreakdown, type ExpenseDetail, type SalesEvent, type Transaction } from '@zollify/shared';
 
 /**
  * A period's books as one zip for the accountant: every sale and every sale
@@ -24,6 +24,8 @@ export interface ExportExpense {
   bookedVoucherId: string | null;
   /** How it was paid: card, cash (out of the till's box), other; null where it was not said. */
   paidFrom?: string | null;
+  /** How a computed expense came about; a per diem's says which days it covers. */
+  detail?: ExpenseDetail | null;
   createdBy?: { email: string | null } | null;
 }
 
@@ -88,8 +90,9 @@ export function buildBooksZip(input: ExportInput): { filename: string; bytes: Ui
     });
   }
 
-  const expensesCsv = [row(['Date', 'Category', 'Vendor', 'Note', 'Amount', 'Currency', 'Event', 'Invoice file', 'Booked voucher', 'Paid with', 'Added by', 'Expense id'])];
+  const expensesCsv = [row(['Date', 'Category', 'Vendor', 'Note', 'Amount', 'Currency', 'Event', 'Invoice file', 'Booked voucher', 'Paid with', 'Per diem covers it', 'Added by', 'Expense id'])];
   const files: Record<string, Uint8Array> = {};
+  const covered = new Set(coveredByPerDiem(input.expenses));
   let invoices = 0;
   for (const e of [...input.expenses].sort((a, b) => a.date.localeCompare(b.date) || a.vendor.localeCompare(b.vendor))) {
     let path = '';
@@ -101,7 +104,7 @@ export function buildBooksZip(input: ExportInput): { filename: string; bytes: Ui
         invoices += 1;
       }
     }
-    expensesCsv.push(row([e.date, label.get(e.category) ?? e.category, e.vendor, e.note, round2(e.amount), e.currency, e.eventId ? eventName(e.eventId) : '', path, e.bookedVoucherId ?? '', e.paidFrom ?? '', e.createdBy?.email ?? '', e.id]));
+    expensesCsv.push(row([e.date, label.get(e.category) ?? e.category, e.vendor, e.note, round2(e.amount), e.currency, e.eventId ? eventName(e.eventId) : '', path, e.bookedVoucherId ?? '', e.paidFrom ?? '', covered.has(e) ? 'yes' : '', e.createdBy?.email ?? '', e.id]));
   }
 
   const at = input.generatedAt ?? new Date();
@@ -114,6 +117,8 @@ export function buildBooksZip(input: ExportInput): { filename: string; bytes: Ui
     '                Status "reverted" is a sale taken back: it is kept so receipt numbers run without gaps - leave it out of totals.',
     `sale-lines.csv  One row per item on those sales (${lines}), with the VAT rate applied to the line.`,
     `expenses.csv    The ledger's costs dated in the period (${input.expenses.length}), with the invoice file where one was attached.`,
+    '                "Per diem covers it" is yes on food bought on a day a per diem on the same event covers: the money went, but',
+    '                the flat rate already stands for the meals, so it is not deducted twice (or the per diem is cut for a meal provided).',
     `invoices/       The attached invoices (${invoices}), named by date, vendor and expense id.`,
     '',
     'Dates and times are UTC. Amounts use a dot as the decimal mark.',

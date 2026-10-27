@@ -95,6 +95,7 @@ describe("a sale's lines", () => {
 describe('settings', () => {
   it('fill in defaults and refuse nonsense', () => {
     expect(LoyaltySettingsSchema.parse({}).scheme).toBe('stamps');
+    expect(LoyaltySettingsSchema.parse({}).staffMaySet).toBe(false);
     expect(LoyaltySettingsSchema.parse({ reward: { kind: 'percent', percent: 15 } }).reward).toEqual({ kind: 'percent', percent: 15 });
     expect(LoyaltySettingsSchema.safeParse({ reward: { kind: 'percent', percent: 150 } }).success).toBe(false);
     expect(LoyaltySettingsSchema.safeParse({ rewardCost: 0 }).success).toBe(false);

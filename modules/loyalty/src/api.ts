@@ -18,6 +18,8 @@ export interface LedgerRow {
   amount: number;
   at: number;
   note: string;
+  /** Who made a hand entry; null on a sale's row. */
+  by: { userId: string; email: string | null } | null;
 }
 export interface GoogleView {
   issuerId: string;
@@ -37,6 +39,8 @@ export interface SettingsView {
 export interface Lookup {
   member: { id: string; code: string; name: string; standing: LoyaltyStanding };
   settings: { programme: string; scheme: LoyaltyScheme; rewardCost: number; reward: LoyaltyReward; stampEvery: number; pointsPerUnit: number; minSpend: number };
+  /** Whether this person may set the card's balance (admins always; staff when the settings allow). */
+  maySet: boolean;
 }
 
 export const api = {
@@ -48,6 +52,10 @@ export const api = {
   members: () => sdk().http.get<{ members: MemberView[] }>('members'),
   member: (id: string) => sdk().http.get<{ member: MemberView; ledger: LedgerRow[] }>(`members/${encodeURIComponent(id)}`),
   adjust: (id: string, delta: number, note: string) => sdk().http.post<{ member: MemberView }>(`members/${encodeURIComponent(id)}/adjust`, { delta, note }),
+  /** The card set to a balance - moving a customer over from an old card. */
+  setBalance: (id: string, balance: number, note: string) => sdk().http.post<{ member: Lookup['member'] }>(`members/${encodeURIComponent(id)}/set`, { balance, note }),
+  editLedger: (id: string, amount: number, note: string) => sdk().http.put<{ ledger: LedgerRow[]; standing: LoyaltyStanding }>(`ledger/${encodeURIComponent(id)}`, { amount, note }),
+  removeLedger: (id: string) => sdk().http.del<{ ledger: LedgerRow[]; standing: LoyaltyStanding }>(`ledger/${encodeURIComponent(id)}`),
   erase: (id: string) => sdk().http.del<{ ok: boolean }>(`members/${encodeURIComponent(id)}`),
   recount: () => sdk().http.post<{ members: number }>('recount'),
   lookup: (code: string) => sdk().http.get<Lookup>(`lookup?code=${encodeURIComponent(code)}`),

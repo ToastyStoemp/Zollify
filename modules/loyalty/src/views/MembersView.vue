@@ -17,6 +17,8 @@ const currency = ref('EUR');
 const query = ref('');
 const open = ref<{ member: MemberView; ledger: LedgerRow[] } | null>(null);
 const adjust = ref({ delta: '1', note: '' });
+/** A hand entry being changed: its id, and the amount and note as typed. */
+const editing = ref<{ id: string; amount: string; note: string } | null>(null);
 const error = ref<string | null>(null);
 const loaded = ref(false);
 const showQr = ref(false);
@@ -64,6 +66,31 @@ async function giveOrTake(sign: 1 | -1): Promise<void> {
     sdk().ui.toast(`${Math.abs(n)} ${unit(Math.abs(n))} ${n > 0 ? 'given' : 'taken'}.`, { kind: 'success' });
   } catch (err) {
     error.value = errorText(err, 'Could not change that.');
+  }
+}
+const byText = (l: LedgerRow): string => (l.by ? (l.by.email ?? 'a removed user').split('@')[0]! : '');
+async function saveEntry(): Promise<void> {
+  if (!open.value || !editing.value) return;
+  const amount = Math.round(Number(editing.value.amount));
+  if (!amount) return void (error.value = 'An entry needs an amount other than zero - remove it instead.');
+  try {
+    const res = await api.editLedger(editing.value.id, amount, editing.value.note.trim());
+    open.value = { member: { ...open.value.member, standing: res.standing }, ledger: res.ledger };
+    members.value = members.value.map((m) => (m.id === open.value!.member.id ? open.value!.member : m));
+    editing.value = null;
+  } catch (err) {
+    error.value = errorText(err, 'Could not change that entry.');
+  }
+}
+async function removeEntry(l: LedgerRow): Promise<void> {
+  if (!open.value) return;
+  if (!(await sdk().ui.confirm(`${l.amount > 0 ? '+' : ''}${l.amount} ${l.note ? `(${l.note})` : ''} is taken out of the card's count.`, 'Remove this entry?', { confirm: 'Remove' }))) return;
+  try {
+    const res = await api.removeLedger(l.id);
+    open.value = { member: { ...open.value.member, standing: res.standing }, ledger: res.ledger };
+    members.value = members.value.map((m) => (m.id === open.value!.member.id ? open.value!.member : m));
+  } catch (err) {
+    error.value = errorText(err, 'Could not remove that entry.');
   }
 }
 async function erase(m: MemberView): Promise<void> {
@@ -162,7 +189,23 @@ function printQr(): void {
         </div>
         <ul class="ledger">
           <li v-for="l in open.ledger" :key="l.id">
-            <span>{{ when(l.at) }}</span><span class="sub">{{ l.saleId ? (l.amount < 0 ? 'reward used' : 'sale') : l.note || 'by hand' }}</span><strong :class="l.amount < 0 ? 'bad' : 'good'">{{ l.amount > 0 ? '+' : '' }}{{ l.amount }}</strong>
+            <template v-if="editing?.id === l.id">
+              <form class="editrow" @submit.prevent="saveEntry">
+                <input v-model="editing.amount" type="number" step="1" aria-label="Amount" />
+                <input v-model="editing.note" type="text" maxlength="200" aria-label="Note" />
+                <button type="submit" class="primary">Save</button>
+                <button type="button" class="quiet" @click="editing = null">Cancel</button>
+              </form>
+            </template>
+            <template v-else>
+              <span>{{ when(l.at) }}</span>
+              <span class="sub">{{ l.saleId ? (l.amount < 0 ? 'reward used' : 'sale') : l.note || 'by hand' }}<template v-if="byText(l)"> · {{ byText(l) }}</template></span>
+              <strong :class="l.amount < 0 ? 'bad' : 'good'">{{ l.amount > 0 ? '+' : '' }}{{ l.amount }}</strong>
+              <span v-if="!l.saleId" class="rowacts">
+                <button type="button" class="quiet" aria-label="Change entry" @click="editing = { id: l.id, amount: String(l.amount), note: l.note }">Edit</button>
+                <button type="button" class="quiet danger" aria-label="Remove entry" @click="removeEntry(l)"><Icon name="x" :size="12" /></button>
+              </span>
+            </template>
           </li>
         </ul>
       </article>
@@ -202,7 +245,11 @@ tbody tr:last-child td { border-bottom: 0; }
 .adjust { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto auto; gap: .4rem; align-items: center; }
 .adjust input { min-width: 0; }
 .ledger { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
-.ledger li { display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; }
+.ledger li { display: grid; grid-template-columns: auto 1fr auto auto; gap: .6rem; align-items: center; }
+.ledger li:has(> form) { grid-template-columns: 1fr; }
+.editrow { display: grid; grid-template-columns: 5rem minmax(0, 1fr) auto auto; gap: .4rem; align-items: center; }
+.rowacts { display: flex; gap: .2rem; }
+.rowacts .quiet { min-height: 1.8rem; padding: 0 .4rem; font-size: .78rem; }
 .good { color: var(--zfy-accent-ink, #0a5a4a); }
 .bad { color: var(--zfy-danger, #c6512f); }
 @media (max-width: 800px) { .two { grid-template-columns: 1fr; } .adjust { grid-template-columns: 4rem 1fr; } }

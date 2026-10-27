@@ -279,6 +279,40 @@ describe("the owner's hand", () => {
   });
 });
 
+describe('a balance set by hand - moving a customer over', () => {
+  let entryId = '';
+  it('is refused to staff until an admin allows it, then logged with who did it', async () => {
+    expect((await call(staff, 'POST', `/members/${memberId}/set`, { balance: 7 })).statusCode).toBe(403);
+    expect((await call(staff, 'GET', `/lookup?code=${code}`)).json().maySet).toBe(false);
+    const current = (await call(owner, 'GET', '/settings')).json().settings;
+    expect((await call(owner, 'PUT', '/settings', { ...current, staffMaySet: true })).statusCode).toBe(200);
+    expect((await call(staff, 'GET', `/lookup?code=${code}`)).json().maySet).toBe(true);
+    const set = await call(staff, 'POST', `/members/${memberId}/set`, { balance: 7, note: 'old paper card' });
+    expect(set.statusCode).toBe(200);
+    expect(set.json().member.standing).toMatchObject({ balance: 7 });
+    const ledger = (await call(owner, 'GET', `/members/${memberId}`)).json().ledger;
+    expect(ledger[0]).toMatchObject({ amount: -1, note: 'old paper card', by: { email: 'staff@example.test' } });
+    expect(ledger.find((l: { note: string }) => l.note === 'sorry for the wait').by.email).toBe('shop@example.test');
+    expect(ledger.find((l: { saleId: string | null }) => l.saleId === 't1').by).toBeNull();
+    entryId = ledger[0].id;
+    expect((await call(staff, 'POST', `/members/${memberId}/set`, { balance: -1 })).statusCode).toBe(400);
+  });
+
+  it('is the admin\'s to change or remove; sale rows are not', async () => {
+    expect((await call(staff, 'PUT', `/ledger/${entryId}`, { amount: 5, note: 'x' })).statusCode).toBe(403);
+    const edited = await call(owner, 'PUT', `/ledger/${entryId}`, { amount: 3, note: 'old card, recounted' });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().standing.balance).toBe(11);
+    expect(edited.json().ledger[0]).toMatchObject({ amount: 3, note: 'old card, recounted', by: { email: 'staff@example.test' } });
+    expect((await call(owner, 'PUT', '/ledger/t1:earn', { amount: 99, note: '' })).statusCode).toBe(404);
+    expect((await call(owner, 'DELETE', '/ledger/t1:earn')).statusCode).toBe(404);
+    const removed = await call(owner, 'DELETE', `/ledger/${entryId}`);
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json().standing.balance).toBe(8);
+    expect((await call(owner, 'DELETE', `/ledger/${entryId}`)).statusCode).toBe(404);
+  });
+});
+
 describe('Google Wallet', () => {
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const pem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;

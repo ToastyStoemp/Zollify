@@ -18,6 +18,9 @@ const found = ref<Lookup | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
 const itemPrice = ref('');
+/** Setting the card to a balance (an old paper card brought over): open when allowed. */
+const setting = ref(false);
+const setTo = ref('');
 const currency = computed(() => sdk().data.events.active()?.currency ?? sdk().account()?.profile.defaultCurrency ?? 'EUR');
 const money = (n: number) => fmtPrice(n, currency.value);
 const onSale = computed(() => sdk().till.findLine(LOYALTY_MEMBER_LINE_KEY));
@@ -50,6 +53,24 @@ async function look(): Promise<void> {
   } catch (err) {
     found.value = null;
     error.value = errorText(err, 'No card with that code - or no connection to check it.');
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function setBalance(): Promise<void> {
+  if (!found.value) return;
+  const n = Math.round(Number(setTo.value));
+  if (!(n >= 0)) return void (error.value = 'What should the balance be?');
+  busy.value = true;
+  error.value = null;
+  try {
+    const res = await api.setBalance(found.value.member.id, n, 'old card brought over');
+    found.value = { ...found.value, member: res.member };
+    setting.value = false;
+    sdk().ui.toast(`Set to ${n} ${unit(n)}.`, { kind: 'success' });
+  } catch (err) {
+    error.value = errorText(err, 'Could not set the balance.');
   } finally {
     busy.value = false;
   }
@@ -100,6 +121,15 @@ function useReward(): void {
           <label v-if="needsPrice" class="price"><span>Price of the free item</span><input v-model="itemPrice" type="text" inputmode="decimal" placeholder="0.00" /></label>
           <button type="button" class="primary" @click="useReward">Use a reward{{ rewardValue > 0 ? ` · ${money(rewardValue)} off` : '' }}</button>
         </template>
+        <template v-if="found.maySet">
+          <button v-if="!setting" type="button" class="quiet" @click="setting = true; setTo = String(standing.balance)">Set the balance (old card brought over)</button>
+          <form v-else class="setrow" @submit.prevent="setBalance">
+            <input v-model="setTo" type="number" min="0" step="1" aria-label="New balance" />
+            <button type="submit" class="primary" :disabled="busy">Set to {{ setTo || 0 }} {{ unit(Number(setTo) || 0) }}</button>
+            <button type="button" class="quiet" @click="setting = false">Cancel</button>
+          </form>
+          <p class="hint">Logged with your name; an admin sees and can change it.</p>
+        </template>
       </div>
     </template>
     <p v-else class="hint">The customer's card is the QR on their phone or the code under it. Scanning the QR into the till's search box puts the sale on the card too.</p>
@@ -118,4 +148,6 @@ function useReward(): void {
 .actions { display: flex; flex-direction: column; gap: .5rem; }
 .actions button { min-height: 2.8rem; }
 .price { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
+.setrow { display: grid; grid-template-columns: 6rem 1fr auto; gap: .4rem; align-items: center; }
+.setrow input { min-width: 0; }
 </style>

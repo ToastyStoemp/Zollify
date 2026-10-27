@@ -132,6 +132,7 @@ async function removeGoogle(): Promise<void> {
         <label><span>Sales below this earn nothing ({{ currency }}, 0 for any)</span><input v-model.number="form.minSpend" type="number" min="0" step="0.01" /></label>
         <label><span>Erase a card unused for (months, 0 never)</span><input v-model.number="form.eraseAfterMonths" type="number" min="0" max="120" step="1" /></label>
         <label class="wide"><span>A line on the join page</span><input v-model="form.joinIntro" type="text" maxlength="400" placeholder="Thanks for coming back - every visit counts." /></label>
+        <label class="wide check"><input v-model="form.staffMaySet" type="checkbox" /> <span>Staff may set a card's balance at the till - for moving customers over from an old card. Each change is logged with who made it, under Loyalty, where you can change or remove it.</span></label>
       </div>
       <div class="actions"><button type="submit" class="primary" :disabled="busy === 'save'">Save</button></div>
     </form>
@@ -175,6 +176,8 @@ h2 { margin: 0; font-size: 1.05rem; }
 .grid label { display: flex; flex-direction: column; gap: .2rem; font-size: .8rem; }
 .grid .wide { grid-column: 1 / -1; }
 .file small { color: var(--zfy-muted, #5a6472); }
+.grid .check { flex-direction: row; align-items: flex-start; gap: .5rem; font-size: .85rem; }
+.grid .check input { margin-top: .2rem; }
 .actions { display: flex; gap: .4rem; }
 .join { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
 .joinmeta { display: flex; flex-direction: column; gap: .4rem; min-width: 0; }

@@ -244,7 +244,10 @@ counts each member's stamps from the synced sales (a reverted sale takes them
 back, a test-mode sale stamps nothing) and brings the pass up to date after
 each change. Members, their ledger, stamps given by hand, a recount after the
 rules change, and erasure are under Loyalty; a card unused for the set number
-of months is erased by itself. Kept about a member: email, name, the code and
+of months is erased by itself. With "Staff may set a card's balance" on, staff
+can set a card to a figure at the till - moving customers over from an old
+paper card - and each such entry says who made it, for an admin to change or
+remove. Kept about a member: email, name, the code and
 the ledger. Apple Wallet is not offered yet.
 
 **Commissions** track custom work from request to pickup (Requested, Accepted,

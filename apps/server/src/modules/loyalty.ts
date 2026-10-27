@@ -104,6 +104,9 @@ function migrate(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS loyalty_ledger_member ON loyalty_ledger (accountId, memberId);
   `);
+  // Who made a hand entry (a stamp given, a balance set), added later; sale rows have none.
+  const cols = (db.prepare('PRAGMA table_info(loyalty_ledger)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('byUser')) db.exec('ALTER TABLE loyalty_ledger ADD COLUMN byUser TEXT');
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────
@@ -178,6 +181,20 @@ function memberById(db: Database.Database, accountId: string, id: string): Membe
 /** A confirmed member by card code, with the account it belongs to. */
 function memberByCode(db: Database.Database, code: string): (MemberRow & { accountId: string }) | undefined {
   return db.prepare(`SELECT accountId, ${MEMBER_COLS} FROM loyalty_members WHERE code = ? AND confirmedAt IS NOT NULL`).get(code) as (MemberRow & { accountId: string }) | undefined;
+}
+
+const emailOf = (db: Database.Database, userId: string | null): string | null => (userId ? ((db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as { email: string } | undefined)?.email ?? null) : null);
+
+/** A hand entry: stamps given or taken, or a balance set - with who did it. */
+function handEntry(db: Database.Database, accountId: string, memberId: string, amount: number, note: string, byUser: string): void {
+  db.prepare('INSERT INTO loyalty_ledger (accountId, id, memberId, saleId, amount, at, note, byUser) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)').run(accountId, `adj:${randomUUID()}`, memberId, amount, Date.now(), note, byUser);
+  if (amount > 0) db.prepare('UPDATE loyalty_members SET lastEarnedAt = ? WHERE accountId = ? AND id = ?').run(Date.now(), accountId, memberId);
+}
+
+/** The ledger as the owner sees it: sale rows and hand rows, the latter with who made them. */
+function ledgerOf(db: Database.Database, accountId: string, memberId: string) {
+  const rows = db.prepare('SELECT id, saleId, amount, at, note, byUser FROM loyalty_ledger WHERE accountId = ? AND memberId = ? ORDER BY at DESC LIMIT 200').all(accountId, memberId) as { id: string; saleId: string | null; amount: number; at: number; note: string; byUser: string | null }[];
+  return rows.map((r) => ({ id: r.id, saleId: r.saleId, amount: r.amount, at: r.at, note: r.note, by: r.byUser ? { userId: r.byUser, email: emailOf(db, r.byUser) } : null }));
 }
 
 function standing(db: Database.Database, accountId: string, memberId: string, s: LoyaltySettings): LoyaltyStanding {
@@ -320,6 +337,8 @@ const JoinBody = z.object({
   captchaSolution: z.string().max(40).default(''),
 });
 const AdjustBody = z.object({ delta: z.number().int().min(-100_000).max(100_000), note: z.string().trim().max(200).default('') });
+const SetBody = z.object({ balance: z.number().int().min(0).max(100_000), note: z.string().trim().max(200).default('') });
+const LedgerEditBody = z.object({ amount: z.number().int().min(-100_000).max(100_000), note: z.string().trim().max(200).default('') });
 
 // ── Pages ───────────────────────────────────────────────────────────────────
 
@@ -542,8 +561,7 @@ export function loyaltyServerModule(jwtSecret: string): ServerModule {
         if (me.role === 'member') return reply.code(403).send(forbidden);
         const m = memberById(db, me.accountId, req.params.id);
         if (!m || !m.confirmedAt) return reply.code(404).send(bad('No such member.'));
-        const ledger = db.prepare('SELECT id, saleId, amount, at, note FROM loyalty_ledger WHERE accountId = ? AND memberId = ? ORDER BY at DESC LIMIT 200').all(me.accountId, m.id);
-        return { member: view(me.accountId, settingsOf(db, me.accountId), m), ledger };
+        return { member: view(me.accountId, settingsOf(db, me.accountId), m), ledger: ledgerOf(db, me.accountId, m.id) };
       });
 
       /** Stamps given or taken by hand - a goodwill stamp, a correction. */
@@ -554,10 +572,50 @@ export function loyaltyServerModule(jwtSecret: string): ServerModule {
         if (!m || !m.confirmedAt) return reply.code(404).send(bad('No such member.'));
         const parsed = AdjustBody.safeParse(req.body);
         if (!parsed.success || !parsed.data.delta) return reply.code(400).send(bad('How many, and why?'));
-        db.prepare('INSERT INTO loyalty_ledger (accountId, id, memberId, saleId, amount, at, note) VALUES (?, ?, ?, NULL, ?, ?, ?)').run(me.accountId, `adj:${randomUUID()}`, m.id, parsed.data.delta, Date.now(), parsed.data.note || 'by hand');
-        if (parsed.data.delta > 0) db.prepare('UPDATE loyalty_members SET lastEarnedAt = ? WHERE accountId = ? AND id = ?').run(Date.now(), me.accountId, m.id);
+        handEntry(db, me.accountId, m.id, parsed.data.delta, parsed.data.note || 'by hand', me.userId);
         void wallet.push(ctx, me.accountId, m.id, originOf(req));
         return { member: view(me.accountId, settingsOf(db, me.accountId), m) };
+      });
+
+      /**
+       * A card set to a balance - moving a customer over from an old paper card. Staff may,
+       * when the settings allow it; the entry says who did it, and admins can change it.
+       */
+      app.post<{ Params: { id: string } }>('/members/:id/set', async (req, reply) => {
+        const me = who(req);
+        const s = settingsOf(db, me.accountId);
+        if (me.role === 'member' && !s.staffMaySet) return reply.code(403).send({ error: 'forbidden', message: 'Only an admin can set a balance; an admin can allow staff to under Settings → Loyalty card.' });
+        const m = memberById(db, me.accountId, req.params.id);
+        if (!m || !m.confirmedAt) return reply.code(404).send(bad('No such member.'));
+        const parsed = SetBody.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send(bad('What should the balance be?'));
+        const delta = parsed.data.balance - standing(db, me.accountId, m.id, s).balance;
+        if (delta) handEntry(db, me.accountId, m.id, delta, parsed.data.note || `set to ${parsed.data.balance}`, me.userId);
+        void wallet.push(ctx, me.accountId, m.id, originOf(req));
+        return { member: { id: m.id, code: m.code, name: m.name, standing: standing(db, me.accountId, m.id, s) } };
+      });
+
+      /** A hand entry changed or removed by an admin; sale rows are the sales' and stay. */
+      app.put<{ Params: { id: string } }>('/ledger/:id', async (req, reply) => {
+        const me = who(req);
+        if (me.role === 'member') return reply.code(403).send(forbidden);
+        const parsed = LedgerEditBody.safeParse(req.body);
+        if (!parsed.success) return reply.code(400).send(bad('Check the entry.'));
+        const row = db.prepare('SELECT memberId FROM loyalty_ledger WHERE accountId = ? AND id = ? AND saleId IS NULL').get(me.accountId, req.params.id) as { memberId: string } | undefined;
+        if (!row) return reply.code(404).send(bad('No such hand entry.'));
+        db.prepare('UPDATE loyalty_ledger SET amount = ?, note = ? WHERE accountId = ? AND id = ?').run(parsed.data.amount, parsed.data.note, me.accountId, req.params.id);
+        void wallet.push(ctx, me.accountId, row.memberId, originOf(req));
+        return { ledger: ledgerOf(db, me.accountId, row.memberId), standing: standing(db, me.accountId, row.memberId, settingsOf(db, me.accountId)) };
+      });
+
+      app.delete<{ Params: { id: string } }>('/ledger/:id', async (req, reply) => {
+        const me = who(req);
+        if (me.role === 'member') return reply.code(403).send(forbidden);
+        const row = db.prepare('SELECT memberId FROM loyalty_ledger WHERE accountId = ? AND id = ? AND saleId IS NULL').get(me.accountId, req.params.id) as { memberId: string } | undefined;
+        if (!row) return reply.code(404).send(bad('No such hand entry.'));
+        db.prepare('DELETE FROM loyalty_ledger WHERE accountId = ? AND id = ?').run(me.accountId, req.params.id);
+        void wallet.push(ctx, me.accountId, row.memberId, originOf(req));
+        return { ledger: ledgerOf(db, me.accountId, row.memberId), standing: standing(db, me.accountId, row.memberId, settingsOf(db, me.accountId)) };
       });
 
       app.delete<{ Params: { id: string } }>('/members/:id', async (req, reply) => {
@@ -585,6 +643,8 @@ export function loyaltyServerModule(jwtSecret: string): ServerModule {
         return {
           member: { id: m.id, code: m.code, name: m.name, standing: standing(db, me.accountId, m.id, s) },
           settings: { programme: s.programme, scheme: s.scheme, rewardCost: s.rewardCost, reward: s.reward, stampEvery: s.stampEvery, pointsPerUnit: s.pointsPerUnit, minSpend: s.minSpend },
+          /** Whether this person may set the card's balance (admins always; staff when allowed). */
+          maySet: me.role !== 'member' || s.staffMaySet,
         };
       });
     },

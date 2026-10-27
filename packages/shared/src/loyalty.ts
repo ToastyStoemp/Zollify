@@ -50,6 +50,12 @@ export const LoyaltySettingsSchema = z.object({
   joinIntro: z.string().trim().max(400).default(''),
   /** A member with nothing earned for this long is erased; 0 keeps them. */
   eraseAfterMonths: z.number().int().min(0).max(120).default(24),
+  /**
+   * Staff may set a card to a balance - for moving customers over from an
+   * old paper card, say. Every such change is logged with who made it, and
+   * admins can change or remove the entry. Off, only admins touch balances.
+   */
+  staffMaySet: z.boolean().default(false),
 });
 export type LoyaltySettings = z.infer<typeof LoyaltySettingsSchema>;
 export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = LoyaltySettingsSchema.parse({});

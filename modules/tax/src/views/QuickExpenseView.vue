@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { checkPickedFile, fmtPrice, localIsoDay, type SalesEvent } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
 import { api, type CardPayment, type Expense } from '../api';
+import { syncWalletPayments, walletAccess } from '../wallet';
 import { sdk } from '../runtime';
 
 /**
@@ -51,6 +52,8 @@ const added = ref<Expense[]>([]);
 /** Card payments the phone saw, newest first: one tap adds one to this event as an expense. */
 const payments = ref<CardPayment[]>([]);
 const addingPayment = ref<string | null>(null);
+/** Whether the phone lets Zollify read Wallet's payments: null on the web, where there is no phone to read. */
+const listening = ref<boolean | null>(null);
 
 function pickEvent(id: string): void {
   eventId.value = id;
@@ -69,9 +72,19 @@ onMounted(async () => {
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load the categories.';
   }
-  await loadPayments();
+  await refreshPayments();
 });
 
+/** Takes what the phone has seen of card payments since last time, then lists them. */
+async function refreshPayments(): Promise<void> {
+  try {
+    await syncWalletPayments();
+    listening.value = await walletAccess.listening();
+  } catch {
+    // The phone's notifications are a bonus: a failure here leaves the list as it was.
+  }
+  await loadPayments();
+}
 async function loadPayments(): Promise<void> {
   try {
     payments.value = (await api.cardPayments()).payments;
@@ -192,10 +205,13 @@ function done(): void {
       <button type="submit" class="primary save" :disabled="busy">{{ busy ? 'Adding…' : 'Add expense' }}</button>
     </form>
 
-    <article v-if="payments.length" class="card">
+    <article v-if="payments.length || listening !== null" class="card">
       <h2>Card payments</h2>
       <p class="hint">Paid by card on the phone, most recent first. Add one to the event above, with the category picked above.</p>
-      <ul class="payments">
+      <button v-if="listening === false" type="button" class="quiet" @click="walletAccess.openSettings()">Let Zollify read Google Wallet payments</button>
+      <button v-else-if="listening" type="button" class="quiet" @click="refreshPayments()">Check the phone for new payments</button>
+      <p v-if="!payments.length" class="hint">Nothing yet. Card payments the phone sees on business cards show here.</p>
+      <ul v-else class="payments">
         <li v-for="p in payments" :key="p.id">
           <span class="who"><strong>{{ p.merchant || 'Card payment' }}</strong><small>{{ dateOf(p.at) }}<template v-if="p.last4"> · •••• {{ p.last4 }}</template><template v-if="p.addedExpenseId"> · added before</template></small></span>
           <strong>{{ fmtPrice(p.amount, p.currency) }}</strong>

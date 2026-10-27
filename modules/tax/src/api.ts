@@ -137,6 +137,7 @@ export const api = {
   cards: () => sdk().http.get<{ cards: CardRow[] }>('cards'),
   markCard: (last4: string, role: 'business' | 'personal', label: string) => sdk().http.put<{ ok: boolean }>(`cards/${last4}`, { role, label }),
   cardPayments: () => sdk().http.get<{ payments: CardPayment[] }>('card-payments'),
+  sendCardPayment: (body: { id: string; at: number; amount: number; currency: string; merchant: string; last4: string }) => sdk().http.post<{ stored: boolean; duplicate: boolean }>('card-payments', body),
   /** Quick-adds a card payment as an expense on the event; the same payment can be added again. */
   addCardPayment: (id: string, body: { eventId: string; category: string; vendor?: string; note?: string }) => sdk().http.post<{ expense: Expense }>(`card-payments/${id}/add`, body),
   dismissCardPayment: (id: string) => sdk().http.del<{ ok: boolean }>(`card-payments/${id}`),

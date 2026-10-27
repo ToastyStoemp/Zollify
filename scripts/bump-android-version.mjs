@@ -9,6 +9,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildStamp } from './build-version.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const gradlePath = join(root, 'android', 'app', 'build.gradle');
@@ -16,18 +17,18 @@ const gradlePath = join(root, 'android', 'app', 'build.gradle');
 // Minutes-since-epoch: monotonically increasing, no state to track between runs.
 // Update detection still keys off this integer.
 const versionCode = Math.floor(Date.now() / 60000);
-// versionName = the git commit being built, so a running app maps 1:1 to a
-// commit. A "-dirty" suffix flags a build made with uncommitted changes.
-const versionName = gitVersion();
+// versionName = the same MAJOR.MINOR.PATCH-<commit> as the content updates
+// (scripts/build-version.mjs), so the app and its content read alike and an
+// APK built from the commit the server serves has nothing to download. It is
+// also the version the content updater gives the content inside the APK. A
+// "-dirty" suffix flags a build made with uncommitted changes.
+const versionName = buildStamp() + (dirty() ? '-dirty' : '');
 
-function gitVersion() {
+function dirty() {
   try {
-    const sha = execSync('git rev-parse --short HEAD', { cwd: root }).toString().trim();
-    const dirty = execSync('git status --porcelain', { cwd: root }).toString().trim() ? '-dirty' : '';
-    return sha + dirty;
+    return execSync('git status --porcelain', { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() !== '';
   } catch {
-    // No git (e.g. a source tarball) - fall back to a timestamp so it's never empty.
-    return new Date().toISOString().slice(0, 16).replace('T', ' ');
+    return false;
   }
 }
 

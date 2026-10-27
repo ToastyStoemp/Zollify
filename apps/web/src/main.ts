@@ -72,6 +72,12 @@ async function start(): Promise<void> {
   const ready = boot();
   void wireShortcuts(router, ready);
   createApp(App).use(router).mount('#app');
+  // Tells the content updater this bundle started. It has to come now, not
+  // after boot: the plugin rolls a new bundle back unless it hears this
+  // within 10 seconds, and boot waits on the network (sign-in, data,
+  // modules), which on a phone at a venue takes longer - so every update was
+  // downloaded, started, rolled back to the old one, and fetched again.
+  void notifyShellUpdateReady();
   await ready;
 }
 
@@ -113,10 +119,6 @@ async function boot(): Promise<void> {
     startTillLock();
   }
   markBooted();
-  // Confirms this boot to the shell-content updater before anything else -
-  // it must hear this once per successful start or it assumes the active
-  // bundle crashed and rolls back to the previous one.
-  void notifyShellUpdateReady();
   void autoUpdateCheck();
   // Also re-run on the WS shell.update doorbell (see realtime.ts) - a
   // terminal left running all shift might not see another cold start for

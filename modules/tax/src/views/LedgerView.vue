@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { checkPickedFile } from '@zollify/shared';
-import { api, type Expense, type InvoiceScan, type PnlRow } from '../api';
+import { api, type Expense, type InvoiceScan, type PaidFrom, type PnlRow } from '../api';
 import { refreshStatus, status } from '../state';
 import { sdk } from '../runtime';
 import { Icon } from '@zollify/ui';
@@ -44,7 +44,8 @@ const busy = ref<string | null>(null);
 const scan = ref<InvoiceScan | null>(null);
 const scanFile = ref<{ base64: string; name: string } | null>(null);
 
-const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: localIsoDay(), vendor: '', note: '' });
+/** How it was paid: '' until someone says - such an expense is not taken off what cash up expects. */
+const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: localIsoDay(), vendor: '', note: '', paidFrom: '' as PaidFrom | '' });
 /** Which helper is open: per diems or mileage on an event, a shared cost or the rates on the overview. */
 const helper = ref<'perdiem' | 'mileage' | 'shared' | 'rates' | 'export' | null>(null);
 /** The event's dates and country for the per diem helper: a day either side of the event for travel. */
@@ -132,7 +133,7 @@ async function save(): Promise<void> {
   error.value = null;
   busy.value = 'save';
   try {
-    const payload = { ...form.value, amount: Number(form.value.amount) || 0 };
+    const payload = { ...form.value, amount: Number(form.value.amount) || 0, paidFrom: (form.value.paidFrom || null) as PaidFrom | null };
     let saved: Expense;
     if (editingId.value) saved = (await api.updateExpense(editingId.value, payload)).expense;
     else saved = (await api.addExpense(payload)).expense;
@@ -153,7 +154,7 @@ async function save(): Promise<void> {
 
 function edit(e: Expense): void {
   editingId.value = e.id;
-  form.value = { eventId: e.eventId, category: e.category, amount: e.amount, currency: e.currency, date: e.date, vendor: e.vendor, note: e.note };
+  form.value = { eventId: e.eventId, category: e.category, amount: e.amount, currency: e.currency, date: e.date, vendor: e.vendor, note: e.note, paidFrom: e.paidFrom ?? '' };
 }
 
 /** Who added it, when that was someone else than you - a helper's quick expense at the event, say. */
@@ -326,6 +327,15 @@ async function openInvoice(e: Expense): Promise<void> {
           <label><span>Amount</span><input v-model.number="form.amount" type="number" min="0" step="0.01" inputmode="decimal" required /></label>
           <label><span>Currency</span><input v-model="form.currency" type="text" maxlength="3" /></label>
           <label><span>Date</span><input v-model="form.date" type="date" /></label>
+          <label>
+            <span>Paid with</span>
+            <select v-model="form.paidFrom">
+              <option value="">Not said</option>
+              <option value="card">Card</option>
+              <option value="cash">Cash from the till</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
           <label class="wide"><span>Note</span><input v-model="form.note" type="text" /></label>
         </div>
         <div class="actions">
@@ -342,7 +352,7 @@ async function openInvoice(e: Expense): Promise<void> {
             <tr v-for="e in expenses" :key="e.id">
               <td class="mono">{{ e.date || '-' }}</td>
               <td>{{ e.vendor || '-' }}<span v-if="e.note" class="sub"> · {{ e.note }}</span><span v-if="addedBy(e)" class="sub by"> · added by {{ addedBy(e) }}</span></td>
-              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · worked out</span></td>
+              <td>{{ categories.find((c) => c.id === e.category)?.label ?? e.category }}<span v-if="e.detail" class="sub"> · worked out</span><span v-if="e.paidFrom === 'cash'" class="sub"> · paid in cash</span></td>
               <td class="num">{{ fmt(e.amount, e.currency) }}</td>
               <td>
                 <button v-if="e.invoice" type="button" class="quiet link" @click="openInvoice(e)">{{ e.invoice.filename }}</button>

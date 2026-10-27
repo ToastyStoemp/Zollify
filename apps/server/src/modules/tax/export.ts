@@ -22,6 +22,8 @@ export interface ExportExpense {
   note: string;
   invoice: { filename: string } | null;
   bookedVoucherId: string | null;
+  /** How it was paid: card, cash (out of the till's box), other; null where it was not said. */
+  paidFrom?: string | null;
   createdBy?: { email: string | null } | null;
 }
 
@@ -86,7 +88,7 @@ export function buildBooksZip(input: ExportInput): { filename: string; bytes: Ui
     });
   }
 
-  const expensesCsv = [row(['Date', 'Category', 'Vendor', 'Note', 'Amount', 'Currency', 'Event', 'Invoice file', 'Booked voucher', 'Added by', 'Expense id'])];
+  const expensesCsv = [row(['Date', 'Category', 'Vendor', 'Note', 'Amount', 'Currency', 'Event', 'Invoice file', 'Booked voucher', 'Paid with', 'Added by', 'Expense id'])];
   const files: Record<string, Uint8Array> = {};
   let invoices = 0;
   for (const e of [...input.expenses].sort((a, b) => a.date.localeCompare(b.date) || a.vendor.localeCompare(b.vendor))) {
@@ -99,7 +101,7 @@ export function buildBooksZip(input: ExportInput): { filename: string; bytes: Ui
         invoices += 1;
       }
     }
-    expensesCsv.push(row([e.date, label.get(e.category) ?? e.category, e.vendor, e.note, round2(e.amount), e.currency, e.eventId ? eventName(e.eventId) : '', path, e.bookedVoucherId ?? '', e.createdBy?.email ?? '', e.id]));
+    expensesCsv.push(row([e.date, label.get(e.category) ?? e.category, e.vendor, e.note, round2(e.amount), e.currency, e.eventId ? eventName(e.eventId) : '', path, e.bookedVoucherId ?? '', e.paidFrom ?? '', e.createdBy?.email ?? '', e.id]));
   }
 
   const at = input.generatedAt ?? new Date();

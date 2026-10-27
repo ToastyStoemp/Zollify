@@ -82,6 +82,12 @@ export default defineConfig({
       // Host entries are referenced only by the import map, never by an import
       // in the graph, so their exports must survive tree-shaking.
       preserveEntrySignatures: 'allow-extension',
+      onwarn(warning, warn) {
+        // zod's own comments mention `@__PURE__` where Rollup cannot read it as an annotation;
+        // Rollup drops those comments and nothing else changes. Other warnings still show.
+        if (warning.code === 'INVALID_ANNOTATION' && /[\\/]node_modules[\\/]zod[\\/]/.test(warning.id ?? '')) return;
+        warn(warning);
+      },
     },
   },
 });

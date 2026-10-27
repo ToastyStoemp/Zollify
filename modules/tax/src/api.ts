@@ -110,9 +110,16 @@ export interface InvoiceScan {
 const q = (params: Record<string, string | undefined>): string =>
   '?' + new URLSearchParams(Object.fromEntries(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])))).toString();
 
+/** The printing side of a year, from Sourcing: materials bought and misprints, in the account's currency. */
+export interface YearMaterials {
+  materials: { spent: number; orders: number; byType: Record<string, number> };
+  waste: { qty: number; cost: number; byMaterial: { id: string; name: string; unit: string; qty: number; cost: number }[] };
+}
+
 export const api = {
   /** A period's books as one zip - sales, lines, expenses and their invoices - for the accountant. */
   export: (from: string, to: string) => sdk().http.get<{ filename: string; base64: string; counts: { sales: number; lines: number; expenses: number; invoices: number } }>(`export${q({ from, to })}`),
+  year: (year: number) => sdk().http.get<YearMaterials>(`year/${year}`),
   status: () => sdk().http.get<TaxStatus>('status'),
   config: () => sdk().http.get<{ groups: ConfigGroup[]; values: Record<string, string | boolean>; enabled: Record<string, boolean> }>('config'),
   saveConfig: (patch: { set?: Record<string, string>; clear?: string[]; enabled?: Record<string, boolean> }) =>

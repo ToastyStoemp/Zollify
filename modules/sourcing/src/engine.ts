@@ -130,17 +130,19 @@ export interface Material {
   packName?: string;
   updatedAt?: number;
 }
-/** A use of a material: by hand, sent by the printing app, or what a recount found. */
+/** A use of a material: by hand, sent by the printing app, what a recount found, or a misprint (waste). */
 export interface MaterialUse {
   id: string;
   materialId: string;
   qty: number;
   at: number;
-  source: 'manual' | 'printer' | 'count';
+  source: 'manual' | 'printer' | 'count' | 'waste';
   note: string;
 }
 export interface MaterialUsage {
   used: number;
+  /** The part of `used` that was misprints and other waste. */
+  wasted: number;
   recent: MaterialUse[];
 }
 export interface SourcingFile {
@@ -367,6 +369,16 @@ export const currentBatch = (m: Material, usage: MaterialUsage | undefined) => c
 /** What is on hand: everything received less everything used. */
 export function materialOnHand(m: Material, usage: MaterialUsage | undefined): number {
   return Math.round((materialTotals(m).received - (usage?.used ?? 0)) * 1000) / 1000;
+}
+/**
+ * What went to waste: misprints and the like, as a share of everything used
+ * and what they cost at the average price paid. The rate is of all use, so a
+ * sheet wasted out of ten printed reads as 10%.
+ */
+export function materialWaste(m: Material, usage: MaterialUsage | undefined): { qty: number; rate: number; cost: number } {
+  const qty = usage?.wasted ?? 0;
+  const used = usage?.used ?? 0;
+  return { qty, rate: qty > 0 && used > 0 ? Math.round((qty / used) * 1000) / 1000 : 0, cost: round2(qty * unitCost(m)) };
 }
 /** Ordered, received, still on order, spent - and the unit cost, from what was ordered and paid. */
 export function materialTotals(m: Material) {

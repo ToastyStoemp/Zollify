@@ -7,7 +7,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./tokens.css": "./src/tokens.css"
+    "./tokens.css": "./src/tokens.css",
+    "./QrCode.vue": "./src/QrCode.vue"
   },
   "scripts": {
     "typecheck": "vue-tsc --noEmit -p tsconfig.json",

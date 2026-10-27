@@ -41,6 +41,7 @@ import {
   shellTestMode,
   testMode,
 } from '../cart';
+import { GIVEN_AWAY_LABEL } from '../lib/given-away';
 import { defaultProviderId, getProvider } from '../payments/registry';
 import { testTerminalProvider } from '../payments/test-terminal';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
@@ -651,6 +652,11 @@ function applyDiscount(): void {
   if (!Number.isFinite(value) || value <= 0) return toast('Enter a discount value.', 'bad');
   if (discountForm.type === 'percent' && value > 100) return toast('Percent discount cannot be over 100%.', 'bad');
   setCustomDiscount({ type: discountForm.type, value, name: discountForm.name.trim() || (discountForm.type === 'percent' ? `${value}% off` : 'Discount') });
+  showDiscount.value = false;
+}
+/** The whole cart for nothing: a 100% discount, which the till then completes with Give away. */
+function giveAwayCart(): void {
+  setCustomDiscount({ type: 'percent', value: 100, name: GIVEN_AWAY_LABEL });
   showDiscount.value = false;
 }
 
@@ -1324,6 +1330,7 @@ function lockTill(): void {
         </div>
         <input v-model="discountForm.value" type="number" min="0" step="0.05" inputmode="decimal" placeholder="Value" />
         <input v-model="discountForm.name" type="text" placeholder="Name (optional)" />
+        <button type="button" class="free" @click="giveAwayCart">Give away - 100% off</button>
       </div>
       <template #footer>
         <div class="actions between">
@@ -1521,6 +1528,7 @@ function lockTill(): void {
 .pay .split, .confirm.split { background: #b8742f; }
 .pay .free, .confirm.free { background: #8a4fb8; }
 .pay .free { grid-column: 1 / -1; }
+.form .free { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; background: #8a4fb8; }
 .pay button:hover:not(:disabled), .confirm:hover:not(:disabled) { filter: brightness(1.08); }
 
 .form { display: flex; flex-direction: column; gap: .6rem; }

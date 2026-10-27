@@ -35,8 +35,8 @@ function keepUsage(materialId: string, usage: MaterialUsage): void {
   snap.value.usage = { ...(snap.value.usage ?? {}), [materialId]: usage };
 }
 /** Logs a use by hand (a print run, a misprint). */
-export async function useMaterial(materialId: string, qty: number, note?: string): Promise<void> {
-  const res = await sdk().http.post<{ usage: MaterialUsage }>(`materials/${materialId}/use`, { qty, ...(note ? { note } : {}) });
+export async function useMaterial(materialId: string, qty: number, note?: string, waste = false): Promise<void> {
+  const res = await sdk().http.post<{ usage: MaterialUsage }>(`materials/${materialId}/use`, { qty, ...(note ? { note } : {}), ...(waste ? { waste } : {}) });
   keepUsage(materialId, res.usage);
 }
 /** A recount: what is really there. The difference is logged. */

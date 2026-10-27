@@ -30,6 +30,7 @@ export default defineModule({
       { path: 'ledger', name: 'ledger', title: 'Event profit', minRole: 'admin', component: () => import('./views/LedgerView.vue') },
       { path: 'ranking', name: 'ranking', title: 'Event ranking', minRole: 'admin', component: () => import('./views/RankingView.vue') },
       { path: 'year', name: 'year', title: 'Year in review', minRole: 'admin', component: () => import('./views/YearView.vue') },
+      { path: 'cards', name: 'cards', title: 'Card payments', minRole: 'admin', component: () => import('./views/CardsView.vue') },
       // Something bought at the event, in a few taps - Home's card and the Android "Add expense" shortcut.
       { path: 'quick-expense', name: 'quick-expense', title: 'Add an expense', component: () => import('./views/QuickExpenseView.vue') },
     ]);
@@ -37,6 +38,7 @@ export default defineModule({
     sdk.nav.add({ routeName: 'ledger', group: 'books', label: 'Event profit', icon: 'book', order: 210, minRole: 'admin' });
     sdk.nav.add({ routeName: 'ranking', group: 'books', label: 'Event ranking', icon: 'bar-chart', order: 215, minRole: 'admin' });
     sdk.nav.add({ routeName: 'year', group: 'books', label: 'Year in review', icon: 'calendar', order: 216, minRole: 'admin' });
+    sdk.nav.add({ routeName: 'cards', group: 'books', label: 'Card payments', icon: 'credit-card', order: 217, minRole: 'admin' });
     // Home: the last event against its earlier editions.
     sdk.home.card({ id: 'last-event', order: 60, minRole: 'admin', component: () => import('./views/LastEventCard.vue') });
     sdk.home.card({ id: 'quick-expense', order: 15, minRole: 'member', component: () => import('./views/QuickExpenseCard.vue') });

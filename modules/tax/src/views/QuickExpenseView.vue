@@ -3,7 +3,8 @@ import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { checkPickedFile, fmtPrice, localIsoDay, type SalesEvent } from '@zollify/shared';
 import { Icon } from '@zollify/ui';
-import { api, type Expense } from '../api';
+import { api, type CardPayment, type Expense, type PaidFrom } from '../api';
+import { syncWalletPayments, walletAccess } from '../wallet';
 import { sdk } from '../runtime';
 
 /**
@@ -42,12 +43,24 @@ const QUICK = ['food', 'travel', 'furniture', 'marketing', 'shipping', 'other'];
 const categories = ref<{ id: string; label: string }[]>([]);
 const quick = computed(() => QUICK.map((id) => categories.value.find((c) => c.id === id)).filter((c): c is { id: string; label: string } => !!c));
 const category = ref('food');
+/** Card by default; cash when it came out of the till's box - cash up takes it off what the box should hold. */
+const paidFrom = ref<PaidFrom>('card');
+const PAID: { id: PaidFrom; label: string }[] = [
+  { id: 'card', label: 'Card' },
+  { id: 'cash', label: 'Cash from the till' },
+  { id: 'other', label: 'Other' },
+];
 const amount = ref('');
 const what = ref('');
 const photo = ref<{ base64: string; name: string } | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
 const added = ref<Expense[]>([]);
+/** Card payments the phone saw, newest first: one tap adds one to this event as an expense. */
+const payments = ref<CardPayment[]>([]);
+const addingPayment = ref<string | null>(null);
+/** Whether the phone lets Zollify read Wallet's payments: null on the web, where there is no phone to read. */
+const listening = ref<boolean | null>(null);
 
 function pickEvent(id: string): void {
   eventId.value = id;
@@ -66,7 +79,45 @@ onMounted(async () => {
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not load the categories.';
   }
+  await refreshPayments();
 });
+
+/** Takes what the phone has seen of card payments since last time, then lists them. */
+async function refreshPayments(): Promise<void> {
+  try {
+    await syncWalletPayments();
+    listening.value = await walletAccess.listening();
+  } catch {
+    // The phone's notifications are a bonus: a failure here leaves the list as it was.
+  }
+  await loadPayments();
+}
+async function loadPayments(): Promise<void> {
+  try {
+    payments.value = (await api.cardPayments()).payments;
+  } catch {
+    // Without the list the form still works; the card payments simply are not offered.
+    payments.value = [];
+  }
+}
+
+/** Adds a card payment to the event picked here, with the category picked here. */
+async function addPayment(p: CardPayment): Promise<void> {
+  if (!eventId.value) return void (error.value = 'Pick the event this was for.');
+  addingPayment.value = p.id;
+  error.value = null;
+  try {
+    const saved = (await api.addCardPayment(p.id, { eventId: eventId.value, category: category.value })).expense;
+    added.value = [saved, ...added.value];
+    sdk().ui.toast(`${fmtPrice(p.amount, p.currency)} at ${p.merchant || 'the card'} added to ${event.value?.name ?? 'the event'}.`, { kind: 'success' });
+    await loadPayments();
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Could not add that payment.';
+  } finally {
+    addingPayment.value = null;
+  }
+}
+const dateOf = (t: number) => new Date(t).toLocaleDateString(undefined, { day: '2-digit', month: '2-digit' });
 
 async function pickPhoto(e: Event): Promise<void> {
   const input = e.target as HTMLInputElement;
@@ -91,7 +142,7 @@ async function save(): Promise<void> {
   error.value = null;
   busy.value = true;
   try {
-    let saved = (await api.addExpense({ eventId: eventId.value, category: category.value, amount: value, currency: currency.value, date: today, vendor: what.value.trim(), note: '' })).expense;
+    let saved = (await api.addExpense({ eventId: eventId.value, category: category.value, amount: value, currency: currency.value, date: today, vendor: what.value.trim(), note: '', paidFrom: paidFrom.value })).expense;
     if (photo.value) saved = (await api.attachInvoice(saved.id, photo.value.base64, photo.value.name)).expense;
     added.value = [saved, ...added.value];
     sdk().ui.toast(`${fmtPrice(value, currency.value)} ${labelOf(category.value).toLowerCase()} added to ${event.value?.name ?? 'the event'}.`, { kind: 'success' });
@@ -144,6 +195,10 @@ function done(): void {
 
       <input v-model="what" type="text" maxlength="120" placeholder="What was it? (snacks, parking…)" aria-label="What was it" enterkeyhint="done" />
 
+      <div class="seg paid" role="group" aria-label="Paid with">
+        <button v-for="p in PAID" :key="p.id" type="button" :class="{ on: paidFrom === p.id }" @click="paidFrom = p.id">{{ p.label }}</button>
+      </div>
+
       <div class="chips" role="group" aria-label="Category">
         <button v-for="c in quick" :key="c.id" type="button" :class="['chip', { on: category === c.id }]" @click="category = c.id">{{ c.label }}</button>
         <select v-if="categories.length > quick.length" :value="quick.some((c) => c.id === category) ? '' : category" aria-label="More categories" class="more" @change="category = ($event.target as HTMLSelectElement).value || category">
@@ -160,6 +215,21 @@ function done(): void {
       <p v-if="error" class="error">{{ error }}</p>
       <button type="submit" class="primary save" :disabled="busy">{{ busy ? 'Adding…' : 'Add expense' }}</button>
     </form>
+
+    <article v-if="payments.length || listening !== null" class="card">
+      <h2>Card payments</h2>
+      <p class="hint">Paid by card on the phone, most recent first. Add one to the event above, with the category picked above.</p>
+      <button v-if="listening === false" type="button" class="quiet" @click="walletAccess.openSettings()">Let Zollify read Google Wallet payments</button>
+      <button v-else-if="listening" type="button" class="quiet" @click="refreshPayments()">Check the phone for new payments</button>
+      <p v-if="!payments.length" class="hint">Nothing yet. Card payments the phone sees on business cards show here.</p>
+      <ul v-else class="payments">
+        <li v-for="p in payments" :key="p.id">
+          <span class="who"><strong>{{ p.merchant || 'Card payment' }}</strong><small>{{ dateOf(p.at) }}<template v-if="p.last4"> · •••• {{ p.last4 }}</template><template v-if="p.addedExpenseId"> · added before</template></small></span>
+          <strong>{{ fmtPrice(p.amount, p.currency) }}</strong>
+          <button type="button" :disabled="addingPayment === p.id" @click="addPayment(p)">{{ addingPayment === p.id ? '…' : p.addedExpenseId ? 'Add again' : 'Add' }}</button>
+        </li>
+      </ul>
+    </article>
 
     <article v-if="added.length" class="card">
       <h2>Just added<template v-if="addedTotal !== null"> · {{ fmtPrice(addedTotal, currency) }}</template></h2>
@@ -185,6 +255,7 @@ header h1 { margin: 0; font-size: 1.3rem; }
 .cur { font-size: 1.1rem; font-weight: 600; color: var(--zfy-muted, #5a6472); }
 .seg { display: flex; gap: .25rem; }
 .seg button { min-height: 2.6rem; padding: 0 .7rem; }
+.paid button { flex: 1; font-size: .85rem; }
 .seg button.on { background: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); border-color: var(--zfy-accent, #0e7c66); }
 .chips { display: flex; flex-wrap: wrap; gap: .4rem; }
 .chip { min-height: 2.4rem; padding: 0 .8rem; border-radius: 999px; font-size: .85rem; }
@@ -198,4 +269,11 @@ header h1 { margin: 0; font-size: 1.3rem; }
 .added li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: center; }
 .muted { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .ledger { font-size: .85rem; }
+.hint { margin: 0; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
+.payments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.payments li { display: grid; grid-template-columns: 1fr auto auto; gap: .6rem; align-items: center; font-size: .9rem; }
+.payments .who { display: flex; flex-direction: column; min-width: 0; }
+.payments .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payments small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
+.payments button { min-height: 2.4rem; padding: 0 .8rem; }
 </style>

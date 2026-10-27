@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue';
 import { eventDays, localIsoDay, splitShared, type SplitMethod } from '@zollify/shared';
-import { api, type Expense } from '../api';
+import { api, type Expense, type PaidFrom } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -14,7 +14,7 @@ const props = defineProps<{ categories: { id: string; label: string }[]; currenc
 const emit = defineEmits<{ saved: [Expense[]]; close: [] }>();
 
 const events = computed(() => [...sdk().data.events.list()].sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? '')));
-const form = reactive({ category: 'insurance', amount: 0, currency: props.currency, date: localIsoDay(), vendor: '', note: '', method: 'days' as SplitMethod });
+const form = reactive({ category: 'insurance', amount: 0, currency: props.currency, date: localIsoDay(), vendor: '', note: '', method: 'days' as SplitMethod, paidFrom: 'card' as PaidFrom });
 const picked = ref<Set<string>>(new Set());
 const error = ref<string | null>(null);
 const busy = ref(false);
@@ -67,6 +67,7 @@ async function save(): Promise<void> {
       <label><span>Currency</span><input v-model="form.currency" type="text" maxlength="3" /></label>
       <label><span>Date</span><input v-model="form.date" type="date" /></label>
       <label><span>Split</span><select v-model="form.method"><option value="days">By the days each event runs</option><option value="even">Evenly</option></select></label>
+      <label><span>Paid with</span><select v-model="form.paidFrom"><option value="card">Card</option><option value="cash">Cash from the till</option><option value="other">Other</option></select></label>
       <label class="wide"><span>Note</span><input v-model="form.note" type="text" /></label>
     </div>
     <div class="events">

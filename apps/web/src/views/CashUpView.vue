@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { CURRENCY_COINS, denominationsFor, fmtPrice, round2, seesSalesTotals } from '@zollify/shared';
 import {
   activeEventId,
+  authFetch,
   currentAccount,
   getSalesEvent,
   transactionsOfEvent,
@@ -117,8 +118,37 @@ const countedTotal = computed(() =>
   round2([...counted.value.entries()].reduce((sum, [value, qty]) => sum + value * qty, 0)),
 );
 
-/** What should be in the box: the float you started with plus cash taken. */
-const expected = computed(() => round2(float.value + takings.value.cash));
+/**
+ * Cash paid out of this event's box for expenses (the ledger's, through the tax module, when it is
+ * on): what the box should hold is less that. A helper sees only the cash they paid; the owner
+ * sees all of it, or the one whose drawer is being counted.
+ */
+const spent = ref<{ id: string; amount: number; currency: string; createdBy: string | null; vendor: string; category: string }[]>([]);
+async function loadSpent(id: string): Promise<typeof spent.value> {
+  try {
+    return ((await authFetch(`/m/tax/ledger/cash-spent?eventId=${encodeURIComponent(id)}`)) as { expenses: typeof spent.value }).expenses;
+  } catch {
+    // The tax module off, or no server: nothing to take off.
+    return [];
+  }
+}
+watch(
+  eventId,
+  async (id) => {
+    const next = id ? await loadSpent(id) : [];
+    // Switching events while this loads must not leave the last event's expenses on this one.
+    if (id === eventId.value) spent.value = next;
+  },
+  { immediate: true },
+);
+const cashSpent = computed(() => {
+  const mine = spent.value.filter((e) => !seller.value || e.createdBy === seller.value);
+  const sameCurrency = mine.filter((e) => e.currency === currency.value);
+  return { total: round2(sameCurrency.reduce((n, e) => n + e.amount, 0)), items: sameCurrency, otherCurrency: mine.length - sameCurrency.length };
+});
+
+/** What should be in the box: the float you started with, plus the cash taken, less the cash paid out for expenses. */
+const expected = computed(() => round2(float.value + takings.value.cash - cashSpent.value.total));
 
 const variance = computed(() => round2(countedTotal.value - expected.value));
 
@@ -194,6 +224,11 @@ function isCoin(value: number): boolean {
         <li v-if="reverted > 0">
           <span class="label">Reverted</span>
           <strong class="bad">{{ fmtPrice(reverted, currency) }}</strong>
+        </li>
+        <li v-if="cashSpent.items.length">
+          <span class="label">Cash spent on expenses</span>
+          <strong class="bad">−{{ fmtPrice(cashSpent.total, currency) }}</strong>
+          <span class="sub">{{ cashSpent.items.map((e) => `${e.vendor || e.category} ${fmtPrice(e.amount, currency)}`).join(' · ') }}<template v-if="cashSpent.otherCurrency"> · {{ cashSpent.otherCurrency }} in another currency not taken off</template></span>
         </li>
       </ul>
 

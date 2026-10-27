@@ -54,6 +54,7 @@ export interface ConfigGroup {
   fields: ConfigField[];
 }
 
+export type PaidFrom = 'card' | 'cash' | 'other';
 export interface Expense {
   id: string;
   eventId: string;
@@ -69,6 +70,8 @@ export interface Expense {
   detail: ExpenseDetail | null;
   /** Who added it; absent or null for expenses from before this was kept. */
   createdBy?: { userId: string; email: string | null } | null;
+  /** Where the money came from; null for expenses from before this was asked. Cash up takes cash off the box. */
+  paidFrom: PaidFrom | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -83,6 +86,7 @@ export interface SharedExpenseInput {
   date: string;
   vendor: string;
   note: string;
+  paidFrom?: PaidFrom | null;
 }
 
 export interface PnlRow {
@@ -116,7 +120,31 @@ export interface YearMaterials {
   waste: { qty: number; cost: number; byMaterial: { id: string; name: string; unit: string; qty: number; cost: number }[] };
 }
 
+/** A card the phone has named by its last four digits; `role` is null until the owner marks it. */
+export interface CardRow {
+  last4: string;
+  role: 'business' | 'personal' | null;
+  label: string;
+}
+/** A payment the phone saw on a card (Google Wallet), kept until dismissed. */
+export interface CardPayment {
+  id: string;
+  at: number;
+  amount: number;
+  currency: string;
+  merchant: string;
+  last4: string;
+  addedExpenseId: string | null;
+}
+
 export const api = {
+  cards: () => sdk().http.get<{ cards: CardRow[] }>('cards'),
+  markCard: (last4: string, role: 'business' | 'personal', label: string) => sdk().http.put<{ ok: boolean }>(`cards/${last4}`, { role, label }),
+  cardPayments: () => sdk().http.get<{ payments: CardPayment[] }>('card-payments'),
+  sendCardPayment: (body: { id: string; at: number; amount: number; currency: string; merchant: string; last4: string }) => sdk().http.post<{ stored: boolean; duplicate: boolean }>('card-payments', body),
+  /** Quick-adds a card payment as an expense on the event; the same payment can be added again. */
+  addCardPayment: (id: string, body: { eventId: string; category: string; vendor?: string; note?: string }) => sdk().http.post<{ expense: Expense }>(`card-payments/${id}/add`, body),
+  dismissCardPayment: (id: string) => sdk().http.del<{ ok: boolean }>(`card-payments/${id}`),
   /** A period's books as one zip - sales, lines, expenses and their invoices - for the accountant. */
   export: (from: string, to: string) => sdk().http.get<{ filename: string; base64: string; counts: { sales: number; lines: number; expenses: number; invoices: number } }>(`export${q({ from, to })}`),
   year: (year: number) => sdk().http.get<YearMaterials>(`year/${year}`),

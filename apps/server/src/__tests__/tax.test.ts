@@ -5,6 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildGateway } from '@zollify/server-core';
 import { taxServerModule } from '../modules/tax/index';
+import { strFromU8, unzipSync } from 'fflate';
 
 /**
  * The server half without any real provider: secrets stay secret, mock mode
@@ -280,5 +281,38 @@ describe('expenses from staff', () => {
     expect((await app.inject({ method: 'DELETE', url: `${M}/ledger/expenses/${theirs.id}`, headers: as(staff) })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/${mine.id}/invoice`, headers: as(staff), payload: { base64: pdf, filename: 'x.pdf' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'DELETE', url: `${M}/ledger/expenses/${theirs.id}`, headers: auth() })).statusCode).toBe(200);
+  });
+});
+
+describe('the accountant export', () => {
+  it('zips the period\'s sales, their lines, the expenses and the invoices, with a README', async () => {
+    const add = await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: 'ev-1', category: 'booth', amount: 150, currency: 'EUR', date: '2026-03-01', vendor: 'Messe Leipzig', note: 'table 12' } });
+    const id = add.json().expense.id as string;
+    const pdf = Buffer.from('%PDF-1.4\nhello\n');
+    expect((await app.inject({ method: 'POST', url: `${M}/ledger/expenses/${id}/invoice`, headers: auth(), payload: { base64: pdf.toString('base64'), filename: 'Rechnung.PDF' } })).statusCode).toBe(200);
+    await app.inject({ method: 'POST', url: `${M}/ledger/expenses`, headers: auth(), payload: { eventId: '', category: 'insurance', amount: 60, currency: 'EUR', date: '2027-01-10', vendor: 'Later' } });
+
+    // The test sales are stamped at the epoch, so the period starts there.
+    const res = await app.inject({ method: 'GET', url: `${M}/export?from=1970-01-01&to=2026-12-31`, headers: auth() });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ filename: 'zollify-books-1970-01-01-to-2026-12-31.zip', counts: { sales: 3, lines: 0 } });
+    expect(res.json().counts.expenses).toBeGreaterThanOrEqual(1);
+    const files = unzipSync(Buffer.from(res.json().base64, 'base64'));
+    expect(Object.keys(files)).toEqual(expect.arrayContaining(['README.txt', 'expenses.csv', `invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf`, 'sale-lines.csv', 'sales.csv']));
+    const sales = strFromU8(files['sales.csv']!).trim().split('\n');
+    expect(sales[0]).toBe('Date,Time (UTC),Receipt,Event,Country,Status,Payment,Currency,Gross,VAT,Net,Book currency,Book total,Sale id');
+    expect(sales.slice(1)).toEqual([
+      '1970-01-01,00:00:00,t1,Leipzig Con,Germany,sold,cash,EUR,40,0,40,EUR,40,t1',
+      '1970-01-01,00:00:00,t2,Leipzig Con,Germany,sold,card,EUR,25,0,25,EUR,25,t2',
+      '1970-01-01,00:00:00,t3,Leipzig Con,Germany,reverted,cash,EUR,99,0,99,EUR,99,t3',
+    ]);
+    const expenses = strFromU8(files['expenses.csv']!).trim().split('\n');
+    expect(expenses).toContain(`2026-03-01,Booth / table fee,Messe Leipzig,table 12,150,EUR,Leipzig Con,invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf,,${OWNER_EMAIL},${id}`);
+    expect(expenses.some((l) => l.startsWith('2027-01-10'))).toBe(false);
+    expect(Buffer.from(files[`invoices/2026-03-01_Messe-Leipzig_${id.slice(0, 8)}.pdf`]!)).toEqual(pdf);
+    expect(strFromU8(files['README.txt']!)).toContain('sales.csv       One row per sale (3)');
+
+    expect((await app.inject({ method: 'GET', url: `${M}/export?from=2026-12-31&to=2026-01-01`, headers: auth() })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${M}/export?from=2026-1-1&to=2026-12-31`, headers: auth() })).statusCode).toBe(400);
   });
 });

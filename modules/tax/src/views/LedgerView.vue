@@ -10,6 +10,7 @@ import { vatByEvent } from '../ledger-vat';
 import ComputedCostForm from './ComputedCostForm.vue';
 import SharedCostForm from './SharedCostForm.vue';
 import RatesForm from './RatesForm.vue';
+import AccountantExport from './AccountantExport.vue';
 
 /**
  * Ledger: per-event profit and loss. Revenue comes from the till; costs -
@@ -45,7 +46,7 @@ const scanFile = ref<{ base64: string; name: string } | null>(null);
 
 const blank = () => ({ eventId: '', category: 'other', amount: 0, currency: 'EUR', date: localIsoDay(), vendor: '', note: '' });
 /** Which helper is open: per diems or mileage on an event, a shared cost or the rates on the overview. */
-const helper = ref<'perdiem' | 'mileage' | 'shared' | 'rates' | null>(null);
+const helper = ref<'perdiem' | 'mileage' | 'shared' | 'rates' | 'export' | null>(null);
 /** The event's dates and country for the per diem helper: a day either side of the event for travel. */
 const tripOf = computed(() => {
   const e = current.value ? sdk().data.events.get(current.value.eventId) : undefined;
@@ -246,9 +247,11 @@ async function openInvoice(e: Expense): Promise<void> {
       <div class="helpers">
         <button type="button" :class="{ on: helper === 'shared' }" @click="helper === 'shared' ? (helper = null) : openShared()">A cost over several events</button>
         <button type="button" :class="{ on: helper === 'rates' }" @click="helper = helper === 'rates' ? null : 'rates'">Rates</button>
+        <button type="button" :class="{ on: helper === 'export' }" @click="helper = helper === 'export' ? null : 'export'">For the accountant</button>
       </div>
       <SharedCostForm v-if="helper === 'shared'" :categories="categories" :currency="totals.currency === 'mixed' ? 'EUR' : totals.currency" @saved="sharedSaved" @close="helper = null" />
       <RatesForm v-if="helper === 'rates'" @close="helper = null" />
+      <AccountantExport v-if="helper === 'export'" @close="helper = null" />
       <ul class="totals">
         <li><span class="label">Revenue <small>excl. VAT</small></span><strong class="good">{{ fmt(totals.revenue, totals.currency) }}</strong></li>
         <li><span class="label">Expenses</span><strong class="bad">{{ totals.expensesMixed ? 'mixed currencies' : '−' + fmt(totals.expenses, totals.currency) }}</strong></li>

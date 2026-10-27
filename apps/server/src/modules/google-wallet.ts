@@ -25,7 +25,9 @@ export interface WalletConfig extends ServiceAccount {
 }
 export interface WalletCard {
   memberId: string;
-  /** What the barcode holds (the card's URL) and what is printed under it (the code). */
+  /** A QR with the card's link, or a Code 128 of the code for a handheld scanner. */
+  barcodeType: 'QR_CODE' | 'CODE_128';
+  /** What the barcode holds (the card's URL, or the code alone) and what is printed under it (the code). */
   barcodeValue: string;
   code: string;
   holder: string;
@@ -151,7 +153,7 @@ export function objectFor(cfg: WalletConfig, p: WalletProgramme, card: WalletCar
     accountName: card.holder.slice(0, 60) || 'Member',
     loyaltyPoints: { label: card.unit.slice(0, 1).toUpperCase() + card.unit.slice(1), balance: { int: card.balance } },
     secondaryLoyaltyPoints: { label: 'Rewards', balance: { int: card.rewards } },
-    barcode: { type: 'QR_CODE', value: card.barcodeValue, alternateText: card.code },
+    barcode: { type: card.barcodeType, value: card.barcodeValue, alternateText: card.code },
     textModulesData: [{ id: 'next', header: 'Next reward', body: card.nextText.slice(0, 200) }],
     linksModuleData: { uris: [{ uri: card.cardUrl, description: 'Your card' }] },
   };

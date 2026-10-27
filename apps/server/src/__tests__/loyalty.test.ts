@@ -194,6 +194,8 @@ describe('joining from the QR', () => {
     expect(card.body).toContain('Ana');
     expect(card.body).toContain('3 more stamps to the next reward');
     expect(card.body).toContain('<svg');
+    // The code as bars too, for a handheld scanner at the till.
+    expect(card.body).toContain(`aria-label="Barcode ${code}"`);
     expect(card.body).not.toContain('Add to Google Wallet');
     // The link is single use.
     expect((await pub('GET', new URL(confirm).pathname)).statusCode).toBe(404);
@@ -344,6 +346,16 @@ describe('Google Wallet', () => {
     expect(payload).toMatchObject({ aud: 'google', typ: 'savetowallet', iss: 'wallet@proj.iam.gserviceaccount.com', origins: ['https://till.example.test'] });
     const obj = payload.payload.loyaltyObjects[0];
     expect(obj).toMatchObject({ id: `3388000000012345678.${memberId}`, state: 'ACTIVE', accountId: code, accountName: 'Ana', loyaltyPoints: { label: 'Stamps', balance: { int: 8 } }, barcode: { type: 'QR_CODE', value: `https://till.example.test/p/loyalty/c/${code}`, alternateText: code } });
+  });
+
+  it('puts Code 128 bars of the code alone on the pass when the shop scans with a handheld', async () => {
+    const current = (await call(owner, 'GET', '/settings')).json().settings;
+    await call(owner, 'PUT', '/settings', { ...current, passBarcode: 'code128' });
+    const card = await pub('GET', `/p/loyalty/c/${code}`);
+    const jwt = /href="https:\/\/pay\.google\.com\/gp\/v\/save\/([^"]+)"/.exec(card.body)![1]!;
+    const obj = JSON.parse(Buffer.from(jwt.split('.')[1]!, 'base64url').toString()).payload.loyaltyObjects[0];
+    expect(obj.barcode).toEqual({ type: 'CODE_128', value: code, alternateText: code });
+    await call(owner, 'PUT', '/settings', { ...current, passBarcode: 'qr' });
   });
 
   it('brings the pass up to date after a sale, and reports when Google will not take it', async () => {

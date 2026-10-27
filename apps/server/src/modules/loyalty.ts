@@ -32,6 +32,7 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
+import { code128Svg } from './barcode';
 import { ensureClass, parseServiceAccount, saveLink, upsertObject, WalletError, type FetchFn, type WalletCard, type WalletConfig, type WalletProgramme } from './google-wallet';
 import { POW_SOLVER_JS } from './pow-client';
 
@@ -276,7 +277,8 @@ function makeWallet(jwtSecret: string) {
     const cardUrl = `${origin}${LOYALTY_PUBLIC_PATH}c/${m.code}`;
     return {
       memberId: m.id,
-      barcodeValue: cardUrl,
+      barcodeType: s.passBarcode === 'code128' ? 'CODE_128' : 'QR_CODE',
+      barcodeValue: s.passBarcode === 'code128' ? m.code : cardUrl,
       code: m.code,
       holder: m.name || 'Member',
       balance: st.balance,
@@ -369,6 +371,8 @@ button,.btn{display:inline-block;margin-top:14px;padding:12px 18px;border:0;bord
 .big{font-size:2.4rem;font-weight:800;color:var(--accent-ink);line-height:1.1}
 .qr{display:flex;justify-content:center;margin:14px 0}
 .qr svg{width:200px;height:200px;background:#fff;padding:8px;border-radius:10px}
+.bars{display:flex;justify-content:center;margin:10px 0 4px}
+.bars svg{width:100%;max-width:300px;height:64px;background:#fff;padding:6px 8px;border-radius:8px;box-sizing:content-box}
 .code{font-family:ui-monospace,Menlo,monospace;text-align:center;color:var(--muted);letter-spacing:.06em}
 `;
 
@@ -753,7 +757,7 @@ ${ctx.mail.enabled ? '' : '<p class="msg err">Sign-up is not possible right now 
             : `<p class="big">${st.balance} <small>${h(unit)}</small></p>`;
         const body = `<header>${shop ? `<div class="shop">${h(shop)}</div>` : ''}<h1>${h(programme)}</h1>${m.name ? `<p class="intro">${h(m.name)}</p>` : ''}</header>
 <div class="card">${stampsDrawn}<p class="msg">${st.rewards > 0 ? `${st.rewards} reward${st.rewards === 1 ? '' : 's'} to use - show this at the till.` : `${st.toNext} more ${h(loyaltyUnit(s, st.toNext))} to the next reward.`}</p><p class="hint">${h(rewardLabel(s, money(accountCurrency(db, m.accountId))))}</p></div>
-<div class="card"><div class="qr">${qr}</div><p class="code">${h(m.code)}</p><p class="hint">Show this at the till, or save it to your phone.</p>${save ? `<a class="btn google" href="${h(save)}">Add to Google Wallet</a>` : ''}</div>
+<div class="card"><div class="qr">${qr}</div><div class="bars">${code128Svg(m.code, { height: 60, label: `Barcode ${m.code}` })}</div><p class="code">${h(m.code)}</p><p class="hint">Show this at the till - the square code for a phone or camera, the bars for a barcode scanner - or save it to your phone.</p>${save ? `<a class="btn google" href="${h(save)}">Add to Google Wallet</a>` : ''}</div>
 <p class="hint">Bookmark this page: it is your card. Your balance updates after each sale.</p>`;
         return reply.type('text/html; charset=utf-8').header('cache-control', 'no-store').send(page(programme, body, { sandbox: isSandbox(db, m.accountId) }));
       });

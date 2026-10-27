@@ -232,8 +232,9 @@ the store hears back the same way.
 
 **Loyalty** is a stamp card or points on the customer's phone. The customer
 scans a QR on the table, enters their email and confirms it, and gets a card:
-a code in a QR on a web page (`/p/loyalty/c/<code>`), and an "Add to Google
-Wallet" pass when the account has a Google Wallet issuer (issuer id and a
+a code as a QR and as Code 128 bars on a web page (`/p/loyalty/c/<code>`), and
+an "Add to Google Wallet" pass (QR, or bars for a handheld scanner) when the
+account has a Google Wallet issuer (issuer id and a
 service account key under Settings → Loyalty card; Google wants a logo and
 reviews the programme first). The owner picks stamps per spend or points per
 unit, what a reward is - an amount off, a percentage off one sale, or a free

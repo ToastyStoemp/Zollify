@@ -56,6 +56,12 @@ export const LoyaltySettingsSchema = z.object({
    * admins can change or remove the entry. Off, only admins touch balances.
    */
   staffMaySet: z.boolean().default(false),
+  /**
+   * What the Google Wallet pass shows: a QR with the card's link (a phone
+   * camera opens the card too) or a Code 128 of the code alone, for a
+   * handheld barcode scanner at the till. The web card shows both.
+   */
+  passBarcode: z.enum(['qr', 'code128']).default('qr'),
 });
 export type LoyaltySettings = z.infer<typeof LoyaltySettingsSchema>;
 export const DEFAULT_LOYALTY_SETTINGS: LoyaltySettings = LoyaltySettingsSchema.parse({});

@@ -132,6 +132,9 @@ async function removeGoogle(): Promise<void> {
         <label><span>Sales below this earn nothing ({{ currency }}, 0 for any)</span><input v-model.number="form.minSpend" type="number" min="0" step="0.01" /></label>
         <label><span>Erase a card unused for (months, 0 never)</span><input v-model.number="form.eraseAfterMonths" type="number" min="0" max="120" step="1" /></label>
         <label class="wide"><span>A line on the join page</span><input v-model="form.joinIntro" type="text" maxlength="400" placeholder="Thanks for coming back - every visit counts." /></label>
+        <label><span>Barcode on the Google Wallet pass</span>
+          <select v-model="form.passBarcode"><option value="qr">QR code (a phone camera opens the card too)</option><option value="code128">Code 128 bars (for a handheld barcode scanner)</option></select>
+        </label>
         <label class="wide check"><input v-model="form.staffMaySet" type="checkbox" /> <span>Staff may set a card's balance at the till - for moving customers over from an old card. Each change is logged with who made it, under Loyalty, where you can change or remove it.</span></label>
       </div>
       <div class="actions"><button type="submit" class="primary" :disabled="busy === 'save'">Save</button></div>

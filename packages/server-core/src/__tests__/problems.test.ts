@@ -457,7 +457,8 @@ describe('end to end', () => {
     }
     const problem = (await open('email'))[0]!;
     expect(problem).toMatchObject({ severity: 'error', count: 3 });
-    expect(JSON.stringify(problem)).not.toMatch(/secret-user|someone@example|EAUTH|535/);
+    // Only the words shown to people: the id and timestamps are random digits that can hold "535".
+    expect([problem.message, problem.detail, problem.link].join(' ')).not.toMatch(/secret-user|someone@example|EAUTH|535/);
     expect((await bellTitles()).filter((t) => t.startsWith('Needs attention: Email could not be sent'))).toHaveLength(1);
 
     mailFails = false;

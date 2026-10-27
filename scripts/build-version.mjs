@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * The version a build is stamped with: MAJOR.MINOR.PATCH-<commit>.
  *

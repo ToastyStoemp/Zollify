@@ -57,6 +57,29 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+        <!-- Google Wallet's payment notifications, read for card payments (WalletNotificationService). -->
+        <service
+            android:name=".WalletNotificationService"
+            android:exported="false"
+            android:label="@string/wallet_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Home-screen widget: one tap opens Add an expense (QuickExpenseWidget). -->
+        <receiver
+            android:name=".QuickExpenseWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_expense_widget_info" />
+        </receiver>
+
     </application>
 
     <!-- Permissions -->

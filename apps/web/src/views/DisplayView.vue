@@ -75,6 +75,11 @@ const playlist = ref<string[]>([]);
 const playing = ref(0);
 const videoSrc = ref<string | null>(null);
 const player = ref<HTMLVideoElement | null>(null);
+/**
+ * A see-through poster. Without one, Android's WebView paints its own grey
+ * play button while the next video loads - a flash between every two videos.
+ */
+const NO_POSTER = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 /** The browser would not start a video by itself; a tap on the screen does. */
 const needsTap = ref(false);
 /** Videos in a row that would not play - once every one has failed, the logo comes back. */
@@ -202,6 +207,7 @@ const amount = (n: number): string => n.toFixed(2);
       ref="player"
       class="video"
       :src="videoSrc"
+      :poster="NO_POSTER"
       muted
       playsinline
       autoplay

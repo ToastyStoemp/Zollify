@@ -400,6 +400,13 @@ function added(productId: string, variantId: string | null, message: string): vo
 async function lookupUnknown(code: string): Promise<void> {
   const found = await sdk().till.lookup(code);
   if (!found) return toast('No product found for that code.', 'bad');
+  if ('handled' in found) {
+    // A module took the code itself - a loyalty card attached to the sale, say.
+    toast(found.message ?? 'Done.');
+    search.value = '';
+    beep();
+    return;
+  }
   for (let i = 0; i < 40 && !products.value.some((p) => p.id === found.productId); i++) await new Promise((r) => setTimeout(r, 250));
   if (!products.value.some((p) => p.id === found.productId)) return toast(`${found.message ?? 'Found it.'} It is not on this till yet - try again in a moment.`, 'bad');
   added(found.productId, found.variantId, found.message ?? 'Added');
@@ -690,9 +697,12 @@ const offTill = sdk().till.onAddLine((line) => {
   return addModuleLine(line);
 });
 const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
+// What the sale comes to, for a module pricing a reward (loyalty) against it.
+const offTillTotal = sdk().till.onTotal?.(() => ({ total: total.value, currency: currency.value }));
 onUnmounted(() => {
   offTill();
   offTillLines();
+  offTillTotal?.();
 });
 
 const showMisc = ref(false);

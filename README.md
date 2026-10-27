@@ -171,7 +171,8 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
-Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Wholesale.
+Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Wholesale,
+Loyalty.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -228,6 +229,23 @@ balance unless the rent is paid separately. The store also schedules **setup
 moments**: the artist gets an in-app notification on their linked account and
 an email with a calendar file, confirms or declines from *Where I consign*, and
 the store hears back the same way.
+
+**Loyalty** is a stamp card or points on the customer's phone. The customer
+scans a QR on the table, enters their email and confirms it, and gets a card:
+a code in a QR on a web page (`/p/loyalty/c/<code>`), and an "Add to Google
+Wallet" pass when the account has a Google Wallet issuer (issuer id and a
+service account key under Settings → Loyalty card; Google wants a logo and
+reviews the programme first). The owner picks stamps per spend or points per
+unit, what a reward is - an amount off, a percentage off one sale, or a free
+item up to a price - and what it costs. At the till the card's QR scanned into
+the search box, or typed into the Loyalty card tile, puts a zero-price line
+naming the member on the sale; a reward goes in as a negative line. The server
+counts each member's stamps from the synced sales (a reverted sale takes them
+back, a test-mode sale stamps nothing) and brings the pass up to date after
+each change. Members, their ledger, stamps given by hand, a recount after the
+rules change, and erasure are under Loyalty; a card unused for the set number
+of months is erased by itself. Kept about a member: email, name, the code and
+the ledger. Apple Wallet is not offered yet.
 
 **Commissions** track custom work from request to pickup (Requested, Accepted,
 In progress, Ready for pickup, Collected, Cancelled). The record and the

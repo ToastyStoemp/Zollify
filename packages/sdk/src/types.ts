@@ -165,6 +165,16 @@ export interface TillLookup {
   /** Shown to the seller, e.g. "Shared from Ana's catalogue - Ana has been told." */
   message?: string;
 }
+/** A module took the code itself - put its own line in the cart, say (a loyalty card). The till shows `message` and clears the search. */
+export interface TillHandled {
+  handled: true;
+  message?: string;
+}
+/** What the sale comes to right now, as charged. */
+export interface TillTotal {
+  total: number;
+  currency: string;
+}
 
 /** Something a module puts in the till's cart that is not a catalogue product - a workshop place, say. */
 export interface TillLine {
@@ -674,9 +684,13 @@ export interface Sdk {
      * artist's label scanned at a store, say. Return the catalogue product it
      * has made available, or null.
      */
-    onLookup(handler: (code: string) => Promise<TillLookup | null>): Unsubscribe;
+    onLookup(handler: (code: string) => Promise<TillLookup | TillHandled | null>): Unsubscribe;
     /** The till's side: ask the modules about an unknown code. First answer wins. */
-    lookup(code: string): Promise<TillLookup | null>;
+    lookup(code: string): Promise<TillLookup | TillHandled | null>;
+    /** What the sale comes to right now, as charged; null when no till is open. Absent on older shells, so call it guarded. */
+    total?(): TillTotal | null;
+    /** The till's side: say what the sale comes to. Only one till listens at a time. */
+    onTotal?(handler: () => TillTotal): Unsubscribe;
   };
 
   /**

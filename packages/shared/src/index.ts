@@ -48,3 +48,4 @@ export * from './sme-thresholds';
 export * from './travel-costs';
 export * from './wholesale';
 export * from './material-cost';
+export * from './loyalty';

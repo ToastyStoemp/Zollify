@@ -347,7 +347,7 @@ async function addFromPool(l: PoolListing): Promise<void> {
  * is on. Anything not named here lands under Other.
  */
 const GROUPS: { title: string; ids: string[] }[] = [
-  { title: 'Selling', ids: ['pos', 'price-cards', 'label-printer', 'commissions'] },
+  { title: 'Selling', ids: ['pos', 'price-cards', 'label-printer', 'commissions', 'loyalty'] },
   { title: 'Events', ids: ['public-events', 'convention-checklist', 'customs'] },
   { title: 'Stores', ids: ['consignment', 'consignment-artist', 'multi-storage'] },
   { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync', 'wholesale'] },

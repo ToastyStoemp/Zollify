@@ -15,6 +15,7 @@ import {
   type StoreSchema,
   type TillLine,
   type TillLineAccess,
+  type TillHandled,
   type TillLookup,
   type Unsubscribe,
 } from '@zollify/sdk';
@@ -202,9 +203,11 @@ const CONFIG_SCHEMA: StoreSchema = { [CONFIG_STORE]: 'key' };
 
 /** The open till, when there is one - the module that sells registers here. */
 let tillReceiver: ((line: Omit<TillLine, 'ref'> & { ref?: SaleLineRef }) => boolean) | null = null;
+/** The open till's running total, for a module pricing a reward or a settlement. */
+let tillTotal: (() => { total: number; currency: string }) | null = null;
 /** Modules that can resolve a code the catalogue does not know. */
 let tillLines: TillLineAccess | null = null;
-const tillLookups = new Set<(code: string) => Promise<TillLookup | null>>();
+const tillLookups = new Set<(code: string) => Promise<TillLookup | TillHandled | null>>();
 
 export function createModuleHost(moduleId: string, services: HostServices): ModuleHost {
   const subscriptions: Unsubscribe[] = [];
@@ -390,6 +393,19 @@ export function createModuleHost(moduleId: string, services: HostServices): Modu
         tillReceiver = handler;
         const off = () => {
           if (tillReceiver === handler) tillReceiver = null;
+        };
+        subscriptions.push(off);
+        return off;
+      },
+      total() {
+        guard();
+        return tillTotal ? tillTotal() : null;
+      },
+      onTotal(handler) {
+        guard();
+        tillTotal = handler;
+        const off = () => {
+          if (tillTotal === handler) tillTotal = null;
         };
         subscriptions.push(off);
         return off;

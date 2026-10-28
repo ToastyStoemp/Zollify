@@ -7,6 +7,7 @@ import {
   type EventOverlay,
   type PublicEventsConfig,
 } from '@zollify/shared';
+import { QrCode } from '@zollify/ui';
 import { api, type Preview } from '../api';
 import { migrateBoothToEvents } from '../migrate';
 import { sdk } from '../runtime';
@@ -167,6 +168,12 @@ async function copy(text: string, what: string): Promise<void> {
               <input v-model.number="config.pastLimit" type="number" min="0" max="100" class="short" />
             </label>
           </div>
+          <label class="inline"><input v-model="config.showTable" type="checkbox" /> <span>What's on the table: a menu page with prices for a QR on the booth</span></label>
+          <p class="hint">Lists what the open event claimed, priced as you charge there; with no claims, or no open event, the whole catalogue. Photos are the small thumbnails; never stock or what sold.</p>
+          <label v-if="config.showTable">
+            <span>A line under the title</span>
+            <input v-model="config.tableNote" type="text" maxlength="200" placeholder="Cash and card · ask for other sizes" />
+          </label>
           <div class="actions">
             <button type="submit" class="primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save' }}</button>
             <span v-if="saved === 'settings'" class="ok" role="status">Saved.</span>
@@ -190,7 +197,21 @@ async function copy(text: string, what: string): Promise<void> {
               </dd>
               <dt>Instagram</dt>
               <dd><code>{{ base }}/instagram.txt</code></dd>
+              <template v-if="config.showTable">
+                <dt>Table menu</dt>
+                <dd>
+                  <a :href="`${base}/table`" target="_blank" rel="noopener">{{ base }}/table</a>
+                  <span v-if="preview?.table" class="hint">
+                    · {{ preview.table.event ? `${preview.table.event}: ` : '' }}{{ preview.table.count }} item{{ preview.table.count === 1 ? '' : 's' }}
+                    {{ preview.table.scope === 'table' ? 'from the claims' : 'from the whole catalogue' }}
+                  </span>
+                </dd>
+              </template>
             </dl>
+            <div v-if="config.showTable" class="qr">
+              <QrCode :value="`${base}/table`" :size="140" label="QR code for the table menu" />
+              <p class="hint">Print this for the table. The page follows whichever event is open, so one print lasts.</p>
+            </div>
 
             <h3>Widget for your shop</h3>
             <p class="hint">
@@ -298,6 +319,7 @@ label.inline { flex-direction: row; align-items: center; gap: .4rem; }
 label small { color: var(--zfy-muted, #5a6472); font-size: .78rem; }
 .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
 .short { width: 5rem; }
+.qr { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
 .slug { display: flex; align-items: center; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 8px; overflow: hidden; background: var(--zfy-surface-2, #e9edf1); }
 .slug .prefix { padding: 0 .5rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); white-space: nowrap; }
 .slug input { border: 0; border-radius: 0; flex: 1; min-width: 0; }

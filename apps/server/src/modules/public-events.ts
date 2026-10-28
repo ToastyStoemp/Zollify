@@ -9,14 +9,19 @@ import {
   buildIcs,
   planBoothCleanup,
   splitPublicEvents,
+  tableMenu,
   type SalesEvent,
+  type TableMenu,
   type StoredEventOverlay,
   type PublicEvent,
   type PublicEventsConfig,
 } from '@zollify/shared';
 import {
   isEnabled,
+  reduceDiscounts,
   reduceEvents,
+  reduceProducts,
+  reduceStock,
   type ModuleContext,
   type ModuleServices,
   type PublicModuleContext,
@@ -98,6 +103,47 @@ function eventsFor(db: Database.Database, accountId: string) {
     .prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN ('event.upsert', 'event.close') ORDER BY seq")
     .all(accountId) as { opId: string; type: string; payload: string }[];
   return reduceEvents(ops.map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) })));
+}
+
+/** The catalogue, the deals and the claims, replayed from the op-log for the table menu. */
+function catalogueFor(db: Database.Database, accountId: string) {
+  const ops = db
+    .prepare("SELECT opId, type, payload FROM ops WHERE accountId = ? AND type IN ('product.upsert', 'product.delete', 'discount.upsert', 'discount.delete', 'stock.set') ORDER BY seq")
+    .all(accountId) as { opId: string; type: string; payload: string }[];
+  const parsed = ops.map((o) => ({ opId: o.opId, type: o.type, payload: JSON.parse(o.payload) }));
+  return { products: reduceProducts(parsed), discounts: reduceDiscounts(parsed), stock: reduceStock(parsed) };
+}
+
+/** The catalogue's own currency, from the account's profile; EUR until it says. */
+function baseCurrency(db: Database.Database, accountId: string): string {
+  const row = db.prepare('SELECT profile FROM accounts WHERE id = ?').get(accountId) as { profile: string | null } | undefined;
+  try {
+    return String((JSON.parse(row?.profile ?? '{}') as { defaultCurrency?: string }).defaultCurrency || 'EUR');
+  } catch {
+    return 'EUR';
+  }
+}
+
+/** What's on the table right now, from the open event's claims (see `tableMenu`). */
+function menuFor(db: Database.Database, accountId: string): TableMenu {
+  const { products, discounts, stock } = catalogueFor(db, accountId);
+  return tableMenu({ events: eventsFor(db, accountId), products, discounts, stock, currency: baseCurrency(db, accountId), today: new Date().toISOString().slice(0, 10) });
+}
+
+/**
+ * A product photo as the small webp thumbnail every device syncs (the
+ * full picture never reaches the server), from the latest image op that
+ * carries one. Null when there is none.
+ */
+function thumbFor(db: Database.Database, accountId: string, imageId: string): Buffer | null {
+  const rows = db.prepare("SELECT payload FROM ops WHERE accountId = ? AND type = 'image.meta' ORDER BY seq DESC").all(accountId) as { payload: string }[];
+  let best: { updatedAt: number; thumbB64: string } | null = null;
+  for (const r of rows) {
+    const p = JSON.parse(r.payload) as { imageId?: string; updatedAt?: number; thumbB64?: string };
+    if (p.imageId !== imageId || !p.thumbB64) continue;
+    if (!best || (p.updatedAt ?? 0) > best.updatedAt) best = { updatedAt: p.updatedAt ?? 0, thumbB64: p.thumbB64 };
+  }
+  return best ? Buffer.from(best.thumbB64, 'base64') : null;
 }
 
 /**
@@ -260,6 +306,62 @@ function card(ev: PublicEvent): string {
   const blurb = ev.blurb ? `<div class="meta">${h(ev.blurb)}</div>` : '';
   const link = ev.link ? `<a class="link" href="${h(ev.link)}" target="_blank" rel="noopener">Event details →</a>` : '';
   return `<div class="card">${now}<div class="name">${h(ev.name)}</div><div class="date">${range(ev.start, ev.end)}</div>${loc}${booth}${blurb}${link}</div>`;
+}
+
+const TABLE_STYLE = `
+.note{color:var(--muted);margin-top:6px}
+.menu h2.sec{margin-top:28px}
+.items{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.item{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+.item img{width:100%;aspect-ratio:1;object-fit:cover;background:var(--accent-soft);display:block}
+.item .body{padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.item .title{font-weight:700}
+.line{display:flex;justify-content:space-between;gap:10px;font-size:.92rem}
+.line .v{color:var(--muted)}
+.line .p{font-weight:700;white-space:nowrap}
+.deal{font-size:.78rem;color:var(--accent-ink);font-weight:600}
+.scope{font-size:.8rem;color:var(--muted);text-align:center;margin-top:8px}
+`;
+
+/** The "what's on the table" menu: the open event's claimed items with prices, for the QR on the booth. */
+function renderTable(site: Site, menu: TableMenu): string {
+  const ev = menu.event;
+  const where = ev ? [ev.hall && `Hall ${h(ev.hall)}`, ev.booth && `Booth ${h(ev.booth)}`].filter(Boolean).join(' · ') : '';
+  const title = ev ? h(ev.name) : "What's on the table";
+  const when = ev && ev.start ? `<div class="date">${range(ev.start, ev.end)}</div>` : '';
+  const groups = menu.groups
+    .map((g) => {
+      const items = g.items
+        .map((it) => {
+          const img = it.imageId ? `<img src="${h(`${site.base}/img/${encodeURIComponent(it.imageId)}`)}" alt="" loading="lazy" width="220" height="220">` : '';
+          const lines = it.lines
+            .map((l) => `<div class="line"><span class="v">${h(l.name)}</span><span class="p">${h(l.text)}</span></div>${l.deal ? `<div class="deal">${h(l.deal)}</div>` : ''}`)
+            .join('');
+          return `<div class="item">${img}<div class="body"><div class="title">${h(it.title)}</div>${lines}</div></div>`;
+        })
+        .join('');
+      return `${g.type ? `<h2 class="sec">${h(g.type)}</h2>` : menu.groups.length > 1 ? '<h2 class="sec">More</h2>' : ''}<div class="items">${items}</div>`;
+    })
+    .join('');
+  const scope = menu.scope === 'table' ? `${menu.count} item${menu.count === 1 ? '' : 's'} on the table today` : `${menu.count} item${menu.count === 1 ? '' : 's'} in the catalogue`;
+  return `<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${h(site.org)} - ${title}</title>
+<meta name="description" content="${h(site.org)}: what is on the table, with prices.">
+<meta name="robots" content="noindex">
+<style>${PAGE_STYLE}${TABLE_STYLE}</style></head><body><div class="wrap">
+<header class="hero">
+  <div class="org">${h(site.org)}</div>
+  <h1>${title}</h1>
+  ${when}${where ? `<div class="meta">${where}</div>` : ''}
+  ${site.config.tableNote ? `<p class="note">${h(site.config.tableNote)}</p>` : ''}
+</header>
+<main class="menu">
+  ${menu.count ? groups : '<div class="empty">Nothing on the menu right now - ask at the table.</div>'}
+  <p class="scope">${scope} · prices in ${h(menu.currency)}</p>
+</main>
+<footer><a href="${h(site.base)}">Where to find ${h(site.org)} next</a></footer>
+</div></body></html>`;
 }
 
 function renderPage(site: Site): string {
@@ -555,12 +657,15 @@ export const publicEventsServerModule: ServerModule = {
       const config = readConfig(ctx.db, who.accountId);
       const { upcoming, past } = splitPublicEvents(eventsFor(ctx.db, who.accountId), readOverlays(ctx.db, who.accountId), config.pastLimit);
       const base = config.slug ? `${publicOrigin(req)}/p/public-events/${config.slug}` : null;
+      const menu = config.showTable ? menuFor(ctx.db, who.accountId) : null;
       return {
         published: Boolean(config.slug),
         base,
         upcoming,
         past,
         bio: buildBio(upcoming, config.igTemplate, config.igFallback),
+        /** The menu as it stands: which event, how many items, from the claims or the whole catalogue. Null while the page is off. */
+        table: menu ? { event: menu.event?.name ?? null, count: menu.count, scope: menu.scope, currency: menu.currency } : null,
       };
     });
   },
@@ -573,6 +678,29 @@ export const publicEventsServerModule: ServerModule = {
       const site = loadSite(ctx, req, req.params.slug);
       if (!site) return reply.code(404).type('text/plain').send('No such events page.');
       return reply.type('text/html; charset=utf-8').header('cache-control', CACHE_PUBLIC).send(renderPage(site));
+    });
+
+    // ── What's on the table ────────────────────────────────────────────
+    app.get<Slug>('/:slug/table', async (req, reply) => {
+      const site = loadSite(ctx, req, req.params.slug);
+      if (!site || !site.config.showTable) return reply.code(404).type('text/plain').send('No such page.');
+      return reply.type('text/html; charset=utf-8').header('cache-control', 'public, max-age=60').send(renderTable(site, menuFor(ctx.db, site.accountId)));
+    });
+
+    app.get<Slug>('/:slug/table.json', async (req, reply) => {
+      const site = loadSite(ctx, req, req.params.slug);
+      if (!site || !site.config.showTable) return reply.code(404).send({ error: 'not_found' });
+      return reply.header('cache-control', 'public, max-age=60').send({ org: site.org, ...menuFor(ctx.db, site.accountId) });
+    });
+
+    /** A product's thumbnail, only while the menu shows that product. */
+    app.get<{ Params: { slug: string; imageId: string } }>('/:slug/img/:imageId', async (req, reply) => {
+      const site = loadSite(ctx, req, req.params.slug);
+      if (!site || !site.config.showTable) return reply.code(404).type('text/plain').send('');
+      const shown = menuFor(ctx.db, site.accountId).groups.some((g) => g.items.some((it) => it.imageId === req.params.imageId));
+      const bytes = shown ? thumbFor(ctx.db, site.accountId, req.params.imageId) : null;
+      if (!bytes) return reply.code(404).type('text/plain').send('');
+      return reply.type('image/webp').header('cache-control', 'public, max-age=86400').send(bytes);
     });
 
     app.get<Slug>('/:slug/events.json', async (req, reply) => {

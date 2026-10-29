@@ -286,16 +286,36 @@ const paperOnHand = (size: string): number | null => materialOf(settings.value?.
 const shortSizes = computed(() => Object.entries(needs.value).filter(([size, n]) => (paperOnHand(size) ?? Infinity) < n).map(([size]) => size));
 const sizeLabel = (size: string): string => (size === 'custom' ? 'Custom size' : paperLabel(size));
 /** "Fit to paper stock": per size short of paper, the copies cut in proportion to what each item wanted. */
+/**
+ * Clears the counts of items in these paper sizes that have no file linked: they can't print, so
+ * a fit that shares out the paper shouldn't leave them looking like part of the run. Their names.
+ */
+function clearUnprintable(sizes: string[]): string[] {
+  const names: string[] = [];
+  for (const r of active.value) {
+    if ((qty[r.key] ?? 0) > 0 && !links.value[r.key]?.file && sizes.includes(printSize(r))) {
+      qty[r.key] = 0;
+      names.push(r.variant ? `${r.title} ${r.variant}` : r.title);
+    }
+  }
+  return names;
+}
+const clearedNote = (names: string[]): string =>
+  names.length ? ` ${names.join(', ')} had copies but no file linked, so ${names.length === 1 ? 'it' : 'they'} can't print: cleared.` : '';
+
 function fitToPaperStock(): void {
+  const short = [...shortSizes.value];
   const items = queuedAll.value.map((r) => ({ key: r.key, size: printSize(r), copies: qty[r.key] ?? 0 }));
   const stock = Object.fromEntries(Object.keys(needs.value).flatMap((size) => (paperOnHand(size) === null ? [] : [[size, paperOnHand(size)!]])));
   const before = { ...needs.value };
   const fitted = fitToStock(items, stock);
   for (const [key, n] of Object.entries(fitted)) qty[key] = n;
+  const cleared = clearUnprintable(short);
   const cut = Object.keys(before).filter((size) => (needs.value[size] ?? 0) < before[size]!);
-  notice.value = cut.length
-    ? `Fitted to the paper on hand: ${cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets`).join(', ')}. Each item keeps its share of what it wanted.`
-    : 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
+  notice.value =
+    (cut.length
+      ? `Fitted to the paper on hand: ${cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets`).join(', ')}. Each item keeps its share of what it wanted.`
+      : 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.') + clearedNote(cleared);
 }
 /**
  * "Smart fit to stock": per size short of paper, each sheet goes to the copy most likely to sell
@@ -318,6 +338,7 @@ async function smartFitToPaperStock(): Promise<void> {
   const before = { ...needs.value };
   const { counts, gain } = smartFit(items, stock);
   for (const [key, n] of Object.entries(counts)) qty[key] = n;
+  const cleared = clearUnprintable(Object.keys(gain));
   const cut = Object.keys(gain);
   if (!cut.length) {
     notice.value = 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
@@ -330,7 +351,8 @@ async function smartFitToPaperStock(): Promise<void> {
     `Smart fit for ${forWhat}: ` +
     cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets, of which about ${Math.round(gain[size]!.units)} should sell (worth about ${Math.round(gain[size]!.value)})`).join('; ') +
     '. The sheets went to the copies most likely to sell, dearer prints first.' +
-    (noHistory ? ` ${noHistory} ${noHistory === 1 ? 'item has' : 'items have'} no sales in the last year, so ${noHistory === 1 ? 'its' : 'their'} own count stood in for a forecast.` : '');
+    (noHistory ? ` ${noHistory} ${noHistory === 1 ? 'item has' : 'items have'} no sales in the last year, so ${noHistory === 1 ? 'its' : 'their'} own count stood in for a forecast.` : '') +
+    clearedNote(cleared);
 }
 
 // A size no item prints on any more goes back to every size.
@@ -903,7 +925,20 @@ async function printAll(): Promise<void> {
               />
             </td>
             <td>
-              <button type="button" class="quiet" :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`" @click="pickFile(row)">{{ dropRow === row.key ? 'Drop to link' : links[row.key]?.file ? links[row.key]!.file.split(/[\\/]/).pop() : 'Link a file' }}</button>
+              <button
+                v-if="links[row.key]?.file || dropRow === row.key"
+                type="button"
+                class="quiet"
+                :title="`${links[row.key]?.file ? `${links[row.key]!.file}\n` : ''}Click to choose a file, or drop one on this row`"
+                @click="pickFile(row)"
+              >
+                {{ dropRow === row.key ? 'Drop to link' : links[row.key]!.file.split(/[\\/]/).pop() }}
+              </button>
+              <!-- An item with no file can't print: its file cell says so, in the warning colour. -->
+              <button v-else type="button" class="no-file" title="No file linked, so this item can't print. Click to choose one, or drop one on this row" @click="pickFile(row)">
+                <Icon name="alert-triangle" />
+                No file, link one
+              </button>
             </td>
             <td>
               <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
@@ -932,7 +967,16 @@ async function printAll(): Promise<void> {
                 </button>
               </div>
             </td>
-            <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file || isHidden(row)" /></td>
+            <td>
+              <input
+                v-model.number="qty[row.key]"
+                type="number"
+                min="0"
+                max="999"
+                :disabled="!links[row.key]?.file || isHidden(row)"
+                :title="!links[row.key]?.file ? 'No file linked, so this item does not print. Link a file first.' : isHidden(row) ? 'Hidden: printed elsewhere' : ''"
+              />
+            </td>
             <td>
               <template v-if="progress[row.key]">
                 <span v-if="progress[row.key]!.failed" class="error">{{ progress[row.key]!.status }}</span>
@@ -1007,6 +1051,8 @@ tr.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-surface)
 tr.settings td { background: var(--zfy-bg); }
 tr.settings.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-bg)); }
 .actions-cell { width: 1%; white-space: nowrap; }
+.no-file { display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .6rem; border: 1px dashed var(--zfy-warning); border-radius: 8px; background: color-mix(in srgb, var(--zfy-warning) 10%, transparent); color: var(--zfy-warning); }
+.no-file:hover { background: color-mix(in srgb, var(--zfy-warning) 18%, transparent); }
 .row-actions { display: flex; gap: .35rem; }
 .icon-button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border-radius: 8px; color: var(--zfy-muted); }
 .icon-button:hover { color: var(--zfy-ink); border-color: color-mix(in srgb, var(--zfy-ink) 30%, var(--zfy-line)); }

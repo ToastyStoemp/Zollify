@@ -98,6 +98,7 @@ void app.whenReady().then(() => {
   ipcMain.handle('zollify:logout', () => zollify.logout());
   ipcMain.handle('zollify:catalog', () => zollify.catalog().catch(fail));
   ipcMain.handle('zollify:lastEventSold', () => zollify.lastEventSold().catch(fail));
+  ipcMain.handle('zollify:forecast', (_e, today: string) => zollify.forecast(String(today)).catch(fail));
 
   // ── Zollify materials, through a printer key (Sourcing → Materials → Printing app) ──
   /** Stores a printer key once Zollify accepts it; '' removes it. */

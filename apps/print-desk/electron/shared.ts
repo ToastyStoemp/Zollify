@@ -274,3 +274,77 @@ export function fitToStock(items: PaperItem[], stock: Record<string, number>): R
   }
   return out;
 }
+
+/** Chance that a Poisson demand with this `mean` reaches `n` or more. */
+export function poissonTail(mean: number, n: number): number {
+  if (n <= 0) return 1;
+  if (!(mean > 0)) return 0;
+  // 1 - P(D < n), summing the terms in log space so a large mean doesn't underflow.
+  let logTerm = -mean;
+  let below = 0;
+  for (let k = 0; k < n; k++) {
+    if (k > 0) logTerm += Math.log(mean) - Math.log(k);
+    below += Math.exp(logTerm);
+  }
+  return Math.min(1, Math.max(0, 1 - below));
+}
+
+/** An item for the smart fit: its copies, what it has, and what it is expected to sell at what price. */
+export interface SmartItem extends PaperItem {
+  onHand: number;
+  /** Units it is expected to sell before the next print run; null when it has no sales to go by. */
+  mean: number | null;
+  price: number;
+}
+
+/**
+ * Print counts that make the most of short paper: per size short of sheets, each sheet goes to the
+ * copy worth the most, a copy being worth its price times the chance it sells (Poisson demand
+ * around the item's forecast, after what it has on hand). Never more copies than an item asked
+ * for. An item with no sales to go by takes its own count as its forecast; one with no price
+ * takes the size's average price. Sizes with enough paper, or no stock figure, keep their counts.
+ * `gain` is, per size, the copies and value the fitted counts are expected to sell.
+ */
+export function smartFit(items: SmartItem[], stock: Record<string, number>): { counts: Record<string, number>; gain: Record<string, { units: number; value: number }> } {
+  const counts: Record<string, number> = Object.fromEntries(items.map((i) => [i.key, Math.max(0, i.copies)]));
+  const gain: Record<string, { units: number; value: number }> = {};
+  const bySize = new Map<string, SmartItem[]>();
+  for (const i of items) if (i.copies > 0) bySize.set(i.size, [...(bySize.get(i.size) ?? []), i]);
+  for (const [size, list] of bySize) {
+    if (!(size in stock)) continue;
+    const need = list.reduce((n, i) => n + i.copies, 0);
+    let sheets = Math.max(0, Math.floor(stock[size]!));
+    if (need <= sheets) continue;
+    const priced = list.filter((i) => i.price > 0);
+    const fallbackPrice = priced.length ? priced.reduce((n, i) => n + i.price, 0) / priced.length : 1;
+    const state = list.map((i, order) => ({
+      i,
+      order,
+      mean: i.mean ?? Math.max(0, i.onHand) + i.copies,
+      price: i.price > 0 ? i.price : fallbackPrice,
+      given: 0,
+    }));
+    const next = (s: (typeof state)[number]): number => s.price * poissonTail(s.mean, Math.max(0, s.i.onHand) + s.given + 1);
+    gain[size] = { units: 0, value: 0 };
+    for (const s of state) counts[s.i.key] = 0;
+    while (sheets > 0) {
+      let best: (typeof state)[number] | null = null;
+      let bestValue = -1;
+      for (const s of state) {
+        if (s.given >= s.i.copies) continue;
+        const v = next(s);
+        if (v > bestValue || (v === bestValue && best && (s.mean > best.mean || (s.mean === best.mean && s.order < best.order)))) {
+          best = s;
+          bestValue = v;
+        }
+      }
+      if (!best) break;
+      gain[size]!.units += bestValue / best.price;
+      gain[size]!.value += bestValue;
+      best.given++;
+      counts[best.i.key] = best.given;
+      sheets--;
+    }
+  }
+  return { counts, gain };
+}

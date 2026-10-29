@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QrCode from '@zollify/ui/QrCode.vue';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
-import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, targetFor } from '../electron/shared';
+import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
 import PrintSettings from './PrintSettings.vue';
@@ -42,14 +42,19 @@ const isHidden = (r: CatalogRow): boolean => hiddenKeys.value.has(r.key);
 const showHidden = ref(false);
 /** The items printed here. */
 const active = computed(() => rows.value.filter((r) => !isHidden(r)));
+/** The table's rows before the size and text filters: the hidden ones too when they are shown. */
+const listed = computed(() => (showHidden.value ? rows.value : active.value));
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  const list = showHidden.value ? rows.value : active.value;
-  return q ? list.filter((r) => `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)) : list;
+  return listed.value.filter(
+    (r) => (!onlySize.value || printSize(r) === onlySize.value) && (!q || `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)),
+  );
 });
+/** The paper sizes in the table, for the quick filter: A sizes and others by name, a custom size last. */
+const tableSizes = computed(() => [...new Set(listed.value.map(printSize))].sort((a, b) => (a === 'custom' ? 1 : b === 'custom' ? -1 : a.localeCompare(b))));
 /** The paper an item prints on ("a3"), or "custom". */
 const printSize = (r: CatalogRow): string => paperName(paramsFor(r).paper) ?? 'custom';
-/** Print only this paper size ('' every size). */
+/** One paper size for the table and the print run ('' every size): the quick filter, and the Paper needed chips. */
 const onlySize = ref('');
 /** Every item with copies to print and a file to print them from. */
 const queuedAll = computed(() => active.value.filter((r) => (qty[r.key] ?? 0) > 0 && links.value[r.key]?.file));
@@ -291,9 +296,45 @@ function fitToPaperStock(): void {
     ? `Fitted to the paper on hand: ${cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets`).join(', ')}. Each item keeps its share of what it wanted.`
     : 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
 }
-// A size picked for printing that has nothing left to print goes back to every size.
-watch(needs, (n) => {
-  if (onlySize.value && !(onlySize.value in n)) onlySize.value = '';
+/**
+ * "Smart fit to stock": per size short of paper, each sheet goes to the copy most likely to sell
+ * at the next event, weighed by its price, from Zollify's sales (see demandForecast, smartFit).
+ */
+async function smartFitToPaperStock(): Promise<void> {
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const forecast = await guard('Reading what sells', () => api.zollify.forecast(iso));
+  if (!forecast) return;
+  const items = queuedAll.value.map((r) => ({
+    key: r.key,
+    size: printSize(r),
+    copies: qty[r.key] ?? 0,
+    onHand: r.onHand,
+    mean: r.key in forecast.perDay ? forecast.perDay[r.key]! * forecast.horizonDays : null,
+    price: forecast.price[r.key] ?? 0,
+  }));
+  const stock = Object.fromEntries(Object.keys(needs.value).flatMap((size) => (paperOnHand(size) === null ? [] : [[size, paperOnHand(size)!]])));
+  const before = { ...needs.value };
+  const { counts, gain } = smartFit(items, stock);
+  for (const [key, n] of Object.entries(counts)) qty[key] = n;
+  const cut = Object.keys(gain);
+  if (!cut.length) {
+    notice.value = 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
+    return;
+  }
+  const ev = forecast.event;
+  const forWhat = ev ? `${ev.name || 'the next event'} (${ev.days} ${ev.days === 1 ? 'day' : 'days'}${ev.factor !== 1 ? `, earlier editions ${ev.factor > 1 ? 'busier' : 'quieter'} ×${ev.factor}` : ''})` : 'an average event';
+  const noHistory = items.filter((i) => i.mean === null && i.copies > 0).length;
+  notice.value =
+    `Smart fit for ${forWhat}: ` +
+    cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets, of which about ${Math.round(gain[size]!.units)} should sell (worth about ${Math.round(gain[size]!.value)})`).join('; ') +
+    '. The sheets went to the copies most likely to sell, dearer prints first.' +
+    (noHistory ? ` ${noHistory} ${noHistory === 1 ? 'item has' : 'items have'} no sales in the last year, so ${noHistory === 1 ? 'its' : 'their'} own count stood in for a forecast.` : '');
+}
+
+// A size no item prints on any more goes back to every size.
+watch(tableSizes, (sizes) => {
+  if (onlySize.value && !sizes.includes(onlySize.value)) onlySize.value = '';
 });
 async function setHidden(row: CatalogRow, hidden: boolean): Promise<void> {
   if (!session.value) return;
@@ -727,6 +768,12 @@ async function printAll(): Promise<void> {
 
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
+      <div v-if="tableSizes.length > 1" class="size-filter" role="group" aria-label="Paper size">
+        <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All</button>
+        <button v-for="size in tableSizes" :key="size" type="button" class="chip" :aria-pressed="onlySize === size" :title="`Show and print only ${sizeLabel(size)}`" @click="onlySize = onlySize === size ? '' : size">
+          {{ size === 'custom' ? 'Custom' : sizeLabel(size) }}
+        </button>
+      </div>
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
       <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
       <button type="button" :aria-expanded="open === PAPER" title="Take the paper of each printed copy off its material in Zollify (Sourcing → Materials)" @click="open = open === PAPER ? null : PAPER">Paper stock</button>
@@ -758,6 +805,7 @@ async function printAll(): Promise<void> {
         {{ sizeLabel(String(size)) }}: {{ n }} {{ n === 1 ? 'sheet' : 'sheets' }}<template v-if="paperOnHand(String(size)) !== null"> · {{ paperOnHand(String(size)) }} on hand</template>
       </button>
       <button v-if="shortSizes.length" type="button" title="Cut the copies of each size short of paper to what is on hand, each item in proportion to what it wanted" @click="fitToPaperStock">Fit to paper stock</button>
+      <button v-if="shortSizes.length" type="button" :disabled="!!busy" title="Give the paper on hand to the copies most likely to sell at the next event, dearer prints first, from Zollify's sales" @click="smartFitToPaperStock">Smart fit to stock</button>
       <span v-if="!paperVia" class="muted">Set up Paper stock to see what is on hand.</span>
     </div>
     <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
@@ -949,6 +997,7 @@ tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .paper .key { display: flex; gap: .5rem; margin: .4rem 0; }
 .paper .key input { flex: 1; max-width: 24rem; }
 .paper-sizes { display: flex; flex-wrap: wrap; gap: .6rem .9rem; margin: .4rem 0; }
+.size-filter { display: flex; gap: .3rem; }
 .plan { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .chip { padding: .25rem .65rem; border-radius: 999px; }
 .chip[aria-pressed='true'] { border-color: var(--zfy-primary); box-shadow: inset 0 0 0 1px var(--zfy-primary); }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { listMaterials, useMaterial } from './materials.js';
+import { listMaterials, sessionRefusal, useMaterial } from './materials.js';
 
 describe('materials client', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -26,5 +26,14 @@ describe('materials client', () => {
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: 'unauthorized', message: 'That printer key is not valid.' }), { status: 401 }));
     await expect(listMaterials('https://z.test', 'zpk_old')).rejects.toThrow('That printer key is not valid.');
     await expect(listMaterials('https://z.test', '')).rejects.toThrow(/No printer key/);
+  });
+});
+
+describe('sessionRefusal', () => {
+  it('says why the sign-in cannot reach the materials', () => {
+    expect(sessionRefusal(402, 'module_not_enabled')).toMatch(/switched off/);
+    expect(sessionRefusal(403, 'forbidden')).toMatch(/owners and admins/);
+    expect(sessionRefusal(404, 'Not Found')).toMatch(/needs an update/);
+    expect(sessionRefusal(500, 'Something broke')).toBe('Something broke');
   });
 });

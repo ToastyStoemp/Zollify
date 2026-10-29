@@ -273,6 +273,18 @@ export function registerUsage(app: FastifyInstance, ctx: ModuleContext): void {
     return { ...costSettings(ctx.db, who.accountId), updated };
   });
 
+  /**
+   * The printing app's two calls for a signed-in user, so an app that signs in to Zollify (Print
+   * Desk) needs no printer key: the same answers as /p/sourcing/materials and /p/sourcing/usage,
+   * a resent job id counted once.
+   */
+  const calls = printing(ctx);
+  app.get('/printing/materials', async (req) => calls.list(ctx.identity(req).accountId));
+  app.post('/printing/usage', async (req, reply) => {
+    const r = calls.use(ctx.identity(req).accountId, req.body);
+    return reply.code(r.code).send(r.body);
+  });
+
   app.get('/keys', async (req) => {
     const who = ctx.identity(req);
     return { keys: ctx.db.prepare('SELECT id, label, createdAt, lastUsedAt FROM sourcing_keys WHERE accountId = ? ORDER BY createdAt').all(who.accountId) as PrinterKey[] };
@@ -326,10 +338,62 @@ const RecipeBody = z.object({
 });
 
 /**
- * The printing app's side, at /p/sourcing/…: a printer key in the
- * Authorization header (`Bearer zpk_…`), and only these two calls. A use
- * is one material and its quantity, or copies of a print, which takes every
- * material of that dossier's recipe at once (paper and ink).
+ * The printing app's two calls on an account: list the materials with what is on hand, and log a
+ * use. A use is one material and its quantity, or copies of a print, which takes every material
+ * of that dossier's recipe at once (paper and ink). Reached with a printer key (registerPrinterApi)
+ * or by a signed-in admin (registerUsage), with the same answers; `keyId` says which key it was.
+ */
+function printing(ctx: Pick<ModuleServices, 'db' | 'notify' | 'writeOps'>) {
+  const view = (accountId: string, m: MaterialDoc) => ({
+    id: m.id,
+    name: m.name,
+    type: m.type ?? 'other',
+    unit: m.unit ?? 'unit',
+    onHand: onHandOf(ctx.db, accountId, m),
+    onOrder: onOrder(m),
+    ...(typeof m.lowAt === 'number' ? { lowAt: m.lowAt } : {}),
+  });
+  const list = (accountId: string) => ({ materials: materialsOf(ctx.db, accountId).map((m) => view(accountId, m)) });
+  const use = (accountId: string, input: unknown, keyId?: string): { code: number; body: unknown } => {
+    const all = materialsOf(ctx.db, accountId);
+    const job = RecipeBody.safeParse(input);
+    if (job.success) {
+      const wantedTitle = job.data.print.toLowerCase();
+      const dossiers = dossiersOf(ctx.db, accountId);
+      const d = dossiers.find((x) => x.id === job.data.print) ?? dossiers.find((x) => x.title.trim().toLowerCase() === wantedTitle);
+      if (!d) return { code: 404, body: { error: 'unknown_print', message: `No dossier "${job.data.print}". Make one under Sourcing → Dossiers with a recipe, or send its id.` } };
+      const lines = (d.recipe ?? []).filter((r) => r.materialId && Number(r.qty) > 0);
+      if (!lines.length) return { code: 409, body: { error: 'no_recipe', message: `"${d.title}" has no recipe yet - give its dossier the materials one print uses.` } };
+      const note = [`${job.data.copies} × ${d.title}`, job.data.note].filter(Boolean).join(' · ');
+      const source: UseSource = job.data.waste ? 'waste' : 'printer';
+      const tag = job.data.waste ? 'waste' : 'print';
+      const out = [];
+      let duplicate = true;
+      for (const line of lines) {
+        const m = all.find((x) => x.id === line.materialId);
+        if (!m) continue;
+        const res = logUse(ctx, accountId, m, { id: job.data.id && `${tag}-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source, note, keyId });
+        duplicate &&= res.duplicate;
+        out.push({ ...view(accountId, m), onHand: res.onHand });
+      }
+      return { code: duplicate ? 200 : 201, body: { materials: out, duplicate } };
+    }
+    const one = MaterialBody.safeParse(input);
+    if (!one.success) return { code: 400, body: { error: 'invalid_request', message: 'Send the material (id or name) and a quantity above zero, or a print (dossier id or title) and its copies.' } };
+    const wanted = one.data.material.toLowerCase();
+    const m = all.find((x) => x.id === one.data.material) ?? all.find((x) => x.name.trim().toLowerCase() === wanted);
+    if (!m) return { code: 404, body: { error: 'unknown_material', message: `No material "${one.data.material}". Add it under Sourcing → Materials, or send its id.` } };
+    const source: UseSource = one.data.waste ? 'waste' : 'printer';
+    // A print keeps the id it always had, so a job resent across this change still counts once.
+    const { duplicate, onHand } = logUse(ctx, accountId, m, { id: one.data.id && `${one.data.waste ? 'waste' : 'print'}-${one.data.id}`, qty: one.data.qty, source, note: one.data.note, keyId });
+    return { code: duplicate ? 200 : 201, body: { material: { ...view(accountId, m), onHand }, duplicate } };
+  };
+  return { list, use };
+}
+
+/**
+ * The printing app's side, at /p/sourcing/…: a printer key in the Authorization header
+ * (`Bearer zpk_…`), and only the two printing calls.
  */
 export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContext): void {
   const limit = { config: { rateLimit: { max: 240, timeWindow: '1 minute' } } };
@@ -342,56 +406,16 @@ export function registerPrinterApi(app: FastifyInstance, ctx: PublicModuleContex
     return row;
   };
   const refused = { error: 'unauthorized', message: 'That printer key is not valid, was revoked, or Sourcing is switched off.' };
-  const view = (accountId: string, m: MaterialDoc) => ({
-    id: m.id,
-    name: m.name,
-    type: m.type ?? 'other',
-    unit: m.unit ?? 'unit',
-    onHand: onHandOf(ctx.db, accountId, m),
-    onOrder: onOrder(m),
-    ...(typeof m.lowAt === 'number' ? { lowAt: m.lowAt } : {}),
-  });
-
+  const calls = printing(ctx);
   app.get('/materials', limit, async (req, reply) => {
     const key = keyOf(req);
     if (!key) return reply.code(401).send(refused);
-    return { materials: materialsOf(ctx.db, key.accountId).map((m) => view(key.accountId, m)) };
+    return calls.list(key.accountId);
   });
-
   app.post('/usage', limit, async (req, reply) => {
     const key = keyOf(req);
     if (!key) return reply.code(401).send(refused);
-    const all = materialsOf(ctx.db, key.accountId);
-    const job = RecipeBody.safeParse(req.body);
-    if (job.success) {
-      const wantedTitle = job.data.print.toLowerCase();
-      const dossiers = dossiersOf(ctx.db, key.accountId);
-      const d = dossiers.find((x) => x.id === job.data.print) ?? dossiers.find((x) => x.title.trim().toLowerCase() === wantedTitle);
-      if (!d) return reply.code(404).send({ error: 'unknown_print', message: `No dossier "${job.data.print}". Make one under Sourcing → Dossiers with a recipe, or send its id.` });
-      const lines = (d.recipe ?? []).filter((r) => r.materialId && Number(r.qty) > 0);
-      if (!lines.length) return reply.code(409).send({ error: 'no_recipe', message: `"${d.title}" has no recipe yet - give its dossier the materials one print uses.` });
-      const note = [`${job.data.copies} × ${d.title}`, job.data.note].filter(Boolean).join(' · ');
-      const source: UseSource = job.data.waste ? 'waste' : 'printer';
-      const tag = job.data.waste ? 'waste' : 'print';
-      const out = [];
-      let duplicate = true;
-      for (const line of lines) {
-        const m = all.find((x) => x.id === line.materialId);
-        if (!m) continue;
-        const res = logUse(ctx, key.accountId, m, { id: job.data.id && `${tag}-${job.data.id}-${m.id}`, qty: Number(line.qty) * job.data.copies, source, note, keyId: key.id });
-        duplicate &&= res.duplicate;
-        out.push({ ...view(key.accountId, m), onHand: res.onHand });
-      }
-      return reply.code(duplicate ? 200 : 201).send({ materials: out, duplicate });
-    }
-    const body = MaterialBody.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ error: 'invalid_request', message: 'Send the material (id or name) and a quantity above zero, or a print (dossier id or title) and its copies.' });
-    const wanted = body.data.material.toLowerCase();
-    const m = all.find((x) => x.id === body.data.material) ?? all.find((x) => x.name.trim().toLowerCase() === wanted);
-    if (!m) return reply.code(404).send({ error: 'unknown_material', message: `No material "${body.data.material}". Add it under Sourcing → Materials, or send its id.` });
-    const source: UseSource = body.data.waste ? 'waste' : 'printer';
-    // A print keeps the id it always had, so a job resent across this change still counts once.
-    const { duplicate, onHand } = logUse(ctx, key.accountId, m, { id: body.data.id && `${body.data.waste ? 'waste' : 'print'}-${body.data.id}`, qty: body.data.qty, source, note: body.data.note, keyId: key.id });
-    return reply.code(duplicate ? 200 : 201).send({ material: { ...view(key.accountId, m), onHand }, duplicate });
+    const r = calls.use(key.accountId, req.body, key.id);
+    return reply.code(r.code).send(r.body);
   });
 }

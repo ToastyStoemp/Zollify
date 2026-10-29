@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor, fitToStock, paperNeeds } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -126,5 +126,36 @@ describe('effectiveParams with overrides', () => {
   it('leaves the overrides out on request, and for items with their own settings', () => {
     expect(effectiveParams(link, global, 'a2', false)).toMatchObject({ paper: [1190.55, 1683.78], scaleToFit: true });
     expect(effectiveParams({ ...link, own: true }, global, 'a2')).toBe(link.params);
+  });
+});
+
+describe('paperNeeds', () => {
+  it('counts one sheet per copy, per size', () => {
+    expect(paperNeeds([{ key: 'a', size: 'a3', copies: 3 }, { key: 'b', size: 'a3', copies: 2 }, { key: 'c', size: 'a4', copies: 1 }, { key: 'd', size: 'a2', copies: 0 }])).toEqual({ a3: 5, a4: 1 });
+  });
+});
+
+describe('fitToStock', () => {
+  const items = [
+    { key: 'kyoto', size: 'a3', copies: 6 },
+    { key: 'sunset', size: 'a3', copies: 3 },
+    { key: 'wave', size: 'a3', copies: 1 },
+    { key: 'small', size: 'a4', copies: 4 },
+  ];
+  it('shares the sheets in proportion to what each item wanted', () => {
+    // 10 wanted, 5 sheets: 3, 1.5, 0.5 -> 3, then the halves: the bigger order first.
+    expect(fitToStock(items, { a3: 5 })).toEqual({ kyoto: 3, sunset: 2, wave: 0, small: 4 });
+    expect(fitToStock(items, { a3: 7 })).toEqual({ kyoto: 4, sunset: 2, wave: 1, small: 4 });
+  });
+  it('never uses more sheets than there are', () => {
+    for (let sheets = 0; sheets <= 10; sheets++) {
+      const fit = fitToStock(items, { a3: sheets });
+      expect(fit.kyoto! + fit.sunset! + fit.wave!).toBe(sheets);
+    }
+  });
+  it('leaves sizes with enough paper, or without a stock figure, as they are', () => {
+    expect(fitToStock(items, { a3: 10, a4: 99 })).toEqual({ kyoto: 6, sunset: 3, wave: 1, small: 4 });
+    expect(fitToStock(items, {})).toEqual({ kyoto: 6, sunset: 3, wave: 1, small: 4 });
+    expect(fitToStock(items, { a4: -2 })).toMatchObject({ small: 0 });
   });
 });

@@ -147,6 +147,45 @@ describe('the printing app', () => {
   });
 });
 
+describe('the printing app, signed in', () => {
+  // Its own paper and key: the tests above remove theirs.
+  let key = '';
+  beforeAll(async () => {
+    await call('PUT', '/materials/a4', { id: 'a4', name: 'Hahnemühle A4', type: 'paper', unit: 'sheet', purchases: [{ id: 'p1', qty: 30, cost: 15, date: '2026-10-01' }] });
+    key = (await call('POST', '/keys', { label: 'Print Desk, signed in' })).json().secret;
+  });
+
+  it('lists the materials and logs a use without a printer key, as the key routes do', async () => {
+    const list = await call('GET', '/printing/materials');
+    expect(list.statusCode).toBe(200);
+    const before = list.json().materials.find((m: { id: string }) => m.id === 'a4').onHand;
+    const used = await call('POST', '/printing/usage', { material: 'a4', qty: 2, id: 'signed-in-0001', note: 'Kyoto A4 · Print Desk' });
+    expect(used.statusCode).toBe(201);
+    expect(used.json().material.onHand).toBe(before - 2);
+    expect((await call('GET', '/snapshot')).json().usage.a4.recent[0]).toMatchObject({ source: 'printer', qty: 2, note: 'Kyoto A4 · Print Desk' });
+  });
+
+  it('counts a resent job once, also when it went through the key the first time', async () => {
+    const again = await call('POST', '/printing/usage', { material: 'a4', qty: 2, id: 'signed-in-0001' });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().duplicate).toBe(true);
+    const viaKey = await printer('POST', '/usage', { material: 'a4', qty: 1, id: 'job-both-ways' }, key);
+    expect(viaKey.statusCode).toBe(201);
+    const signedIn = await call('POST', '/printing/usage', { material: 'a4', qty: 1, id: 'job-both-ways' });
+    expect(signedIn.json()).toMatchObject({ duplicate: true, material: { onHand: viaKey.json().material.onHand } });
+  });
+
+  it('says what is wrong with a use, in the same words', async () => {
+    expect((await call('POST', '/printing/usage', { material: 'linen', qty: 1 })).json().error).toBe('unknown_material');
+    expect((await call('POST', '/printing/usage', { material: 'a4', qty: 0 })).statusCode).toBe(400);
+  });
+
+  it('needs a signed-in user: a printer key, even a working one, is not one', async () => {
+    expect((await app.inject({ method: 'GET', url: '/api/m/sourcing/printing/materials' })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/m/sourcing/printing/materials', headers: auth(key) })).statusCode).toBe(401);
+  });
+});
+
 describe('prints by recipe, and product costs that follow the batches', () => {
   let key = '';
   const latestCost = () => {

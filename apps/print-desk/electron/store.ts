@@ -13,7 +13,7 @@ export interface Stored extends Settings {
   printerKeyEncrypted?: boolean;
 }
 
-export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0, sizeTargets: {}, itemTargets: {}, units: 'cm', paperMaterials: {}, hasPrinterKey: false };
+export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0, sizeTargets: {}, itemTargets: {}, units: 'cm', paperMaterials: {}, hasPrinterKey: false, hidden: {} };
 
 export class Store {
   data: Stored;

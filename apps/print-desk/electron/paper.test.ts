@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor, fitToStock, paperNeeds, poissonTail, smartFit } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -126,5 +126,73 @@ describe('effectiveParams with overrides', () => {
   it('leaves the overrides out on request, and for items with their own settings', () => {
     expect(effectiveParams(link, global, 'a2', false)).toMatchObject({ paper: [1190.55, 1683.78], scaleToFit: true });
     expect(effectiveParams({ ...link, own: true }, global, 'a2')).toBe(link.params);
+  });
+});
+
+describe('paperNeeds', () => {
+  it('counts one sheet per copy, per size', () => {
+    expect(paperNeeds([{ key: 'a', size: 'a3', copies: 3 }, { key: 'b', size: 'a3', copies: 2 }, { key: 'c', size: 'a4', copies: 1 }, { key: 'd', size: 'a2', copies: 0 }])).toEqual({ a3: 5, a4: 1 });
+  });
+});
+
+describe('fitToStock', () => {
+  const items = [
+    { key: 'kyoto', size: 'a3', copies: 6 },
+    { key: 'sunset', size: 'a3', copies: 3 },
+    { key: 'wave', size: 'a3', copies: 1 },
+    { key: 'small', size: 'a4', copies: 4 },
+  ];
+  it('shares the sheets in proportion to what each item wanted', () => {
+    // 10 wanted, 5 sheets: 3, 1.5, 0.5 -> 3, then the halves: the bigger order first.
+    expect(fitToStock(items, { a3: 5 })).toEqual({ kyoto: 3, sunset: 2, wave: 0, small: 4 });
+    expect(fitToStock(items, { a3: 7 })).toEqual({ kyoto: 4, sunset: 2, wave: 1, small: 4 });
+  });
+  it('never uses more sheets than there are', () => {
+    for (let sheets = 0; sheets <= 10; sheets++) {
+      const fit = fitToStock(items, { a3: sheets });
+      expect(fit.kyoto! + fit.sunset! + fit.wave!).toBe(sheets);
+    }
+  });
+  it('leaves sizes with enough paper, or without a stock figure, as they are', () => {
+    expect(fitToStock(items, { a3: 10, a4: 99 })).toEqual({ kyoto: 6, sunset: 3, wave: 1, small: 4 });
+    expect(fitToStock(items, {})).toEqual({ kyoto: 6, sunset: 3, wave: 1, small: 4 });
+    expect(fitToStock(items, { a4: -2 })).toMatchObject({ small: 0 });
+  });
+});
+
+describe('poissonTail', () => {
+  it('is the chance demand reaches n', () => {
+    expect(poissonTail(2, 0)).toBe(1);
+    expect(poissonTail(2, 1)).toBeCloseTo(1 - Math.exp(-2), 10);
+    expect(poissonTail(2, 2)).toBeCloseTo(1 - 3 * Math.exp(-2), 10);
+    expect(poissonTail(0, 1)).toBe(0);
+    expect(poissonTail(400, 380)).toBeGreaterThan(0.8); // no underflow with a large mean
+  });
+});
+
+describe('smartFit', () => {
+  const item = (key: string, copies: number, onHand: number, mean: number | null, price = 30) => ({ key, size: 'a3', copies, onHand, mean, price });
+  it('gives the sheets to the copies most likely to sell', () => {
+    // Kyoto sells ~6 and has none; Sunset sells ~1 and has 2 already. 4 sheets: all Kyoto.
+    const { counts } = smartFit([item('kyoto', 6, 0, 6), item('sunset', 3, 2, 1)], { a3: 4 });
+    expect(counts).toEqual({ kyoto: 4, sunset: 0 });
+  });
+  it('weighs the price: a dearer print wins a sheet at the same chance', () => {
+    const { counts } = smartFit([item('cheap', 2, 0, 3, 20), item('dear', 2, 0, 3, 60)], { a3: 2 });
+    expect(counts).toEqual({ cheap: 0, dear: 2 });
+  });
+  it('never gives more than an item asked for, nor more sheets than there are', () => {
+    const items = [item('a', 2, 0, 50), item('b', 5, 0, 1), item('c', 4, 3, null)];
+    for (let sheets = 0; sheets <= 11; sheets++) {
+      const { counts } = smartFit(items, { a3: sheets });
+      expect(counts.a!).toBeLessThanOrEqual(2);
+      expect(counts.a! + counts.b! + counts.c!).toBe(Math.min(sheets, 11));
+    }
+  });
+  it('leaves sizes with enough paper alone and says what the fit should sell', () => {
+    expect(smartFit([item('a', 2, 0, 3)], { a3: 5 }).counts).toEqual({ a: 2 });
+    const { gain } = smartFit([item('a', 3, 0, 1), item('b', 3, 0, 1)], { a3: 2 });
+    expect(gain.a3!.units).toBeCloseTo(2 * (1 - Math.exp(-1)), 6);
+    expect(gain.a3!.value).toBeCloseTo(60 * (1 - Math.exp(-1)), 6);
   });
 });

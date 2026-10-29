@@ -8,7 +8,7 @@ import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResu
 import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
 import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
-import { listMaterials, useMaterial, type MaterialUse } from './materials.js';
+import { listMaterials, sessionRefusal, useMaterial, type MaterialUse, type PaperAccess } from './materials.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
@@ -98,6 +98,7 @@ void app.whenReady().then(() => {
   ipcMain.handle('zollify:logout', () => zollify.logout());
   ipcMain.handle('zollify:catalog', () => zollify.catalog().catch(fail));
   ipcMain.handle('zollify:lastEventSold', () => zollify.lastEventSold().catch(fail));
+  ipcMain.handle('zollify:forecast', (_e, today: string) => zollify.forecast(String(today)).catch(fail));
 
   // ── Zollify materials, through a printer key (Sourcing → Materials → Printing app) ──
   /** Stores a printer key once Zollify accepts it; '' removes it. */
@@ -110,19 +111,50 @@ void app.whenReady().then(() => {
     store.save();
     return store.settings();
   });
-  ipcMain.handle('materials:list', () => (readPrinterKey() ? listMaterials(zollify.server, readPrinterKey()).catch(fail) : []));
+  /**
+   * The materials, through the sign-in when it may (an owner or admin, Sourcing on, a server with
+   * the printing calls), else through a stored printer key. `note` says why neither works.
+   */
+  async function paperAccess(): Promise<PaperAccess> {
+    let note = 'Sign in to Zollify first.';
+    if (zollify.session) {
+      try {
+        return { via: 'session', materials: await zollify.printingMaterials(), note: '' };
+      } catch (err) {
+        note = err instanceof ZollifyError ? sessionRefusal(err.status, err.message) : String(err);
+      }
+    }
+    const key = readPrinterKey();
+    if (!key) return { via: null, materials: [], note };
+    try {
+      return { via: 'key', materials: await listMaterials(zollify.server, key), note };
+    } catch (err) {
+      return { via: null, materials: [], note: err instanceof Error ? err.message : String(err) };
+    }
+  }
+  let paperVia: PaperAccess['via'] = null;
+  ipcMain.handle('materials:list', async () => {
+    const access = await paperAccess();
+    paperVia = access.via;
+    return access;
+  });
   /**
    * Logs paper used. `job` names the copies (run, item, which copies), and the use's id is made
    * from it, so sending the same copies again counts once.
    */
-  ipcMain.handle('materials:use', (_e, use: Omit<MaterialUse, 'id'> & { job: string }) =>
-    useMaterial(zollify.server, readPrinterKey(), {
-      material: use.material,
-      qty: use.qty,
-      note: use.note,
-      id: `pd-${createHash('sha256').update(use.job).digest('hex').slice(0, 40)}`,
-    }).catch(fail),
-  );
+  ipcMain.handle('materials:use', async (_e, use: Omit<MaterialUse, 'id'> & { job: string }) => {
+    const u: MaterialUse = { material: use.material, qty: use.qty, note: use.note, id: `pd-${createHash('sha256').update(use.job).digest('hex').slice(0, 40)}` };
+    // Through the sign-in when that is how the materials were read; the key otherwise, or when the
+    // sign-in is refused. The id makes a use sent both ways count once.
+    if (paperVia === 'session' && zollify.session) {
+      try {
+        return await zollify.printingUse(u);
+      } catch (err) {
+        if (!(err instanceof ZollifyError && [401, 402, 403, 404].includes(err.status) && readPrinterKey())) return fail(err);
+      }
+    }
+    return useMaterial(zollify.server, readPrinterKey(), u).catch(fail);
+  });
   ipcMain.handle('zollify:addOnHand', (_e, items: { productId: string; variantId: string; add: number }[]) => zollify.addOnHand(items).catch(fail));
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));

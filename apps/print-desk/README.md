@@ -114,6 +114,22 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   sizes" goes back. **Fit to paper stock** cuts the copies of each size that is
   short to the sheets on hand, each item keeping its share of what it wanted
   (30 and 25 wanted, 48 sheets: 26 and 22).
+- **Smart fit to stock** gives the sheets of a short size to the copies most
+  likely to sell instead: each item's sales per event day at events over the
+  last year (stores left out), times the days of the next event (scaled by how
+  its earlier editions in the same series sold), make its forecast; a copy is
+  worth its price times the chance it sells after what is on hand (Poisson
+  demand). Never more copies than an item asked for. An item with no sales in
+  the last year takes its own count as its forecast.
+- The toolbar keeps the search, the size filter and Print; the rest is in two
+  menus. **Fill**: from last event, to target, and Targets… (the main target
+  and one per size). **Setup**: global print settings, paper stock, detect
+  sizes, and adding printed copies to the Zollify stock. The two fits are one
+  **Fit to paper stock** menu in the Paper needed bar. Messages show as toasts
+  in a corner, so they never move the page; a notice goes after 12 s (not
+  while the pointer is on it), an error stays until dismissed.
+- **Paper size quick filter** (next to the search): shows only one size's
+  items and prints only that size, the same choice as the Paper needed chips.
 - **Hide** (per row) is for items printed elsewhere, such as outsourced ones:
   they leave the table, the fills and the print run. "Show hidden" lists them
   again, dimmed, with **Unhide**. Kept per account between sessions.

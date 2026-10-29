@@ -1,7 +1,7 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
-import type { EventSold } from '../electron/reduce';
+import type { DemandForecast, EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
 declare module '*.vue' {
@@ -26,6 +26,8 @@ export interface PrintDeskApi {
     catalog(): Promise<CatalogRow[]>;
     /** Copies the last closed event sold per stock key; null when no event is closed. */
     lastEventSold(): Promise<EventSold | null>;
+    /** What each item is expected to sell, for the next event (`today` as YYYY-MM-DD). */
+    forecast(today: string): Promise<DemandForecast>;
     /** Adds copies to each item's stock as Zollify has it now; each item's new count. */
     addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]>;
   };

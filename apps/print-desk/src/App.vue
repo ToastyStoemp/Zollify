@@ -4,8 +4,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QrCode from '@zollify/ui/QrCode.vue';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
-import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, targetFor } from '../electron/shared';
+import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
+import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
+import Menu from './Menu.vue';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -41,14 +43,19 @@ const isHidden = (r: CatalogRow): boolean => hiddenKeys.value.has(r.key);
 const showHidden = ref(false);
 /** The items printed here. */
 const active = computed(() => rows.value.filter((r) => !isHidden(r)));
+/** The table's rows before the size and text filters: the hidden ones too when they are shown. */
+const listed = computed(() => (showHidden.value ? rows.value : active.value));
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  const list = showHidden.value ? rows.value : active.value;
-  return q ? list.filter((r) => `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)) : list;
+  return listed.value.filter(
+    (r) => (!onlySize.value || printSize(r) === onlySize.value) && (!q || `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)),
+  );
 });
+/** The paper sizes in the table, for the quick filter: A sizes and others by name, a custom size last. */
+const tableSizes = computed(() => [...new Set(listed.value.map(printSize))].sort((a, b) => (a === 'custom' ? 1 : b === 'custom' ? -1 : a.localeCompare(b))));
 /** The paper an item prints on ("a3"), or "custom". */
 const printSize = (r: CatalogRow): string => paperName(paramsFor(r).paper) ?? 'custom';
-/** Print only this paper size ('' every size). */
+/** One paper size for the table and the print run ('' every size): the quick filter, and the Paper needed chips. */
 const onlySize = ref('');
 /** Every item with copies to print and a file to print them from. */
 const queuedAll = computed(() => active.value.filter((r) => (qty[r.key] ?? 0) > 0 && links.value[r.key]?.file));
@@ -290,9 +297,45 @@ function fitToPaperStock(): void {
     ? `Fitted to the paper on hand: ${cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets`).join(', ')}. Each item keeps its share of what it wanted.`
     : 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
 }
-// A size picked for printing that has nothing left to print goes back to every size.
-watch(needs, (n) => {
-  if (onlySize.value && !(onlySize.value in n)) onlySize.value = '';
+/**
+ * "Smart fit to stock": per size short of paper, each sheet goes to the copy most likely to sell
+ * at the next event, weighed by its price, from Zollify's sales (see demandForecast, smartFit).
+ */
+async function smartFitToPaperStock(): Promise<void> {
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const forecast = await guard('Reading what sells', () => api.zollify.forecast(iso));
+  if (!forecast) return;
+  const items = queuedAll.value.map((r) => ({
+    key: r.key,
+    size: printSize(r),
+    copies: qty[r.key] ?? 0,
+    onHand: r.onHand,
+    mean: r.key in forecast.perDay ? forecast.perDay[r.key]! * forecast.horizonDays : null,
+    price: forecast.price[r.key] ?? 0,
+  }));
+  const stock = Object.fromEntries(Object.keys(needs.value).flatMap((size) => (paperOnHand(size) === null ? [] : [[size, paperOnHand(size)!]])));
+  const before = { ...needs.value };
+  const { counts, gain } = smartFit(items, stock);
+  for (const [key, n] of Object.entries(counts)) qty[key] = n;
+  const cut = Object.keys(gain);
+  if (!cut.length) {
+    notice.value = 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
+    return;
+  }
+  const ev = forecast.event;
+  const forWhat = ev ? `${ev.name || 'the next event'} (${ev.days} ${ev.days === 1 ? 'day' : 'days'}${ev.factor !== 1 ? `, earlier editions ${ev.factor > 1 ? 'busier' : 'quieter'} ×${ev.factor}` : ''})` : 'an average event';
+  const noHistory = items.filter((i) => i.mean === null && i.copies > 0).length;
+  notice.value =
+    `Smart fit for ${forWhat}: ` +
+    cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets, of which about ${Math.round(gain[size]!.units)} should sell (worth about ${Math.round(gain[size]!.value)})`).join('; ') +
+    '. The sheets went to the copies most likely to sell, dearer prints first.' +
+    (noHistory ? ` ${noHistory} ${noHistory === 1 ? 'item has' : 'items have'} no sales in the last year, so ${noHistory === 1 ? 'its' : 'their'} own count stood in for a forecast.` : '');
+}
+
+// A size no item prints on any more goes back to every size.
+watch(tableSizes, (sizes) => {
+  if (onlySize.value && !sizes.includes(onlySize.value)) onlySize.value = '';
 });
 async function setHidden(row: CatalogRow, hidden: boolean): Promise<void> {
   if (!session.value) return;
@@ -589,6 +632,18 @@ async function toggleAddToStock(on: boolean): Promise<void> {
   settings.value = await api.settings.set({ addToStock: on });
 }
 
+/** A notice goes after a while (not while the pointer rests on it); an error stays until dismissed. */
+const NOTICE_MS = 12_000;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+function holdNotice(): void {
+  clearTimeout(noticeTimer);
+}
+function fadeNotice(): void {
+  clearTimeout(noticeTimer);
+  if (notice.value) noticeTimer = setTimeout(() => (notice.value = ''), NOTICE_MS);
+}
+watch(notice, fadeNotice);
+
 /** Per item of the current run: copies already added to the Zollify stock. */
 const counted: Record<string, number> = {};
 let stockQueue: Promise<void> = Promise.resolve();
@@ -721,22 +776,34 @@ async function printAll(): Promise<void> {
       </div>
     </header>
 
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="notice" role="status">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
+    <!-- Toasts float over the page in a corner, so a message never moves the toolbar or the table. -->
+    <div class="toasts">
+      <p v-if="error" class="toast error" role="alert">{{ error }} <button type="button" class="quiet" aria-label="Dismiss" @click="error = ''">×</button></p>
+      <p v-if="notice" class="toast notice" role="status" @mouseenter="holdNotice" @mouseleave="fadeNotice">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
+    </div>
 
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
-      <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
-      <button type="button" :aria-expanded="open === PAPER" title="Take the paper of each printed copy off its material in Zollify (Sourcing → Materials)" @click="open = open === PAPER ? null : PAPER">Paper stock</button>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to the copies the last closed event sold" @click="fillFromLastEvent">Fill from last event</button>
-      <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
-        Main target
-        <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
-      </label>
-      <button v-if="sizes.length" type="button" class="quiet" :aria-expanded="showSizeTargets" title="A target per A size; items without a size in their name use the main target" @click="showSizeTargets = !showSizeTargets">Per size</button>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to what it takes to reach its target stock" @click="fillToTarget">Fill to target</button>
-      <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+      <div v-if="tableSizes.length > 1" class="size-filter" role="group" aria-label="Paper size">
+        <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All</button>
+        <button v-for="size in tableSizes" :key="size" type="button" class="chip" :aria-pressed="onlySize === size" :title="`Show and print only ${sizeLabel(size)}`" @click="onlySize = onlySize === size ? '' : size">
+          {{ size === 'custom' ? 'Custom' : sizeLabel(size) }}
+        </button>
+      </div>
+      <span class="spacer"></span>
+      <Menu label="Fill" title="Set the print counts" :disabled="!!busy || !rows.length">
+        <button type="button" role="menuitem" @click="fillFromLastEvent">Fill from last event<small>The copies the last closed event sold</small></button>
+        <button type="button" role="menuitem" @click="fillToTarget">Fill to target<small>What each item needs to reach its target stock</small></button>
+        <hr />
+        <button type="button" role="menuitem" @click="showSizeTargets = !showSizeTargets">{{ showSizeTargets ? 'Close the targets' : 'Targets…' }}<small>Main target {{ settings?.target ?? 0 }}, and per paper size</small></button>
+      </Menu>
+      <Menu label="Setup" title="Print settings, paper and stock" align="right">
+        <button type="button" role="menuitem" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}<small>One set for every item, each on its own paper</small></button>
+        <button type="button" role="menuitem" @click="open = open === PAPER ? null : PAPER">Paper stock<small>{{ paperVia ? 'Paper is taken off Zollify materials' : 'Take printed paper off Zollify materials' }}</small></button>
+        <button type="button" role="menuitem" :disabled="!!busy || !rows.length" @click="detectSizes">Detect sizes<small>Each item's paper from the A size in its name</small></button>
+        <hr />
+        <label role="menuitemcheckbox" :aria-checked="!!settings?.addToStock"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+      </Menu>
       <button v-if="hiddenKeys.size" type="button" class="quiet" :aria-pressed="showHidden" @click="showHidden = !showHidden">{{ showHidden ? `Leave out hidden (${hiddenKeys.size})` : `Show hidden (${hiddenKeys.size})` }}</button>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || (onlySize ? `Print ${sizeLabel(onlySize)} only` : 'Print all') }}</button>
@@ -756,11 +823,18 @@ async function printAll(): Promise<void> {
       >
         {{ sizeLabel(String(size)) }}: {{ n }} {{ n === 1 ? 'sheet' : 'sheets' }}<template v-if="paperOnHand(String(size)) !== null"> · {{ paperOnHand(String(size)) }} on hand</template>
       </button>
-      <button v-if="shortSizes.length" type="button" title="Cut the copies of each size short of paper to what is on hand, each item in proportion to what it wanted" @click="fitToPaperStock">Fit to paper stock</button>
+      <Menu v-if="shortSizes.length" label="Fit to paper stock" :disabled="!!busy">
+        <button type="button" role="menuitem" @click="smartFitToPaperStock">Smart fit<small>The paper to the copies most likely to sell at the next event, dearer prints first</small></button>
+        <button type="button" role="menuitem" @click="fitToPaperStock">Proportional fit<small>Each item keeps its share of what it wanted</small></button>
+      </Menu>
       <span v-if="!paperVia" class="muted">Set up Paper stock to see what is on hand.</span>
     </div>
-    <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
-      <span class="muted">Target stock per size (empty: {{ settings?.target ?? 0 }}, the main target)</span>
+    <div v-if="showSizeTargets" class="size-targets" role="group" aria-label="Target stock">
+      <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
+        Main target
+        <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
+      </label>
+      <span v-if="sizes.length" class="muted">Per size (empty: the main target)</span>
       <label v-for="s in sizes" :key="s" class="inline target">
         {{ s.toUpperCase() }}
         <input type="number" min="0" max="999" :value="settings?.sizeTargets?.[s] ?? ''" :placeholder="String(settings?.target ?? 0)" @change="setSizeTarget(s, ($event.target as HTMLInputElement).valueAsNumber)" />
@@ -808,11 +882,11 @@ async function printAll(): Promise<void> {
 
     <table>
       <thead>
-        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
+        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th><span class="sr-only">Actions</span></th><th>Print</th><th>Result</th></tr>
       </thead>
       <tbody>
-        <template v-for="row in shown" :key="row.key">
-          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row) }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
+        <template v-for="(row, i) in shown" :key="row.key">
+          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row), alt: i % 2 === 1 }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
@@ -833,8 +907,30 @@ async function printAll(): Promise<void> {
             </td>
             <td>
               <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
-              <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
-              <button type="button" class="quiet" :title="isHidden(row) ? 'Print this item here again' : 'Printed elsewhere (outsourced): leave it out of the fills and the print run'" @click="setHidden(row, !isHidden(row))">{{ isHidden(row) ? 'Unhide' : 'Hide' }}</button>
+            </td>
+            <td class="actions-cell">
+              <div class="row-actions">
+                <button
+                  type="button"
+                  class="icon-button"
+                  :aria-pressed="open === row.key"
+                  :aria-label="`Print settings for ${row.variant ? `${row.title} ${row.variant}` : row.title}`"
+                  :title="open === row.key ? 'Close the print settings' : 'Print settings'"
+                  @click="open = open === row.key ? null : row.key"
+                >
+                  <Icon name="settings" />
+                </button>
+                <button
+                  type="button"
+                  class="icon-button"
+                  :aria-pressed="isHidden(row)"
+                  :aria-label="`${isHidden(row) ? 'Unhide' : 'Hide'} ${row.variant ? `${row.title} ${row.variant}` : row.title}`"
+                  :title="isHidden(row) ? 'Hidden: printed elsewhere. Click to print it here again' : 'Hide: printed elsewhere (outsourced), so out of the fills and the print run'"
+                  @click="setHidden(row, !isHidden(row))"
+                >
+                  <Icon :name="isHidden(row) ? 'eye-off' : 'eye'" />
+                </button>
+              </div>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file || isHidden(row)" /></td>
             <td>
@@ -849,8 +945,8 @@ async function printAll(): Promise<void> {
               </template>
             </td>
           </tr>
-          <tr v-if="open === row.key" class="settings">
-            <td :colspan="hasSku ? 8 : 7">
+          <tr v-if="open === row.key" class="settings" :class="{ alt: i % 2 === 1 }">
+            <td :colspan="hasSku ? 9 : 8">
               <ItemOverrides
                 v-if="usesGlobal(row)"
                 :base="effectiveParams(links[row.key], globalParams, sizeOf(row), false) ?? {}"
@@ -900,28 +996,41 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .exe { display: flex; align-items: center; gap: .4rem; }
 .exe code { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.toolbar input[type='search'] { flex: 1; min-width: 12rem; }
+.toolbar input[type='search'] { flex: 0 1 18rem; min-width: 10rem; }
 .target input, .target-cell { width: 4.5rem; }
 .size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border-radius: 10px; }
-th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: middle; }
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }
+/* Every other item a shade off the surface, so a row reads across; its settings panel shares it. */
+tr.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-surface)); }
 tr.settings td { background: var(--zfy-bg); }
+tr.settings.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-bg)); }
+.actions-cell { width: 1%; white-space: nowrap; }
+.row-actions { display: flex; gap: .35rem; }
+.icon-button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border-radius: 8px; color: var(--zfy-muted); }
+.icon-button:hover { color: var(--zfy-ink); border-color: color-mix(in srgb, var(--zfy-ink) 30%, var(--zfy-line)); }
+.icon-button[aria-pressed='true'] { color: var(--zfy-primary); border-color: var(--zfy-primary); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
 tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
-.notice { margin: 0; padding: .5rem .75rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); }
-.notice button { padding: 0 .4rem; }
+.toasts { position: fixed; left: 1rem; bottom: 1rem; z-index: 20; display: flex; flex-direction: column; gap: .5rem; max-width: min(36rem, calc(100vw - 12rem)); pointer-events: none; }
+.toast { pointer-events: auto; margin: 0; padding: .6rem .75rem; border-radius: 10px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.toast.error { border-color: var(--zfy-danger); }
+.toast button { padding: 0 .4rem; }
 .global { padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-surface); }
 .global > p { margin: 0 0 .4rem; }
 .paper .key { display: flex; gap: .5rem; margin: .4rem 0; }
 .paper .key input { flex: 1; max-width: 24rem; }
 .paper-sizes { display: flex; flex-wrap: wrap; gap: .6rem .9rem; margin: .4rem 0; }
+.size-filter { display: flex; gap: .3rem; }
+.toolbar .spacer { flex: 1; }
 .plan { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .chip { padding: .25rem .65rem; border-radius: 999px; }
 .chip[aria-pressed='true'] { border-color: var(--zfy-primary); box-shadow: inset 0 0 0 1px var(--zfy-primary); }
 .chip.short { border-color: var(--zfy-danger); color: var(--zfy-danger); }
-tr.hidden td { opacity: .55; }
+tr.hidden td:not(.actions-cell) { opacity: .55; }
 .uses-global { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogRows, lastClosedEventSold } from './reduce.js';
+import { catalogRows, demandForecast, lastClosedEventSold } from './reduce.js';
 import { printParams } from './shared.js';
 
 describe('catalogRows', () => {
@@ -60,5 +60,41 @@ describe('lastClosedEventSold', () => {
   });
   it('is null without a closed event', () => {
     expect(lastClosedEventSold([ev('a', '2026-01-01', 'planned')])).toBeNull();
+  });
+});
+
+describe('demandForecast', () => {
+  const day = (iso: string, h = 12) => Date.parse(`${iso}T${String(h).padStart(2, '0')}:00:00`);
+  const ev = (id: string, start: string, end: string, extra = {}) => ({ type: 'event.upsert', payload: { id, name: id, status: 'closed', dateStart: start, dateEnd: end, updatedAt: 1, ...extra } });
+  const tx = (id: string, eventId: string, at: number, items: [string, string | null, number][]) => ({ type: 'tx.create', payload: { id, eventId, timestamp: at, items: items.map(([pid, vid, qty]) => ({ pid, vid, qty })) } });
+  const ops = [
+    { type: 'product.upsert', payload: { id: 'kyoto', title: 'Kyoto', price: 25, variants: [{ id: 'a3', name: 'A3', price: 35 }, { id: 'a4', name: 'A4' }], updatedAt: 1 } },
+    ev('fair-2025', '2025-11-08', '2025-11-09', { seriesId: 'fair' }),
+    ev('market', '2026-06-06', '2026-06-06'),
+    ev('shop', '2026-01-01', '2026-12-31', { kind: 'store' }),
+    ev('fair-2026', '2026-11-07', '2026-11-09', { seriesId: 'fair', status: 'planned' }),
+    tx('t1', 'fair-2025', day('2025-11-08'), [['kyoto', 'a3', 6], ['kyoto', 'a4', 2]]),
+    tx('t2', 'market', day('2026-06-06'), [['kyoto', 'a3', 1]]),
+    tx('t3', 'shop', day('2026-03-01'), [['kyoto', 'a3', 50]]),
+    tx('t4', 'market', day('2026-06-06', 15), [['kyoto', 'a4', 1]]),
+    { type: 'tx.revert', payload: { id: 't4' } },
+  ];
+  it('rates each item per event day over the last year, stores and reverted sales left out', () => {
+    const f = demandForecast(ops, '2026-10-29');
+    // Event days in the year: fair-2025 2 + market 1 = 3. Kyoto A3 sold 6 + 1, A4 2.
+    expect(f.perDay['kyoto:a3']).toBeCloseTo(7 / 3, 6);
+    expect(f.perDay['kyoto:a4']).toBeCloseTo(2 / 3, 6);
+    expect(f.price).toEqual({ 'kyoto:a3': 35, 'kyoto:a4': 25 });
+  });
+  it('plans for the next event, scaled by how its earlier editions sold', () => {
+    const f = demandForecast(ops, '2026-10-29');
+    // Average 9 units / 3 days = 3; the fair's last edition 8 / 2 = 4: factor 1.33 over 3 days.
+    expect(f.event).toEqual({ name: 'fair-2026', days: 3, factor: 1.33 });
+    expect(f.horizonDays).toBeCloseTo(3.99, 6);
+  });
+  it('plans for an average event when none is coming', () => {
+    const f = demandForecast(ops.filter((o) => (o.payload as { id?: string }).id !== 'fair-2026'), '2026-10-29');
+    expect(f.event).toBeNull();
+    expect(f.horizonDays).toBeCloseTo(1.5, 6);
   });
 });

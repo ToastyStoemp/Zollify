@@ -46,3 +46,18 @@ export async function listMaterials(server: string, key: string): Promise<Materi
 export async function useMaterial(server: string, key: string, use: MaterialUse): Promise<{ material: Material; duplicate: boolean }> {
   return call(server, key, '/usage', { method: 'POST', body: JSON.stringify(use) });
 }
+
+/** How Print Desk reaches the materials: the Zollify sign-in, the printer key, or neither (`note` says why). */
+export interface PaperAccess {
+  via: 'session' | 'key' | null;
+  materials: Material[];
+  note: string;
+}
+
+/** Why the sign-in can't reach the materials, in words for the Paper stock panel. */
+export function sessionRefusal(status: number, message: string): string {
+  if (status === 402) return 'Sourcing is switched off for this account in Zollify.';
+  if (status === 403) return 'Only owners and admins can use Sourcing with their sign-in.';
+  if (status === 404) return 'This Zollify server does not take Print Desk\'s sign-in for materials yet (it needs an update).';
+  return message;
+}

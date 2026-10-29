@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { catalogRows, lastClosedEventSold, type EventSold, type PulledOp } from './reduce.js';
 import type { CatalogRow, Session } from './shared.js';
 import { stockKey } from './shared.js';
+import type { Material, MaterialUse } from './materials.js';
 
 /** Zollify's answer to a login or refresh: a native client gets the refresh token in the body. */
 interface TokenResponse {
@@ -32,7 +33,12 @@ export interface LinkPoll {
 }
 
 export class ZollifyError extends Error {
-  constructor(message: string, readonly needs2fa = false) {
+  constructor(
+    message: string,
+    readonly needs2fa = false,
+    /** The HTTP status Zollify answered with, when it answered. */
+    readonly status = 0,
+  ) {
     super(message);
   }
 }
@@ -149,7 +155,7 @@ export class Zollify {
       return this.request<T>(path, init, false);
     }
     const json = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new ZollifyError(json.error ?? `${path} failed (${res.status})`);
+    if (!res.ok) throw new ZollifyError((json as { message?: string }).message ?? json.error ?? `${path} failed (${res.status})`, false, res.status);
     return json;
   }
 
@@ -196,6 +202,16 @@ export class Zollify {
     const next = items.map((i) => ({ ...i, key: stockKey(i.productId, i.variantId), onHand: (now.get(stockKey(i.productId, i.variantId)) ?? 0) + i.add }));
     await this.setOnHand(next);
     return next.map(({ key, onHand }) => ({ key, onHand }));
+  }
+
+  /** The account's materials with what is on hand, through the sign-in (Sourcing's printing calls). */
+  async printingMaterials(): Promise<Material[]> {
+    return (await this.request<{ materials: Material[] }>('/api/m/sourcing/printing/materials')).materials;
+  }
+
+  /** Logs a material used, through the sign-in; a resent id counts once, as with the printer key. */
+  async printingUse(use: MaterialUse): Promise<{ material: Material; duplicate: boolean }> {
+    return this.request('/api/m/sourcing/printing/usage', { method: 'POST', body: JSON.stringify(use) });
   }
 
   /** Counts stock: each item's new on-hand figure, as the web app's stock count does. */

@@ -305,10 +305,17 @@ async function setHidden(row: CatalogRow, hidden: boolean): Promise<void> {
   settings.value = await api.settings.set({ hidden: all });
   notice.value = hidden ? `${row.variant ? `${row.title} ${row.variant}` : row.title} is hidden: printed elsewhere, so out of the fills and the print run. "Show hidden" brings it back.` : '';
 }
+/** How the materials are reached: the Zollify sign-in, the printer key, or not at all. */
+const paperVia = ref<'session' | 'key' | null>(null);
+/** Why the sign-in can't reach the materials, when it can't. */
+const paperWhy = ref('');
 async function loadMaterials(): Promise<void> {
-  if (!settings.value?.hasPrinterKey) return;
+  if (!session.value) return;
   try {
-    materials.value = await api.materials.list();
+    const access = await api.materials.list();
+    materials.value = access.materials;
+    paperVia.value = access.via;
+    paperWhy.value = access.note;
     paperNote.value = '';
   } catch (err) {
     paperNote.value = `Could not read the materials: ${err instanceof Error ? err.message : String(err)}`;
@@ -330,6 +337,7 @@ async function saveKey(): Promise<void> {
 async function removeKey(): Promise<void> {
   settings.value = await api.materials.setKey('');
   materials.value = [];
+  await loadMaterials();
 }
 async function setPaperMaterial(size: string, id: string): Promise<void> {
   const next = { ...(settings.value?.paperMaterials ?? {}) };
@@ -625,7 +633,7 @@ async function usePaper(p: CopyProgress): Promise<void> {
   const material = size ? settings.value?.paperMaterials?.[size] : undefined;
   const from = paperCounted[p.key] ?? 0;
   const delta = p.printed - from;
-  if (!material || !settings.value?.hasPrinterKey || delta <= 0) return;
+  if (!material || !paperVia.value || delta <= 0) return;
   try {
     const res = await api.materials.use({
       material,
@@ -749,7 +757,7 @@ async function printAll(): Promise<void> {
         {{ sizeLabel(String(size)) }}: {{ n }} {{ n === 1 ? 'sheet' : 'sheets' }}<template v-if="paperOnHand(String(size)) !== null"> · {{ paperOnHand(String(size)) }} on hand</template>
       </button>
       <button v-if="shortSizes.length" type="button" title="Cut the copies of each size short of paper to what is on hand, each item in proportion to what it wanted" @click="fitToPaperStock">Fit to paper stock</button>
-      <span v-if="!settings?.hasPrinterKey" class="muted">Set up Paper stock to see what is on hand.</span>
+      <span v-if="!paperVia" class="muted">Set up Paper stock to see what is on hand.</span>
     </div>
     <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
       <span class="muted">Target stock per size (empty: {{ settings?.target ?? 0 }}, the main target)</span>
@@ -759,15 +767,20 @@ async function printAll(): Promise<void> {
       </label>
     </div>
     <section v-if="open === PAPER" class="global paper" aria-label="Paper stock">
-      <template v-if="!settings?.hasPrinterKey">
-        <p class="muted">Each printed copy can take its sheet off a material in Zollify. Make a printer key under <strong>Sourcing → Materials → Printing app</strong> and paste it here.</p>
+      <template v-if="!paperVia">
+        <p class="muted">Each printed copy can take its sheet off a material in Zollify (Sourcing → Materials).</p>
+        <p v-if="paperWhy" class="muted">Your sign-in can't: {{ paperWhy }}</p>
+        <p class="muted">An admin can make a printer key under <strong>Sourcing → Materials → Printing app</strong> to paste here instead.</p>
         <form class="key" @submit.prevent="saveKey">
           <input v-model="keyInput" type="password" autocomplete="off" placeholder="zpk_…" aria-label="Printer key" />
           <button type="submit" class="primary" :disabled="!keyInput.trim()">Save key</button>
         </form>
       </template>
       <template v-else>
-        <p class="muted">Each copy that comes out of the printer takes one sheet off the material set for its paper size. A cancelled print takes only what printed.</p>
+        <p class="muted">
+          Each copy that comes out of the printer takes one sheet off the material set for its paper size. A cancelled print takes only what printed.
+          {{ paperVia === 'session' ? 'Through your Zollify sign-in.' : `Through the printer key${paperWhy ? ` (your sign-in can't: ${paperWhy})` : ''}.` }}
+        </p>
         <div class="paper-sizes">
           <label v-for="size in paperSizes" :key="size">
             <span>{{ paperLabel(size) }}</span>
@@ -779,7 +792,7 @@ async function printAll(): Promise<void> {
           </label>
           <p v-if="!paperSizes.length" class="muted">No item has a named paper size yet.</p>
         </div>
-        <button type="button" class="quiet" @click="removeKey">Remove the printer key</button>
+        <button v-if="settings?.hasPrinterKey" type="button" class="quiet" @click="removeKey">{{ paperVia === 'session' ? 'Remove the printer key (not needed with your sign-in)' : 'Remove the printer key' }}</button>
       </template>
       <p v-if="paperNote" class="error" role="alert">{{ paperNote }}</p>
     </section>

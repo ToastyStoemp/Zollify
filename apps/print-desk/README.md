@@ -97,10 +97,13 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   counted), less reverted sales. Items it sold none of go to 0. Items without a
   linked file are named, as they cannot print.
 - **Paper stock** (toolbar) takes the paper of each printed copy off a material
-  in Zollify (Sourcing → Materials). Paste a printer key made under Materials →
-  Printing app (kept encrypted like the sign-in token, checked with Zollify
-  before it is saved), then pick the material for each paper size the
-  catalogue prints on. Copies are logged as they come out, like the stock: a
+  in Zollify (Sourcing → Materials): pick the material for each paper size the
+  catalogue prints on. It goes through your Zollify sign-in
+  (`/api/m/sourcing/printing/…`) when that may: an owner or admin, with
+  Sourcing on. Otherwise (a staff account, or a server without those routes)
+  paste a printer key made under Materials → Printing app; it is kept
+  encrypted like the sign-in token and checked with Zollify before it is
+  saved. Copies are logged as they come out, like the stock: a
   cancelled job takes only what printed, and each use carries an id made from
   the run, the item and the copies, so a report sent twice is logged once.
   The paper is the size the item prints on (its settings, or the global ones

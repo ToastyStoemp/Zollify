@@ -1,6 +1,6 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DevModeSummary } from '../electron/devmode';
-import type { Material } from '../electron/materials';
+import type { Material, PaperAccess } from '../electron/materials';
 import type { EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 
@@ -33,7 +33,8 @@ export interface PrintDeskApi {
   materials: {
     /** Stores the key once Zollify accepts it ('' removes it). */
     setKey(key: string): Promise<Settings>;
-    list(): Promise<Material[]>;
+    /** The materials, through the sign-in or else the printer key, and how. */
+    list(): Promise<PaperAccess>;
     /** Logs paper used; `job` names the copies, so the same copies sent again count once. */
     use(use: { material: string; qty: number; note?: string; job: string }): Promise<{ material: Material; duplicate: boolean }>;
   };

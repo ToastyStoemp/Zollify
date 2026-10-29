@@ -105,6 +105,15 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   the run, the item and the copies, so a report sent twice is logged once.
   The paper is the size the item prints on (its settings, or the global ones
   with the size from its name); a custom size takes nothing.
+- **Paper needed**: under the toolbar, the sheets each paper size needs for the
+  queued copies, with what Paper stock says is on hand; a size short of paper
+  shows red. Click a size to print only that size ("Print A3 only"); "All
+  sizes" goes back. **Fit to paper stock** cuts the copies of each size that is
+  short to the sheets on hand, each item keeping its share of what it wanted
+  (30 and 25 wanted, 48 sheets: 26 and 22).
+- **Hide** (per row) is for items printed elsewhere, such as outsourced ones:
+  they leave the table, the fills and the print run. "Show hidden" lists them
+  again, dimmed, with **Unhide**. Kept per account between sessions.
 - **Stock stays current.** The catalogue and stock are read from Zollify again
   every 30 s and whenever the window comes to the front, and before **Fill to
   target**; only ops new since the last read come over. The header shows when

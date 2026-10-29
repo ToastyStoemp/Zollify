@@ -82,6 +82,8 @@ export interface Settings {
   paperMaterials: Record<string, string>;
   /** Whether a printer key for Zollify's materials is stored (the key itself stays in the main process). */
   hasPrinterKey: boolean;
+  /** Account id -> stock keys of items printed elsewhere (outsourced): out of the fills and the print run. */
+  hidden: Record<string, string[]>;
 }
 
 export type Units = 'cm' | 'mm' | 'in';
@@ -226,3 +228,49 @@ export function printParams(link: PrintLink, copies: number): Record<string, unk
 /** An item's target stock: its own when set, else its A size's, else the main one. */
 export const targetFor = (own: number | undefined, size: string | null, target: number, sizeTargets: Record<string, number> | undefined): number =>
   own ?? (size ? sizeTargets?.[size] : undefined) ?? target;
+
+/** Copies of one item on one paper size, for paper planning. */
+export interface PaperItem {
+  key: string;
+  /** The paper size it prints on ("a3"), or "custom". */
+  size: string;
+  copies: number;
+}
+
+/** Sheets needed per paper size: one per copy. */
+export function paperNeeds(items: PaperItem[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const i of items) if (i.copies > 0) out[i.size] = (out[i.size] ?? 0) + i.copies;
+  return out;
+}
+
+/**
+ * Print counts that fit the paper on hand: per size where the copies need more sheets than
+ * `stock` has, each item gets its share of the sheets in proportion to the copies it wanted
+ * (largest remainders get the sheets left over, then the bigger orders). Sizes without a stock
+ * figure, and sizes with enough, keep their counts.
+ */
+export function fitToStock(items: PaperItem[], stock: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = Object.fromEntries(items.map((i) => [i.key, Math.max(0, i.copies)]));
+  const bySize = new Map<string, PaperItem[]>();
+  for (const i of items) if (i.copies > 0) bySize.set(i.size, [...(bySize.get(i.size) ?? []), i]);
+  for (const [size, list] of bySize) {
+    if (!(size in stock)) continue;
+    const need = list.reduce((n, i) => n + i.copies, 0);
+    const sheets = Math.max(0, Math.floor(stock[size]!));
+    if (need <= sheets) continue;
+    const shares = list.map((i, order) => ({ i, order, exact: (i.copies * sheets) / need }));
+    let left = sheets;
+    for (const s of shares) {
+      out[s.i.key] = Math.floor(s.exact);
+      left -= out[s.i.key]!;
+    }
+    shares.sort((a, b) => b.exact - Math.floor(b.exact) - (a.exact - Math.floor(a.exact)) || b.i.copies - a.i.copies || a.order - b.order);
+    for (const s of shares) {
+      if (left <= 0) break;
+      out[s.i.key]! += 1;
+      left--;
+    }
+  }
+  return out;
+}

@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import QrCode from '@zollify/ui/QrCode.vue';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
-import { effectiveParams, isPrintFile, targetFor, orientFor, paperName, paperParam, settingsFor, sizeFromName } from '../electron/shared';
+import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, targetFor } from '../electron/shared';
 import ItemOverrides from './ItemOverrides.vue';
 import PrintSettings from './PrintSettings.vue';
 
@@ -35,11 +35,25 @@ const login = reactive({ server: '', email: '', password: '', code: '', needs2fa
 const links = computed<Record<string, PrintLink>>(() => (session.value && settings.value ? (settings.value.links[session.value.accountId] ?? {}) : {}));
 /** Over the whole catalogue, not the filtered rows, so the column does not come and go while typing a filter. */
 const hasSku = computed(() => rows.value.some((r) => r.sku));
+/** Items printed elsewhere (outsourced): out of the table, the fills and the print run. */
+const hiddenKeys = computed(() => new Set(session.value ? (settings.value?.hidden?.[session.value.accountId] ?? []) : []));
+const isHidden = (r: CatalogRow): boolean => hiddenKeys.value.has(r.key);
+const showHidden = ref(false);
+/** The items printed here. */
+const active = computed(() => rows.value.filter((r) => !isHidden(r)));
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
-  return q ? rows.value.filter((r) => `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)) : rows.value;
+  const list = showHidden.value ? rows.value : active.value;
+  return q ? list.filter((r) => `${r.title} ${r.variant} ${r.sku}`.toLowerCase().includes(q)) : list;
 });
-const queued = computed(() => rows.value.filter((r) => (qty[r.key] ?? 0) > 0 && links.value[r.key]?.file));
+/** The paper an item prints on ("a3"), or "custom". */
+const printSize = (r: CatalogRow): string => paperName(paramsFor(r).paper) ?? 'custom';
+/** Print only this paper size ('' every size). */
+const onlySize = ref('');
+/** Every item with copies to print and a file to print them from. */
+const queuedAll = computed(() => active.value.filter((r) => (qty[r.key] ?? 0) > 0 && links.value[r.key]?.file));
+/** What Print sends: the queued items, of one paper size when one is picked. */
+const queued = computed(() => (onlySize.value ? queuedAll.value.filter((r) => printSize(r) === onlySize.value) : queuedAll.value));
 const totalCopies = computed(() => queued.value.reduce((n, r) => n + (qty[r.key] ?? 0), 0));
 /** Copies of the current run not printed yet; null once nothing is printing. */
 const copiesLeft = computed(() => {
@@ -72,7 +86,7 @@ onMounted(async () => {
 });
 
 async function loadAll(): Promise<void> {
-  await Promise.all([refreshCatalog(), refreshPrinters()]);
+  await Promise.all([refreshCatalog(), refreshPrinters(), loadMaterials()]);
 }
 async function refreshCatalog(): Promise<void> {
   await guard('Loading catalogue', async () => {
@@ -96,6 +110,7 @@ async function resync(): Promise<void> {
       rows.value = fresh;
       syncedAt.value = new Date();
     }
+    await loadMaterials();
   } catch {
     /* offline for a moment: the next resync tries again */
   }
@@ -257,6 +272,39 @@ const paperNote = ref('');
  */
 const paperSizes = computed(() => [...new Set(rows.value.flatMap((r) => [paperName(paramsFor(r).paper), sizeOf(r)]).filter((n): n is string => !!n))].sort());
 const materialOf = (id: string | undefined): Material | undefined => materials.value.find((m) => m.id === id);
+/** Sheets of each paper size the queued copies need. */
+const needs = computed(() => paperNeeds(queuedAll.value.map((r) => ({ key: r.key, size: printSize(r), copies: qty[r.key] ?? 0 }))));
+/** Sheets on hand of a paper size, from its material in Zollify; null when none is set for it. */
+const paperOnHand = (size: string): number | null => materialOf(settings.value?.paperMaterials?.[size])?.onHand ?? null;
+const shortSizes = computed(() => Object.entries(needs.value).filter(([size, n]) => (paperOnHand(size) ?? Infinity) < n).map(([size]) => size));
+const sizeLabel = (size: string): string => (size === 'custom' ? 'Custom size' : paperLabel(size));
+/** "Fit to paper stock": per size short of paper, the copies cut in proportion to what each item wanted. */
+function fitToPaperStock(): void {
+  const items = queuedAll.value.map((r) => ({ key: r.key, size: printSize(r), copies: qty[r.key] ?? 0 }));
+  const stock = Object.fromEntries(Object.keys(needs.value).flatMap((size) => (paperOnHand(size) === null ? [] : [[size, paperOnHand(size)!]])));
+  const before = { ...needs.value };
+  const fitted = fitToStock(items, stock);
+  for (const [key, n] of Object.entries(fitted)) qty[key] = n;
+  const cut = Object.keys(before).filter((size) => (needs.value[size] ?? 0) < before[size]!);
+  notice.value = cut.length
+    ? `Fitted to the paper on hand: ${cut.map((size) => `${sizeLabel(size)} ${before[size]} → ${needs.value[size] ?? 0} sheets`).join(', ')}. Each item keeps its share of what it wanted.`
+    : 'Nothing to fit: every paper size has enough on hand, or no material is set for it under Paper stock.';
+}
+// A size picked for printing that has nothing left to print goes back to every size.
+watch(needs, (n) => {
+  if (onlySize.value && !(onlySize.value in n)) onlySize.value = '';
+});
+async function setHidden(row: CatalogRow, hidden: boolean): Promise<void> {
+  if (!session.value) return;
+  const all = plain(settings.value?.hidden ?? {});
+  const mine = new Set(all[session.value.accountId] ?? []);
+  if (hidden) mine.add(row.key);
+  else mine.delete(row.key);
+  all[session.value.accountId] = [...mine];
+  if (hidden) qty[row.key] = 0;
+  settings.value = await api.settings.set({ hidden: all });
+  notice.value = hidden ? `${row.variant ? `${row.title} ${row.variant}` : row.title} is hidden: printed elsewhere, so out of the fills and the print run. "Show hidden" brings it back.` : '';
+}
 async function loadMaterials(): Promise<void> {
   if (!settings.value?.hasPrinterKey) return;
   try {
@@ -357,7 +405,7 @@ function fillCounts(counts: Record<string, number>, what: string, none: string):
   let items = 0;
   const noFile: string[] = [];
   for (const r of rows.value) {
-    const n = Math.max(0, Math.min(999, Math.floor(counts[r.key] ?? 0)));
+    const n = isHidden(r) ? 0 : Math.max(0, Math.min(999, Math.floor(counts[r.key] ?? 0)));
     qty[r.key] = n;
     if (!n) continue;
     copies += n;
@@ -681,8 +729,27 @@ async function printAll(): Promise<void> {
       <button v-if="sizes.length" type="button" class="quiet" :aria-expanded="showSizeTargets" title="A target per A size; items without a size in their name use the main target" @click="showSizeTargets = !showSizeTargets">Per size</button>
       <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to what it takes to reach its target stock" @click="fillToTarget">Fill to target</button>
       <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+      <button v-if="hiddenKeys.size" type="button" class="quiet" :aria-pressed="showHidden" @click="showHidden = !showHidden">{{ showHidden ? `Leave out hidden (${hiddenKeys.size})` : `Show hidden (${hiddenKeys.size})` }}</button>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
-      <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || 'Print all' }}</button>
+      <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || (onlySize ? `Print ${sizeLabel(onlySize)} only` : 'Print all') }}</button>
+    </div>
+    <div v-if="Object.keys(needs).length" class="plan" role="group" aria-label="Paper needed">
+      <span class="muted">Paper needed:</span>
+      <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All sizes</button>
+      <button
+        v-for="(n, size) in needs"
+        :key="size"
+        type="button"
+        class="chip"
+        :class="{ short: shortSizes.includes(String(size)) }"
+        :aria-pressed="onlySize === size"
+        :title="`Print only ${sizeLabel(String(size))}`"
+        @click="onlySize = onlySize === size ? '' : String(size)"
+      >
+        {{ sizeLabel(String(size)) }}: {{ n }} {{ n === 1 ? 'sheet' : 'sheets' }}<template v-if="paperOnHand(String(size)) !== null"> · {{ paperOnHand(String(size)) }} on hand</template>
+      </button>
+      <button v-if="shortSizes.length" type="button" title="Cut the copies of each size short of paper to what is on hand, each item in proportion to what it wanted" @click="fitToPaperStock">Fit to paper stock</button>
+      <span v-if="!settings?.hasPrinterKey" class="muted">Set up Paper stock to see what is on hand.</span>
     </div>
     <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
       <span class="muted">Target stock per size (empty: {{ settings?.target ?? 0 }}, the main target)</span>
@@ -732,7 +799,7 @@ async function printAll(): Promise<void> {
       </thead>
       <tbody>
         <template v-for="row in shown" :key="row.key">
-          <tr :class="{ drop: dropRow === row.key }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
+          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row) }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
@@ -754,8 +821,9 @@ async function printAll(): Promise<void> {
             <td>
               <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
               <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
+              <button type="button" class="quiet" :title="isHidden(row) ? 'Print this item here again' : 'Printed elsewhere (outsourced): leave it out of the fills and the print run'" @click="setHidden(row, !isHidden(row))">{{ isHidden(row) ? 'Unhide' : 'Hide' }}</button>
             </td>
-            <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file" /></td>
+            <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file || isHidden(row)" /></td>
             <td>
               <template v-if="progress[row.key]">
                 <span v-if="progress[row.key]!.failed" class="error">{{ progress[row.key]!.status }}</span>
@@ -836,6 +904,11 @@ tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .paper .key { display: flex; gap: .5rem; margin: .4rem 0; }
 .paper .key input { flex: 1; max-width: 24rem; }
 .paper-sizes { display: flex; flex-wrap: wrap; gap: .6rem .9rem; margin: .4rem 0; }
+.plan { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.chip { padding: .25rem .65rem; border-radius: 999px; }
+.chip[aria-pressed='true'] { border-color: var(--zfy-primary); box-shadow: inset 0 0 0 1px var(--zfy-primary); }
+.chip.short { border-color: var(--zfy-danger); color: var(--zfy-danger); }
+tr.hidden td { opacity: .55; }
 .uses-global { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

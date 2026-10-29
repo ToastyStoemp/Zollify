@@ -7,6 +7,7 @@ import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, 
 import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
+import Menu from './Menu.vue';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -631,6 +632,18 @@ async function toggleAddToStock(on: boolean): Promise<void> {
   settings.value = await api.settings.set({ addToStock: on });
 }
 
+/** A notice goes after a while (not while the pointer rests on it); an error stays until dismissed. */
+const NOTICE_MS = 12_000;
+let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+function holdNotice(): void {
+  clearTimeout(noticeTimer);
+}
+function fadeNotice(): void {
+  clearTimeout(noticeTimer);
+  if (notice.value) noticeTimer = setTimeout(() => (notice.value = ''), NOTICE_MS);
+}
+watch(notice, fadeNotice);
+
 /** Per item of the current run: copies already added to the Zollify stock. */
 const counted: Record<string, number> = {};
 let stockQueue: Promise<void> = Promise.resolve();
@@ -763,8 +776,11 @@ async function printAll(): Promise<void> {
       </div>
     </header>
 
-    <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="notice" role="status">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
+    <!-- Toasts float over the page in a corner, so a message never moves the toolbar or the table. -->
+    <div class="toasts">
+      <p v-if="error" class="toast error" role="alert">{{ error }} <button type="button" class="quiet" aria-label="Dismiss" @click="error = ''">×</button></p>
+      <p v-if="notice" class="toast notice" role="status" @mouseenter="holdNotice" @mouseleave="fadeNotice">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
+    </div>
 
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
@@ -774,17 +790,20 @@ async function printAll(): Promise<void> {
           {{ size === 'custom' ? 'Custom' : sizeLabel(size) }}
         </button>
       </div>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's paper from an A0-A6 size in its variant or product name" @click="detectSizes">Detect sizes</button>
-      <button type="button" :aria-expanded="open === GLOBAL" title="One set of print settings for every item; each keeps its own paper size and orientation" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}</button>
-      <button type="button" :aria-expanded="open === PAPER" title="Take the paper of each printed copy off its material in Zollify (Sourcing → Materials)" @click="open = open === PAPER ? null : PAPER">Paper stock</button>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to the copies the last closed event sold" @click="fillFromLastEvent">Fill from last event</button>
-      <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
-        Main target
-        <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
-      </label>
-      <button v-if="sizes.length" type="button" class="quiet" :aria-expanded="showSizeTargets" title="A target per A size; items without a size in their name use the main target" @click="showSizeTargets = !showSizeTargets">Per size</button>
-      <button type="button" :disabled="!!busy || !rows.length" title="Set each item's print count to what it takes to reach its target stock" @click="fillToTarget">Fill to target</button>
-      <label class="inline"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+      <span class="spacer"></span>
+      <Menu label="Fill" title="Set the print counts" :disabled="!!busy || !rows.length">
+        <button type="button" role="menuitem" @click="fillFromLastEvent">Fill from last event<small>The copies the last closed event sold</small></button>
+        <button type="button" role="menuitem" @click="fillToTarget">Fill to target<small>What each item needs to reach its target stock</small></button>
+        <hr />
+        <button type="button" role="menuitem" @click="showSizeTargets = !showSizeTargets">{{ showSizeTargets ? 'Close the targets' : 'Targets…' }}<small>Main target {{ settings?.target ?? 0 }}, and per paper size</small></button>
+      </Menu>
+      <Menu label="Setup" title="Print settings, paper and stock" align="right">
+        <button type="button" role="menuitem" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}<small>One set for every item, each on its own paper</small></button>
+        <button type="button" role="menuitem" @click="open = open === PAPER ? null : PAPER">Paper stock<small>{{ paperVia ? 'Paper is taken off Zollify materials' : 'Take printed paper off Zollify materials' }}</small></button>
+        <button type="button" role="menuitem" :disabled="!!busy || !rows.length" @click="detectSizes">Detect sizes<small>Each item's paper from the A size in its name</small></button>
+        <hr />
+        <label role="menuitemcheckbox" :aria-checked="!!settings?.addToStock"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+      </Menu>
       <button v-if="hiddenKeys.size" type="button" class="quiet" :aria-pressed="showHidden" @click="showHidden = !showHidden">{{ showHidden ? `Leave out hidden (${hiddenKeys.size})` : `Show hidden (${hiddenKeys.size})` }}</button>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || (onlySize ? `Print ${sizeLabel(onlySize)} only` : 'Print all') }}</button>
@@ -804,12 +823,18 @@ async function printAll(): Promise<void> {
       >
         {{ sizeLabel(String(size)) }}: {{ n }} {{ n === 1 ? 'sheet' : 'sheets' }}<template v-if="paperOnHand(String(size)) !== null"> · {{ paperOnHand(String(size)) }} on hand</template>
       </button>
-      <button v-if="shortSizes.length" type="button" title="Cut the copies of each size short of paper to what is on hand, each item in proportion to what it wanted" @click="fitToPaperStock">Fit to paper stock</button>
-      <button v-if="shortSizes.length" type="button" :disabled="!!busy" title="Give the paper on hand to the copies most likely to sell at the next event, dearer prints first, from Zollify's sales" @click="smartFitToPaperStock">Smart fit to stock</button>
+      <Menu v-if="shortSizes.length" label="Fit to paper stock" :disabled="!!busy">
+        <button type="button" role="menuitem" @click="smartFitToPaperStock">Smart fit<small>The paper to the copies most likely to sell at the next event, dearer prints first</small></button>
+        <button type="button" role="menuitem" @click="fitToPaperStock">Proportional fit<small>Each item keeps its share of what it wanted</small></button>
+      </Menu>
       <span v-if="!paperVia" class="muted">Set up Paper stock to see what is on hand.</span>
     </div>
-    <div v-if="showSizeTargets && sizes.length" class="size-targets" role="group" aria-label="Target stock per size">
-      <span class="muted">Target stock per size (empty: {{ settings?.target ?? 0 }}, the main target)</span>
+    <div v-if="showSizeTargets" class="size-targets" role="group" aria-label="Target stock">
+      <label class="inline target" title="Target stock for items without their own or their size's, kept between sessions">
+        Main target
+        <input type="number" min="0" max="999" :value="settings?.target ?? 0" @change="setTarget(($event.target as HTMLInputElement).valueAsNumber)" />
+      </label>
+      <span v-if="sizes.length" class="muted">Per size (empty: the main target)</span>
       <label v-for="s in sizes" :key="s" class="inline target">
         {{ s.toUpperCase() }}
         <input type="number" min="0" max="999" :value="settings?.sizeTargets?.[s] ?? ''" :placeholder="String(settings?.target ?? 0)" @change="setSizeTarget(s, ($event.target as HTMLInputElement).valueAsNumber)" />
@@ -971,7 +996,7 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .exe { display: flex; align-items: center; gap: .4rem; }
 .exe code { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
-.toolbar input[type='search'] { flex: 1; min-width: 12rem; }
+.toolbar input[type='search'] { flex: 0 1 18rem; min-width: 10rem; }
 .target input, .target-cell { width: 4.5rem; }
 .size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border-radius: 10px; }
@@ -990,14 +1015,17 @@ tr.settings.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy
 tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
 tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
-.notice { margin: 0; padding: .5rem .75rem; border-radius: 8px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); }
-.notice button { padding: 0 .4rem; }
+.toasts { position: fixed; left: 1rem; bottom: 1rem; z-index: 20; display: flex; flex-direction: column; gap: .5rem; max-width: min(36rem, calc(100vw - 12rem)); pointer-events: none; }
+.toast { pointer-events: auto; margin: 0; padding: .6rem .75rem; border-radius: 10px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
+.toast.error { border-color: var(--zfy-danger); }
+.toast button { padding: 0 .4rem; }
 .global { padding: .6rem .8rem; border-radius: 10px; background: var(--zfy-surface); }
 .global > p { margin: 0 0 .4rem; }
 .paper .key { display: flex; gap: .5rem; margin: .4rem 0; }
 .paper .key input { flex: 1; max-width: 24rem; }
 .paper-sizes { display: flex; flex-wrap: wrap; gap: .6rem .9rem; margin: .4rem 0; }
 .size-filter { display: flex; gap: .3rem; }
+.toolbar .spacer { flex: 1; }
 .plan { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 .chip { padding: .25rem .65rem; border-radius: 999px; }
 .chip[aria-pressed='true'] { border-color: var(--zfy-primary); box-shadow: inset 0 0 0 1px var(--zfy-primary); }

@@ -121,6 +121,13 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   worth its price times the chance it sells after what is on hand (Poisson
   demand). Never more copies than an item asked for. An item with no sales in
   the last year takes its own count as its forecast.
+- The toolbar keeps the search, the size filter and Print; the rest is in two
+  menus. **Fill**: from last event, to target, and Targets… (the main target
+  and one per size). **Setup**: global print settings, paper stock, detect
+  sizes, and adding printed copies to the Zollify stock. The two fits are one
+  **Fit to paper stock** menu in the Paper needed bar. Messages show as toasts
+  in a corner, so they never move the page; a notice goes after 12 s (not
+  while the pointer is on it), an error stays until dismissed.
 - **Paper size quick filter** (next to the search): shows only one size's
   items and prints only that size, the same choice as the Paper needed chips.
 - **Hide** (per row) is for items printed elsewhere, such as outsourced ones:

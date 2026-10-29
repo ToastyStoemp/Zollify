@@ -10,6 +10,8 @@ export interface Preview {
   upcoming: PublicEvent[];
   past: PublicEvent[];
   bio: string;
+  /** The table menu as it stands; null while that page is off. */
+  table: { event: string | null; count: number; scope: 'table' | 'catalogue'; currency: string } | null;
 }
 
 export const api = {

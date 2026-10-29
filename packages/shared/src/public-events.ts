@@ -57,6 +57,10 @@ export const PublicEventsConfigSchema = z.object({
   pastLimit: z.number().int().min(0).max(100).default(12),
   igTemplate: z.string().max(600).default(''),
   igFallback: z.string().max(200).default(''),
+  /** The "what's on the table" menu at `/table`: the open event's claimed items with prices, for the QR on the booth. */
+  showTable: z.boolean().default(false),
+  /** A line under the menu's title: "Cash and card", "Ask for other sizes". */
+  tableNote: z.string().trim().max(200).default(''),
 });
 export type PublicEventsConfig = z.infer<typeof PublicEventsConfigSchema>;
 

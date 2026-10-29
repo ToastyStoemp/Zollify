@@ -561,6 +561,15 @@ from the slug and refuses unless the module is enabled for it. Hall, booth numbe
 link and note are part of the event (`SalesEvent.booth`, edited under Events, Edit,
 Booth); the module's per-event overlay only keeps publishing choices (hidden, Instagram
 handle) and legacy booth values, which fill in wherever the event has none.
+*What's on the table* (`/table`, off until switched on under Publish) is the
+menu for a QR on the booth: the open event's claimed items with their prices
+as the booth charges there (local currency, rounding and typed-over prices
+honoured, tiered deals as "3 for €60"), grouped by product type, with the
+small webp thumbnails every device syncs served at `/img/<imageId>` only
+while the menu shows that product. With no claims, or no open event, the
+whole catalogue stands in, so a QR printed once keeps working; only what is
+for sale and listed appears, never stock, costs or what sold. The rule is
+`tableMenu` in `@zollify/shared`; `/table.json` carries the same figures.
 
 *Wholesale* - the `wholesale` module (admins) sells to shops outright, the
 reverse of consignment. **Trade prices**: per product, whether it is offered

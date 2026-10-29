@@ -55,7 +55,7 @@ export { loadDotEnv } from './env';
 export { issueChallenge, verifyChallenge, type ChallengePurpose } from './captcha';
 export { makeSecretBox, type SecretBox } from './secretbox';
 export { registerStatic, type StaticOptions } from './static';
-export { reduceEvents, reduceProducts, reduceDiscounts, reduceTransactions, reduceMerges, type ReducibleOp } from './reduce';
+export { reduceEvents, reduceProducts, reduceDiscounts, reduceStock, reduceTransactions, reduceMerges, type ReducibleOp } from './reduce';
 export {
   uploadConfig,
   decodeUpload,

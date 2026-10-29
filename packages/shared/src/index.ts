@@ -46,6 +46,7 @@ export * from './tax-deadlines';
 export * from './sme-report';
 export * from './sme-thresholds';
 export * from './travel-costs';
+export * from './table-menu';
 export * from './wholesale';
 export * from './material-cost';
 export * from './loyalty';

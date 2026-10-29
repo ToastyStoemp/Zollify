@@ -5,6 +5,7 @@ import QrCode from '@zollify/ui/QrCode.vue';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
 import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, targetFor } from '../electron/shared';
+import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
 import PrintSettings from './PrintSettings.vue';
 
@@ -808,11 +809,11 @@ async function printAll(): Promise<void> {
 
     <table>
       <thead>
-        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th>Print</th><th>Result</th></tr>
+        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th><span class="sr-only">Actions</span></th><th>Print</th><th>Result</th></tr>
       </thead>
       <tbody>
-        <template v-for="row in shown" :key="row.key">
-          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row) }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
+        <template v-for="(row, i) in shown" :key="row.key">
+          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row), alt: i % 2 === 1 }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
@@ -833,8 +834,30 @@ async function printAll(): Promise<void> {
             </td>
             <td>
               <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
-              <button type="button" class="quiet" @click="open = open === row.key ? null : row.key">{{ open === row.key ? 'Close' : 'Settings' }}</button>
-              <button type="button" class="quiet" :title="isHidden(row) ? 'Print this item here again' : 'Printed elsewhere (outsourced): leave it out of the fills and the print run'" @click="setHidden(row, !isHidden(row))">{{ isHidden(row) ? 'Unhide' : 'Hide' }}</button>
+            </td>
+            <td class="actions-cell">
+              <div class="row-actions">
+                <button
+                  type="button"
+                  class="icon-button"
+                  :aria-pressed="open === row.key"
+                  :aria-label="`Print settings for ${row.variant ? `${row.title} ${row.variant}` : row.title}`"
+                  :title="open === row.key ? 'Close the print settings' : 'Print settings'"
+                  @click="open = open === row.key ? null : row.key"
+                >
+                  <Icon name="settings" />
+                </button>
+                <button
+                  type="button"
+                  class="icon-button"
+                  :aria-pressed="isHidden(row)"
+                  :aria-label="`${isHidden(row) ? 'Unhide' : 'Hide'} ${row.variant ? `${row.title} ${row.variant}` : row.title}`"
+                  :title="isHidden(row) ? 'Hidden: printed elsewhere. Click to print it here again' : 'Hide: printed elsewhere (outsourced), so out of the fills and the print run'"
+                  @click="setHidden(row, !isHidden(row))"
+                >
+                  <Icon :name="isHidden(row) ? 'eye-off' : 'eye'" />
+                </button>
+              </div>
             </td>
             <td><input v-model.number="qty[row.key]" type="number" min="0" max="999" :disabled="!links[row.key]?.file || isHidden(row)" /></td>
             <td>
@@ -849,8 +872,8 @@ async function printAll(): Promise<void> {
               </template>
             </td>
           </tr>
-          <tr v-if="open === row.key" class="settings">
-            <td :colspan="hasSku ? 8 : 7">
+          <tr v-if="open === row.key" class="settings" :class="{ alt: i % 2 === 1 }">
+            <td :colspan="hasSku ? 9 : 8">
               <ItemOverrides
                 v-if="usesGlobal(row)"
                 :base="effectiveParams(links[row.key], globalParams, sizeOf(row), false) ?? {}"
@@ -904,9 +927,18 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .target input, .target-cell { width: 4.5rem; }
 .size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 table { width: 100%; border-collapse: collapse; background: var(--zfy-surface); border-radius: 10px; }
-th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: top; }
+th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--zfy-line); vertical-align: middle; }
 th { font-size: .8rem; color: var(--zfy-muted); font-weight: 600; }
+/* Every other item a shade off the surface, so a row reads across; its settings panel shares it. */
+tr.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-surface)); }
 tr.settings td { background: var(--zfy-bg); }
+tr.settings.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy-bg)); }
+.actions-cell { width: 1%; white-space: nowrap; }
+.row-actions { display: flex; gap: .35rem; }
+.icon-button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; padding: 0; border-radius: 8px; color: var(--zfy-muted); }
+.icon-button:hover { color: var(--zfy-ink); border-color: color-mix(in srgb, var(--zfy-ink) 30%, var(--zfy-line)); }
+.icon-button[aria-pressed='true'] { color: var(--zfy-primary); border-color: var(--zfy-primary); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
 tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
@@ -921,7 +953,7 @@ tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .chip { padding: .25rem .65rem; border-radius: 999px; }
 .chip[aria-pressed='true'] { border-color: var(--zfy-primary); box-shadow: inset 0 0 0 1px var(--zfy-primary); }
 .chip.short { border-color: var(--zfy-danger); color: var(--zfy-danger); }
-tr.hidden td { opacity: .55; }
+tr.hidden td:not(.actions-cell) { opacity: .55; }
 .uses-global { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 td progress { width: 8rem; accent-color: var(--zfy-primary); }
 </style>

@@ -43,7 +43,7 @@ const types = computed(() => [...new Set(products.value.filter((p) => p.forSale 
 const listed = computed(() => {
   const q = search.value.trim().toLowerCase();
   return products.value
-    .filter((p) => p.forSale !== false && !p.unlisted && (!q || `${p.title} ${p.type ?? ''}`.toLowerCase().includes(q)))
+    .filter((p) => p.forSale !== false && (!q || `${p.title} ${p.type ?? ''}`.toLowerCase().includes(q)))
     .sort((a, b) => `${a.type} ${a.title}`.localeCompare(`${b.type} ${b.title}`));
 });
 
@@ -362,11 +362,11 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
             <input v-model="search" type="search" placeholder="Find a product" class="find" />
             <ul class="products">
               <li v-for="p in listed" :key="p.id">
-                <label class="inline">
-                  <input type="checkbox" :checked="has(def.source.items, `${p.id}:`) || (!!p.type && has(def.source.types, p.type))" :disabled="!!p.type && has(def.source.types, p.type)" @change="toggleSource(def, 'items', `${p.id}:`)" />
-                  {{ p.title }} <small class="muted">{{ p.type }}</small>
+                <label class="inline" :title="p.unlisted ? 'Off the price lists: a whole type leaves it out, picked here it counts' : undefined">
+                  <input type="checkbox" :checked="has(def.source.items, `${p.id}:`) || (!p.unlisted && !!p.type && has(def.source.types, p.type))" :disabled="!p.unlisted && !!p.type && has(def.source.types, p.type)" @change="toggleSource(def, 'items', `${p.id}:`)" />
+                  {{ p.title }} <small class="muted">{{ p.type }}{{ p.unlisted ? ' · off lists' : '' }}</small>
                 </label>
-                <div v-if="(p.variants ?? []).filter((v) => !v.unlisted).length > 1 && !has(def.source.items, `${p.id}:`) && !(p.type && has(def.source.types, p.type))" class="chips variants">
+                <div v-if="(p.variants ?? []).filter((v) => !v.unlisted).length > 1 && !has(def.source.items, `${p.id}:`) && !(!p.unlisted && p.type && has(def.source.types, p.type))" class="chips variants">
                   <button v-for="v in (p.variants ?? []).filter((v) => !v.unlisted)" :key="v.id" type="button" class="chip" :aria-pressed="has(def.source.items, `${p.id}:${v.id}`)" @click="toggleSource(def, 'items', `${p.id}:${v.id}`)">{{ v.name }}</button>
                 </div>
               </li>

@@ -110,13 +110,17 @@ interface Unit {
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/** The sellable items a card prices: listed products and variants for sale. */
+/**
+ * The sellable items a card prices: products and variants for sale. A whole type leaves out the
+ * unlisted ones (off the price lists); a product or variant picked by name counts all the same.
+ */
 export function cardUnits(source: CardSource, products: Product[]): Unit[] {
   const units: Unit[] = [];
   for (const p of products) {
-    if (p.deletedAt || p.forSale === false || p.unlisted) continue;
-    const whole = (!!p.type && source.types.includes(p.type)) || source.items.includes(`${p.id}:`);
-    const variants = (p.variants ?? []).filter((v) => !v.unlisted);
+    if (p.deletedAt || p.forSale === false) continue;
+    const named = source.items.includes(`${p.id}:`);
+    const whole = named || (!p.unlisted && !!p.type && source.types.includes(p.type));
+    const variants = (p.variants ?? []).filter((v) => named || !v.unlisted || source.items.includes(`${p.id}:${v.id}`));
     if (variants.length) {
       for (const v of variants) {
         if (whole || source.items.includes(`${p.id}:${v.id}`)) units.push({ key: `${p.id}:${v.id}`, product: p, variant: v.name || '', price: round2(v.price ?? p.price ?? 0) });
@@ -134,7 +138,8 @@ const touches = (rule: DiscountRule, u: Unit): boolean =>
 /**
  * A line's name. Each item goes by its variant when that is a size several of the card's
  * products share ("A4"), or when the card is one product; else by its product. A name too long
- * for a line keeps the sizes alone, else the type the items share, else the first name.
+ * for a line keeps the sizes alone, else the words the names start with ("Deskmat - Sky",
+ * "Deskmat - Valley": "Deskmat"), else the type the items share, else the first name.
  */
 function lineLabel(group: Unit[], units: Unit[]): string {
   const oneProduct = new Set(units.map((u) => u.product.id)).size === 1;
@@ -145,6 +150,14 @@ function lineLabel(group: Unit[], units: Unit[]): string {
   if (label.length <= 24) return label;
   const sizes = [...new Set(group.filter(bySize).map((u) => u.variant))];
   if (sizes.length) return sizes.join(' / ');
+  const words = names.map((n) => n.split(/\s+/));
+  const shared: string[] = [];
+  for (const [i, w] of words[0]!.entries()) {
+    if (!words.every((ws) => ws[i] === w)) break;
+    shared.push(w);
+  }
+  const start = shared.join(' ').replace(/[\s\-–—:·,]+$/, '');
+  if (start) return start;
   const types = new Set(group.map((u) => u.product.type));
   return types.size === 1 && group[0]!.product.type ? group[0]!.product.type : names[0]!;
 }
@@ -187,9 +200,17 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
 
   const live = discounts.filter((d) => !d.deletedAt && !(d.validFrom && today < d.validFrom) && !(d.validUntil && today > d.validUntil));
   for (const rule of live) {
-    if (!units.some((u) => touches(rule, u))) continue;
+    const touched = units.filter((u) => touches(rule, u));
+    if (!touched.length) continue;
+    // A deal on some of the card's items says which: "3 × A4  65.-", "Mousepad: buy 2, get 1 free".
+    const some = touched.length < units.length ? lineLabel(touched, units) : '';
+    const offer = (text: string): string => (some ? `${some}: ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text);
     if (rule.type === 'tiered') {
-      for (const t of [...(rule.tiers ?? [])].sort((a, b) => a.qty - b.qty)) if (t.qty > 1) rows.push({ id: `deal:${rule.id}:${t.qty}`, kind: 'deal', qty: t.qty, price: round2(t.total) });
+      for (const t of [...(rule.tiers ?? [])].sort((a, b) => a.qty - b.qty)) {
+        if (t.qty < 2) continue;
+        const id = `deal:${rule.id}:${t.qty}`;
+        rows.push(some ? { id, kind: 'line', label: `${t.qty} × ${some}`, price: round2(t.total), accent: true } : { id, kind: 'deal', qty: t.qty, price: round2(t.total) });
+      }
     } else if (rule.type === 'combo') {
       const members = [
         ...(rule.productIds ?? []).map((id) => memberPrice(products, (p) => p.id === id)),
@@ -201,9 +222,9 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
         rows.push({ id: `bundle:${rule.id}`, kind: 'line', label: 'Bundle', price, accent: true });
       }
     } else if (rule.type === 'bxgy') {
-      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: `Buy ${rule.buyQty ?? 2}, get ${rule.freeQty ?? 1} free` });
+      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: offer(`Buy ${rule.buyQty ?? 2}, get ${rule.freeQty ?? 1} free`) });
     } else if (rule.type === 'nth_pct') {
-      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: `Every ${ordinal(rule.nth ?? 3)} ${rule.percent ?? 0}% off` });
+      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: offer(`Every ${ordinal(rule.nth ?? 3)} ${rule.percent ?? 0}% off`) });
     }
   }
   return rows;

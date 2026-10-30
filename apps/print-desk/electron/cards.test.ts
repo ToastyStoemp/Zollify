@@ -63,8 +63,30 @@ describe('cardRows', () => {
     expect(cardRows(def(['Art Print']), prints, [], today).map((r) => (r.kind === 'line' ? r.label : ''))).toEqual(['A4', 'A3', 'Thank you']);
     expect(cardRows(def(['Enamel']), prints, [], today).map((r) => (r.kind === 'line' ? r.label : ''))).toEqual(['Enamel', 'Cat']);
   });
+  it('says which items a deal on some of them is for, and names mixed products by how they start', () => {
+    const shop = [
+      product({ id: 'sky', title: 'Deskmat - Sky', type: 'Desk Mat', price: 45 }),
+      product({ id: 'valley', title: 'Deskmat - Valley', type: 'Desk Mat', price: 45 }),
+      product({ id: 'cat', title: 'Mousepad - Cat', type: 'Desk Mat', price: 15 }),
+      product({ id: 'sushi', title: 'Mousepad - Sushi', type: 'Desk Mat', price: 15 }),
+      product({ id: 'kyoto', title: 'Kyoto', type: 'Art Print', variants: [{ id: '3', name: 'A3', price: 40 }, { id: '4', name: 'A4', price: 25 }] }),
+      product({ id: 'oslo', title: 'Oslo', type: 'Art Print', variants: [{ id: '3', name: 'A3', price: 40 }, { id: '4', name: 'A4', price: 25 }] }),
+    ];
+    const rules = [
+      rule({ id: 'mats', type: 'tiered', productIds: ['sky', 'valley'], tiers: [{ qty: 2, total: 80 }] }),
+      rule({ id: 'a4', type: 'tiered', variantIds: ['kyoto:4', 'oslo:4'], tiers: [{ qty: 3, total: 65 }] }),
+      rule({ id: 'pads', type: 'bxgy', productIds: ['cat', 'sushi'], buyQty: 2, freeQty: 1 }),
+    ];
+    const label = (r: ReturnType<typeof cardRows>[number]): string => (r.kind === 'line' ? `${r.label} ${r.price}` : r.kind === 'note' ? r.text : r.kind);
+    expect(cardRows(def(['Desk Mat']), shop, rules, today).map(label)).toEqual(['Mousepad 15', 'Deskmat 45', '2 × Deskmat 80', 'Mousepad: buy 2, get 1 free']);
+    expect(cardRows(def(['Art Print']), shop, rules, today).map(label)).toEqual(['A4 25', 'A3 40', '3 × A4 65']);
+  });
+  it('leaves unlisted products off a whole type, but not when picked by name', () => {
+    expect(cardRows(def(['Keychain']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 12 }]);
+    expect(cardRows(def([], ['double:']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 15 }]);
+  });
   it('is empty when the card prices nothing for sale', () => {
-    expect(cardRows(def([], ['double:']), products, discounts, today)).toEqual([]);
+    expect(cardRows(def([], ['gone:']), [...products, product({ id: 'gone', forSale: false })], discounts, today)).toEqual([]);
   });
 });
 

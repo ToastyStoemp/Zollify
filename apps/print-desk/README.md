@@ -166,8 +166,11 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   line each, named after a size the products share ("A4") or else the product;
   a tiered discount adds "2 FOR 20.-" deals; a combo adds a "Bundle" line at
   its members' prices less the discount; buy-x-get-y and every-nth discounts add
-  a line of small print. Discounts count while they are valid today. Unlisted
-  products, and those not for sale, stay off.
+  a line of small print. A discount on only some of the card's items says which
+  ("3 × A4  65.-", "Mousepad: buy 2, get 1 free"). Discounts count while they
+  are valid today. A whole type leaves out unlisted products (off the price
+  lists); a product picked by name counts even when unlisted. Products not for
+  sale stay off.
 - **Small print** is the products' price notes, or lines of the card's own
   ("Hahnemühle paper", "4 random stickers"). Any line's name can be changed and
   any row left off, in the card's Edit panel.

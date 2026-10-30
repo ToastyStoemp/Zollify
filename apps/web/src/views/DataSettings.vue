@@ -26,6 +26,7 @@ const include = ref({
   inventory: true,
   eventStock: true,
   transactions: true,
+  discounts: true,
   images: true,
 });
 
@@ -85,8 +86,8 @@ async function exportBackup(): Promise<void> {
     await saveFile(filename, blob, 'application/zip');
 
     status.value =
-      `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events and ` +
-      `${backup.transactions.length} sales.`;
+      `Exported ${backup.products.length} products (${backup.images?.length ?? 0} photos), ${backup.events.length} events, ` +
+      `${backup.transactions.length} sales and ${backup.discounts?.length ?? 0} discounts.`;
     if (include.value.transactions && !eventIdsForExport.value) salesArchived.value = true;
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Could not create a backup.';
@@ -142,8 +143,8 @@ async function confirmRestore(): Promise<void> {
     const result = await restoreBackup(loaded.raw, loaded.files);
     pending.value = null;
     status.value =
-      `Restored ${result.products} products (${result.images} photos), ${result.events} events and ` +
-      `${result.transactions} sales. Syncing to your other devices…`;
+      `Restored ${result.products} products (${result.images} photos), ${result.events} events, ` +
+      `${result.transactions} sales and ${result.discounts} discounts. Syncing to your other devices…`;
     void syncNow();
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'The restore did not finish.';
@@ -190,6 +191,7 @@ async function confirmRestore(): Promise<void> {
         <label class="inline"><input v-model="include.inventory" type="checkbox" /> <span>Stock counts</span></label>
         <label class="inline"><input v-model="include.eventStock" type="checkbox" /> <span>Event claims</span></label>
         <label class="inline"><input v-model="include.transactions" type="checkbox" /> <span>Sales</span></label>
+        <label class="inline"><input v-model="include.discounts" type="checkbox" /> <span>Discounts</span></label>
         <label class="inline"><input v-model="include.images" type="checkbox" /> <span>Photos</span></label>
       </div>
     </fieldset>
@@ -220,6 +222,7 @@ async function confirmRestore(): Promise<void> {
         <li><strong>{{ pending.summary.inventory }}</strong> stock counts</li>
         <li><strong>{{ pending.summary.eventStock }}</strong> event claims</li>
         <li><strong>{{ pending.summary.transactions }}</strong> sales</li>
+        <li><strong>{{ pending.summary.discounts }}</strong> discounts</li>
         <li><strong>{{ pending.summary.images }}</strong> photos</li>
       </ul>
       <div class="row">

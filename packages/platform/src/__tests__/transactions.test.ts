@@ -26,6 +26,7 @@ const catalog = await import('../core/catalog');
 const events = await import('../core/sales-events');
 const device = await import('../core/device');
 const images = await import('../core/images');
+const discounts = await import('../core/discounts');
 
 function sale(over: Partial<SaleEvent> = {}): SaleEvent {
   return {
@@ -298,6 +299,7 @@ describe('backup', () => {
     await catalog.upsertProduct({ id: 'p1', title: 'Print', price: 5, forSale: true, unlisted: false, imageId: 'img-1' } as never);
     await events.upsertSalesEvent({ id: 'ev-1', name: 'Fair', venue: {}, currency: 'CHF', status: 'planned' } as never);
     await tx.recordSale(sale({ saleId: 's1' }));
+    await discounts.upsertDiscount({ id: 'd1', name: 'Two for one', type: 'percent', productIds: ['p1'], variantIds: [] } as never);
     await images.importProductImage({
       id: 'img-1',
       productId: 'p1',
@@ -318,8 +320,10 @@ describe('backup', () => {
     expect(data.products).toHaveLength(1);
     expect(data.events).toHaveLength(1);
     expect(data.transactions).toHaveLength(1);
+    expect(data.discounts).toMatchObject([{ id: 'd1', name: 'Two for one' }]);
 
     await deleteCoreDb(account.accountId);
+    discounts.resetDiscountCache();
     catalog.resetCatalogCache();
     events.resetSalesEventCache();
     tx.resetTransactionCache();
@@ -332,6 +336,8 @@ describe('backup', () => {
     expect(catalog.allProducts.value).toHaveLength(1);
     expect(events.visibleEvents.value).toHaveLength(1);
     expect(tx.recentTransactions.value).toHaveLength(1);
+    expect(result.discounts).toBe(1);
+    expect(discounts.allDiscounts.value.map((d) => d.name)).toEqual(['Two for one']);
 
     const restoredImage = await openCoreDb(account.accountId).images.get('img-1');
     expect(await restoredImage?.full.text()).toBe('full');

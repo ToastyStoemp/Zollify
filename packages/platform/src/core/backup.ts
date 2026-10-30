@@ -1,4 +1,4 @@
-import type { EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@zollify/shared';
+import type { DiscountRule, EventStock, InventoryItem, Product, SalesEvent, Transaction } from '@zollify/shared';
 import { deleteCoreDb, openCoreDb } from './db';
 import { listZollifyDbs } from '../module-db';
 import Dexie from 'dexie';
@@ -10,6 +10,7 @@ import { loadCatalog, resetCatalogCache } from './catalog';
 import { loadSalesEvents, resetSalesEventCache } from './sales-events';
 import { loadTransactions, resetTransactionCache } from './transactions';
 import { loadInventory, resetInventoryCache } from './inventory';
+import { loadDiscounts, resetDiscountCache } from './discounts';
 import { queueOp } from './outbox';
 import { Zip, ZipDeflate, ZipPassThrough, strFromU8, strToU8, unzipSync } from 'fflate';
 import { base64ToBlob, importProductImage } from './images';
@@ -64,6 +65,8 @@ export interface ZollifyBackup {
   /** Per-event claims against it. */
   eventStock: EventStock[];
   transactions: Transaction[];
+  /** Discount rules, tombstones included - optional so a backup from before they were added still restores. */
+  discounts?: DiscountRule[];
   /** Product photos - optional so a version-1 backup from before they were added still restores. */
   images?: BackupImage[];
 }
@@ -77,6 +80,7 @@ export interface BackupOptions {
   inventory?: boolean;
   eventStock?: boolean;
   transactions?: boolean;
+  discounts?: boolean;
   images?: boolean;
   /**
    * Restrict to one or more events instead of the whole booth - undefined or
@@ -95,6 +99,7 @@ const ALL_INCLUDED: Required<Omit<BackupOptions, 'eventIds'>> = {
   inventory: true,
   eventStock: true,
   transactions: true,
+  discounts: true,
   images: true,
 };
 
@@ -120,12 +125,13 @@ async function collectBackup(options?: BackupOptions) {
   const account = requireAccount();
   const db = openCoreDb(account.accountId);
 
-  let [products, events, inventory, eventStock, transactions, imageRecs] = await Promise.all([
+  let [products, events, inventory, eventStock, transactions, discounts, imageRecs] = await Promise.all([
     include.products ? db.products.toArray() : Promise.resolve([]),
     include.events ? db.events.toArray() : Promise.resolve([]),
     include.inventory ? db.inventory.toArray() : Promise.resolve([]),
     include.eventStock ? db.eventStock.toArray() : Promise.resolve([]),
     include.transactions ? db.transactions.toArray() : Promise.resolve([]),
+    include.discounts ? db.discounts.toArray() : Promise.resolve([]),
     include.images ? db.images.toArray() : Promise.resolve([]),
   ]);
 
@@ -137,6 +143,8 @@ async function collectBackup(options?: BackupOptions) {
     // Only the stock actually claimed for these events, not the whole booth.
     const claimed = new Set(eventStock.map((s) => `${s.productId}\x00${s.variantId}`));
     inventory = inventory.filter((i) => claimed.has(`${i.productId}\x00${i.variantId}`));
+    // Rules for every event, plus those limited to one of the selected ones.
+    discounts = discounts.filter((d) => !d.eventIds?.length || d.eventIds.some((id) => wanted.has(id)));
   }
 
   // Only images a live product or variant still points at; a photo replaced
@@ -160,6 +168,7 @@ async function collectBackup(options?: BackupOptions) {
     inventory,
     eventStock,
     transactions,
+    discounts,
     images: [],
   };
   return { backup, imageRecs };
@@ -271,6 +280,7 @@ export interface BackupSummary {
   inventory: number;
   eventStock: number;
   transactions: number;
+  discounts: number;
   images: number;
 }
 
@@ -306,6 +316,7 @@ export function inspectBackup(raw: unknown): BackupSummary {
     inventory: file.inventory?.length ?? 0,
     eventStock: file.eventStock?.length ?? 0,
     transactions: file.transactions?.length ?? 0,
+    discounts: file.discounts?.length ?? 0,
     images: file.images?.length ?? 0,
   };
 }
@@ -316,6 +327,7 @@ export interface RestoreResult {
   inventory: number;
   eventStock: number;
   transactions: number;
+  discounts: number;
   images: number;
 }
 
@@ -338,12 +350,14 @@ export async function restoreBackup(raw: unknown, files: Record<string, Uint8Arr
   const stock = (file.eventStock ?? []).map((s) => toPlain({ ...s, variantId: s.variantId ?? '' }));
   const inventory = (file.inventory ?? []).map((i) => toPlain({ ...i, variantId: i.variantId ?? '' }));
   const transactions = (file.transactions ?? []).map(toPlain);
+  const discounts = (file.discounts ?? []).map(toPlain);
 
-  await db.transaction('rw', [db.products, db.events, db.eventStock, db.transactions, db.inventory], async () => {
+  await db.transaction('rw', [db.products, db.events, db.eventStock, db.transactions, db.inventory, db.discounts], async () => {
     if (products.length) await db.products.bulkPut(products);
     if (events.length) await db.events.bulkPut(events);
     if (inventory.length) await db.inventory.bulkPut(inventory);
     if (stock.length) await db.eventStock.bulkPut(stock);
+    if (discounts.length) await db.discounts.bulkPut(discounts);
     // Sales are immutable, so an existing row always wins over the file's copy.
     for (const tx of transactions) {
       if (!(await db.transactions.get(tx.id))) await db.transactions.put(tx);
@@ -355,6 +369,8 @@ export async function restoreBackup(raw: unknown, files: Record<string, Uint8Arr
   for (const event of events) await queueOp({ type: 'event.upsert', payload: event });
   for (const item of inventory) await queueOp({ type: 'inventory.set', payload: item });
   for (const entry of stock) await queueOp({ type: 'stock.set', payload: entry });
+  // A deleted rule goes out as an upsert carrying its deletedAt, which every reducer keeps as a tombstone.
+  for (const rule of discounts) await queueOp({ type: 'discount.upsert', payload: rule });
   // A test sale goes back as one, so a restore never turns it into takings.
   for (const tx of transactions) await queueOp({ type: tx.testRun ? 'tx.test.create' : 'tx.create', payload: tx });
 
@@ -383,7 +399,8 @@ export async function restoreBackup(raw: unknown, files: Record<string, Uint8Arr
   resetSalesEventCache();
   resetTransactionCache();
   resetInventoryCache();
-  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadInventory()]);
+  resetDiscountCache();
+  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadInventory(), loadDiscounts()]);
 
   return {
     products: summary.products,
@@ -391,6 +408,7 @@ export async function restoreBackup(raw: unknown, files: Record<string, Uint8Arr
     inventory: summary.inventory,
     eventStock: summary.eventStock,
     transactions: summary.transactions,
+    discounts: summary.discounts,
     images: restoredImages,
   };
 }

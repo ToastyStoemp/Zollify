@@ -45,6 +45,11 @@ beforeEach(async () => {
     { id: 'tx1', eventId: 'ev1', deviceId: 'd', timestamp: 1, method: 'cash', payments: [], items: [], discounts: [], total: 10, currency: 'CHF' } as never,
     { id: 'tx2', eventId: 'ev2', deviceId: 'd', timestamp: 1, method: 'cash', payments: [], items: [], discounts: [], total: 5, currency: 'CHF' } as never,
   ]);
+  await db.discounts.bulkPut([
+    { id: 'd-all', name: 'Everywhere', type: 'percent', productIds: [], variantIds: [], updatedAt: 1 } as never,
+    { id: 'd-ev2', name: 'Con B only', type: 'percent', productIds: [], variantIds: [], eventIds: ['ev2'], updatedAt: 1 } as never,
+    { id: 'd-gone', name: 'Deleted', type: 'percent', productIds: [], variantIds: [], deletedAt: 2, updatedAt: 2 } as never,
+  ]);
 });
 
 describe('createBackup', () => {
@@ -55,6 +60,18 @@ describe('createBackup', () => {
     expect(backup.inventory).toHaveLength(2);
     expect(backup.eventStock).toHaveLength(2);
     expect(backup.transactions).toHaveLength(2);
+    // Tombstones too, so a restore cannot bring a deleted rule back.
+    expect(backup.discounts?.map((d) => d.id).sort()).toEqual(['d-all', 'd-ev2', 'd-gone']);
+  });
+
+  it('omits discounts when they are unchecked', async () => {
+    const backup = await createBackup({ discounts: false });
+    expect(backup.discounts).toHaveLength(0);
+  });
+
+  it('keeps only the discounts that apply to the selected event', async () => {
+    const backup = await createBackup({ eventIds: ['ev1'] });
+    expect(backup.discounts?.map((d) => d.id).sort()).toEqual(['d-all', 'd-gone']);
   });
 
   it('omits a category the caller unchecked', async () => {

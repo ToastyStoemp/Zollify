@@ -110,8 +110,8 @@ interface Unit {
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
- * The sellable items a card prices: products and variants for sale. A whole type leaves out the
- * unlisted ones (off the price lists); a product or variant picked by name counts all the same.
+ * The sellable items a card prices: products and variants for sale. Unlisted ones (off the price
+ * lists) count only when picked by name: an unlisted product, or an unlisted variant by itself.
  */
 export function cardUnits(source: CardSource, products: Product[]): Unit[] {
   const units: Unit[] = [];
@@ -119,7 +119,7 @@ export function cardUnits(source: CardSource, products: Product[]): Unit[] {
     if (p.deletedAt || p.forSale === false) continue;
     const named = source.items.includes(`${p.id}:`);
     const whole = named || (!p.unlisted && !!p.type && source.types.includes(p.type));
-    const variants = (p.variants ?? []).filter((v) => named || !v.unlisted || source.items.includes(`${p.id}:${v.id}`));
+    const variants = (p.variants ?? []).filter((v) => !v.unlisted || source.items.includes(`${p.id}:${v.id}`));
     if (variants.length) {
       for (const v of variants) {
         if (whole || source.items.includes(`${p.id}:${v.id}`)) units.push({ key: `${p.id}:${v.id}`, product: p, variant: v.name || '', price: round2(v.price ?? p.price ?? 0) });
@@ -176,8 +176,8 @@ function memberPrice(products: Product[], match: (p: Product, vid: string) => bo
 const ordinal = (n: number): string => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] ?? ['th', 'st', 'nd', 'rd'][n % 100] ?? 'th');
 
 /**
- * Every row a card can show, before its own labels and hidden rows: the prices, the small print,
- * then the deals of the discounts that touch its items and apply on `today` (YYYY-MM-DD).
+ * Every row a card can show, before its own labels and hidden rows: the prices, the deals of the
+ * discounts that touch its items and apply on `today` (YYYY-MM-DD), then the small print.
  */
 export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Product[], discounts: DiscountRule[], today: string): CardRow[] {
   const units = cardUnits(def.source, products);
@@ -186,16 +186,15 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
 
   const byPrice = new Map<number, Unit[]>();
   for (const u of units) byPrice.set(u.price, [...(byPrice.get(u.price) ?? []), u]);
-  if (byPrice.size === 1) rows.push({ id: 'price', kind: 'price', price: units[0]!.price });
+  // One product in one variant is a size or format worth saying ("30x30cm"), so it is a line.
+  const oneSize = units.length === 1 && !!units[0]!.variant;
+  if (byPrice.size === 1 && !oneSize) rows.push({ id: 'price', kind: 'price', price: units[0]!.price });
   else
     for (const [price, group] of [...byPrice].sort((a, b) => a[0] - b[0])) {
       // Named after its first item, not its price, so a new price is the same row.
       const first = group.map((u) => u.key).sort()[0]!;
       rows.push({ id: `line:${first}`, kind: 'line', label: lineLabel(group, units), price });
     }
-
-  const notes = def.notes ?? [...new Set(units.map((u) => u.product.priceNote?.trim() ?? '').filter(Boolean))];
-  notes.forEach((text, i) => rows.push({ id: `note:${i}`, kind: 'note', text }));
 
   const live = discounts.filter((d) => !d.deletedAt && !(d.validFrom && today < d.validFrom) && !(d.validUntil && today > d.validUntil));
   for (const rule of live) {
@@ -226,6 +225,9 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
       rows.push({ id: `offer:${rule.id}`, kind: 'note', text: offer(`Every ${ordinal(rule.nth ?? 3)} ${rule.percent ?? 0}% off`) });
     }
   }
+
+  const notes = def.notes ?? [...new Set(units.map((u) => u.product.priceNote?.trim() ?? '').filter(Boolean))];
+  notes.forEach((text, i) => rows.push({ id: `note:${i}`, kind: 'note', text }));
   return rows;
 }
 

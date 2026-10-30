@@ -84,6 +84,10 @@ describe('cardRows', () => {
   it('leaves unlisted products off a whole type, but not when picked by name', () => {
     expect(cardRows(def(['Keychain']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 12 }]);
     expect(cardRows(def([], ['double:']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 15 }]);
+    const peach = product({ id: 'peach', title: 'Peach', price: 35, variants: [{ id: 's', name: '30x30cm' }, { id: 'o', name: 'Original', price: 250, unlisted: true }] });
+    // One size of one print says which size it is.
+    expect(cardRows(def([], ['peach:']), [peach], [], today)).toEqual([{ id: 'line:peach:s', kind: 'line', label: '30x30cm', price: 35 }]);
+    expect(cardRows(def([], ['peach:', 'peach:o']), [peach], [], today).map((r) => r.kind === 'line' && r.label)).toEqual(['30x30cm', 'Original']);
   });
   it('is empty when the card prices nothing for sale', () => {
     expect(cardRows(def([], ['gone:']), [...products, product({ id: 'gone', forSale: false })], discounts, today)).toEqual([]);

@@ -267,7 +267,6 @@ const COLOR_NAMES: [keyof CardTheme['colors'], string][] = [
   ['ink', 'Text'],
   ['accent', 'Deals'],
   ['sparkle', 'Sparkles'],
-  ['sparkleDark', 'Small sparkle'],
 ];
 const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 </script>

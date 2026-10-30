@@ -23,7 +23,6 @@ export interface CardColors {
   /** Deal and bundle prices. */
   accent: string;
   sparkle: string;
-  sparkleDark: string;
 }
 
 export interface CardTheme {
@@ -36,9 +35,9 @@ export interface CardTheme {
 }
 
 export const DEFAULT_THEMES: CardTheme[] = [
-  { id: 'peach', name: 'Peach', font: 'Bahnschrift', mascot: '', colors: { bg: '#FEEEE4', frame: '#FBD2C2', pill: '#FBD2C2', title: '#9F674E', ink: '#9F674E', accent: '#EA2100', sparkle: '#FFB04C', sparkleDark: '#C9631F' } },
-  { id: 'sky', name: 'Sky', font: 'Bahnschrift', mascot: '', colors: { bg: '#CDE5EC', frame: '#7FA2D6', pill: '#7FA2D6', title: '#FFFFFF', ink: '#6A8BC4', accent: '#F04A2A', sparkle: '#FFB04C', sparkleDark: '#FFFFFF' } },
-  { id: 'cocoa', name: 'Cocoa', font: 'Bahnschrift', mascot: '', colors: { bg: '#6B3F2A', frame: '#8C5E46', pill: '#8C5E46', title: '#F6D2B0', ink: '#F0A456', accent: '#F2452C', sparkle: '#FFB04C', sparkleDark: '#C9631F' } },
+  { id: 'peach', name: 'Peach', font: 'Bahnschrift', mascot: '', colors: { bg: '#FEEEE4', frame: '#FBD2C2', pill: '#FBD2C2', title: '#9F674E', ink: '#9F674E', accent: '#EA2100', sparkle: '#FFB04C' } },
+  { id: 'sky', name: 'Sky', font: 'Bahnschrift', mascot: '', colors: { bg: '#CDE5EC', frame: '#7FA2D6', pill: '#7FA2D6', title: '#FFFFFF', ink: '#6A8BC4', accent: '#F04A2A', sparkle: '#FFB04C' } },
+  { id: 'cocoa', name: 'Cocoa', font: 'Bahnschrift', mascot: '', colors: { bg: '#6B3F2A', frame: '#8C5E46', pill: '#8C5E46', title: '#F6D2B0', ink: '#F0A456', accent: '#F2452C', sparkle: '#FFB04C' } },
 ];
 
 /** What a card prices: whole product types, and products ("pid:") or variants ("pid:vid"). */
@@ -358,7 +357,7 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
     ...body,
     ...head,
     star('Sparkle', 169, 182, 150, 160, c.sparkle),
-    star('Sparkle small', 110, 298, 60, 66, c.sparkleDark),
+    star('Sparkle small', 110, 298, 60, 66, c.sparkle),
     star('Sparkle', 1148, frameBottom - 108, 125, 135, c.sparkle),
     star('Sparkle small', 1034, frameBottom - 14, 60, 64, c.sparkle),
   ];

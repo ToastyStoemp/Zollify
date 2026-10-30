@@ -1,6 +1,6 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DiscountRule, Product } from '@zollify/shared';
-import type { CardRow, CardTheme, PriceFormat } from '../electron/cards';
+import type { CardRow, CardSize, CardStyle, CardTheme, PriceFormat } from '../electron/cards';
 import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
@@ -42,7 +42,7 @@ export interface PrintDeskApi {
     /** The folder card and sheet PSDs go to (made when missing). */
     dir(): Promise<string>;
     /** Draws a card PSD and its preview PNG; `mascot` is a PNG path or '' for none. */
-    draw(card: { id: string; title: string; subtitle: string; rows: CardRow[]; theme: CardTheme; mascot: string }, fmt: PriceFormat): Promise<{ file: string; preview: string; height: number; layout: string }>;
+    draw(card: { id: string; title: string; subtitle: string; rows: CardRow[]; theme: CardTheme; mascot: string; size?: CardSize; style?: CardStyle; noHeading?: boolean }, fmt: PriceFormat): Promise<{ file: string; preview: string; width: number; height: number; layout: string }>;
     /** Sets text layers by name in a card PSD; layers not found are named in `missing`. */
     setTexts(file: string, texts: Record<string, string>): Promise<{ updated: number; missing: string[]; preview: string }>;
     /** A4 sheet PSDs of the cards, in order, each with a preview PNG. */

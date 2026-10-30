@@ -63,8 +63,34 @@ describe('cardRows', () => {
     expect(cardRows(def(['Art Print']), prints, [], today).map((r) => (r.kind === 'line' ? r.label : ''))).toEqual(['A4', 'A3', 'Thank you']);
     expect(cardRows(def(['Enamel']), prints, [], today).map((r) => (r.kind === 'line' ? r.label : ''))).toEqual(['Enamel', 'Cat']);
   });
+  it('says which items a deal on some of them is for, and names mixed products by how they start', () => {
+    const shop = [
+      product({ id: 'sky', title: 'Deskmat - Sky', type: 'Desk Mat', price: 45 }),
+      product({ id: 'valley', title: 'Deskmat - Valley', type: 'Desk Mat', price: 45 }),
+      product({ id: 'cat', title: 'Mousepad - Cat', type: 'Desk Mat', price: 15 }),
+      product({ id: 'sushi', title: 'Mousepad - Sushi', type: 'Desk Mat', price: 15 }),
+      product({ id: 'kyoto', title: 'Kyoto', type: 'Art Print', variants: [{ id: '3', name: 'A3', price: 40 }, { id: '4', name: 'A4', price: 25 }] }),
+      product({ id: 'oslo', title: 'Oslo', type: 'Art Print', variants: [{ id: '3', name: 'A3', price: 40 }, { id: '4', name: 'A4', price: 25 }] }),
+    ];
+    const rules = [
+      rule({ id: 'mats', type: 'tiered', productIds: ['sky', 'valley'], tiers: [{ qty: 2, total: 80 }] }),
+      rule({ id: 'a4', type: 'tiered', variantIds: ['kyoto:4', 'oslo:4'], tiers: [{ qty: 3, total: 65 }] }),
+      rule({ id: 'pads', type: 'bxgy', productIds: ['cat', 'sushi'], buyQty: 2, freeQty: 1 }),
+    ];
+    const label = (r: ReturnType<typeof cardRows>[number]): string => (r.kind === 'line' ? `${r.label} ${r.price}` : r.kind === 'note' ? r.text : r.kind);
+    expect(cardRows(def(['Desk Mat']), shop, rules, today).map(label)).toEqual(['Mousepad 15', 'Deskmat 45', '2 × Deskmat 80', 'Mousepad: buy 2, get 1 free']);
+    expect(cardRows(def(['Art Print']), shop, rules, today).map(label)).toEqual(['A4 25', 'A3 40', '3 × A4 65']);
+  });
+  it('leaves unlisted products off a whole type, but not when picked by name', () => {
+    expect(cardRows(def(['Keychain']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 12 }]);
+    expect(cardRows(def([], ['double:']), products, [], today)).toEqual([{ id: 'price', kind: 'price', price: 15 }]);
+    const peach = product({ id: 'peach', title: 'Peach', price: 35, variants: [{ id: 's', name: '30x30cm' }, { id: 'o', name: 'Original', price: 250, unlisted: true }] });
+    // One size of one print says which size it is.
+    expect(cardRows(def([], ['peach:']), [peach], [], today)).toEqual([{ id: 'line:peach:s', kind: 'line', label: '30x30cm', price: 35 }]);
+    expect(cardRows(def([], ['peach:', 'peach:o']), [peach], [], today).map((r) => r.kind === 'line' && r.label)).toEqual(['30x30cm', 'Original']);
+  });
   it('is empty when the card prices nothing for sale', () => {
-    expect(cardRows(def([], ['double:']), products, discounts, today)).toEqual([]);
+    expect(cardRows(def([], ['gone:']), [...products, product({ id: 'gone', forSale: false })], discounts, today)).toEqual([]);
   });
 });
 
@@ -87,6 +113,36 @@ describe('cardLayout', () => {
     const names = two.commands.filter(([id]) => id === 'type.create').map(([, p]) => p.name);
     expect(names).toEqual(['price', 'deal:kb:2 qty', 'deal:kb:2 for', 'deal:kb:2 price', 'Title']);
     expect(cardTexts(art([{ id: 'deal:kb:2', kind: 'deal', qty: 2, price: 20 }]), DEFAULT_FORMAT)).toEqual({ Title: 'KEYCHAIN', 'deal:kb:2 qty': '2', 'deal:kb:2 price': '20.-' });
+  });
+});
+
+describe('sizes and strips', () => {
+  const rows: ReturnType<typeof cardRows> = [{ id: 'line:a', kind: 'line', label: 'A4', price: 25 }, { id: 'line:b', kind: 'line', label: 'A3', price: 40 }];
+  const art = { title: 'Available in:', subtitle: '', rows, theme: DEFAULT_THEMES[0]!, mascot: null };
+  it('draws a third-wide card as the master at two thirds, everything in proportion', () => {
+    const half = cardLayout(art, DEFAULT_FORMAT);
+    const third = cardLayout({ ...art, size: 'third' }, DEFAULT_FORMAT);
+    expect([half.width, third.width]).toEqual([1240, 826]);
+    expect(Math.abs(third.height - (half.height * 826) / 1240)).toBeLessThan(2);
+    const size = (l: typeof half): unknown => l.commands.find(([, p]) => p.name === 'line:a price')![1].size;
+    expect(size(third)).toBeCloseTo((Number(size(half)) * 826) / 1240, 1);
+    expect(third.layout).toBe('third|line:a|line:b');
+  });
+  it('lays a strip out as a heading as typed with the sizes side by side', () => {
+    const strip = cardLayout({ ...art, style: 'strip' }, DEFAULT_FORMAT);
+    const at = (name: string): Record<string, unknown> => strip.commands.find(([, p]) => p.name === name)![1];
+    expect(at('Title').text).toBe('Available in:');
+    expect(at('line:a label').y).toBe(at('line:b label').y);
+    expect(Number(at('line:a label').x)).toBeLessThan(Number(at('line:b label').x));
+    expect(strip.layout).toBe('strip|line:a|line:b');
+    expect(strip.height).toBeLessThan(cardLayout(art, DEFAULT_FORMAT).height);
+  });
+  it('leaves the heading of a strip off when asked, the title then only naming the card', () => {
+    const bare = cardLayout({ ...art, title: 'Kyoto', style: 'strip', noHeading: true }, DEFAULT_FORMAT);
+    expect(bare.commands.some(([, p]) => p.name === 'Title')).toBe(false);
+    expect(bare.layout).toBe('strip|noheading|line:a|line:b');
+    expect(bare.height).toBeLessThan(cardLayout({ ...art, style: 'strip' }, DEFAULT_FORMAT).height);
+    expect(Object.keys(cardTexts({ ...art, title: 'Kyoto', style: 'strip', noHeading: true }, DEFAULT_FORMAT))).not.toContain('Title');
   });
 });
 
@@ -115,5 +171,15 @@ describe('packSheets', () => {
       ['5', 1, 1240, 0],
     ]);
     expect(A4.height).toBe(3508);
+  });
+  it('gives third-wide cards pages of their own, three across', () => {
+    const cards = [{ key: 'h', width: 1240, height: 1000 }, ...['a', 'b', 'c', 'd'].map((key) => ({ key, width: 826, height: 400 }))];
+    expect(packSheets(cards).map((p) => [p.key, p.page, p.x, p.y])).toEqual([
+      ['h', 0, 0, 0],
+      ['a', 1, 0, 0],
+      ['b', 1, 826, 0],
+      ['c', 1, 1652, 0],
+      ['d', 1, 0, 400],
+    ]);
   });
 });

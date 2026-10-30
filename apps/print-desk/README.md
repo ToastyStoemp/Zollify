@@ -166,8 +166,11 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   line each, named after a size the products share ("A4") or else the product;
   a tiered discount adds "2 FOR 20.-" deals; a combo adds a "Bundle" line at
   its members' prices less the discount; buy-x-get-y and every-nth discounts add
-  a line of small print. Discounts count while they are valid today. Unlisted
-  products, and those not for sale, stay off.
+  a line of small print. A discount on only some of the card's items says which
+  ("3 × A4  65.-", "Mousepad: buy 2, get 1 free"). Discounts count while they
+  are valid today. A whole type leaves out unlisted products (off the price
+  lists); a product picked by name counts even when unlisted. Products not for
+  sale stay off.
 - **Small print** is the products' price notes, or lines of the card's own
   ("Hahnemühle paper", "4 random stickers"). Any line's name can be changed and
   any row left off, in the card's Edit panel.
@@ -175,6 +178,12 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   prices, sparkles), a font (Bahnschrift by default) and an optional mascot PNG on
   the title band's right end. A card takes its theme's mascot, none, or a PNG of
   its own. The sparkles are drawn as four-pointed stars.
+- **Style and size**: a card (title band, rows under each other) or a strip like
+  a shelf tag (a heading such as "Available in:", then the sizes side by side,
+  each over its price; deals and small print under them). A strip's heading can
+  be switched off: its title then only names it in the list. Either comes half an
+  A4 wide (10.5 cm, two across) or a third (7 cm, three across), which is the
+  same master drawn at two thirds. Each width gets sheets of its own.
 - **Draw** makes the card a PSD in the cards folder (Documents\Price cards unless
   changed), 1240 px wide (half an A4 at 300 ppi), as tall as its rows. Every part
   is a real layer: shapes for the background, frame and band, text layers named

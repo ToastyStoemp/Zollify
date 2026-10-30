@@ -160,10 +160,10 @@ const previewOf = (psd: string): string => psd.replace(/\.psd$/i, '') + '.png';
 const renderPreview = (exe: string, psd: string): Promise<string> => exec(exe, ['convert', psd, previewOf(psd)], 120_000).then(() => previewOf(psd));
 
 /** Draws a card into `file` (a PSD), and its preview PNG beside it. */
-export async function drawCard(exe: string, art: CardArt, fmt: PriceFormat, file: string): Promise<{ file: string; preview: string; height: number; layout: string }> {
+export async function drawCard(exe: string, art: CardArt, fmt: PriceFormat, file: string): Promise<{ file: string; preview: string; width: number; height: number; layout: string }> {
   const { width, height, layout, commands } = cardLayout(art, fmt);
   await runCommands(exe, { width, height, resolution: 300, background: 'white', name: art.title }, commands, file);
-  return { file, preview: await renderPreview(exe, file), height, layout };
+  return { file, preview: await renderPreview(exe, file), width, height, layout };
 }
 
 interface InfoLayer {

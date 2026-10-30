@@ -23,7 +23,6 @@ export interface CardColors {
   /** Deal and bundle prices. */
   accent: string;
   sparkle: string;
-  sparkleDark: string;
 }
 
 export interface CardTheme {
@@ -36,9 +35,9 @@ export interface CardTheme {
 }
 
 export const DEFAULT_THEMES: CardTheme[] = [
-  { id: 'peach', name: 'Peach', font: 'Bahnschrift', mascot: '', colors: { bg: '#FEEEE4', frame: '#FBD2C2', pill: '#FBD2C2', title: '#9F674E', ink: '#9F674E', accent: '#EA2100', sparkle: '#FFB04C', sparkleDark: '#C9631F' } },
-  { id: 'sky', name: 'Sky', font: 'Bahnschrift', mascot: '', colors: { bg: '#CDE5EC', frame: '#7FA2D6', pill: '#7FA2D6', title: '#FFFFFF', ink: '#6A8BC4', accent: '#F04A2A', sparkle: '#FFB04C', sparkleDark: '#FFFFFF' } },
-  { id: 'cocoa', name: 'Cocoa', font: 'Bahnschrift', mascot: '', colors: { bg: '#6B3F2A', frame: '#8C5E46', pill: '#8C5E46', title: '#F6D2B0', ink: '#F0A456', accent: '#F2452C', sparkle: '#FFB04C', sparkleDark: '#C9631F' } },
+  { id: 'peach', name: 'Peach', font: 'Bahnschrift', mascot: '', colors: { bg: '#FEEEE4', frame: '#FBD2C2', pill: '#FBD2C2', title: '#9F674E', ink: '#9F674E', accent: '#EA2100', sparkle: '#FFB04C' } },
+  { id: 'sky', name: 'Sky', font: 'Bahnschrift', mascot: '', colors: { bg: '#CDE5EC', frame: '#7FA2D6', pill: '#7FA2D6', title: '#FFFFFF', ink: '#6A8BC4', accent: '#F04A2A', sparkle: '#FFB04C' } },
+  { id: 'cocoa', name: 'Cocoa', font: 'Bahnschrift', mascot: '', colors: { bg: '#6B3F2A', frame: '#8C5E46', pill: '#8C5E46', title: '#F6D2B0', ink: '#F0A456', accent: '#F2452C', sparkle: '#FFB04C' } },
 ];
 
 /** What a card prices: whole product types, and products ("pid:") or variants ("pid:vid"). */
@@ -67,7 +66,15 @@ export interface CardDef {
   /** A PNG of it, for the list. */
   preview?: string;
   height?: number;
-  /** The row ids it was drawn with: prices go into the PSD in place while these stay the same. */
+  /** Half an A4 wide when unset. */
+  size?: CardSize;
+  /** A card when unset. */
+  style?: CardStyle;
+  /** A strip without its heading: the title only names the card in the list. */
+  noHeading?: boolean;
+  /** Its width in pixels, as drawn. */
+  width?: number;
+  /** The style, size and row ids it was drawn with: prices go into the PSD in place while these stay the same. */
   layout?: string;
   /** The texts in the PSD, by layer name, as Print Desk last wrote them. */
   texts?: Record<string, string>;
@@ -78,12 +85,12 @@ export type CardState = 'new' | 'current' | 'prices' | 'layout' | 'empty';
 export function cardState(def: CardDef, rows: CardRow[], fmt: PriceFormat): CardState {
   if (!rows.length) return 'empty';
   if (!def.file) return 'new';
-  if (rows.map((r) => r.id).join('|') !== def.layout) return 'layout';
+  if (layoutKey(def, rows) !== def.layout) return 'layout';
   return changedTexts(def, rows, fmt).length ? 'prices' : 'current';
 }
 /** The texts that differ from what the PSD holds, as [layer name, text]. */
 export function changedTexts(def: CardDef, rows: CardRow[], fmt: PriceFormat): [string, string][] {
-  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
+  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style, noHeading: def.noHeading }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
 }
 
 /** How a price reads: "{n}.-" gives "15.-"; prices are the catalogue's, times `rate`, to `rounding`. */
@@ -110,13 +117,17 @@ interface Unit {
 
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/** The sellable items a card prices: listed products and variants for sale. */
+/**
+ * The sellable items a card prices: products and variants for sale. Unlisted ones (off the price
+ * lists) count only when picked by name: an unlisted product, or an unlisted variant by itself.
+ */
 export function cardUnits(source: CardSource, products: Product[]): Unit[] {
   const units: Unit[] = [];
   for (const p of products) {
-    if (p.deletedAt || p.forSale === false || p.unlisted) continue;
-    const whole = (!!p.type && source.types.includes(p.type)) || source.items.includes(`${p.id}:`);
-    const variants = (p.variants ?? []).filter((v) => !v.unlisted);
+    if (p.deletedAt || p.forSale === false) continue;
+    const named = source.items.includes(`${p.id}:`);
+    const whole = named || (!p.unlisted && !!p.type && source.types.includes(p.type));
+    const variants = (p.variants ?? []).filter((v) => !v.unlisted || source.items.includes(`${p.id}:${v.id}`));
     if (variants.length) {
       for (const v of variants) {
         if (whole || source.items.includes(`${p.id}:${v.id}`)) units.push({ key: `${p.id}:${v.id}`, product: p, variant: v.name || '', price: round2(v.price ?? p.price ?? 0) });
@@ -134,7 +145,8 @@ const touches = (rule: DiscountRule, u: Unit): boolean =>
 /**
  * A line's name. Each item goes by its variant when that is a size several of the card's
  * products share ("A4"), or when the card is one product; else by its product. A name too long
- * for a line keeps the sizes alone, else the type the items share, else the first name.
+ * for a line keeps the sizes alone, else the words the names start with ("Deskmat - Sky",
+ * "Deskmat - Valley": "Deskmat"), else the type the items share, else the first name.
  */
 function lineLabel(group: Unit[], units: Unit[]): string {
   const oneProduct = new Set(units.map((u) => u.product.id)).size === 1;
@@ -145,6 +157,14 @@ function lineLabel(group: Unit[], units: Unit[]): string {
   if (label.length <= 24) return label;
   const sizes = [...new Set(group.filter(bySize).map((u) => u.variant))];
   if (sizes.length) return sizes.join(' / ');
+  const words = names.map((n) => n.split(/\s+/));
+  const shared: string[] = [];
+  for (const [i, w] of words[0]!.entries()) {
+    if (!words.every((ws) => ws[i] === w)) break;
+    shared.push(w);
+  }
+  const start = shared.join(' ').replace(/[\s\-–—:·,]+$/, '');
+  if (start) return start;
   const types = new Set(group.map((u) => u.product.type));
   return types.size === 1 && group[0]!.product.type ? group[0]!.product.type : names[0]!;
 }
@@ -164,8 +184,8 @@ function memberPrice(products: Product[], match: (p: Product, vid: string) => bo
 const ordinal = (n: number): string => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] ?? ['th', 'st', 'nd', 'rd'][n % 100] ?? 'th');
 
 /**
- * Every row a card can show, before its own labels and hidden rows: the prices, the small print,
- * then the deals of the discounts that touch its items and apply on `today` (YYYY-MM-DD).
+ * Every row a card can show, before its own labels and hidden rows: the prices, the deals of the
+ * discounts that touch its items and apply on `today` (YYYY-MM-DD), then the small print.
  */
 export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Product[], discounts: DiscountRule[], today: string): CardRow[] {
   const units = cardUnits(def.source, products);
@@ -174,7 +194,9 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
 
   const byPrice = new Map<number, Unit[]>();
   for (const u of units) byPrice.set(u.price, [...(byPrice.get(u.price) ?? []), u]);
-  if (byPrice.size === 1) rows.push({ id: 'price', kind: 'price', price: units[0]!.price });
+  // One product in one variant is a size or format worth saying ("30x30cm"), so it is a line.
+  const oneSize = units.length === 1 && !!units[0]!.variant;
+  if (byPrice.size === 1 && !oneSize) rows.push({ id: 'price', kind: 'price', price: units[0]!.price });
   else
     for (const [price, group] of [...byPrice].sort((a, b) => a[0] - b[0])) {
       // Named after its first item, not its price, so a new price is the same row.
@@ -182,14 +204,19 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
       rows.push({ id: `line:${first}`, kind: 'line', label: lineLabel(group, units), price });
     }
 
-  const notes = def.notes ?? [...new Set(units.map((u) => u.product.priceNote?.trim() ?? '').filter(Boolean))];
-  notes.forEach((text, i) => rows.push({ id: `note:${i}`, kind: 'note', text }));
-
   const live = discounts.filter((d) => !d.deletedAt && !(d.validFrom && today < d.validFrom) && !(d.validUntil && today > d.validUntil));
   for (const rule of live) {
-    if (!units.some((u) => touches(rule, u))) continue;
+    const touched = units.filter((u) => touches(rule, u));
+    if (!touched.length) continue;
+    // A deal on some of the card's items says which: "3 × A4  65.-", "Mousepad: buy 2, get 1 free".
+    const some = touched.length < units.length ? lineLabel(touched, units) : '';
+    const offer = (text: string): string => (some ? `${some}: ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text);
     if (rule.type === 'tiered') {
-      for (const t of [...(rule.tiers ?? [])].sort((a, b) => a.qty - b.qty)) if (t.qty > 1) rows.push({ id: `deal:${rule.id}:${t.qty}`, kind: 'deal', qty: t.qty, price: round2(t.total) });
+      for (const t of [...(rule.tiers ?? [])].sort((a, b) => a.qty - b.qty)) {
+        if (t.qty < 2) continue;
+        const id = `deal:${rule.id}:${t.qty}`;
+        rows.push(some ? { id, kind: 'line', label: `${t.qty} × ${some}`, price: round2(t.total), accent: true } : { id, kind: 'deal', qty: t.qty, price: round2(t.total) });
+      }
     } else if (rule.type === 'combo') {
       const members = [
         ...(rule.productIds ?? []).map((id) => memberPrice(products, (p) => p.id === id)),
@@ -201,11 +228,14 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
         rows.push({ id: `bundle:${rule.id}`, kind: 'line', label: 'Bundle', price, accent: true });
       }
     } else if (rule.type === 'bxgy') {
-      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: `Buy ${rule.buyQty ?? 2}, get ${rule.freeQty ?? 1} free` });
+      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: offer(`Buy ${rule.buyQty ?? 2}, get ${rule.freeQty ?? 1} free`) });
     } else if (rule.type === 'nth_pct') {
-      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: `Every ${ordinal(rule.nth ?? 3)} ${rule.percent ?? 0}% off` });
+      rows.push({ id: `offer:${rule.id}`, kind: 'note', text: offer(`Every ${ordinal(rule.nth ?? 3)} ${rule.percent ?? 0}% off`) });
     }
   }
+
+  const notes = def.notes ?? [...new Set(units.map((u) => u.product.priceNote?.trim() ?? '').filter(Boolean))];
+  notes.forEach((text, i) => rows.push({ id: `note:${i}`, kind: 'note', text }));
   return rows;
 }
 
@@ -234,6 +264,21 @@ export function formatPrice(price: number, fmt: PriceFormat): string {
 
 export const CARD_WIDTH = 1240;
 export const A4 = { width: 2480, height: 3508 };
+
+/** How wide a card is drawn: the master at its own size, or scaled down to fit three across. */
+export type CardSize = 'half' | 'third';
+export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
+  half: { width: CARD_WIDTH, label: 'Half A4 wide (10.5 cm, 2 across)' },
+  third: { width: Math.floor(A4.width / 3), label: 'Third of A4 wide (7 cm, 3 across)' },
+};
+/**
+ * How a card is laid out: the card (title band, rows under each other) or a strip (a heading
+ * and the sizes side by side, each with its price under it), for a tag beside each print.
+ */
+export type CardStyle = 'card' | 'strip';
+/** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean }, rows: CardRow[]): string =>
+  [...(art.style === 'strip' ? ['strip'] : []), ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []), ...(art.size === 'third' ? ['third'] : []), ...rows.map((r) => r.id)].join('|');
 const PX_PER_PT = 300 / 72;
 const FRAME = { x: 92, top: 192, width: 1056, radius: 165, stroke: 20 };
 const PILL = { x: 287, y: 100, width: 673, height: 177 };
@@ -267,11 +312,28 @@ export interface CardArt {
   theme: CardTheme;
   /** The mascot PNG and its size in pixels, or null for none. */
   mascot: { path: string; width: number; height: number } | null;
+  size?: CardSize;
+  style?: CardStyle;
+  noHeading?: boolean;
+}
+
+/** A command with its positions and sizes times `s`: the master drawn smaller, all in proportion. */
+function scaled([id, p]: Command, s: number): Command {
+  if (s === 1) return [id, p];
+  const n = (v: unknown): unknown => (typeof v === 'number' ? Math.round(v * s * 100) / 100 : v);
+  const q: Record<string, unknown> = { ...p };
+  for (const k of ['x', 'y', 'size', 'radii', 'scale']) if (k in q) q[k] = n(q[k]);
+  for (const k of ['rect', 'center']) if (Array.isArray(q[k])) q[k] = (q[k] as unknown[]).map(n);
+  if (q.stroke) q.stroke = { ...(q.stroke as Record<string, unknown>), width: n((q.stroke as Record<string, unknown>).width) };
+  return [id, q];
 }
 
 /** Text layer name -> its text, for every text a card's prices or labels set. */
-export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows'>, fmt: PriceFormat): Record<string, string> {
-  const out: Record<string, string> = { Title: art.title.toUpperCase() };
+export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows' | 'style' | 'noHeading'>, fmt: PriceFormat): Record<string, string> {
+  // The card's title band is in capitals; a strip's heading reads as typed ("Available in:"), or is left off.
+  const out: Record<string, string> = {};
+  if (art.style !== 'strip') out.Title = art.title.toUpperCase();
+  else if (!art.noHeading && art.title.trim()) out.Title = art.title;
   if (art.subtitle) out.Subtitle = art.subtitle;
   for (const r of art.rows) {
     if (r.kind === 'price') out[r.id] = formatPrice(r.price, fmt);
@@ -284,6 +346,76 @@ export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows'>, fmt
 
 /** The card as PhotoCraft commands for a new document `width` x `height` at 300 ppi. */
 export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; height: number; layout: string; commands: Command[] } {
+  const { height, commands } = art.style === 'strip' ? stripCommands(art, fmt) : cardCommands(art, fmt);
+  const width = CARD_SIZES[art.size ?? 'half'].width;
+  const s = width / CARD_WIDTH;
+  return { width, height: Math.ceil((height * s) / 2) * 2, layout: layoutKey(art, art.rows), commands: commands.map((cmd) => scaled(cmd, s)) };
+}
+
+const star = (name: string, cx: number, cy: number, w: number, h: number, fill: string): Command => ['shape.create', { kind: 'star', sides: 4, starRatio: 0.28, rect: [cx - w / 2, cy - h / 2, w, h], fill, name }];
+
+/**
+ * A strip, like a shelf tag: a rounded frame, the title as a heading, then the lines side by side
+ * (the size over its price), a single price large, deals and small print under them.
+ */
+function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; commands: Command[] } {
+  const c = art.theme.colors;
+  const font = art.theme.font || 'Bahnschrift';
+  const texts = cardTexts(art, fmt);
+  const body: Command[] = [];
+  const text = (name: string, x: number, y: number, size: number, color: string, extra: Record<string, unknown> = {}): void => {
+    body.push(['type.create', { x, y, text: texts[name] ?? name, name, font, fontStyle: 'Bold', size, color, align: 'center', ...extra }]);
+  };
+  const ROOM = 840;
+  // Without a heading the rows start lower, so they sit in the middle of the frame.
+  let y = texts.Title ? 40 : 55;
+  if (texts.Title) {
+    text('Title', CARD_WIDTH / 2, y + 110, fit(texts.Title!, 20, ROOM, 300), c.ink, { tracking: 300 });
+    y += 125;
+  }
+  const lines = art.rows.filter((r) => r.kind === 'line');
+  if (lines.length) {
+    const step = lines.length > 1 ? Math.min(300, ROOM / (lines.length - 1)) : 0;
+    const size = Math.min(...lines.map((r) => fit(texts[`${r.id} label`]!, 26, Math.min(step || ROOM, ROOM) - 30, 100)));
+    lines.forEach((r, i) => {
+      const x = CARD_WIDTH / 2 + (i - (lines.length - 1) / 2) * step;
+      text(`${r.id} label`, x, y + 110, size, c.ink, { tracking: 100 });
+      text(`${r.id} price`, x, y + 205, 22, r.accent ? c.accent : c.ink);
+    });
+    y += 225;
+  }
+  for (const r of art.rows) {
+    if (r.kind === 'price') {
+      text(r.id, CARD_WIDTH / 2, y + 150, 34, c.ink, { tracking: 100 });
+      y += 170;
+    } else if (r.kind === 'deal') {
+      text(`${r.id} qty`, 500, y + 75, 20, c.ink);
+      body.push(['type.create', { x: 610, y: y + 75, text: 'FOR', name: `${r.id} for`, font, fontStyle: 'Bold', size: 14, color: c.ink, align: 'center', tracking: 360 }]);
+      text(`${r.id} price`, 740, y + 75, 20, c.accent);
+      y += 90;
+    } else if (r.kind === 'note') {
+      text(r.id, CARD_WIDTH / 2, y + 60, fit(texts[r.id]!, 12, ROOM, 120), c.ink, { tracking: 120 });
+      y += 70;
+    }
+  }
+  const height = Math.ceil((y + 85) / 2) * 2;
+  const frame = { x: 40, y: 30, w: CARD_WIDTH - 80, h: height - 60 };
+  return {
+    height,
+    commands: [
+      ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH + 10, height + 10], fill: c.bg, name: 'Background' }],
+      ['shape.create', { kind: 'roundedRect', rect: [frame.x, frame.y, frame.w, frame.h], radii: Math.min(150, frame.h / 2), fill: null, stroke: { width: 14, color: c.frame, align: 'center' }, name: 'Frame' }],
+      ...body,
+      star('Sparkle', 170, 55, 100, 105, c.sparkle),
+      star('Sparkle small', 118, 70, 40, 44, c.sparkle),
+      star('Sparkle', 1155, height - 97, 85, 90, c.sparkle),
+      star('Sparkle small', 1077, height - 46, 40, 42, c.sparkle),
+    ],
+  };
+}
+
+/** The card: a title band with the mascot on it, then the rows under each other. */
+function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; commands: Command[] } {
   const c = art.theme.colors;
   const font = art.theme.font || 'Bahnschrift';
   const texts = cardTexts(art, fmt);
@@ -329,15 +461,15 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
       ]
     : [['type.create', { x: titleX, y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 16, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }]];
 
-  const star = (name: string, cx: number, cy: number, w: number, h: number, fill: string): Command => ['shape.create', { kind: 'star', sides: 4, starRatio: 0.28, rect: [cx - w / 2, cy - h / 2, w, h], fill, name }];
   const commands: Command[] = [
-    ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH, height], fill: c.bg, name: 'Background' }],
+    // Past the edges, so a scaled-down card rounding its height up has no strip without background.
+    ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH + 10, height + 10], fill: c.bg, name: 'Background' }],
     ['shape.create', { kind: 'roundedRect', rect: [FRAME.x, FRAME.top, FRAME.width, frameBottom - FRAME.top], radii: FRAME.radius, fill: null, stroke: { width: FRAME.stroke, color: c.frame, align: 'center' }, name: 'Frame' }],
     ['shape.create', { kind: 'roundedRect', rect: [PILL.x, PILL.y, PILL.width, PILL.height], radii: PILL.height / 2, fill: c.pill, name: 'Pill' }],
     ...body,
     ...head,
     star('Sparkle', 169, 182, 150, 160, c.sparkle),
-    star('Sparkle small', 110, 298, 60, 66, c.sparkleDark),
+    star('Sparkle small', 110, 298, 60, 66, c.sparkle),
     star('Sparkle', 1148, frameBottom - 108, 125, 135, c.sparkle),
     star('Sparkle small', 1034, frameBottom - 14, 60, 64, c.sparkle),
   ];
@@ -346,7 +478,7 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
     const scale = Math.min(100, Math.floor((300 / Math.max(art.mascot.width, art.mascot.height)) * 100));
     commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [954, 174] }]);
   }
-  return { width: CARD_WIDTH, height, layout: art.rows.map((r) => r.id).join('|'), commands };
+  return { height, commands };
 }
 
 /** A card on an A4 sheet: page (0-based) and top-left corner in pixels. */
@@ -360,23 +492,27 @@ export interface Placed {
 }
 
 /**
- * Cards in A4 pages of half-width columns, in order, each going to the column that ends highest;
- * a card that fits in none starts a new page. A card taller than a page gets a page of its own.
+ * Cards in A4 pages of columns as wide as the cards, in order, each going to the column that ends
+ * highest; a card that fits in none starts a new page, and so does each card width, so half and
+ * third cards get pages of their own. A card taller than a page gets a page of its own.
  */
 export function packSheets(cards: { key: string; width: number; height: number }[]): Placed[] {
-  const columns = Math.max(1, Math.floor(A4.width / CARD_WIDTH));
   const out: Placed[] = [];
-  let page = 0;
-  let tops = Array<number>(columns).fill(0);
-  for (const card of cards) {
-    let col = tops.indexOf(Math.min(...tops));
-    if (tops[col]! > 0 && tops[col]! + card.height > A4.height) {
-      page++;
-      tops = Array<number>(columns).fill(0);
-      col = 0;
+  let page = -1;
+  for (const width of [...new Set(cards.map((c) => c.width))]) {
+    const columns = Math.max(1, Math.floor(A4.width / width));
+    let tops = Array<number>(columns).fill(0);
+    page++;
+    for (const card of cards.filter((c) => c.width === width)) {
+      let col = tops.indexOf(Math.min(...tops));
+      if (tops[col]! > 0 && tops[col]! + card.height > A4.height) {
+        page++;
+        tops = Array<number>(columns).fill(0);
+        col = 0;
+      }
+      out.push({ key: card.key, page, x: col * width, y: tops[col]!, width: card.width, height: card.height });
+      tops[col] = tops[col]! + card.height;
     }
-    out.push({ key: card.key, page, x: col * CARD_WIDTH, y: tops[col]!, width: card.width, height: card.height });
-    tops[col] = tops[col]! + card.height;
   }
   return out;
 }

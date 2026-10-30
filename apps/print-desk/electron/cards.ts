@@ -70,6 +70,8 @@ export interface CardDef {
   size?: CardSize;
   /** A card when unset. */
   style?: CardStyle;
+  /** A strip without its heading: the title only names the card in the list. */
+  noHeading?: boolean;
   /** Its width in pixels, as drawn. */
   width?: number;
   /** The style, size and row ids it was drawn with: prices go into the PSD in place while these stay the same. */
@@ -88,7 +90,7 @@ export function cardState(def: CardDef, rows: CardRow[], fmt: PriceFormat): Card
 }
 /** The texts that differ from what the PSD holds, as [layer name, text]. */
 export function changedTexts(def: CardDef, rows: CardRow[], fmt: PriceFormat): [string, string][] {
-  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
+  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style, noHeading: def.noHeading }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
 }
 
 /** How a price reads: "{n}.-" gives "15.-"; prices are the catalogue's, times `rate`, to `rounding`. */
@@ -275,8 +277,8 @@ export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
  */
 export type CardStyle = 'card' | 'strip';
 /** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
-export const layoutKey = (art: { size?: CardSize; style?: CardStyle }, rows: CardRow[]): string =>
-  [...(art.style === 'strip' ? ['strip'] : []), ...(art.size === 'third' ? ['third'] : []), ...rows.map((r) => r.id)].join('|');
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean }, rows: CardRow[]): string =>
+  [...(art.style === 'strip' ? ['strip'] : []), ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []), ...(art.size === 'third' ? ['third'] : []), ...rows.map((r) => r.id)].join('|');
 const PX_PER_PT = 300 / 72;
 const FRAME = { x: 92, top: 192, width: 1056, radius: 165, stroke: 20 };
 const PILL = { x: 287, y: 100, width: 673, height: 177 };
@@ -312,6 +314,7 @@ export interface CardArt {
   mascot: { path: string; width: number; height: number } | null;
   size?: CardSize;
   style?: CardStyle;
+  noHeading?: boolean;
 }
 
 /** A command with its positions and sizes times `s`: the master drawn smaller, all in proportion. */
@@ -326,9 +329,11 @@ function scaled([id, p]: Command, s: number): Command {
 }
 
 /** Text layer name -> its text, for every text a card's prices or labels set. */
-export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows' | 'style'>, fmt: PriceFormat): Record<string, string> {
-  // The card's title band is in capitals; a strip's heading reads as typed ("Available in:").
-  const out: Record<string, string> = { Title: art.style === 'strip' ? art.title : art.title.toUpperCase() };
+export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows' | 'style' | 'noHeading'>, fmt: PriceFormat): Record<string, string> {
+  // The card's title band is in capitals; a strip's heading reads as typed ("Available in:"), or is left off.
+  const out: Record<string, string> = {};
+  if (art.style !== 'strip') out.Title = art.title.toUpperCase();
+  else if (!art.noHeading && art.title.trim()) out.Title = art.title;
   if (art.subtitle) out.Subtitle = art.subtitle;
   for (const r of art.rows) {
     if (r.kind === 'price') out[r.id] = formatPrice(r.price, fmt);
@@ -362,8 +367,9 @@ function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; comman
     body.push(['type.create', { x, y, text: texts[name] ?? name, name, font, fontStyle: 'Bold', size, color, align: 'center', ...extra }]);
   };
   const ROOM = 840;
-  let y = 40;
-  if (art.title.trim()) {
+  // Without a heading the rows start lower, so they sit in the middle of the frame.
+  let y = texts.Title ? 40 : 55;
+  if (texts.Title) {
     text('Title', CARD_WIDTH / 2, y + 110, fit(texts.Title!, 20, ROOM, 300), c.ink, { tracking: 300 });
     y += 125;
   }
@@ -380,8 +386,8 @@ function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; comman
   }
   for (const r of art.rows) {
     if (r.kind === 'price') {
-      text(r.id, CARD_WIDTH / 2, y + 130, 34, c.ink, { tracking: 100 });
-      y += 150;
+      text(r.id, CARD_WIDTH / 2, y + 150, 34, c.ink, { tracking: 100 });
+      y += 170;
     } else if (r.kind === 'deal') {
       text(`${r.id} qty`, 500, y + 75, 20, c.ink);
       body.push(['type.create', { x: 610, y: y + 75, text: 'FOR', name: `${r.id} for`, font, fontStyle: 'Bold', size: 14, color: c.ink, align: 'center', tracking: 360 }]);

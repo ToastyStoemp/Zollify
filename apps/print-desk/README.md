@@ -180,7 +180,8 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   its own. The sparkles are drawn as four-pointed stars.
 - **Style and size**: a card (title band, rows under each other) or a strip like
   a shelf tag (a heading such as "Available in:", then the sizes side by side,
-  each over its price; deals and small print under them). Either comes half an
+  each over its price; deals and small print under them). A strip's heading can
+  be switched off: its title then only names it in the list. Either comes half an
   A4 wide (10.5 cm, two across) or a third (7 cm, three across), which is the
   same master drawn at two thirds. Each width gets sheets of its own.
 - **Draw** makes the card a PSD in the cards folder (Documents\Price cards unless

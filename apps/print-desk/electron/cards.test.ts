@@ -137,6 +137,13 @@ describe('sizes and strips', () => {
     expect(strip.layout).toBe('strip|line:a|line:b');
     expect(strip.height).toBeLessThan(cardLayout(art, DEFAULT_FORMAT).height);
   });
+  it('leaves the heading of a strip off when asked, the title then only naming the card', () => {
+    const bare = cardLayout({ ...art, title: 'Kyoto', style: 'strip', noHeading: true }, DEFAULT_FORMAT);
+    expect(bare.commands.some(([, p]) => p.name === 'Title')).toBe(false);
+    expect(bare.layout).toBe('strip|noheading|line:a|line:b');
+    expect(bare.height).toBeLessThan(cardLayout({ ...art, style: 'strip' }, DEFAULT_FORMAT).height);
+    expect(Object.keys(cardTexts({ ...art, title: 'Kyoto', style: 'strip', noHeading: true }, DEFAULT_FORMAT))).not.toContain('Title');
+  });
 });
 
 describe('cardState', () => {

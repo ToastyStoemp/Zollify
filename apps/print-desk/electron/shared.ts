@@ -1,4 +1,5 @@
 /** Types and pure helpers used by both the Electron main process and the renderer. */
+import type { CardDef, CardTheme, PriceFormat } from './cards.js';
 
 /** A file linked to one product or variant, with the PhotoCraft `file.print` params it prints with. */
 export interface PrintLink {
@@ -84,6 +85,17 @@ export interface Settings {
   hasPrinterKey: boolean;
   /** Account id -> stock keys of items printed elsewhere (outsourced): out of the fills and the print run. */
   hidden: Record<string, string[]>;
+  priceCards: PriceCardSettings;
+}
+
+/** Price cards: the themes, each account's cards, how prices read, and where the PSDs go. */
+export interface PriceCardSettings {
+  themes: CardTheme[];
+  /** Account id -> its cards, in sheet order. */
+  cards: Record<string, CardDef[]>;
+  format: PriceFormat;
+  /** Folder for the card and sheet PSDs; '' for Documents/Price cards. */
+  outDir: string;
 }
 
 export type Units = 'cm' | 'mm' | 'in';

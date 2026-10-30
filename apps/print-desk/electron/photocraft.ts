@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { PrintJob, PrintResult, Printer } from './shared.js';
 import { printParams, type ImageInfo } from './shared.js';
+import { A4, cardLayout, sheetCommands, type CardArt, type Command, type Placed, type PriceFormat } from './cards.js';
 
 const run = promisify(execFile);
 
@@ -80,13 +81,12 @@ export async function lastPrint(exe: string): Promise<Record<string, unknown>> {
   return params;
 }
 
-/** `photocraft-cli run` with one command; its JSON result, or the CLI's error text. */
-async function cli(exe: string, args: string[], timeout = 0): Promise<Record<string, unknown>> {
+/** Runs photocraft-cli; its output, or an error with the CLI's own error line. */
+async function exec(exe: string, args: string[], timeout = 0): Promise<string> {
   if (!exe) throw new Error('Set the path to photocraft-cli first (it is installed with PhotoCraft).');
-  let stdout: string;
   try {
     // info lists every layer: a big PSD's JSON can run to many megabytes.
-    ({ stdout } = await run(exe, args, { maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout }));
+    return (await run(exe, args, { maxBuffer: 64 * 1024 * 1024, windowsHide: true, timeout })).stdout;
   } catch (err) {
     const e = err as { stderr?: string; message?: string; killed?: boolean };
     if (e.killed) throw new Error(`photocraft-cli did not answer within ${timeout / 1000} s`);
@@ -94,6 +94,11 @@ async function cli(exe: string, args: string[], timeout = 0): Promise<Record<str
     const line = text.split('\n').find((l) => l.startsWith('error:'));
     throw new Error(line ? line.replace(/^error:\s*/, '') : text);
   }
+}
+
+/** `photocraft-cli run` with one command; its JSON result, or the CLI's error text. */
+async function cli(exe: string, args: string[], timeout = 0): Promise<Record<string, unknown>> {
+  const stdout = await exec(exe, args, timeout);
   // One --cmd prints one {"command", "result"} object (pretty-printed, so parse the whole output).
   const text = stdout.trim();
   try {
@@ -132,4 +137,78 @@ export async function print(exe: string, job: PrintJob): Promise<PrintResult> {
   } catch (err) {
     return { key: job.key, ok: false, message: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ── Price cards ──
+
+/** `photocraft-cli run` on a file, or on a new document, with commands in order, saved to `out`. */
+async function runCommands(exe: string, source: string | Record<string, unknown>, commands: Command[], out: string): Promise<void> {
+  const args = ['run', ...(typeof source === 'string' ? [source] : ['--new', JSON.stringify(source)])];
+  for (const [id, params] of commands) args.push('--cmd', id, '--params', JSON.stringify(params));
+  await exec(exe, [...args, '--out', out], 180_000);
+}
+
+/** A PNG's size in pixels, from its header; null for anything else. */
+export async function pngSize(file: string): Promise<{ width: number; height: number } | null> {
+  const head = await readFile(file).catch(() => null);
+  if (!head || head.length < 24 || head.toString('latin1', 1, 4) !== 'PNG') return null;
+  return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+}
+
+/** A PNG beside a card or sheet PSD, for the list ("Keychain.psd" -> "Keychain.png"). */
+const previewOf = (psd: string): string => psd.replace(/\.psd$/i, '') + '.png';
+const renderPreview = (exe: string, psd: string): Promise<string> => exec(exe, ['convert', psd, previewOf(psd)], 120_000).then(() => previewOf(psd));
+
+/** Draws a card into `file` (a PSD), and its preview PNG beside it. */
+export async function drawCard(exe: string, art: CardArt, fmt: PriceFormat, file: string): Promise<{ file: string; preview: string; height: number; layout: string }> {
+  const { width, height, layout, commands } = cardLayout(art, fmt);
+  await runCommands(exe, { width, height, resolution: 300, background: 'white', name: art.title }, commands, file);
+  return { file, preview: await renderPreview(exe, file), height, layout };
+}
+
+interface InfoLayer {
+  id: number;
+  kind: string;
+  name: string;
+  children?: InfoLayer[];
+}
+
+/**
+ * Sets the text of a card's text layers by name, in the PSD itself, and draws its preview again.
+ * Layers renamed or deleted by hand are left out and named in `missing`.
+ */
+export async function setCardTexts(exe: string, file: string, texts: Record<string, string>): Promise<{ updated: number; missing: string[]; preview: string }> {
+  const info = JSON.parse(await exec(exe, ['info', file, '--compact'], 60_000)) as { layers?: InfoLayer[] };
+  const ids = new Map<string, number>();
+  const walk = (layers: InfoLayer[] = []): void => {
+    for (const l of layers) {
+      if (l.kind === 'Type' && !ids.has(l.name)) ids.set(l.name, l.id);
+      walk(l.children);
+    }
+  };
+  walk(info.layers);
+  const commands: Command[] = Object.entries(texts)
+    .filter(([name]) => ids.has(name))
+    .map(([name, text]) => ['type.edit', { layer: ids.get(name), text }]);
+  if (commands.length) await runCommands(exe, file, commands, file);
+  return { updated: commands.length, missing: Object.keys(texts).filter((n) => !ids.has(n)), preview: await renderPreview(exe, file) };
+}
+
+/** A4 pages of cards as embedded Smart Objects, saved as `<base>-<n>.psd` with a preview each. */
+export async function drawSheets(exe: string, placed: (Placed & { file: string })[], base: string): Promise<{ file: string; preview: string }[]> {
+  const pages = [...new Set(placed.map((p) => p.page))].sort((a, b) => a - b);
+  const out: { file: string; preview: string }[] = [];
+  for (const page of pages) {
+    const file = `${base}-${page + 1}.psd`;
+    await runCommands(exe, { ...A4, resolution: 300, background: 'white', name: `Price cards ${page + 1}` }, sheetCommands(placed.filter((p) => p.page === page)), file);
+    out.push({ file, preview: await renderPreview(exe, file) });
+  }
+  return out;
+}
+
+/** A sheet as a PDF beside it, A4 at its own size (2480 x 3508 at 300 ppi is the page). */
+export async function sheetPdf(exe: string, file: string): Promise<string> {
+  const output = file.replace(/\.psd$/i, '') + '.pdf';
+  await cli(exe, ['run', file, '--cmd', 'file.print', '--params', JSON.stringify({ paper: 'a4', orientation: 'portrait', scale: 100, output, send: false })], 120_000);
+  return output;
 }

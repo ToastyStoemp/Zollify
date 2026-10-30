@@ -8,6 +8,7 @@ import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperP
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
 import Menu from './Menu.vue';
+import PriceCards from './PriceCards.vue';
 import PrintSettings from './PrintSettings.vue';
 
 const api = window.printDesk;
@@ -31,6 +32,8 @@ const error = ref('');
 /** What the last bulk change did, e.g. "Paper set for 12 items". */
 const notice = ref('');
 const filter = ref('');
+/** The print run, or the price cards. */
+const view = ref<'prints' | 'cards'>('prints');
 
 const login = reactive({ server: '', email: '', password: '', code: '', needs2fa: false });
 
@@ -804,6 +807,12 @@ async function printAll(): Promise<void> {
       <p v-if="notice" class="toast notice" role="status" @mouseenter="holdNotice" @mouseleave="fadeNotice">{{ notice }} <button type="button" class="quiet" aria-label="Dismiss" @click="notice = ''">×</button></p>
     </div>
 
+    <nav class="views" aria-label="View">
+      <button type="button" class="chip" :aria-pressed="view === 'prints'" @click="view = 'prints'">Prints</button>
+      <button type="button" class="chip" :aria-pressed="view === 'cards'" @click="view = 'cards'">Price cards</button>
+    </nav>
+
+    <template v-if="view === 'prints'">
     <div class="toolbar">
       <input v-model="filter" type="search" placeholder="Filter products" />
       <div v-if="tableSizes.length > 1" class="size-filter" role="group" aria-label="Paper size">
@@ -1023,6 +1032,8 @@ async function printAll(): Promise<void> {
       </tbody>
     </table>
     <p v-if="!rows.length && !busy" class="muted">No art prints yet. Give products the type "Art Print" in Zollify's catalogue, then reload.</p>
+    </template>
+    <PriceCards v-else-if="settings" :settings="settings" :session="session" @settings="settings = $event" @error="error = $event" @notice="notice = $event" />
   </main>
 </template>
 
@@ -1040,6 +1051,7 @@ header { display: flex; justify-content: space-between; align-items: center; gap
 .exe { display: flex; align-items: center; gap: .4rem; }
 .exe code { max-width: 28rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.views { display: flex; gap: .4rem; }
 .toolbar input[type='search'] { flex: 0 1 18rem; min-width: 10rem; }
 .target input, .target-cell { width: 4.5rem; }
 .size-targets { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }

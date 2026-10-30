@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { DEFAULT_FORMAT, DEFAULT_THEMES } from './cards.js';
 import type { Settings } from './shared.js';
 
 /** Settings and the session's refresh token, one JSON file in the app's user data folder. */
@@ -13,7 +14,23 @@ export interface Stored extends Settings {
   printerKeyEncrypted?: boolean;
 }
 
-export const DEFAULTS: Stored = { server: '', photocraft: '', deviceId: '', links: {}, addToStock: true, theme: 'system', global: null, target: 0, sizeTargets: {}, itemTargets: {}, units: 'cm', paperMaterials: {}, hasPrinterKey: false, hidden: {} };
+export const DEFAULTS: Stored = {
+  server: '',
+  photocraft: '',
+  deviceId: '',
+  links: {},
+  addToStock: true,
+  theme: 'system',
+  global: null,
+  target: 0,
+  sizeTargets: {},
+  itemTargets: {},
+  units: 'cm',
+  paperMaterials: {},
+  hasPrinterKey: false,
+  hidden: {},
+  priceCards: { themes: DEFAULT_THEMES, cards: {}, format: DEFAULT_FORMAT, outDir: '' },
+};
 
 export class Store {
   data: Stored;

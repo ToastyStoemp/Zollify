@@ -1,4 +1,4 @@
-import type { InventoryItem, Product } from '@zollify/shared';
+import type { DiscountRule, InventoryItem, Product } from '@zollify/shared';
 import { stockKey, type CatalogRow } from './shared.js';
 
 /**
@@ -14,14 +14,9 @@ export interface PulledOp {
   payload: unknown;
 }
 
-/**
- * The live art prints and their inventory from an account's op log: product.upsert /
- * product.delete and inventory.set, last writer wins by updatedAt - the same
- * rules the server and the web app apply.
- */
-export function catalogRows(ops: PulledOp[]): CatalogRow[] {
+/** Products by id: product.upsert last writer wins by updatedAt, product.delete marks deletedAt. */
+function reduceProducts(ops: PulledOp[]): Map<string, Product> {
   const products = new Map<string, Product>();
-  const stock = new Map<string, InventoryItem>();
   for (const op of ops) {
     if (op.type === 'product.upsert') {
       const p = op.payload as Product;
@@ -33,7 +28,47 @@ export function catalogRows(ops: PulledOp[]): CatalogRow[] {
       const at = d.deletedAt ?? d.updatedAt ?? 0;
       const p = products.get(id);
       if (p && at >= p.updatedAt) products.set(id, { ...p, deletedAt: at });
-    } else if (op.type === 'inventory.set') {
+    }
+  }
+  return products;
+}
+
+/**
+ * Every live product (all types, not only art prints) and every live discount rule, for price
+ * cards. Discounts reduce as the server's reduceDiscounts: discount.upsert last writer wins,
+ * discount.delete ({ id, deletedAt }, or the older { ruleId, updatedAt }) deletes.
+ */
+export function priceData(ops: PulledOp[]): { products: Product[]; discounts: DiscountRule[] } {
+  const discounts = new Map<string, DiscountRule>();
+  for (const op of ops) {
+    if (op.type === 'discount.upsert') {
+      const r = op.payload as DiscountRule;
+      const cur = discounts.get(r.id);
+      if (!cur || r.updatedAt >= cur.updatedAt) discounts.set(r.id, r);
+    } else if (op.type === 'discount.delete') {
+      const p = op.payload as { id?: string; deletedAt?: number; ruleId?: string; updatedAt?: number };
+      const id = p.id ?? p.ruleId ?? '';
+      const at = p.deletedAt ?? p.updatedAt ?? 0;
+      const r = discounts.get(id);
+      if (r && at >= r.updatedAt) discounts.set(id, { ...r, deletedAt: at });
+    }
+  }
+  return {
+    products: [...reduceProducts(ops).values()].filter((p) => !p.deletedAt),
+    discounts: [...discounts.values()].filter((d) => !d.deletedAt),
+  };
+}
+
+/**
+ * The live art prints and their inventory from an account's op log: product.upsert /
+ * product.delete and inventory.set, last writer wins by updatedAt - the same
+ * rules the server and the web app apply.
+ */
+export function catalogRows(ops: PulledOp[]): CatalogRow[] {
+  const products = reduceProducts(ops);
+  const stock = new Map<string, InventoryItem>();
+  for (const op of ops) {
+    if (op.type === 'inventory.set') {
       const i = op.payload as InventoryItem;
       const k = stockKey(i.productId, i.variantId);
       const cur = stock.get(k);

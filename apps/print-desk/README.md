@@ -153,3 +153,44 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   status and printer problems (no paper, offline...), and the toolbar the
   copies left in the whole run. "Printed" is what the driver has sent to the
   printer. Elsewhere a job shows as sent, without progress.
+
+## Price cards
+
+**Price cards** (next to **Prints**, above the toolbar) makes the price cards for
+the table: one master card drawn by PhotoCraft, a theme per card, prices from the
+catalogue. It replaces the ZollPriceCards Photoshop plugin.
+
+- **A card prices** whole product types (every keychain on one card) or single
+  products and variants (normal and flower stickers on cards of their own). Its
+  rows follow from those items: one price is a big price; several prices are a
+  line each, named after a size the products share ("A4") or else the product;
+  a tiered discount adds "2 FOR 20.-" deals; a combo adds a "Bundle" line at
+  its members' prices less the discount; buy-x-get-y and every-nth discounts add
+  a line of small print. Discounts count while they are valid today. Unlisted
+  products, and those not for sale, stay off.
+- **Small print** is the products' price notes, or lines of the card's own
+  ("Hahnemühle paper", "4 random stickers"). Any line's name can be changed and
+  any row left off, in the card's Edit panel.
+- **Themes** are the colours (background, frame, title band, title, text, deal
+  prices, sparkles), a font (Bahnschrift by default) and an optional mascot PNG on
+  the title band's right end. A card takes its theme's mascot, none, or a PNG of
+  its own. The sparkles are drawn as four-pointed stars.
+- **Draw** makes the card a PSD in the cards folder (Documents\Price cards unless
+  changed), 1240 px wide (half an A4 at 300 ppi), as tall as its rows. Every part
+  is a real layer: shapes for the background, frame and band, text layers named
+  after their rows, the mascot as an embedded Smart Object. **Open** opens it in
+  PhotoCraft to change by hand.
+- **Prices stay current without losing hand edits.** A card shows "New prices"
+  when a price or name it prints changed: **Update prices** (or **Update all**)
+  writes only the texts that changed into the PSD, by layer name
+  (`photocraft-cli run --cmd type.edit`), so whatever was changed by hand stays.
+  When the rows themselves change (a deal added, a new size), the card says
+  "Rows changed: redraw": **Redraw** starts the PSD again from the master.
+- **Price as** sets how a price reads: `{n}.-` gives `15.-`, `€{n}` gives `€15`.
+  For an event in another currency, set the rate and the rounding step.
+- **Make A4 sheets** lays the ticked cards out, in list order (↑ ↓), on A4 pages
+  (2480 x 3508 px at 300 ppi): two columns, each card going to the column that
+  ends highest, a new page when it fits in neither. Each card is an embedded
+  Smart Object, so a sheet can still be changed in PhotoCraft. Each page can be
+  opened, saved as a PDF beside it, or printed on A4 with the global print
+  settings' printer and driver settings.

@@ -1,9 +1,11 @@
-import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage } from 'electron';
+import { BrowserWindow, app, dialog, ipcMain, nativeTheme, safeStorage, shell } from 'electron';
 import { createHash } from 'node:crypto';
+import { mkdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packSheets, type CardArt, type PriceFormat } from './cards.js';
 import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
-import { findExe, imageSize, lastPrint, print, printers } from './photocraft.js';
+import { drawCard, drawSheets, findExe, imageSize, lastPrint, pngSize, print, printers, setCardTexts, sheetPdf } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
 import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
 import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
@@ -156,6 +158,54 @@ void app.whenReady().then(() => {
     return useMaterial(zollify.server, readPrinterKey(), u).catch(fail);
   });
   ipcMain.handle('zollify:addOnHand', (_e, items: { productId: string; variantId: string; add: number }[]) => zollify.addOnHand(items).catch(fail));
+
+  // ── Price cards: drawn, updated and laid out on A4 by photocraft-cli, into a folder on this computer ──
+  ipcMain.handle('zollify:priceData', () => zollify.priceData().catch(fail));
+  ipcMain.handle('pick:png', async (e) => {
+    const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  ipcMain.handle('pick:folder', async (e) => {
+    const r = await dialog.showOpenDialog(owner(e), { properties: ['openDirectory', 'createDirectory'] });
+    return r.canceled ? null : (r.filePaths[0] ?? null);
+  });
+  const cardsDir = async (): Promise<string> => {
+    const dir = store.data.priceCards.outDir || join(app.getPath('documents'), 'Price cards');
+    await mkdir(dir, { recursive: true });
+    return dir;
+  };
+  const fileSafe = (s: string): string => s.replace(/[^\p{L}\p{N} _-]+/gu, ' ').trim().slice(0, 60) || 'Card';
+  ipcMain.handle('cards:dir', () => cardsDir());
+  ipcMain.handle('cards:draw', async (_e, card: Omit<CardArt, 'mascot'> & { id: string; mascot: string }, fmt: PriceFormat) => {
+    let mascot: CardArt['mascot'] = null;
+    if (card.mascot) {
+      const size = await pngSize(card.mascot);
+      if (!size) return fail(new Error(`The mascot is not a PNG that can be read: ${card.mascot}`));
+      mascot = { path: card.mascot, ...size };
+    }
+    const file = join(await cardsDir(), `${fileSafe(card.title)} ${card.id.slice(0, 6)}.psd`);
+    return drawCard(store.data.photocraft, { ...card, mascot }, fmt, file).catch(fail);
+  });
+  ipcMain.handle('cards:setTexts', (_e, file: string, texts: Record<string, string>) => setCardTexts(store.data.photocraft, file, texts).catch(fail));
+  ipcMain.handle('cards:sheets', async (_e, cards: { key: string; file: string; width: number; height: number }[]) => {
+    const files = new Map(cards.map((c) => [c.key, c.file]));
+    const placed = packSheets(cards).map((p) => ({ ...p, file: files.get(p.key)! }));
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
+    return drawSheets(store.data.photocraft, placed, join(await cardsDir(), `Sheet ${stamp}`)).catch(fail);
+  });
+  ipcMain.handle('cards:pdf', (_e, file: string) => sheetPdf(store.data.photocraft, file).catch(fail));
+  ipcMain.handle('cards:print', async (_e, files: string[]): Promise<PrintResult[]> => {
+    const results: PrintResult[] = [];
+    for (const file of files) {
+      // The global print settings' printer and driver, on A4 at the sheet's own size.
+      const params = await fitDriverPaper({ ...(store.data.global ?? {}), paper: 'a4', orientation: 'portrait', scaleToFit: false, scale: 100 }).catch(fail);
+      results.push(await print(store.data.photocraft, { key: file, file, params, copies: 1 }));
+    }
+    return results;
+  });
+  /** A preview PNG as a data: URL: the page's CSP lets images in from 'self' and data: only. */
+  ipcMain.handle('cards:image', async (_e, file: string) => `data:image/png;base64,${(await readFile(file)).toString('base64')}`);
+  ipcMain.handle('cards:open', (_e, file: string) => shell.openPath(file));
 
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
   ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));

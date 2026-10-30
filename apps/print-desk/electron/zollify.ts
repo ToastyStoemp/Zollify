@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { catalogRows, demandForecast, lastClosedEventSold, type DemandForecast, type EventSold, type PulledOp } from './reduce.js';
+import { catalogRows, demandForecast, lastClosedEventSold, priceData, type DemandForecast, type EventSold, type PulledOp } from './reduce.js';
 import type { CatalogRow, Session } from './shared.js';
 import { stockKey } from './shared.js';
 import type { Material, MaterialUse } from './materials.js';
@@ -162,6 +162,11 @@ export class Zollify {
   /** The whole op log, reduced to one row per sellable item with its counted stock. */
   async catalog(): Promise<CatalogRow[]> {
     return catalogRows(await this.pullAll());
+  }
+
+  /** Every live product and discount rule, for price cards. */
+  async priceData(): Promise<ReturnType<typeof priceData>> {
+    return priceData(await this.pullAll());
   }
 
   /** What each item is expected to sell, for planning a print run (`today` as YYYY-MM-DD). */

@@ -178,6 +178,11 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   prices, sparkles), a font (Bahnschrift by default) and an optional mascot PNG on
   the title band's right end. A card takes its theme's mascot, none, or a PNG of
   its own. The sparkles are drawn as four-pointed stars.
+- **Style and size**: a card (title band, rows under each other) or a strip like
+  a shelf tag (a heading such as "Available in:", then the sizes side by side,
+  each over its price; deals and small print under them). Either comes half an
+  A4 wide (10.5 cm, two across) or a third (7 cm, three across), which is the
+  same master drawn at two thirds. Each width gets sheets of its own.
 - **Draw** makes the card a PSD in the cards folder (Documents\Price cards unless
   changed), 1240 px wide (half an A4 at 300 ppi), as tall as its rows. Every part
   is a real layer: shapes for the background, frame and band, text layers named

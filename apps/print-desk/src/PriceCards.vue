@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import type { DiscountRule, Product } from '@zollify/shared';
 import type { Session, Settings } from '../electron/shared';
-import { DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardState, type CardTheme, type PriceFormat } from '../electron/cards';
+import { CARD_SIZES, DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat } from '../electron/cards';
 
 /**
  * Price cards: one master card, drawn by PhotoCraft per card from the catalogue and a theme.
@@ -153,9 +153,9 @@ function mascotOf(def: CardDef): string {
 async function draw(def: CardDef): Promise<void> {
   const rows = rowsOf(def);
   if (!rows.length) return emit('error', `"${def.title}" prices nothing for sale: pick a type, product or variant first.`);
-  const r = await api.cards.draw(plain({ id: def.id, title: def.title, subtitle: def.subtitle, rows, theme: themeOf(def), mascot: mascotOf(def) }), plain(fmt.value));
-  const texts = cardTexts({ title: def.title, subtitle: def.subtitle, rows }, fmt.value);
-  await patchCard(def.id, { file: r.file, preview: r.preview, height: r.height, layout: r.layout, texts });
+  const r = await api.cards.draw(plain({ id: def.id, title: def.title, subtitle: def.subtitle, rows, theme: themeOf(def), mascot: def.style === 'strip' ? '' : mascotOf(def), size: def.size, style: def.style }), plain(fmt.value));
+  const texts = cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style }, fmt.value);
+  await patchCard(def.id, { file: r.file, preview: r.preview, width: r.width, height: r.height, layout: r.layout, texts });
   onSheet[def.id] = true;
   await loadPreview({ ...def, preview: r.preview });
 }
@@ -210,7 +210,7 @@ async function updateAll(): Promise<void> {
 const sheetCards = computed(() => cards.value.filter((c) => c.file && c.height && onSheet[c.id]));
 async function makeSheets(): Promise<void> {
   await guard('Laying out sheets', async () => {
-    const made = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: 1240, height: c.height! }))));
+    const made = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: c.width ?? 1240, height: c.height! }))));
     pages.value = await Promise.all(made.map(async (p) => ({ ...p, image: await api.cards.image(p.preview) })));
     emit('notice', `${made.length} ${made.length === 1 ? 'sheet' : 'sheets'} saved in ${dir.value}.`);
   });
@@ -334,14 +334,25 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 
       <div v-if="open === def.id" class="editor">
         <div class="fields">
-          <label>Title <input :value="def.title" @change="patchCard(def.id, { title: ($event.target as HTMLInputElement).value })" /></label>
-          <label>Small line above the title <input :value="def.subtitle" placeholder="Pin & Charm" @change="patchCard(def.id, { subtitle: ($event.target as HTMLInputElement).value })" /></label>
+          <label>{{ def.style === 'strip' ? 'Heading' : 'Title' }} <input :value="def.title" :placeholder="def.style === 'strip' ? 'Available in:' : ''" @change="patchCard(def.id, { title: ($event.target as HTMLInputElement).value })" /></label>
+          <label>Style
+            <select :value="def.style ?? 'card'" @change="patchCard(def.id, { style: ($event.target as HTMLSelectElement).value as CardStyle })">
+              <option value="card">Card: title band, rows under each other</option>
+              <option value="strip">Strip: a heading, sizes side by side</option>
+            </select>
+          </label>
+          <label>Size
+            <select :value="def.size ?? 'half'" @change="patchCard(def.id, { size: ($event.target as HTMLSelectElement).value as CardSize })">
+              <option v-for="(s, id) in CARD_SIZES" :key="id" :value="id">{{ s.label }}</option>
+            </select>
+          </label>
+          <label v-if="def.style !== 'strip'">Small line above the title <input :value="def.subtitle" placeholder="Pin & Charm" @change="patchCard(def.id, { subtitle: ($event.target as HTMLInputElement).value })" /></label>
           <label>Theme
             <select :value="def.theme" @change="patchCard(def.id, { theme: ($event.target as HTMLSelectElement).value })">
               <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
             </select>
           </label>
-          <div class="mascot">
+          <div v-if="def.style !== 'strip'" class="mascot">
             <span>Mascot</span>
             <select :value="def.mascot === '' || def.mascot === 'none' ? def.mascot : 'own'" @change="(e) => { const v = (e.target as HTMLSelectElement).value; v === 'own' ? pickMascot(def) : patchCard(def.id, { mascot: v }); }">
               <option value="">The theme's{{ themeOf(def).mascot ? '' : ' (none)' }}</option>

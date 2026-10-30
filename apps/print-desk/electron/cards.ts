@@ -66,7 +66,13 @@ export interface CardDef {
   /** A PNG of it, for the list. */
   preview?: string;
   height?: number;
-  /** The row ids it was drawn with: prices go into the PSD in place while these stay the same. */
+  /** Half an A4 wide when unset. */
+  size?: CardSize;
+  /** A card when unset. */
+  style?: CardStyle;
+  /** Its width in pixels, as drawn. */
+  width?: number;
+  /** The style, size and row ids it was drawn with: prices go into the PSD in place while these stay the same. */
   layout?: string;
   /** The texts in the PSD, by layer name, as Print Desk last wrote them. */
   texts?: Record<string, string>;
@@ -77,12 +83,12 @@ export type CardState = 'new' | 'current' | 'prices' | 'layout' | 'empty';
 export function cardState(def: CardDef, rows: CardRow[], fmt: PriceFormat): CardState {
   if (!rows.length) return 'empty';
   if (!def.file) return 'new';
-  if (rows.map((r) => r.id).join('|') !== def.layout) return 'layout';
+  if (layoutKey(def, rows) !== def.layout) return 'layout';
   return changedTexts(def, rows, fmt).length ? 'prices' : 'current';
 }
 /** The texts that differ from what the PSD holds, as [layer name, text]. */
 export function changedTexts(def: CardDef, rows: CardRow[], fmt: PriceFormat): [string, string][] {
-  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
+  return Object.entries(cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style }, fmt)).filter(([name, text]) => def.texts?.[name] !== text);
 }
 
 /** How a price reads: "{n}.-" gives "15.-"; prices are the catalogue's, times `rate`, to `rounding`. */
@@ -256,6 +262,21 @@ export function formatPrice(price: number, fmt: PriceFormat): string {
 
 export const CARD_WIDTH = 1240;
 export const A4 = { width: 2480, height: 3508 };
+
+/** How wide a card is drawn: the master at its own size, or scaled down to fit three across. */
+export type CardSize = 'half' | 'third';
+export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
+  half: { width: CARD_WIDTH, label: 'Half A4 wide (10.5 cm, 2 across)' },
+  third: { width: Math.floor(A4.width / 3), label: 'Third of A4 wide (7 cm, 3 across)' },
+};
+/**
+ * How a card is laid out: the card (title band, rows under each other) or a strip (a heading
+ * and the sizes side by side, each with its price under it), for a tag beside each print.
+ */
+export type CardStyle = 'card' | 'strip';
+/** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle }, rows: CardRow[]): string =>
+  [...(art.style === 'strip' ? ['strip'] : []), ...(art.size === 'third' ? ['third'] : []), ...rows.map((r) => r.id)].join('|');
 const PX_PER_PT = 300 / 72;
 const FRAME = { x: 92, top: 192, width: 1056, radius: 165, stroke: 20 };
 const PILL = { x: 287, y: 100, width: 673, height: 177 };
@@ -289,11 +310,25 @@ export interface CardArt {
   theme: CardTheme;
   /** The mascot PNG and its size in pixels, or null for none. */
   mascot: { path: string; width: number; height: number } | null;
+  size?: CardSize;
+  style?: CardStyle;
+}
+
+/** A command with its positions and sizes times `s`: the master drawn smaller, all in proportion. */
+function scaled([id, p]: Command, s: number): Command {
+  if (s === 1) return [id, p];
+  const n = (v: unknown): unknown => (typeof v === 'number' ? Math.round(v * s * 100) / 100 : v);
+  const q: Record<string, unknown> = { ...p };
+  for (const k of ['x', 'y', 'size', 'radii', 'scale']) if (k in q) q[k] = n(q[k]);
+  for (const k of ['rect', 'center']) if (Array.isArray(q[k])) q[k] = (q[k] as unknown[]).map(n);
+  if (q.stroke) q.stroke = { ...(q.stroke as Record<string, unknown>), width: n((q.stroke as Record<string, unknown>).width) };
+  return [id, q];
 }
 
 /** Text layer name -> its text, for every text a card's prices or labels set. */
-export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows'>, fmt: PriceFormat): Record<string, string> {
-  const out: Record<string, string> = { Title: art.title.toUpperCase() };
+export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows' | 'style'>, fmt: PriceFormat): Record<string, string> {
+  // The card's title band is in capitals; a strip's heading reads as typed ("Available in:").
+  const out: Record<string, string> = { Title: art.style === 'strip' ? art.title : art.title.toUpperCase() };
   if (art.subtitle) out.Subtitle = art.subtitle;
   for (const r of art.rows) {
     if (r.kind === 'price') out[r.id] = formatPrice(r.price, fmt);
@@ -306,6 +341,75 @@ export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows'>, fmt
 
 /** The card as PhotoCraft commands for a new document `width` x `height` at 300 ppi. */
 export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; height: number; layout: string; commands: Command[] } {
+  const { height, commands } = art.style === 'strip' ? stripCommands(art, fmt) : cardCommands(art, fmt);
+  const width = CARD_SIZES[art.size ?? 'half'].width;
+  const s = width / CARD_WIDTH;
+  return { width, height: Math.ceil((height * s) / 2) * 2, layout: layoutKey(art, art.rows), commands: commands.map((cmd) => scaled(cmd, s)) };
+}
+
+const star = (name: string, cx: number, cy: number, w: number, h: number, fill: string): Command => ['shape.create', { kind: 'star', sides: 4, starRatio: 0.28, rect: [cx - w / 2, cy - h / 2, w, h], fill, name }];
+
+/**
+ * A strip, like a shelf tag: a rounded frame, the title as a heading, then the lines side by side
+ * (the size over its price), a single price large, deals and small print under them.
+ */
+function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; commands: Command[] } {
+  const c = art.theme.colors;
+  const font = art.theme.font || 'Bahnschrift';
+  const texts = cardTexts(art, fmt);
+  const body: Command[] = [];
+  const text = (name: string, x: number, y: number, size: number, color: string, extra: Record<string, unknown> = {}): void => {
+    body.push(['type.create', { x, y, text: texts[name] ?? name, name, font, fontStyle: 'Bold', size, color, align: 'center', ...extra }]);
+  };
+  const ROOM = 840;
+  let y = 40;
+  if (art.title.trim()) {
+    text('Title', CARD_WIDTH / 2, y + 110, fit(texts.Title!, 20, ROOM, 300), c.ink, { tracking: 300 });
+    y += 125;
+  }
+  const lines = art.rows.filter((r) => r.kind === 'line');
+  if (lines.length) {
+    const step = lines.length > 1 ? Math.min(300, ROOM / (lines.length - 1)) : 0;
+    const size = Math.min(...lines.map((r) => fit(texts[`${r.id} label`]!, 26, Math.min(step || ROOM, ROOM) - 30, 100)));
+    lines.forEach((r, i) => {
+      const x = CARD_WIDTH / 2 + (i - (lines.length - 1) / 2) * step;
+      text(`${r.id} label`, x, y + 110, size, c.ink, { tracking: 100 });
+      text(`${r.id} price`, x, y + 205, 22, r.accent ? c.accent : c.ink);
+    });
+    y += 225;
+  }
+  for (const r of art.rows) {
+    if (r.kind === 'price') {
+      text(r.id, CARD_WIDTH / 2, y + 130, 34, c.ink, { tracking: 100 });
+      y += 150;
+    } else if (r.kind === 'deal') {
+      text(`${r.id} qty`, 500, y + 75, 20, c.ink);
+      body.push(['type.create', { x: 610, y: y + 75, text: 'FOR', name: `${r.id} for`, font, fontStyle: 'Bold', size: 14, color: c.ink, align: 'center', tracking: 360 }]);
+      text(`${r.id} price`, 740, y + 75, 20, c.accent);
+      y += 90;
+    } else if (r.kind === 'note') {
+      text(r.id, CARD_WIDTH / 2, y + 60, fit(texts[r.id]!, 12, ROOM, 120), c.ink, { tracking: 120 });
+      y += 70;
+    }
+  }
+  const height = Math.ceil((y + 85) / 2) * 2;
+  const frame = { x: 40, y: 30, w: CARD_WIDTH - 80, h: height - 60 };
+  return {
+    height,
+    commands: [
+      ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH + 10, height + 10], fill: c.bg, name: 'Background' }],
+      ['shape.create', { kind: 'roundedRect', rect: [frame.x, frame.y, frame.w, frame.h], radii: Math.min(150, frame.h / 2), fill: null, stroke: { width: 14, color: c.frame, align: 'center' }, name: 'Frame' }],
+      ...body,
+      star('Sparkle', 170, 55, 100, 105, c.sparkle),
+      star('Sparkle small', 118, 70, 40, 44, c.sparkle),
+      star('Sparkle', 1155, height - 97, 85, 90, c.sparkle),
+      star('Sparkle small', 1077, height - 46, 40, 42, c.sparkle),
+    ],
+  };
+}
+
+/** The card: a title band with the mascot on it, then the rows under each other. */
+function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; commands: Command[] } {
   const c = art.theme.colors;
   const font = art.theme.font || 'Bahnschrift';
   const texts = cardTexts(art, fmt);
@@ -351,9 +455,9 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
       ]
     : [['type.create', { x: titleX, y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 16, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }]];
 
-  const star = (name: string, cx: number, cy: number, w: number, h: number, fill: string): Command => ['shape.create', { kind: 'star', sides: 4, starRatio: 0.28, rect: [cx - w / 2, cy - h / 2, w, h], fill, name }];
   const commands: Command[] = [
-    ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH, height], fill: c.bg, name: 'Background' }],
+    // Past the edges, so a scaled-down card rounding its height up has no strip without background.
+    ['shape.create', { kind: 'rect', rect: [0, 0, CARD_WIDTH + 10, height + 10], fill: c.bg, name: 'Background' }],
     ['shape.create', { kind: 'roundedRect', rect: [FRAME.x, FRAME.top, FRAME.width, frameBottom - FRAME.top], radii: FRAME.radius, fill: null, stroke: { width: FRAME.stroke, color: c.frame, align: 'center' }, name: 'Frame' }],
     ['shape.create', { kind: 'roundedRect', rect: [PILL.x, PILL.y, PILL.width, PILL.height], radii: PILL.height / 2, fill: c.pill, name: 'Pill' }],
     ...body,
@@ -368,7 +472,7 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
     const scale = Math.min(100, Math.floor((300 / Math.max(art.mascot.width, art.mascot.height)) * 100));
     commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [954, 174] }]);
   }
-  return { width: CARD_WIDTH, height, layout: art.rows.map((r) => r.id).join('|'), commands };
+  return { height, commands };
 }
 
 /** A card on an A4 sheet: page (0-based) and top-left corner in pixels. */
@@ -382,23 +486,27 @@ export interface Placed {
 }
 
 /**
- * Cards in A4 pages of half-width columns, in order, each going to the column that ends highest;
- * a card that fits in none starts a new page. A card taller than a page gets a page of its own.
+ * Cards in A4 pages of columns as wide as the cards, in order, each going to the column that ends
+ * highest; a card that fits in none starts a new page, and so does each card width, so half and
+ * third cards get pages of their own. A card taller than a page gets a page of its own.
  */
 export function packSheets(cards: { key: string; width: number; height: number }[]): Placed[] {
-  const columns = Math.max(1, Math.floor(A4.width / CARD_WIDTH));
   const out: Placed[] = [];
-  let page = 0;
-  let tops = Array<number>(columns).fill(0);
-  for (const card of cards) {
-    let col = tops.indexOf(Math.min(...tops));
-    if (tops[col]! > 0 && tops[col]! + card.height > A4.height) {
-      page++;
-      tops = Array<number>(columns).fill(0);
-      col = 0;
+  let page = -1;
+  for (const width of [...new Set(cards.map((c) => c.width))]) {
+    const columns = Math.max(1, Math.floor(A4.width / width));
+    let tops = Array<number>(columns).fill(0);
+    page++;
+    for (const card of cards.filter((c) => c.width === width)) {
+      let col = tops.indexOf(Math.min(...tops));
+      if (tops[col]! > 0 && tops[col]! + card.height > A4.height) {
+        page++;
+        tops = Array<number>(columns).fill(0);
+        col = 0;
+      }
+      out.push({ key: card.key, page, x: col * width, y: tops[col]!, width: card.width, height: card.height });
+      tops[col] = tops[col]! + card.height;
     }
-    out.push({ key: card.key, page, x: col * CARD_WIDTH, y: tops[col]!, width: card.width, height: card.height });
-    tops[col] = tops[col]! + card.height;
   }
   return out;
 }

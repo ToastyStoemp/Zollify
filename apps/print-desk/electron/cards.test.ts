@@ -116,6 +116,29 @@ describe('cardLayout', () => {
   });
 });
 
+describe('sizes and strips', () => {
+  const rows: ReturnType<typeof cardRows> = [{ id: 'line:a', kind: 'line', label: 'A4', price: 25 }, { id: 'line:b', kind: 'line', label: 'A3', price: 40 }];
+  const art = { title: 'Available in:', subtitle: '', rows, theme: DEFAULT_THEMES[0]!, mascot: null };
+  it('draws a third-wide card as the master at two thirds, everything in proportion', () => {
+    const half = cardLayout(art, DEFAULT_FORMAT);
+    const third = cardLayout({ ...art, size: 'third' }, DEFAULT_FORMAT);
+    expect([half.width, third.width]).toEqual([1240, 826]);
+    expect(Math.abs(third.height - (half.height * 826) / 1240)).toBeLessThan(2);
+    const size = (l: typeof half): unknown => l.commands.find(([, p]) => p.name === 'line:a price')![1].size;
+    expect(size(third)).toBeCloseTo((Number(size(half)) * 826) / 1240, 1);
+    expect(third.layout).toBe('third|line:a|line:b');
+  });
+  it('lays a strip out as a heading as typed with the sizes side by side', () => {
+    const strip = cardLayout({ ...art, style: 'strip' }, DEFAULT_FORMAT);
+    const at = (name: string): Record<string, unknown> => strip.commands.find(([, p]) => p.name === name)![1];
+    expect(at('Title').text).toBe('Available in:');
+    expect(at('line:a label').y).toBe(at('line:b label').y);
+    expect(Number(at('line:a label').x)).toBeLessThan(Number(at('line:b label').x));
+    expect(strip.layout).toBe('strip|line:a|line:b');
+    expect(strip.height).toBeLessThan(cardLayout(art, DEFAULT_FORMAT).height);
+  });
+});
+
 describe('cardState', () => {
   it('tells a new price, which goes into the PSD in place, from a new row, which needs a redraw', () => {
     const rows: ReturnType<typeof cardRows> = [{ id: 'price', kind: 'price', price: 12 }];
@@ -141,5 +164,15 @@ describe('packSheets', () => {
       ['5', 1, 1240, 0],
     ]);
     expect(A4.height).toBe(3508);
+  });
+  it('gives third-wide cards pages of their own, three across', () => {
+    const cards = [{ key: 'h', width: 1240, height: 1000 }, ...['a', 'b', 'c', 'd'].map((key) => ({ key, width: 826, height: 400 }))];
+    expect(packSheets(cards).map((p) => [p.key, p.page, p.x, p.y])).toEqual([
+      ['h', 0, 0, 0],
+      ['a', 1, 0, 0],
+      ['b', 1, 826, 0],
+      ['c', 1, 1652, 0],
+      ['d', 1, 0, 400],
+    ]);
   });
 });

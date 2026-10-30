@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import type { DiscountRule, Product } from '@zollify/shared';
-import type { Session, Settings } from '../electron/shared';
+import type { Printer, Session, Settings, Units } from '../electron/shared';
 import { CARD_SIZES, DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat } from '../electron/cards';
+import PrintSettings from './PrintSettings.vue';
 
 /**
  * Price cards: one master card, drawn by PhotoCraft per card from the catalogue and a theme.
  * A card prices whole types, products or variants; new prices go into its PSD in place, so
  * changes made to it by hand in PhotoCraft stay. Ticked cards make A4 sheets.
  */
-const props = defineProps<{ settings: Settings; session: Session }>();
+const props = defineProps<{ settings: Settings; session: Session; printers: Printer[] }>();
 const emit = defineEmits<{ settings: [Settings]; error: [string]; notice: [string] }>();
 
 const api = window.printDesk;
@@ -20,6 +21,7 @@ const discounts = ref<DiscountRule[]>([]);
 const busy = ref('');
 const open = ref<string | null>(null);
 const showThemes = ref(false);
+const showPrint = ref(false);
 const previews = reactive<Record<string, string>>({});
 /** Cards ticked for the next sheet, by id; every drawn card to start with. */
 const onSheet = reactive<Record<string, boolean>>({});
@@ -231,6 +233,26 @@ async function openFile(file: string): Promise<void> {
   if (why) emit('error', why);
 }
 
+// ── Print settings: the sheets' own, else the global ones ──
+const printParams = computed((): Record<string, unknown> | null => pc.value.print ?? null);
+/** What the form starts from before the cards have settings of their own: the default printer, A4. */
+const startParams = (): Record<string, unknown> => {
+  const def = props.printers.find((p) => p.default)?.name;
+  return { ...(def ? { printer: def } : {}), paper: 'a4', orientation: 'portrait', scaleToFit: true, colorHandling: 'printerManages' };
+};
+const printsOn = computed((): string => {
+  const p = printParams.value ?? props.settings.global;
+  const printer = (p?.printer as string | undefined) || 'the default printer';
+  return printParams.value ? `Sheets print on ${printer}, with the price cards' own print settings` : props.settings.global ? `Sheets print on ${printer}, with the global print settings` : 'Sheets print on the default printer';
+});
+async function savePrint(params: Record<string, unknown> | null): Promise<void> {
+  await save({ print: params && plain(params) });
+  emit('notice', params ? "Price card print settings saved: sheets print with these, not the art prints' settings." : 'Sheets print with the global print settings again.');
+}
+async function setUnits(units: Units): Promise<void> {
+  emit('settings', await api.settings.set({ units }));
+}
+
 // ── Settings: price format, folder, themes ──
 async function setFormat(patch: Partial<PriceFormat>): Promise<void> {
   await save({ format: { ...fmt.value, ...patch } });
@@ -280,12 +302,19 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
     <label class="inline" title="{n} is the price: {n}.- gives 15.-, €{n} gives €15">Price as <input class="pattern" :value="fmt.pattern" @change="setFormat({ pattern: ($event.target as HTMLInputElement).value || '{n}' })" /></label>
     <label class="inline" title="Prices are the catalogue's times this, for an event in another currency">× <input type="number" min="0" step="0.0001" :value="fmt.rate" @change="setFormat({ rate: ($event.target as HTMLInputElement).valueAsNumber || 1 })" /></label>
     <label class="inline" title="Round to this step: 0.5, 1, 5. 0 keeps the cents">Round to <input type="number" min="0" step="0.05" :value="fmt.rounding" @change="setFormat({ rounding: ($event.target as HTMLInputElement).valueAsNumber || 0 })" /></label>
+    <button type="button" class="quiet" :aria-pressed="showPrint" @click="showPrint = !showPrint">Print settings{{ printParams ? ' (own)' : '' }}</button>
     <button type="button" class="quiet" :aria-pressed="showThemes" @click="showThemes = !showThemes">Themes</button>
   </div>
   <p class="muted folder">
     Card and sheet PSDs go to <code>{{ dir || '…' }}</code> <button type="button" class="quiet" @click="pickDir">Change</button>
     <span v-if="busy" class="busy">{{ busy }}…</span>
   </p>
+
+  <section v-if="showPrint" class="print" aria-label="Price card print settings">
+    <p class="muted">The printer, paper, colour profile and driver settings the A4 sheets print with, apart from the art prints. "Load from PhotoCraft" takes your last print in PhotoCraft.{{ printParams ? '' : ' Until these are saved, sheets use the global print settings.' }}</p>
+    <PrintSettings :params="printParams ?? startParams()" :printers="printers" :size="null" :units="settings.units" no-apply @update="savePrint" @units="setUnits" />
+    <button v-if="printParams" type="button" class="quiet" @click="savePrint(null)">Use the global print settings</button>
+  </section>
 
   <section v-if="showThemes" class="themes" aria-label="Themes">
     <article v-for="t in themes" :key="t.id" class="theme-card" :style="{ background: t.colors.bg, color: t.colors.ink }">
@@ -410,7 +439,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
   </ul>
 
   <section v-if="cards.length" class="sheet-bar">
-    <span class="muted">{{ sheetCards.length }} cards ticked for the sheet</span>
+    <span class="muted">{{ sheetCards.length }} cards ticked for the sheet · {{ printsOn }}</span>
     <button type="button" class="primary" :disabled="!!busy || !sheetCards.length" @click="makeSheets">Make A4 sheets</button>
     <template v-if="pages.length">
       <button type="button" :disabled="!!busy" @click="printPages(pages.map((p) => p.file))">Print {{ pages.length === 1 ? 'it' : `all ${pages.length}` }}</button>
@@ -434,6 +463,8 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 .pattern { width: 6rem; }
 .folder { margin: 0; font-size: .85rem; }
 .busy { margin-left: 1rem; color: var(--zfy-primary); }
+.print { display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 10px; padding: .8rem; }
+.print p { margin: 0; font-size: .85rem; }
 .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: .8rem; }
 .theme-card { border-radius: 12px; padding: .8rem; display: flex; flex-direction: column; gap: .5rem; border: 1px solid var(--zfy-line); }
 .theme-card input:not([type='color']), .theme-card button { color: var(--zfy-ink); }

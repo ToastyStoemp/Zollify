@@ -197,8 +197,10 @@ void app.whenReady().then(() => {
   ipcMain.handle('cards:print', async (_e, files: string[]): Promise<PrintResult[]> => {
     const results: PrintResult[] = [];
     for (const file of files) {
-      // The global print settings' printer and driver, on A4 at the sheet's own size.
-      const params = await fitDriverPaper({ ...(store.data.global ?? {}), paper: 'a4', orientation: 'portrait', scaleToFit: false, scale: 100 }).catch(fail);
+      // The price cards' own print settings, on A4 unless they say otherwise; else the global ones' printer and driver, on A4 at the sheet's own size.
+      const own = store.data.priceCards.print;
+      const base = own ? { paper: 'a4', orientation: 'portrait', ...own } : { ...(store.data.global ?? {}), paper: 'a4', orientation: 'portrait', scaleToFit: false, scale: 100 };
+      const params = await fitDriverPaper(base).catch(fail);
       results.push(await print(store.data.photocraft, { key: file, file, params, copies: 1 }));
     }
     return results;

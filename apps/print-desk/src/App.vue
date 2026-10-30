@@ -1033,7 +1033,7 @@ async function printAll(): Promise<void> {
     </table>
     <p v-if="!rows.length && !busy" class="muted">No art prints yet. Give products the type "Art Print" in Zollify's catalogue, then reload.</p>
     </template>
-    <PriceCards v-else-if="settings" :settings="settings" :session="session" @settings="settings = $event" @error="error = $event" @notice="notice = $event" />
+    <PriceCards v-else-if="settings" :settings="settings" :session="session" :printers="printers" @settings="settings = $event" @error="error = $event" @notice="notice = $event" />
   </main>
 </template>
 

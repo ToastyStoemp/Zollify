@@ -96,6 +96,8 @@ export interface PriceCardSettings {
   format: PriceFormat;
   /** Folder for the card and sheet PSDs; '' for Documents/Price cards. */
   outDir: string;
+  /** `file.print` params the sheets print with (their own printer, profile, driver settings); null or unset: the global print settings. */
+  print?: Record<string, unknown> | null;
 }
 
 export type Units = 'cm' | 'mm' | 'in';

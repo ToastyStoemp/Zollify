@@ -201,5 +201,8 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   (2480 x 3508 px at 300 ppi): two columns, each card going to the column that
   ends highest, a new page when it fits in neither. Each card is an embedded
   Smart Object, so a sheet can still be changed in PhotoCraft. Each page can be
-  opened, saved as a PDF beside it, or printed on A4 with the global print
-  settings' printer and driver settings.
+  opened, saved as a PDF beside it, or printed on A4.
+- **Print settings** (toolbar): the printer, paper, colour profile and driver
+  settings the sheets print with, apart from the art prints; "Load from
+  PhotoCraft" takes your last print in PhotoCraft. Until they are saved, sheets
+  print with the global print settings' printer and driver settings, on A4.

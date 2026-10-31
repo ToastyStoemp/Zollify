@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { DiscountRule, Product } from '@zollify/shared';
 import type { Printer, Session, Settings, Units } from '../electron/shared';
-import { CARD_SIZES, DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat, type SheetOptions } from '../electron/cards';
+import { CARD_SIZES, DEFAULT_THEMES, cardFor, cardRows, cardUnits, formatPrice, withoutCard, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat, type SheetOptions } from '../electron/cards';
 import PrintSettings from './PrintSettings.vue';
 
 /**
@@ -21,6 +21,7 @@ const discounts = ref<DiscountRule[]>([]);
 const busy = ref('');
 const open = ref<string | null>(null);
 const showThemes = ref(false);
+const showMissing = ref(false);
 const showPrint = ref(false);
 const previews = reactive<Record<string, string>>({});
 /** Cards ticked for the next sheet, by id; every drawn card to start with. */
@@ -101,6 +102,33 @@ async function addCard(): Promise<void> {
   await saveCards([...cards.value, def]);
   open.value = def.id;
 }
+// ── Products without a card: one card each, in a theme, drawn straight away ──
+const missing = computed(() => withoutCard(cards.value, products.value));
+/** The theme new cards take, unless a product's own is picked. */
+const quickTheme = ref(themes.value[0]?.id ?? 'peach');
+const themeFor = reactive<Record<string, string>>({});
+const pickedTheme = (p: Product): string => themeFor[p.id] || quickTheme.value;
+const themeById = (id: string): CardTheme => themes.value.find((t) => t.id === id) ?? themes.value[0]!;
+function priceOf(p: Product): string {
+  const prices = cardUnits({ types: [], items: [`${p.id}:`] }, products.value).map((u) => u.price);
+  if (!prices.length) return '';
+  const [lo, hi] = [Math.min(...prices), Math.max(...prices)];
+  return lo === hi ? formatPrice(lo, fmt.value) : `${formatPrice(lo, fmt.value)} – ${formatPrice(hi, fmt.value)}`;
+}
+async function quickAdd(list: Product[]): Promise<void> {
+  const defs = list.map((p) => cardFor(p, pickedTheme(p), crypto.randomUUID()));
+  await guard(`Adding ${defs.length === 1 ? defs[0]!.title : `${defs.length} cards`}`, async () => {
+    await saveCards([...cards.value, ...defs]);
+    // The new list reaches this view as props on the next tick; drawing patches the cards in it.
+    await nextTick();
+    for (const def of defs) {
+      busy.value = `Drawing ${def.title}`;
+      await draw(def);
+    }
+  });
+  emit('notice', `${defs.length === 1 ? `"${defs[0]!.title}" has` : `${defs.length} products have`} a card now, ticked for the sheet. Change ${defs.length === 1 ? 'it' : 'them'} under Edit.`);
+}
+
 async function removeCard(def: CardDef): Promise<void> {
   if (!confirm(`Remove the card "${def.title}"? Its PSD stays in the folder.`)) return;
   await saveCards(cards.value.filter((c) => c.id !== def.id));
@@ -303,6 +331,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
     <button type="button" class="primary" :disabled="!!busy" @click="addCard">New card</button>
     <button type="button" :disabled="!!busy || !cards.length" @click="updateAll">Update all</button>
     <button type="button" class="quiet" :disabled="!!busy" @click="reload">Reload prices</button>
+    <button type="button" class="quiet" :aria-pressed="showMissing" :disabled="!missing.length" title="Products for sale that no card prices yet" @click="showMissing = !showMissing">Without a card ({{ missing.length }})</button>
     <span class="spacer"></span>
     <label class="inline" title="{n} is the price: {n}.- gives 15.-, €{n} gives €15">Price as <input class="pattern" :value="fmt.pattern" @change="setFormat({ pattern: ($event.target as HTMLInputElement).value || '{n}' })" /></label>
     <label class="inline" title="Prices are the catalogue's times this, for an event in another currency">× <input type="number" min="0" step="0.0001" :value="fmt.rate" @change="setFormat({ rate: ($event.target as HTMLInputElement).valueAsNumber || 1 })" /></label>
@@ -314,6 +343,30 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
     Card and sheet PSDs go to <code>{{ dir || '…' }}</code> <button type="button" class="quiet" @click="pickDir">Change</button>
     <span v-if="busy" class="busy">{{ busy }}…</span>
   </p>
+
+  <section v-if="showMissing && missing.length" class="missing" aria-label="Products without a card">
+    <div class="missing-head">
+      <p class="muted">Products for sale that no card prices yet. Each gets a card of its own, drawn straight away and ticked for the sheet; change it afterwards under Edit.</p>
+      <label class="inline">Theme
+        <span class="dot" :style="{ background: themeById(quickTheme).colors.bg, borderColor: themeById(quickTheme).colors.frame }"></span>
+        <select v-model="quickTheme">
+          <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+      <button type="button" class="primary" :disabled="!!busy" @click="quickAdd(missing)">Add all {{ missing.length }}</button>
+    </div>
+    <ul>
+      <li v-for="p in missing" :key="p.id">
+        <span class="name">{{ p.title }} <small class="muted">{{ p.type }}</small></span>
+        <span class="price">{{ priceOf(p) }}</span>
+        <span class="dot" :style="{ background: themeById(pickedTheme(p)).colors.bg, borderColor: themeById(pickedTheme(p)).colors.frame }"></span>
+        <select :value="pickedTheme(p)" :aria-label="`Theme for ${p.title}`" @change="themeFor[p.id] = ($event.target as HTMLSelectElement).value">
+          <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
+        <button type="button" :disabled="!!busy" @click="quickAdd([p])">Add</button>
+      </li>
+    </ul>
+  </section>
 
   <section v-if="showPrint" class="print" aria-label="Price card print settings">
     <p class="muted">The printer, paper, colour profile and driver settings the A4 sheets print with, apart from the art prints. "Load from PhotoCraft" takes your last print in PhotoCraft.{{ printParams ? '' : ' Until these are saved, sheets use the global print settings.' }}</p>
@@ -474,6 +527,14 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 .pattern { width: 6rem; }
 .folder { margin: 0; font-size: .85rem; }
 .busy { margin-left: 1rem; color: var(--zfy-primary); }
+.missing { display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 10px; padding: .8rem; }
+.missing-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.missing-head p { flex: 1; min-width: 16rem; margin: 0; font-size: .85rem; }
+.missing ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.missing li { display: flex; align-items: center; gap: .6rem; padding: .35rem 0; border-top: 1px solid var(--zfy-line); }
+.missing .name { flex: 1; min-width: 0; }
+.missing .price { font-variant-numeric: tabular-nums; min-width: 6rem; text-align: right; }
+.dot { display: inline-block; width: 1rem; height: 1rem; border-radius: 999px; border: 2px solid; flex: none; }
 .print { display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 10px; padding: .8rem; }
 .print p { margin: 0; font-size: .85rem; }
 .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: .8rem; }

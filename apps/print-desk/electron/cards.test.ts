@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DiscountRule, Product } from '@zollify/shared';
-import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardLayout, cardRows, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows } from './cards.js';
+import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardFor, cardLayout, cardRows, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows, withoutCard } from './cards.js';
 
 const product = (p: Partial<Product> & { id: string }): Product => ({ title: p.id, forSale: true, unlisted: false, price: 0, variants: [], updatedAt: 1, ...p }) as Product;
 const rule = (r: Partial<DiscountRule> & { id: string; type: DiscountRule['type'] }): DiscountRule => ({ name: r.id, productIds: [], variantIds: [], updatedAt: 1, ...r }) as DiscountRule;
@@ -91,6 +91,16 @@ describe('cardRows', () => {
   });
   it('is empty when the card prices nothing for sale', () => {
     expect(cardRows(def([], ['gone:']), [...products, product({ id: 'gone', forSale: false })], discounts, today)).toEqual([]);
+  });
+});
+
+describe('withoutCard', () => {
+  it('lists the listed products for sale no card prices yet, and makes a card for one', () => {
+    const cards = [{ source: { types: ['Keychain'], items: [] } }, { source: { types: [], items: ['sticker:'] } }];
+    expect(withoutCard(cards, products).map((p) => p.id)).toEqual(['bag', 'wallet', 'fsticker']);
+    const card = cardFor(products.find((p) => p.id === 'bag')!, 'sky', 'c1');
+    expect(card).toMatchObject({ id: 'c1', title: 'Bag', theme: 'sky', source: { types: [], items: ['bag:'] } });
+    expect(withoutCard([...cards, card], products).map((p) => p.id)).toEqual(['wallet', 'fsticker']);
   });
 });
 

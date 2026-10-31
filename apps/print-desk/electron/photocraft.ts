@@ -194,13 +194,13 @@ export async function setCardTexts(exe: string, file: string, texts: Record<stri
   return { updated: commands.length, missing: Object.keys(texts).filter((n) => !ids.has(n)), preview: await renderPreview(exe, file) };
 }
 
-/** A4 pages of cards as embedded Smart Objects, saved as `<base>-<n>.psd` with a preview each. */
-export async function drawSheets(exe: string, placed: (Placed & { file: string })[], base: string): Promise<{ file: string; preview: string }[]> {
+/** A4 pages of cards as embedded Smart Objects, with cut marks when asked, saved as `<base>-<n>.psd` with a preview each. */
+export async function drawSheets(exe: string, placed: (Placed & { file: string })[], base: string, marks = false): Promise<{ file: string; preview: string }[]> {
   const pages = [...new Set(placed.map((p) => p.page))].sort((a, b) => a - b);
   const out: { file: string; preview: string }[] = [];
   for (const page of pages) {
     const file = `${base}-${page + 1}.psd`;
-    await runCommands(exe, { ...A4, resolution: 300, background: 'white', name: `Price cards ${page + 1}` }, sheetCommands(placed.filter((p) => p.page === page)), file);
+    await runCommands(exe, { ...A4, resolution: 300, background: 'white', name: `Price cards ${page + 1}` }, sheetCommands(placed.filter((p) => p.page === page), marks), file);
     out.push({ file, preview: await renderPreview(exe, file) });
   }
   return out;

@@ -49,7 +49,7 @@ export interface CardSource {
 export interface CardDef {
   id: string;
   title: string;
-  /** Small line above the title in the pill ("Pin & Charm"); '' for none. */
+  /** Small line under the title in the pill ("40x90cm"); '' for none. */
   subtitle: string;
   theme: string;
   /** '' takes the theme's mascot, 'none' draws none, else a PNG of its own. */
@@ -452,14 +452,20 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   const height = Math.ceil((frameBottom + 122) / 2) * 2;
 
   // The title fits left of the mascot, which sits on the pill's right end.
-  const titleRoom = art.mascot ? 480 : PILL.width - 80;
-  const titleX = art.mascot ? PILL.x + 40 + titleRoom / 2 : PILL.x + PILL.width / 2;
+  // Centred on the pill; the mascot sits past its right end, so a long title clears it.
+  const titleRoom = art.mascot ? 560 : PILL.width - 80;
+  const pillX = PILL.x + PILL.width / 2;
+  /** Letter spacing follows the last letter too: half of it back keeps the word itself in the middle. */
+  const centred = (pt: number, tracking: number): number => pillX + (tracking / 1000) * pt * PX_PER_PT / 2;
+  const titlePt = fit(texts.Title!, art.subtitle ? 14 : 16, titleRoom, 360);
+  const subPt = fit(art.subtitle, 10, titleRoom, 150);
   const head: Command[] = art.subtitle
     ? [
-        ['type.create', { x: titleX, y: 172, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: fit(art.subtitle, 10, titleRoom, 150), color: c.title, align: 'center', tracking: 150 }],
-        ['type.create', { x: titleX, y: 244, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 14, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }],
+        // The name first, the small line under it: "DESKMAT", then "40x90cm".
+        ['type.create', { x: centred(titlePt, 360), y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }],
+        ['type.create', { x: centred(subPt, 150), y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: subPt, color: c.title, align: 'center', tracking: 150 }],
       ]
-    : [['type.create', { x: titleX, y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 16, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }]];
+    : [['type.create', { x: centred(titlePt, 360), y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }]];
 
   const commands: Command[] = [
     // Past the edges, so a scaled-down card rounding its height up has no strip without background.
@@ -474,9 +480,9 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
     star('Sparkle small', 1034, frameBottom - 14, 60, 64, c.sparkle),
   ];
   if (art.mascot) {
-    // Mascots are drawn at their own pixels, made smaller only when they would cover the pill.
+    // Mascots are drawn at their own pixels, made smaller only when bigger than their corner; they sit past the pill's right end, over the frame's corner.
     const scale = Math.min(100, Math.floor((300 / Math.max(art.mascot.width, art.mascot.height)) * 100));
-    commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [954, 174] }]);
+    commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [1060, 174] }]);
   }
   return { height, commands };
 }
@@ -491,12 +497,31 @@ export interface Placed {
   height: number;
 }
 
+/** How sheets are laid out. */
+export interface SheetOptions {
+  /** Fewest sheets: tallest first, each into the first gap on any sheet, widths sharing sheets. Else list order. */
+  tight?: boolean;
+  /** Thin crosses where the cards' corners are, on a layer of their own: where to cut. */
+  marks?: boolean;
+}
+export interface SheetCard {
+  key: string;
+  width: number;
+  height: number;
+  /** Cards of one group (their theme, so their colour) go next to each other: a cut a little off shows no other colour. */
+  group?: string;
+}
+
+export function packSheets(cards: SheetCard[], opts: SheetOptions = {}): Placed[] {
+  return opts.tight ? packTight(cards) : packInOrder(cards);
+}
+
 /**
  * Cards in A4 pages of columns as wide as the cards, in order, each going to the column that ends
  * highest; a card that fits in none starts a new page, and so does each card width, so half and
  * third cards get pages of their own. A card taller than a page gets a page of its own.
  */
-export function packSheets(cards: { key: string; width: number; height: number }[]): Placed[] {
+function packInOrder(cards: SheetCard[]): Placed[] {
   const out: Placed[] = [];
   let page = -1;
   for (const width of [...new Set(cards.map((c) => c.width))]) {
@@ -517,7 +542,58 @@ export function packSheets(cards: { key: string; width: number; height: number }
   return out;
 }
 
-/** One page's commands, for a new A4 document: each card placed as an embedded Smart Object. */
-export function sheetCommands(placed: (Placed & { file: string })[]): Command[] {
-  return placed.map((p) => ['file.placeEmbedded', { path: p.file, scale: 100, smartObject: true, center: [p.x + p.width / 2, p.y + p.height / 2] }]);
+/**
+ * As few sheets as it takes: the widest cards first, a group's cards together (the group with the
+ * most card height first), the tallest first, each into a column of its width with room, one
+ * ending in its own group by preference, else the first; a column of a new width opens on any
+ * sheet with the width left, so half cards and third strips share sheets.
+ * ponytail: first fit decreasing per column, not an optimal 2D packing; enough for a few dozen cards.
+ */
+function packTight(cards: SheetCard[]): Placed[] {
+  const groupKey = (c: SheetCard): string => `${c.width}|${c.group ?? ''}`;
+  const groupHeight = new Map<string, number>();
+  for (const c of cards) groupHeight.set(groupKey(c), (groupHeight.get(groupKey(c)) ?? 0) + c.height);
+  const order = [...cards].sort(
+    (a, b) => b.width - a.width || groupHeight.get(groupKey(b))! - groupHeight.get(groupKey(a))! || groupKey(a).localeCompare(groupKey(b)) || b.height - a.height,
+  );
+  const columns: { page: number; x: number; width: number; top: number; group?: string }[] = [];
+  /** Width taken on each sheet. */
+  const taken: number[] = [];
+  const out: Placed[] = [];
+  for (const card of order) {
+    const room = columns.filter((c) => c.width === card.width && c.top + card.height <= A4.height);
+    let col = room.find((c) => c.group === card.group) ?? room[0];
+    if (!col) {
+      let page = taken.findIndex((w) => w + card.width <= A4.width);
+      if (page < 0) page = taken.push(0) - 1;
+      col = { page, x: taken[page]!, width: card.width, top: 0 };
+      taken[page] = taken[page]! + card.width;
+      columns.push(col);
+    }
+    out.push({ key: card.key, page: col.page, x: col.x, y: col.top, width: card.width, height: card.height });
+    col.top += card.height;
+    col.group = card.group;
+  }
+  return out;
+}
+
+/** Thin grey crosses at every card corner, one shape layer "Cut marks" that can be hidden. */
+export function cutMarks(placed: Placed[]): Command | null {
+  const ARM = 30; // 2.5 mm each way at 300 ppi
+  const LINE = 3; // 0.25 mm
+  const corners = new Set(placed.flatMap((p) => [p.x, p.x + p.width].flatMap((x) => [p.y, p.y + p.height].map((y) => `${x},${y}`))));
+  if (!corners.size) return null;
+  const box = (x: number, y: number, w: number, h: number) => ({ closed: true, knots: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
+  const subpaths = [...corners].flatMap((k) => {
+    const [x, y] = k.split(',').map(Number) as [number, number];
+    return [box(x - ARM, y - LINE / 2, ARM * 2, LINE), box(x - LINE / 2, y - ARM, LINE, ARM * 2)];
+  });
+  return ['shape.create', { kind: 'path', path: { subpaths, fillRule: 'nonzero' }, fill: '#808080', name: 'Cut marks' }];
+}
+
+/** One page's commands, for a new A4 document: each card placed as an embedded Smart Object, the cut marks on top. */
+export function sheetCommands(placed: (Placed & { file: string })[], marks = false): Command[] {
+  const cards: Command[] = placed.map((p) => ['file.placeEmbedded', { path: p.file, scale: 100, smartObject: true, center: [p.x + p.width / 2, p.y + p.height / 2] }]);
+  const cut = marks ? cutMarks(placed) : null;
+  return cut ? [...cards, cut] : cards;
 }

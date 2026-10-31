@@ -1,5 +1,5 @@
 /** Types and pure helpers used by both the Electron main process and the renderer. */
-import type { CardDef, CardTheme, PriceFormat } from './cards.js';
+import type { CardDef, CardTheme, PriceFormat, SheetOptions } from './cards.js';
 
 /** A file linked to one product or variant, with the PhotoCraft `file.print` params it prints with. */
 export interface PrintLink {
@@ -98,6 +98,8 @@ export interface PriceCardSettings {
   outDir: string;
   /** `file.print` params the sheets print with (their own printer, profile, driver settings); null or unset: the global print settings. */
   print?: Record<string, unknown> | null;
+  /** How sheets are laid out; unset: fewest sheets, no cut marks. */
+  sheet?: SheetOptions;
 }
 
 export type Units = 'cm' | 'mm' | 'in';

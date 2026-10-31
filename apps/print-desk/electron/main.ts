@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packSheets, type CardArt, type PriceFormat } from './cards.js';
+import { packSheets, type CardArt, type PriceFormat, type SheetCard, type SheetOptions } from './cards.js';
 import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.js';
 import { drawCard, drawSheets, findExe, imageSize, lastPrint, pngSize, print, printers, setCardTexts, sheetPdf } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
@@ -187,11 +187,11 @@ void app.whenReady().then(() => {
     return drawCard(store.data.photocraft, { ...card, mascot }, fmt, file).catch(fail);
   });
   ipcMain.handle('cards:setTexts', (_e, file: string, texts: Record<string, string>) => setCardTexts(store.data.photocraft, file, texts).catch(fail));
-  ipcMain.handle('cards:sheets', async (_e, cards: { key: string; file: string; width: number; height: number }[]) => {
+  ipcMain.handle('cards:sheets', async (_e, cards: (SheetCard & { file: string })[], opts: SheetOptions = {}) => {
     const files = new Map(cards.map((c) => [c.key, c.file]));
-    const placed = packSheets(cards).map((p) => ({ ...p, file: files.get(p.key)! }));
+    const placed = packSheets(cards, opts).map((p) => ({ ...p, file: files.get(p.key)! }));
     const stamp = new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-');
-    return drawSheets(store.data.photocraft, placed, join(await cardsDir(), `Sheet ${stamp}`)).catch(fail);
+    return drawSheets(store.data.photocraft, placed, join(await cardsDir(), `Sheet ${stamp}`), !!opts.marks).catch(fail);
   });
   ipcMain.handle('cards:pdf', (_e, file: string) => sheetPdf(store.data.photocraft, file).catch(fail));
   ipcMain.handle('cards:print', async (_e, files: string[]): Promise<PrintResult[]> => {

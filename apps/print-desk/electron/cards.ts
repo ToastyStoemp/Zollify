@@ -32,6 +32,8 @@ export interface CardTheme {
   colors: CardColors;
   /** A PNG drawn at the pill's right end; '' for none. */
   mascot: string;
+  /** A big price centred on its number, what the price format adds (".-") hanging outside; cards with price lines are left as they are. */
+  centreNumber?: boolean;
 }
 
 export const DEFAULT_THEMES: CardTheme[] = [
@@ -72,8 +74,6 @@ export interface CardDef {
   style?: CardStyle;
   /** A strip without its heading: the title only names the card in the list. */
   noHeading?: boolean;
-  /** The big price centred on its number, what the price format adds (".-") hanging outside. */
-  centreNumber?: boolean;
   /** Its width in pixels, as drawn. */
   width?: number;
   /** The style, size and row ids it was drawn with: prices go into the PSD in place while these stay the same. */
@@ -84,10 +84,10 @@ export interface CardDef {
 
 /** Where a drawn card stands against the catalogue now. */
 export type CardState = 'new' | 'current' | 'prices' | 'layout' | 'empty';
-export function cardState(def: CardDef, rows: CardRow[], fmt: PriceFormat): CardState {
+export function cardState(def: CardDef, rows: CardRow[], fmt: PriceFormat, theme?: Pick<CardTheme, 'centreNumber'>): CardState {
   if (!rows.length) return 'empty';
   if (!def.file) return 'new';
-  if (layoutKey(def, rows) !== def.layout) return 'layout';
+  if (layoutKey({ ...def, centred: theme?.centreNumber }, rows) !== def.layout) return 'layout';
   return changedTexts(def, rows, fmt).length ? 'prices' : 'current';
 }
 /** The texts that differ from what the PSD holds, as [layer name, text]. */
@@ -343,12 +343,13 @@ export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
  */
 export type CardStyle = 'card' | 'strip';
 /** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
-export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean; centreNumber?: boolean }, rows: CardRow[]): string =>
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean; centred?: boolean }, rows: CardRow[]): string =>
   [
     ...(art.style === 'strip' ? ['strip'] : []),
     ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []),
     ...(art.size === 'third' ? ['third'] : []),
-    ...(art.centreNumber ? ['centred'] : []),
+    // Only a card with a big price is drawn differently when its theme centres the number.
+    ...(art.centred && rows.some((r) => r.kind === 'price') ? ['centred'] : []),
     ...rows.map((r) => r.id),
   ].join('|');
 const PX_PER_PT = 300 / 72;
@@ -396,7 +397,6 @@ export interface CardArt {
   size?: CardSize;
   style?: CardStyle;
   noHeading?: boolean;
-  centreNumber?: boolean;
 }
 
 /** A command with its positions and sizes times `s`: the master drawn smaller, all in proportion. */
@@ -431,7 +431,7 @@ export function cardLayout(art: CardArt, fmt: PriceFormat): { width: number; hei
   const { height, commands } = art.style === 'strip' ? stripCommands(art, fmt) : cardCommands(art, fmt);
   const width = CARD_SIZES[art.size ?? 'half'].width;
   const s = width / CARD_WIDTH;
-  return { width, height: Math.ceil((height * s) / 2) * 2, layout: layoutKey(art, art.rows), commands: commands.map((cmd) => scaled(cmd, s)) };
+  return { width, height: Math.ceil((height * s) / 2) * 2, layout: layoutKey({ ...art, centred: art.theme.centreNumber }, art.rows), commands: commands.map((cmd) => scaled(cmd, s)) };
 }
 
 const star = (name: string, cx: number, cy: number, w: number, h: number, fill: string): Command => ['shape.create', { kind: 'star', sides: 4, starRatio: 0.28, rect: [cx - w / 2, cy - h / 2, w, h], fill, name }];
@@ -468,7 +468,7 @@ function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; comman
   }
   for (const r of art.rows) {
     if (r.kind === 'price') {
-      text(r.id, CARD_WIDTH / 2 + (art.centreNumber ? numberShift(fmt, 34, 100) : 0), y + 150, 34, c.ink, { tracking: 100 });
+      text(r.id, CARD_WIDTH / 2 + (art.theme.centreNumber ? numberShift(fmt, 34, 100) : 0), y + 150, 34, c.ink, { tracking: 100 });
       y += 170;
     } else if (r.kind === 'deal') {
       text(`${r.id} qty`, 500, y + 75, 20, c.ink);
@@ -515,7 +515,7 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   for (const r of art.rows) {
     if (r.kind === 'price') {
       const pt = fit(texts[r.id]!, 48, FRAME.width - 160, 100);
-      text(r.id, CARD_WIDTH / 2 + (art.centreNumber ? numberShift(fmt, pt, 100) : 0), y + 170, pt, c.ink, { tracking: 100 });
+      text(r.id, CARD_WIDTH / 2 + (art.theme.centreNumber ? numberShift(fmt, pt, 100) : 0), y + 170, pt, c.ink, { tracking: 100 });
       y += 277;
     } else if (r.kind === 'deal') {
       text(`${r.id} qty`, 296, y + 105, 30, c.ink);

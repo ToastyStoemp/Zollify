@@ -171,6 +171,10 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   are valid today. A whole type leaves out unlisted products (off the price
   lists); a product picked by name counts even when unlisted. Products not for
   sale stay off.
+- **Without a card** (toolbar) lists the listed products for sale that no card
+  prices yet, with their price. Pick a theme for each, or one for all, and
+  **Add** (or **Add all**): each gets a card of its own, named after it, drawn
+  straight away and ticked for the sheet, to change afterwards under Edit.
 - **Small print** is the products' price notes, or lines of the card's own
   ("Hahnemühle paper", "4 random stickers"). Any line's name can be changed and
   any row left off, in the card's Edit panel.

@@ -139,6 +139,19 @@ export function cardUnits(source: CardSource, products: Product[]): Unit[] {
   return units;
 }
 
+/** Listed products for sale that no card prices yet, in catalogue order by type and title. */
+export function withoutCard(cards: Pick<CardDef, 'source'>[], products: Product[]): Product[] {
+  const priced = new Set(cards.flatMap((c) => cardUnits(c.source, products).map((u) => u.product.id)));
+  return products
+    .filter((p) => !p.deletedAt && p.forSale !== false && !p.unlisted && !priced.has(p.id))
+    .sort((a, b) => (a.type ?? '').localeCompare(b.type ?? '') || a.title.localeCompare(b.title));
+}
+
+/** A card for one product: named after it, in a theme, everything else as a new card. */
+export function cardFor(product: Product, theme: string, id: string): CardDef {
+  return { id, title: product.title, subtitle: '', theme, mascot: '', source: { types: [], items: [`${product.id}:`] }, labels: {}, hidden: [], notes: null };
+}
+
 const touches = (rule: DiscountRule, u: Unit): boolean =>
   rule.productIds?.includes(u.product.id) || (!!u.product.type && !!rule.productTypes?.includes(u.product.type)) || rule.variantIds?.includes(u.key);
 

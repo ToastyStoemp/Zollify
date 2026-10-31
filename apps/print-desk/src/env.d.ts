@@ -1,6 +1,6 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DiscountRule, Product } from '@zollify/shared';
-import type { CardRow, CardSize, CardStyle, CardTheme, PriceFormat } from '../electron/cards';
+import type { CardRow, CardSize, CardStyle, CardTheme, PriceFormat, SheetOptions } from '../electron/cards';
 import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
@@ -46,7 +46,7 @@ export interface PrintDeskApi {
     /** Sets text layers by name in a card PSD; layers not found are named in `missing`. */
     setTexts(file: string, texts: Record<string, string>): Promise<{ updated: number; missing: string[]; preview: string }>;
     /** A4 sheet PSDs of the cards, in order, each with a preview PNG. */
-    sheets(cards: { key: string; file: string; width: number; height: number }[]): Promise<{ file: string; preview: string }[]>;
+    sheets(cards: { key: string; file: string; width: number; height: number; group?: string }[], opts?: SheetOptions): Promise<{ file: string; preview: string }[]>;
     /** A sheet as a PDF beside it. */
     pdf(file: string): Promise<string>;
     /** Prints sheets on A4 with the global print settings' printer. */

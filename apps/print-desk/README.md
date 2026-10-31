@@ -197,11 +197,15 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   "Rows changed: redraw": **Redraw** starts the PSD again from the master.
 - **Price as** sets how a price reads: `{n}.-` gives `15.-`, `€{n}` gives `€15`.
   For an event in another currency, set the rate and the rounding step.
-- **Make A4 sheets** lays the ticked cards out, in list order (↑ ↓), on A4 pages
-  (2480 x 3508 px at 300 ppi): two columns, each card going to the column that
-  ends highest, a new page when it fits in neither. Each card is an embedded
-  Smart Object, so a sheet can still be changed in PhotoCraft. Each page can be
-  opened, saved as a PDF beside it, or printed on A4.
+- **Make A4 sheets** lays the ticked cards out on A4 pages (2480 x 3508 px at
+  300 ppi), each card an embedded Smart Object, so a sheet can still be changed
+  in PhotoCraft. **Fewest sheets** (on unless switched off): the tallest cards
+  first, each into the first gap on any sheet, cards of one theme stacked
+  together so a cut a little off shows no other colour, and half cards and
+  third strips sharing a sheet when it has the width. Off: the list's order
+  (↑ ↓), each width on pages of its own. **Cut marks** adds thin grey crosses at
+  every card corner, on a layer of their own ("Cut marks") that can be hidden.
+  Each page can be opened, saved as a PDF beside it, or printed on A4.
 - **Print settings** (toolbar): the printer, paper, colour profile and driver
   settings the sheets print with, apart from the art prints; "Load from
   PhotoCraft" takes your last print in PhotoCraft. Until they are saved, sheets

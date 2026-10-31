@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import type { DiscountRule, Product } from '@zollify/shared';
 import type { Printer, Session, Settings, Units } from '../electron/shared';
-import { CARD_SIZES, DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat } from '../electron/cards';
+import { CARD_SIZES, DEFAULT_THEMES, cardRows, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat, type SheetOptions } from '../electron/cards';
 import PrintSettings from './PrintSettings.vue';
 
 /**
@@ -210,9 +210,14 @@ async function updateAll(): Promise<void> {
 
 // ── Sheets ──
 const sheetCards = computed(() => cards.value.filter((c) => c.file && c.height && onSheet[c.id]));
+/** Fewest sheets unless switched off; cut marks when asked. */
+const sheetOpts = computed((): SheetOptions => ({ tight: pc.value.sheet?.tight ?? true, marks: pc.value.sheet?.marks ?? false }));
+async function setSheet(patch: SheetOptions): Promise<void> {
+  await save({ sheet: { ...sheetOpts.value, ...patch } });
+}
 async function makeSheets(): Promise<void> {
   await guard('Laying out sheets', async () => {
-    const made = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: c.width ?? 1240, height: c.height! }))));
+    const made = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: c.width ?? 1240, height: c.height!, group: c.theme }))), plain(sheetOpts.value));
     pages.value = await Promise.all(made.map(async (p) => ({ ...p, image: await api.cards.image(p.preview) })));
     emit('notice', `${made.length} ${made.length === 1 ? 'sheet' : 'sheets'} saved in ${dir.value}.`);
   });
@@ -440,6 +445,12 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 
   <section v-if="cards.length" class="sheet-bar">
     <span class="muted">{{ sheetCards.length }} cards ticked for the sheet · {{ printsOn }}</span>
+    <label class="inline" title="Tallest cards first, each into the first gap on any sheet, cards of one theme next to each other, half and third widths sharing sheets. Off: the list's order.">
+      <input type="checkbox" :checked="sheetOpts.tight" @change="setSheet({ tight: ($event.target as HTMLInputElement).checked })" /> Fewest sheets
+    </label>
+    <label class="inline" title="Thin grey crosses at the cards' corners, on a layer of their own (Cut marks) that can be hidden in PhotoCraft">
+      <input type="checkbox" :checked="sheetOpts.marks" @change="setSheet({ marks: ($event.target as HTMLInputElement).checked })" /> Cut marks
+    </label>
     <button type="button" class="primary" :disabled="!!busy || !sheetCards.length" @click="makeSheets">Make A4 sheets</button>
     <template v-if="pages.length">
       <button type="button" :disabled="!!busy" @click="printPages(pages.map((p) => p.file))">Print {{ pages.length === 1 ? 'it' : `all ${pages.length}` }}</button>
@@ -506,7 +517,7 @@ section > p { margin: 0 0 .5rem; font-size: .85rem; }
 .rows li.off { opacity: .45; }
 .rows .label { flex: 1; min-width: 0; }
 .danger { color: var(--zfy-danger); }
-.sheet-bar { display: flex; align-items: center; gap: 1rem; }
+.sheet-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .pages { display: flex; gap: 1rem; flex-wrap: wrap; }
 .pages figure { margin: 0; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 8px; padding: .4rem; }
 .pages img { width: 14rem; display: block; }

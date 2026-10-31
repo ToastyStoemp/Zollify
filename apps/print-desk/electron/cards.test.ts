@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DiscountRule, Product } from '@zollify/shared';
-import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardLayout, cardRows, cardState, cardTexts, changedTexts, formatPrice, packSheets, shownRows } from './cards.js';
+import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardLayout, cardRows, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows } from './cards.js';
 
 const product = (p: Partial<Product> & { id: string }): Product => ({ title: p.id, forSale: true, unlisted: false, price: 0, variants: [], updatedAt: 1, ...p }) as Product;
 const rule = (r: Partial<DiscountRule> & { id: string; type: DiscountRule['type'] }): DiscountRule => ({ name: r.id, productIds: [], variantIds: [], updatedAt: 1, ...r }) as DiscountRule;
@@ -171,6 +171,38 @@ describe('packSheets', () => {
       ['5', 1, 1240, 0],
     ]);
     expect(A4.height).toBe(3508);
+  });
+  it('packs tight: fills gaps on earlier sheets and lets strips share a sheet with half cards', () => {
+    const half = [1800, 1700, 1600, 1500, 600].map((height, i) => ({ key: `h${i}`, width: 1240, height }));
+    const strips = ['a', 'b', 'c'].map((key) => ({ key, width: 826, height: 300 }));
+    const inOrder = packSheets([...half, ...strips]);
+    const tight = packSheets([...half, ...strips], { tight: true });
+    const pages = (p: ReturnType<typeof packSheets>): number => new Set(p.map((x) => x.page)).size;
+    expect(pages(tight)).toBeLessThan(pages(inOrder));
+    // Every card on a sheet, inside it, none overlapping another.
+    for (const p of tight) expect(p.x + p.width <= A4.width && p.y + p.height <= A4.height).toBe(true);
+    for (const p of tight) for (const q of tight) if (p !== q && p.page === q.page) expect(p.x + p.width <= q.x || q.x + q.width <= p.x || p.y + p.height <= q.y || q.y + q.height <= p.y).toBe(true);
+    expect(tight.filter((p) => p.width === 826).every((p) => p.page === tight.find((q) => q.key === 'h4')!.page)).toBe(true);
+  });
+  it('keeps cards of one theme together in a column', () => {
+    const cards = ['peach', 'sky', 'peach', 'sky', 'peach', 'sky'].map((group, i) => ({ key: String(i), width: 1240, height: 1000, group }));
+    const tight = packSheets(cards, { tight: true });
+    const columns = new Map<string, Set<string>>();
+    for (const p of tight) {
+      const k = `${p.page}|${p.x}`;
+      columns.set(k, (columns.get(k) ?? new Set()).add(cards.find((c) => c.key === p.key)!.group));
+    }
+    expect([...columns.values()].every((g) => g.size === 1)).toBe(true);
+  });
+  it('draws a cut mark once at every card corner', () => {
+    const placed = [
+      { key: 'a', page: 0, x: 0, y: 0, width: 1240, height: 1000 },
+      { key: 'b', page: 0, x: 0, y: 1000, width: 1240, height: 800 },
+    ];
+    const [, p] = cutMarks(placed)!;
+    expect((p.path as { subpaths: unknown[] }).subpaths).toHaveLength(6 * 2);
+    expect(sheetCommands(placed.map((x) => ({ ...x, file: 'f.psd' })), true).at(-1)![1].name).toBe('Cut marks');
+    expect(sheetCommands(placed.map((x) => ({ ...x, file: 'f.psd' }))).some(([, q]) => q.name === 'Cut marks')).toBe(false);
   });
   it('gives third-wide cards pages of their own, three across', () => {
     const cards = [{ key: 'h', width: 1240, height: 1000 }, ...['a', 'b', 'c', 'd'].map((key) => ({ key, width: 826, height: 400 }))];

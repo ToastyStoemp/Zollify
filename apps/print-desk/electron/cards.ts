@@ -491,12 +491,31 @@ export interface Placed {
   height: number;
 }
 
+/** How sheets are laid out. */
+export interface SheetOptions {
+  /** Fewest sheets: tallest first, each into the first gap on any sheet, widths sharing sheets. Else list order. */
+  tight?: boolean;
+  /** Thin crosses where the cards' corners are, on a layer of their own: where to cut. */
+  marks?: boolean;
+}
+export interface SheetCard {
+  key: string;
+  width: number;
+  height: number;
+  /** Cards of one group (their theme, so their colour) go next to each other: a cut a little off shows no other colour. */
+  group?: string;
+}
+
+export function packSheets(cards: SheetCard[], opts: SheetOptions = {}): Placed[] {
+  return opts.tight ? packTight(cards) : packInOrder(cards);
+}
+
 /**
  * Cards in A4 pages of columns as wide as the cards, in order, each going to the column that ends
  * highest; a card that fits in none starts a new page, and so does each card width, so half and
  * third cards get pages of their own. A card taller than a page gets a page of its own.
  */
-export function packSheets(cards: { key: string; width: number; height: number }[]): Placed[] {
+function packInOrder(cards: SheetCard[]): Placed[] {
   const out: Placed[] = [];
   let page = -1;
   for (const width of [...new Set(cards.map((c) => c.width))]) {
@@ -517,7 +536,58 @@ export function packSheets(cards: { key: string; width: number; height: number }
   return out;
 }
 
-/** One page's commands, for a new A4 document: each card placed as an embedded Smart Object. */
-export function sheetCommands(placed: (Placed & { file: string })[]): Command[] {
-  return placed.map((p) => ['file.placeEmbedded', { path: p.file, scale: 100, smartObject: true, center: [p.x + p.width / 2, p.y + p.height / 2] }]);
+/**
+ * As few sheets as it takes: the widest cards first, a group's cards together (the group with the
+ * most card height first), the tallest first, each into a column of its width with room, one
+ * ending in its own group by preference, else the first; a column of a new width opens on any
+ * sheet with the width left, so half cards and third strips share sheets.
+ * ponytail: first fit decreasing per column, not an optimal 2D packing; enough for a few dozen cards.
+ */
+function packTight(cards: SheetCard[]): Placed[] {
+  const groupKey = (c: SheetCard): string => `${c.width}|${c.group ?? ''}`;
+  const groupHeight = new Map<string, number>();
+  for (const c of cards) groupHeight.set(groupKey(c), (groupHeight.get(groupKey(c)) ?? 0) + c.height);
+  const order = [...cards].sort(
+    (a, b) => b.width - a.width || groupHeight.get(groupKey(b))! - groupHeight.get(groupKey(a))! || groupKey(a).localeCompare(groupKey(b)) || b.height - a.height,
+  );
+  const columns: { page: number; x: number; width: number; top: number; group?: string }[] = [];
+  /** Width taken on each sheet. */
+  const taken: number[] = [];
+  const out: Placed[] = [];
+  for (const card of order) {
+    const room = columns.filter((c) => c.width === card.width && c.top + card.height <= A4.height);
+    let col = room.find((c) => c.group === card.group) ?? room[0];
+    if (!col) {
+      let page = taken.findIndex((w) => w + card.width <= A4.width);
+      if (page < 0) page = taken.push(0) - 1;
+      col = { page, x: taken[page]!, width: card.width, top: 0 };
+      taken[page] = taken[page]! + card.width;
+      columns.push(col);
+    }
+    out.push({ key: card.key, page: col.page, x: col.x, y: col.top, width: card.width, height: card.height });
+    col.top += card.height;
+    col.group = card.group;
+  }
+  return out;
+}
+
+/** Thin grey crosses at every card corner, one shape layer "Cut marks" that can be hidden. */
+export function cutMarks(placed: Placed[]): Command | null {
+  const ARM = 30; // 2.5 mm each way at 300 ppi
+  const LINE = 3; // 0.25 mm
+  const corners = new Set(placed.flatMap((p) => [p.x, p.x + p.width].flatMap((x) => [p.y, p.y + p.height].map((y) => `${x},${y}`))));
+  if (!corners.size) return null;
+  const box = (x: number, y: number, w: number, h: number) => ({ closed: true, knots: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
+  const subpaths = [...corners].flatMap((k) => {
+    const [x, y] = k.split(',').map(Number) as [number, number];
+    return [box(x - ARM, y - LINE / 2, ARM * 2, LINE), box(x - LINE / 2, y - ARM, LINE, ARM * 2)];
+  });
+  return ['shape.create', { kind: 'path', path: { subpaths, fillRule: 'nonzero' }, fill: '#808080', name: 'Cut marks' }];
+}
+
+/** One page's commands, for a new A4 document: each card placed as an embedded Smart Object, the cut marks on top. */
+export function sheetCommands(placed: (Placed & { file: string })[], marks = false): Command[] {
+  const cards: Command[] = placed.map((p) => ['file.placeEmbedded', { path: p.file, scale: 100, smartObject: true, center: [p.x + p.width / 2, p.y + p.height / 2] }]);
+  const cut = marks ? cutMarks(placed) : null;
+  return cut ? [...cards, cut] : cards;
 }

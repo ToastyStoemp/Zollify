@@ -452,15 +452,20 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   const height = Math.ceil((frameBottom + 122) / 2) * 2;
 
   // The title fits left of the mascot, which sits on the pill's right end.
-  const titleRoom = art.mascot ? 480 : PILL.width - 80;
-  const titleX = art.mascot ? PILL.x + 40 + titleRoom / 2 : PILL.x + PILL.width / 2;
+  // Centred on the pill; the mascot sits past its right end, so a long title clears it.
+  const titleRoom = art.mascot ? 560 : PILL.width - 80;
+  const pillX = PILL.x + PILL.width / 2;
+  /** Letter spacing follows the last letter too: half of it back keeps the word itself in the middle. */
+  const centred = (pt: number, tracking: number): number => pillX + (tracking / 1000) * pt * PX_PER_PT / 2;
+  const titlePt = fit(texts.Title!, art.subtitle ? 14 : 16, titleRoom, 360);
+  const subPt = fit(art.subtitle, 10, titleRoom, 150);
   const head: Command[] = art.subtitle
     ? [
         // The name first, the small line under it: "DESKMAT", then "40x90cm".
-        ['type.create', { x: titleX, y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 14, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }],
-        ['type.create', { x: titleX, y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: fit(art.subtitle, 10, titleRoom, 150), color: c.title, align: 'center', tracking: 150 }],
+        ['type.create', { x: centred(titlePt, 360), y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }],
+        ['type.create', { x: centred(subPt, 150), y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: subPt, color: c.title, align: 'center', tracking: 150 }],
       ]
-    : [['type.create', { x: titleX, y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 16, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }]];
+    : [['type.create', { x: centred(titlePt, 360), y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }]];
 
   const commands: Command[] = [
     // Past the edges, so a scaled-down card rounding its height up has no strip without background.
@@ -475,9 +480,9 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
     star('Sparkle small', 1034, frameBottom - 14, 60, 64, c.sparkle),
   ];
   if (art.mascot) {
-    // Mascots are drawn at their own pixels, made smaller only when they would cover the pill.
+    // Mascots are drawn at their own pixels, made smaller only when bigger than their corner; they sit past the pill's right end, over the frame's corner.
     const scale = Math.min(100, Math.floor((300 / Math.max(art.mascot.width, art.mascot.height)) * 100));
-    commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [954, 174] }]);
+    commands.push(['file.placeEmbedded', { path: art.mascot.path, scale, smartObject: true, center: [1060, 174] }]);
   }
   return { height, commands };
 }

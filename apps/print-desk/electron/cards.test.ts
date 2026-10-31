@@ -304,13 +304,17 @@ describe('packSheets', () => {
     expect(Math.min(...xs)).toBe(1240 - 30);
     expect(Math.max(...xs)).toBeLessThan(1240 + 30);
   });
-  it('draws a cut mark once at every card corner', () => {
+  it('draws a cut mark once at every card corner, with no arms along the paper edge', () => {
     const placed = [
       { key: 'a', page: 0, x: 0, y: 0, width: 1240, height: 1000 },
       { key: 'b', page: 0, x: 0, y: 1000, width: 1240, height: 800 },
     ];
     const [, p] = cutMarks(placed)!;
-    expect((p.path as { subpaths: unknown[] }).subpaths).toHaveLength(6 * 2);
+    const boxes = (p.path as { subpaths: { knots: number[][] }[] }).subpaths.map((s) => s.knots);
+    // Six corners; the arms left once the paper's top and left edges drop out:
+    // (0,0) none, (1240,0) down, (0,1000) right, (1240,1000) left and up-down, (0,1800) right, (1240,1800) left and up.
+    expect(boxes).toHaveLength(7);
+    expect(boxes.some((k) => k.some(([x, y]) => x! <= 30 && y! <= 30))).toBe(false);
     expect(sheetCommands(placed.map((x) => ({ ...x, file: 'f.psd' })), true).at(-1)![1].name).toBe('Cut marks');
     expect(sheetCommands(placed.map((x) => ({ ...x, file: 'f.psd' }))).some(([, q]) => q.name === 'Cut marks')).toBe(false);
   });

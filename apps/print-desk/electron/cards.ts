@@ -768,16 +768,19 @@ function combine(pieces: Piece[]): Piece[][] {
 /**
  * Thin grey marks at every card corner, one shape layer "Cut marks" that can be hidden. A mark
  * only has arms along card edges, so a corner that meets the middle of another card's side shows
- * the cut line and its own edge (a T on its side), never a cross over the other card.
+ * the cut line and its own edge (a T on its side), never a cross over the other card. An edge on
+ * the paper's own edge needs no cut, so it has no arms: the sheet's corners get no mark at all.
  */
 export function cutMarks(placed: Placed[]): Command | null {
   const ARM = 30; // 2.5 mm at 300 ppi
   const LINE = 3; // 0.25 mm
+  /** On the paper's edge, give or take the pixels three third-wide columns leave over. */
+  const onPaperEdge = (at: number, size: number): boolean => at <= 2 || at >= size - 2;
   const corners = new Set(placed.flatMap((p) => [p.x, p.x + p.width].flatMap((x) => [p.y, p.y + p.height].map((y) => `${x},${y}`))));
   if (!corners.size) return null;
-  // Every card edge: horizontal ones at a y from x0 to x1, vertical ones at an x from y0 to y1.
-  const across = placed.flatMap((p) => [p.y, p.y + p.height].map((y) => ({ at: y, from: p.x, to: p.x + p.width })));
-  const down = placed.flatMap((p) => [p.x, p.x + p.width].map((x) => ({ at: x, from: p.y, to: p.y + p.height })));
+  // Every card edge to cut: horizontal ones at a y from x0 to x1, vertical ones at an x from y0 to y1.
+  const across = placed.flatMap((p) => [p.y, p.y + p.height].map((y) => ({ at: y, from: p.x, to: p.x + p.width }))).filter((e) => !onPaperEdge(e.at, A4.height));
+  const down = placed.flatMap((p) => [p.x, p.x + p.width].map((x) => ({ at: x, from: p.y, to: p.y + p.height }))).filter((e) => !onPaperEdge(e.at, A4.width));
   /** Whether an edge runs from `pos` along the line at `at`: towards higher values (+1) or lower (-1). */
   const runs = (edges: typeof across, at: number, pos: number, dir: 1 | -1): boolean =>
     edges.some((e) => e.at === at && (dir > 0 ? e.from <= pos && pos < e.to : e.from < pos && pos <= e.to));

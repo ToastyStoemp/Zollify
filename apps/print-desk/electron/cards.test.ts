@@ -194,6 +194,24 @@ describe('packSheets', () => {
     }
     expect([...columns.values()].every((g) => g.size === 1)).toBe(true);
   });
+  it("puts a colour's leftover with another's, not into a column of a third colour", () => {
+    // Peach fills two columns and a bit, blue just fits two, one cocoa card: the peach leftover goes
+    // with the cocoa card, and blue keeps a sheet of its own.
+    const card = (key: string, group: string, height: number) => ({ key, width: 1240, height, group });
+    const cards = [
+      ...[1700, 1700, 1700, 1700].map((h, i) => card(`p${i}`, 'peach', h)),
+      card('coin', 'peach', 860),
+      ...[1150, 1150, 1000, 1000, 860, 860].map((h, i) => card(`s${i}`, 'sky', h)),
+      card('mat', 'cocoa', 1010),
+    ];
+    const tight = packSheets(cards, { tight: true });
+    const at = (key: string) => tight.find((p) => p.key === key)!;
+    expect(new Set(tight.map((p) => p.page)).size).toBe(3);
+    expect(new Set(['s0', 's1', 's2', 's3', 's4', 's5'].map((k) => at(k).page)).size).toBe(1);
+    expect(at('coin').page).toBe(at('mat').page);
+    expect(at('coin').x).toBe(at('mat').x);
+    expect(at('s0').page).not.toBe(at('coin').page);
+  });
   it('draws a cut mark once at every card corner', () => {
     const placed = [
       { key: 'a', page: 0, x: 0, y: 0, width: 1240, height: 1000 },

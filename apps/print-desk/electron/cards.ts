@@ -542,39 +542,102 @@ function packInOrder(cards: SheetCard[]): Placed[] {
   return out;
 }
 
+/** A group's cards stacked in one column, before columns are combined. */
+interface Piece {
+  width: number;
+  group: string;
+  height: number;
+  cards: SheetCard[];
+}
+
 /**
- * As few sheets as it takes: the widest cards first, a group's cards together (the group with the
- * most card height first), the tallest first, each into a column of its width with room, one
- * ending in its own group by preference, else the first; a column of a new width opens on any
- * sheet with the width left, so half cards and third strips share sheets.
- * ponytail: first fit decreasing per column, not an optimal 2D packing; enough for a few dozen cards.
+ * As few sheets as it takes, each colour kept together. Each group's cards (one theme, one width)
+ * stack into columns of their own, tallest first. Then the pieces of one width combine into as
+ * few columns as fit, mixing as little card height as can be: a group's leftover goes in with
+ * another's leftover rather than into a column of another colour. Columns go on sheets the widest
+ * first, the biggest group first, mixed columns last, each sheet taking columns while it has the
+ * width, so half cards and third strips share sheets.
  */
 function packTight(cards: SheetCard[]): Placed[] {
   const groupKey = (c: SheetCard): string => `${c.width}|${c.group ?? ''}`;
-  const groupHeight = new Map<string, number>();
-  for (const c of cards) groupHeight.set(groupKey(c), (groupHeight.get(groupKey(c)) ?? 0) + c.height);
-  const order = [...cards].sort(
-    (a, b) => b.width - a.width || groupHeight.get(groupKey(b))! - groupHeight.get(groupKey(a))! || groupKey(a).localeCompare(groupKey(b)) || b.height - a.height,
-  );
-  const columns: { page: number; x: number; width: number; top: number; group?: string }[] = [];
-  /** Width taken on each sheet. */
+  const byGroup = new Map<string, SheetCard[]>();
+  for (const c of cards) byGroup.set(groupKey(c), [...(byGroup.get(groupKey(c)) ?? []), c]);
+  const total = (list: SheetCard[]): number => list.reduce((n, c) => n + c.height, 0);
+  // Biggest group first: it gets the first sheets and the top of mixed columns.
+  const rank = new Map([...byGroup].sort((a, b) => total(b[1]) - total(a[1]) || a[0].localeCompare(b[0])).map(([k], i) => [k, i]));
+
+  const pieces: Piece[] = [];
+  for (const [group, list] of byGroup) {
+    const own: Piece[] = [];
+    for (const card of [...list].sort((a, b) => b.height - a.height)) {
+      let piece = own.find((p) => p.height + card.height <= A4.height);
+      if (!piece) own.push((piece = { width: card.width, group, height: 0, cards: [] }));
+      piece.height += card.height;
+      piece.cards.push(card);
+    }
+    pieces.push(...own);
+  }
+
+  const columns = [...new Set(pieces.map((p) => p.width))].sort((a, b) => b - a).flatMap((w) => combine(pieces.filter((p) => p.width === w)));
+  const mixed = (col: Piece[]): boolean => new Set(col.map((p) => p.group)).size > 1;
+  for (const col of columns) col.sort((a, b) => rank.get(a.group)! - rank.get(b.group)! || b.height - a.height);
+  columns.sort((a, b) => b[0]!.width - a[0]!.width || Number(mixed(a)) - Number(mixed(b)) || rank.get(a[0]!.group)! - rank.get(b[0]!.group)!);
+
   const taken: number[] = [];
   const out: Placed[] = [];
-  for (const card of order) {
-    const room = columns.filter((c) => c.width === card.width && c.top + card.height <= A4.height);
-    let col = room.find((c) => c.group === card.group) ?? room[0];
-    if (!col) {
-      let page = taken.findIndex((w) => w + card.width <= A4.width);
-      if (page < 0) page = taken.push(0) - 1;
-      col = { page, x: taken[page]!, width: card.width, top: 0 };
-      taken[page] = taken[page]! + card.width;
-      columns.push(col);
+  for (const col of columns) {
+    const width = col[0]!.width;
+    let page = taken.findIndex((w) => w + width <= A4.width);
+    if (page < 0) page = taken.push(0) - 1;
+    const x = taken[page]!;
+    taken[page] = x + width;
+    let y = 0;
+    for (const card of col.flatMap((p) => p.cards)) {
+      out.push({ key: card.key, page, x, y, width: card.width, height: card.height });
+      y += card.height;
     }
-    out.push({ key: card.key, page: col.page, x: col.x, y: col.top, width: card.width, height: card.height });
-    col.top += card.height;
-    col.group = card.group;
   }
   return out;
+}
+
+/**
+ * Pieces of one width in as few columns as fit, and of those ways the one that mixes the least
+ * card height (the height of the columns holding more than one group). Every way is tried for up to
+ * nine pieces; past that, first fit, tallest first.
+ */
+function combine(pieces: Piece[]): Piece[][] {
+  const fits = (col: Piece[], p: Piece): boolean => col.reduce((n, q) => n + q.height, 0) + p.height <= A4.height;
+  if (pieces.length > 9) {
+    const cols: Piece[][] = [];
+    for (const p of [...pieces].sort((a, b) => b.height - a.height)) {
+      const col = cols.find((c) => fits(c, p));
+      if (col) col.push(p);
+      else cols.push([p]);
+    }
+    return cols;
+  }
+  const mixedHeight = (cols: Piece[][]): number =>
+    cols.filter((c) => new Set(c.map((p) => p.group)).size > 1).reduce((n, c) => n + c.reduce((m, p) => m + p.height, 0), 0);
+  let best: Piece[][] | null = null;
+  const tryFrom = (i: number, cols: Piece[][]): void => {
+    if (best && cols.length > best.length) return;
+    if (i === pieces.length) {
+      if (!best || cols.length < best.length || mixedHeight(cols) < mixedHeight(best)) best = cols.map((c) => [...c]);
+      return;
+    }
+    const p = pieces[i]!;
+    for (const col of cols) {
+      if (!fits(col, p)) continue;
+      col.push(p);
+      tryFrom(i + 1, cols);
+      col.pop();
+    }
+    cols.push([p]);
+    tryFrom(i + 1, cols);
+    cols.pop();
+  };
+  tryFrom(0, []);
+  return best ?? [];
 }
 
 /** Thin grey crosses at every card corner, one shape layer "Cut marks" that can be hidden. */

@@ -195,6 +195,9 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   (`photocraft-cli run --cmd type.edit`), so whatever was changed by hand stays.
   When the rows themselves change (a deal added, a new size), the card says
   "Rows changed: redraw": **Redraw** starts the PSD again from the master.
+- **Centre the number** (card editor, for a card with a big price): the price sits
+  in the middle by its number, what the price format adds (".-") hanging to the
+  side, as "15" centred with ".-" to its right. Switching it asks for a redraw.
 - **Price as** sets how a price reads: `{n}.-` gives `15.-`, `€{n}` gives `€15`.
   For an event in another currency, set the rate and the rounding step.
 - **Make A4 sheets** lays the ticked cards out on A4 pages (2480 x 3508 px at

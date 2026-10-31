@@ -1,6 +1,6 @@
 {
   "name": "@zollify/web",
-  "version": "4.3.0",
+  "version": "4.4.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -28,6 +28,7 @@
     "@zollify/platform": "*",
     "@zollify/pos": "*",
     "@zollify/price-cards": "*",
+    "@zollify/print-stories": "*",
     "@zollify/public-events": "*",
     "@zollify/sdk": "*",
     "@zollify/shopify-sync": "*",

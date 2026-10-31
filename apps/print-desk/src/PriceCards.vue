@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import type { DiscountRule, Product } from '@zollify/shared';
 import type { Printer, Session, Settings, Units } from '../electron/shared';
-import { CARD_SIZES, DEFAULT_THEMES, cardFor, cardRows, cardUnits, formatPrice, withoutCard, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PriceFormat, type SheetOptions } from '../electron/cards';
+import { CARD_SIZES, DEFAULT_THEMES, cardFor, cardRows, eventPricing, cardUnits, formatPrice, withoutCard, cardState, cardTexts, changedTexts, shownRows, type CardDef, type CardRow, type CardSize, type CardStyle, type CardState, type CardTheme, type PricedEvent, type PriceFormat, type SheetOptions } from '../electron/cards';
 import PrintSettings from './PrintSettings.vue';
 
 /**
@@ -32,12 +32,25 @@ const search = ref('');
 
 const pc = computed(() => props.settings.priceCards);
 const themes = computed(() => (pc.value.themes?.length ? pc.value.themes : DEFAULT_THEMES));
-const fmt = computed(() => pc.value.format);
+/** Every event, for their local prices. */
+const events = ref<PricedEvent[]>([]);
+/** Events that charge in a currency of their own, the latest first. */
+const localEvents = computed(() => events.value.filter((e) => eventPricing(e)).sort((a, b) => (b.dateStart ?? '').localeCompare(a.dateStart ?? '')));
+/** The event whose prices the cards show; null: the catalogue's. */
+const priceEvent = computed(() => localEvents.value.find((e) => e.id === pc.value.event) ?? null);
+const local = computed(() => eventPricing(priceEvent.value));
+const eventLabel = (e: PricedEvent): string => [e.name, e.localCurrency?.toUpperCase(), e.dateStart?.slice(0, 7), e.status === 'closed' ? 'closed' : ''].filter(Boolean).join(' · ');
+const pinnedNote = computed(() => {
+  const ev = priceEvent.value;
+  return `${Object.keys(ev?.localPriceOverrides ?? {}).length} prices and ${Object.keys(ev?.localTierOverrides ?? {}).length} bundle totals pinned for ${ev?.name ?? 'this event'}`;
+});
+/** How prices read. An event's prices are already in its currency and rounded, so they are only formatted. */
+const fmt = computed((): PriceFormat => (local.value ? { ...pc.value.format, rate: 1, rounding: 0 } : pc.value.format));
 const cards = computed(() => pc.value.cards[props.session.accountId] ?? []);
 const today = (): string => new Date().toLocaleDateString('sv-SE');
 
 const rowsOf = (def: CardDef): CardRow[] => shownRows(def, allRowsOf(def));
-const allRowsOf = (def: CardDef): CardRow[] => cardRows(def, products.value, discounts.value, today());
+const allRowsOf = (def: CardDef): CardRow[] => cardRows(def, products.value, discounts.value, today(), local.value);
 const stateOf = (def: CardDef): CardState => cardState(def, rowsOf(def), fmt.value);
 const themeOf = (def: CardDef): CardTheme => themes.value.find((t) => t.id === def.theme) ?? themes.value[0]!;
 const STATE_TEXT: Record<CardState, string> = { new: 'Not drawn yet', current: 'Up to date', prices: 'New prices', layout: 'Rows changed: redraw', empty: 'Prices nothing for sale' };
@@ -75,7 +88,7 @@ async function guard(what: string, fn: () => Promise<void>): Promise<void> {
 }
 async function reload(): Promise<void> {
   await guard('Loading prices', async () => {
-    ({ products: products.value, discounts: discounts.value } = await api.zollify.priceData());
+    ({ products: products.value, discounts: discounts.value, events: events.value } = await api.zollify.priceData());
   });
 }
 async function loadPreview(c: CardDef): Promise<void> {
@@ -110,7 +123,7 @@ const themeFor = reactive<Record<string, string>>({});
 const pickedTheme = (p: Product): string => themeFor[p.id] || quickTheme.value;
 const themeById = (id: string): CardTheme => themes.value.find((t) => t.id === id) ?? themes.value[0]!;
 function priceOf(p: Product): string {
-  const prices = cardUnits({ types: [], items: [`${p.id}:`] }, products.value).map((u) => u.price);
+  const prices = cardUnits({ types: [], items: [`${p.id}:`] }, products.value, local.value).map((u) => u.price);
   if (!prices.length) return '';
   const [lo, hi] = [Math.min(...prices), Math.max(...prices)];
   return lo === hi ? formatPrice(lo, fmt.value) : `${formatPrice(lo, fmt.value)} – ${formatPrice(hi, fmt.value)}`;
@@ -288,7 +301,14 @@ async function setUnits(units: Units): Promise<void> {
 
 // ── Settings: price format, folder, themes ──
 async function setFormat(patch: Partial<PriceFormat>): Promise<void> {
-  await save({ format: { ...fmt.value, ...patch } });
+  await save({ format: { ...pc.value.format, ...patch } });
+}
+async function setEvent(id: string): Promise<void> {
+  await save({ event: id });
+  const ev = localEvents.value.find((e) => e.id === id);
+  const moved = cards.value.filter((c) => c.file && stateOf(c) === 'prices').length;
+  const what = ev ? `Prices in ${local.value?.currency}, as ${ev.name} charges them.` : 'Catalogue prices.';
+  emit('notice', `${what}${moved ? ` ${moved} cards have new prices: Update all writes them in.` : ''}`);
 }
 async function pickDir(): Promise<void> {
   const folder = await api.cards.pickFolder();
@@ -334,8 +354,17 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
     <button type="button" class="quiet" :aria-pressed="showMissing" :disabled="!missing.length" title="Products for sale that no card prices yet" @click="showMissing = !showMissing">Without a card ({{ missing.length }})</button>
     <span class="spacer"></span>
     <label class="inline" title="{n} is the price: {n}.- gives 15.-, €{n} gives €15">Price as <input class="pattern" :value="fmt.pattern" @change="setFormat({ pattern: ($event.target as HTMLInputElement).value || '{n}' })" /></label>
-    <label class="inline" title="Prices are the catalogue's times this, for an event in another currency">× <input type="number" min="0" step="0.0001" :value="fmt.rate" @change="setFormat({ rate: ($event.target as HTMLInputElement).valueAsNumber || 1 })" /></label>
-    <label class="inline" title="Round to this step: 0.5, 1, 5. 0 keeps the cents">Round to <input type="number" min="0" step="0.05" :value="fmt.rounding" @change="setFormat({ rounding: ($event.target as HTMLInputElement).valueAsNumber || 0 })" /></label>
+    <label class="inline" title="Catalogue prices, or an event's local prices: its currency, rate and rounding, and the prices pinned for it, as its till charges them">Prices
+      <select :value="priceEvent?.id ?? ''" @change="setEvent(($event.target as HTMLSelectElement).value)">
+        <option value="">Catalogue</option>
+        <option v-for="e in localEvents" :key="e.id" :value="e.id">{{ eventLabel(e) }}</option>
+      </select>
+    </label>
+    <span v-if="local" class="muted rate" :title="pinnedNote">× {{ local.rate }}{{ local.rounding ? `, to ${local.rounding}` : '' }}</span>
+    <template v-else>
+      <label class="inline" title="Prices are the catalogue's times this, for an event in another currency">× <input type="number" min="0" step="0.0001" :value="fmt.rate" @change="setFormat({ rate: ($event.target as HTMLInputElement).valueAsNumber || 1 })" /></label>
+      <label class="inline" title="Round to this step: 0.5, 1, 5. 0 keeps the cents">Round to <input type="number" min="0" step="0.05" :value="fmt.rounding" @change="setFormat({ rounding: ($event.target as HTMLInputElement).valueAsNumber || 0 })" /></label>
+    </template>
     <button type="button" class="quiet" :aria-pressed="showPrint" @click="showPrint = !showPrint">Print settings{{ printParams ? ' (own)' : '' }}</button>
     <button type="button" class="quiet" :aria-pressed="showThemes" @click="showThemes = !showThemes">Themes</button>
   </div>
@@ -526,6 +555,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
 .toolbar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .pattern { width: 6rem; }
+.rate { font-size: .85rem; }
 .folder { margin: 0; font-size: .85rem; }
 .busy { margin-left: 1rem; color: var(--zfy-primary); }
 .missing { display: flex; flex-direction: column; gap: .5rem; background: var(--zfy-surface); border: 1px solid var(--zfy-line); border-radius: 10px; padding: .8rem; }

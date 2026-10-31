@@ -202,8 +202,15 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
 - **Centre the number** (card editor, for a card with a big price): the price sits
   in the middle by its number, what the price format adds (".-") hanging to the
   side, as "15" centred with ".-" to its right. Switching it asks for a redraw.
+- **Prices** (toolbar): the catalogue's, or an event's that charges in a currency
+  of its own (Narcon · SEK, Herofest · CHF). With an event, every price on the
+  cards is what its till charges: converted at its rate and rounded to its step,
+  or the price pinned for it under Local prices; deal and bundle totals the same
+  way. Swapping marks the cards "New prices" and **Update all** writes them into
+  the PSDs; a card whose lines split (some variants pinned, some not) asks for a
+  redraw. Back to Catalogue, they are up to date again.
 - **Price as** sets how a price reads: `{n}.-` gives `15.-`, `€{n}` gives `€15`.
-  For an event in another currency, set the rate and the rounding step.
+  With catalogue prices, a rate and a rounding step convert them by hand.
 - **Make A4 sheets** lays the ticked cards out on A4 pages (2480 x 3508 px at
   300 ppi), each card an embedded Smart Object, so a sheet can still be changed
   in PhotoCraft. **Fewest sheets** (on unless switched off): the tallest cards

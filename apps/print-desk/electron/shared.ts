@@ -98,6 +98,8 @@ export interface PriceCardSettings {
   outDir: string;
   /** `file.print` params the sheets print with (their own printer, profile, driver settings); null or unset: the global print settings. */
   print?: Record<string, unknown> | null;
+  /** The event whose local prices the cards show (its currency, rate, rounding, pinned prices); '' or unset: the catalogue's. */
+  event?: string;
   /** How sheets are laid out; unset: fewest sheets, no cut marks. */
   sheet?: SheetOptions;
 }

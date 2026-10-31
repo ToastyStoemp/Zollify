@@ -1,6 +1,6 @@
 import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
 import type { DiscountRule, Product } from '@zollify/shared';
-import type { CardRow, CardSize, CardStyle, CardTheme, PriceFormat, SheetOptions } from '../electron/cards';
+import type { CardRow, CardSize, CardStyle, CardTheme, PricedEvent, PriceFormat, SheetOptions } from '../electron/cards';
 import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
@@ -33,7 +33,7 @@ export interface PrintDeskApi {
     /** Adds copies to each item's stock as Zollify has it now; each item's new count. */
     addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]>;
     /** Every live product and discount rule, for price cards. */
-    priceData(): Promise<{ products: Product[]; discounts: DiscountRule[] }>;
+    priceData(): Promise<{ products: Product[]; discounts: DiscountRule[]; events: PricedEvent[] }>;
   };
   /** Price cards, drawn by photocraft-cli into the cards folder. */
   cards: {

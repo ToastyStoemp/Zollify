@@ -723,16 +723,31 @@ function combine(pieces: Piece[]): Piece[][] {
   return best ?? [];
 }
 
-/** Thin grey crosses at every card corner, one shape layer "Cut marks" that can be hidden. */
+/**
+ * Thin grey marks at every card corner, one shape layer "Cut marks" that can be hidden. A mark
+ * only has arms along card edges, so a corner that meets the middle of another card's side shows
+ * the cut line and its own edge (a T on its side), never a cross over the other card.
+ */
 export function cutMarks(placed: Placed[]): Command | null {
-  const ARM = 30; // 2.5 mm each way at 300 ppi
+  const ARM = 30; // 2.5 mm at 300 ppi
   const LINE = 3; // 0.25 mm
   const corners = new Set(placed.flatMap((p) => [p.x, p.x + p.width].flatMap((x) => [p.y, p.y + p.height].map((y) => `${x},${y}`))));
   if (!corners.size) return null;
+  // Every card edge: horizontal ones at a y from x0 to x1, vertical ones at an x from y0 to y1.
+  const across = placed.flatMap((p) => [p.y, p.y + p.height].map((y) => ({ at: y, from: p.x, to: p.x + p.width })));
+  const down = placed.flatMap((p) => [p.x, p.x + p.width].map((x) => ({ at: x, from: p.y, to: p.y + p.height })));
+  /** Whether an edge runs from `pos` along the line at `at`: towards higher values (+1) or lower (-1). */
+  const runs = (edges: typeof across, at: number, pos: number, dir: 1 | -1): boolean =>
+    edges.some((e) => e.at === at && (dir > 0 ? e.from <= pos && pos < e.to : e.from < pos && pos <= e.to));
   const box = (x: number, y: number, w: number, h: number) => ({ closed: true, knots: [[x, y], [x + w, y], [x + w, y + h], [x, y + h]] });
   const subpaths = [...corners].flatMap((k) => {
     const [x, y] = k.split(',').map(Number) as [number, number];
-    return [box(x - ARM, y - LINE / 2, ARM * 2, LINE), box(x - LINE / 2, y - ARM, LINE, ARM * 2)];
+    const [left, right] = [runs(across, y, x, -1) ? ARM : 0, runs(across, y, x, 1) ? ARM : 0];
+    const [up, below] = [runs(down, x, y, -1) ? ARM : 0, runs(down, x, y, 1) ? ARM : 0];
+    return [
+      ...(left + right ? [box(x - left, y - LINE / 2, left + right, LINE)] : []),
+      ...(up + below ? [box(x - LINE / 2, y - up, LINE, up + below)] : []),
+    ];
   });
   return ['shape.create', { kind: 'path', path: { subpaths, fillRule: 'nonzero' }, fill: '#808080', name: 'Cut marks' }];
 }

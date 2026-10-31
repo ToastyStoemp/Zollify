@@ -261,6 +261,21 @@ describe('packSheets', () => {
     expect(at('coin').x).toBe(at('mat').x);
     expect(at('s0').page).not.toBe(at('coin').page);
   });
+  it('draws arms only along card edges, not across a neighbouring card', () => {
+    // A short card left, a tall one right: the short card's bottom right corner is on the tall card's side.
+    const placed = [
+      { key: 'short', page: 0, x: 0, y: 0, width: 1240, height: 1000 },
+      { key: 'tall', page: 0, x: 1240, y: 0, width: 1240, height: 1600 },
+    ];
+    const [, p] = cutMarks(placed)!;
+    const boxes = (p.path as { subpaths: { knots: number[][] }[] }).subpaths.map((s) => s.knots);
+    const at = (x: number, y: number) => boxes.filter((k) => k.some(([bx, by]) => Math.abs(bx! - x) <= 30 && Math.abs(by! - y) <= 30));
+    // At (1240, 1000): the cut line up and down, and an arm left along the short card's bottom only.
+    const mark = at(1240, 1000);
+    const xs = mark.flatMap((k) => k.map(([bx]) => bx!));
+    expect(Math.min(...xs)).toBe(1240 - 30);
+    expect(Math.max(...xs)).toBeLessThan(1240 + 30);
+  });
   it('draws a cut mark once at every card corner', () => {
     const placed = [
       { key: 'a', page: 0, x: 0, y: 0, width: 1240, height: 1000 },

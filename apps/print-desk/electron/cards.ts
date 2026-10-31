@@ -120,10 +120,57 @@ interface Unit {
 const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
 /**
+ * An event's local prices, as its till charges them: the catalogue's prices times `rate`, rounded
+ * to `rounding` (0: cents), unless a price is pinned by hand. Shaped like the event's own fields.
+ */
+export interface LocalPricing {
+  currency: string;
+  rate: number;
+  rounding: number;
+  /** Pinned prices by stock key ("pid:vid", "pid:" or, as older events have them, "pid"). */
+  prices: Record<string, number>;
+  /** Pinned bundle totals: "ruleId:tierIndex", and "ruleId:combo" for a combo's discount. */
+  tiers: Record<string, number>;
+}
+
+/** The event fields Print Desk reads. */
+export interface PricedEvent {
+  id: string;
+  name: string;
+  currency: string;
+  dateStart?: string;
+  status?: string;
+  localCurrency?: string;
+  exchangeRate?: number;
+  roundingIncrement?: number;
+  localPriceOverrides?: Record<string, number>;
+  localTierOverrides?: Record<string, number>;
+  deletedAt?: number;
+}
+
+/** An event's local prices; null when it charges in the catalogue's currency. */
+export function eventPricing(ev: PricedEvent | null | undefined): LocalPricing | null {
+  if (!ev?.localCurrency || !(Number(ev.exchangeRate) > 0) || ev.localCurrency.toUpperCase() === ev.currency.toUpperCase()) return null;
+  return { currency: ev.localCurrency.toUpperCase(), rate: Number(ev.exchangeRate), rounding: ev.roundingIncrement ?? 0, prices: ev.localPriceOverrides ?? {}, tiers: ev.localTierOverrides ?? {} };
+}
+
+/** A catalogue amount as the event charges it: converted, then rounded, as the till does. */
+const toLocal = (base: number, local: LocalPricing): number => {
+  const v = base * local.rate;
+  return local.rounding > 0 ? Math.round(v / local.rounding) * local.rounding : round2(v);
+};
+/** One item's price: the catalogue's, or the event's pinned or converted one. */
+function unitPrice(productId: string, variantId: string, base: number, local?: LocalPricing | null): number {
+  if (!local) return round2(base);
+  const pinned = local.prices[`${productId}:${variantId}`] ?? (variantId ? undefined : local.prices[productId]);
+  return typeof pinned === 'number' && pinned >= 0 ? pinned : toLocal(base, local);
+}
+
+/**
  * The sellable items a card prices: products and variants for sale. Unlisted ones (off the price
  * lists) count only when picked by name: an unlisted product, or an unlisted variant by itself.
  */
-export function cardUnits(source: CardSource, products: Product[]): Unit[] {
+export function cardUnits(source: CardSource, products: Product[], local?: LocalPricing | null): Unit[] {
   const units: Unit[] = [];
   for (const p of products) {
     if (p.deletedAt || p.forSale === false) continue;
@@ -132,10 +179,10 @@ export function cardUnits(source: CardSource, products: Product[]): Unit[] {
     const variants = (p.variants ?? []).filter((v) => !v.unlisted || source.items.includes(`${p.id}:${v.id}`));
     if (variants.length) {
       for (const v of variants) {
-        if (whole || source.items.includes(`${p.id}:${v.id}`)) units.push({ key: `${p.id}:${v.id}`, product: p, variant: v.name || '', price: round2(v.price ?? p.price ?? 0) });
+        if (whole || source.items.includes(`${p.id}:${v.id}`)) units.push({ key: `${p.id}:${v.id}`, product: p, variant: v.name || '', price: unitPrice(p.id, v.id, v.price ?? p.price ?? 0, local) });
       }
     } else if (whole) {
-      units.push({ key: `${p.id}:`, product: p, variant: '', price: round2(p.price ?? 0) });
+      units.push({ key: `${p.id}:`, product: p, variant: '', price: unitPrice(p.id, '', p.price ?? 0, local) });
     }
   }
   return units;
@@ -185,13 +232,13 @@ function lineLabel(group: Unit[], units: Unit[]): string {
 }
 
 /** The cheapest price of a combo member, or null when the catalogue has none of it. */
-function memberPrice(products: Product[], match: (p: Product, vid: string) => boolean): number | null {
+function memberPrice(products: Product[], match: (p: Product, vid: string) => boolean, local?: LocalPricing | null): number | null {
   const prices: number[] = [];
   for (const p of products) {
     if (p.deletedAt || p.forSale === false) continue;
     const variants = p.variants ?? [];
-    if (variants.length) for (const v of variants) if (match(p, v.id)) prices.push(v.price ?? p.price ?? 0);
-    if (!variants.length && match(p, '')) prices.push(p.price ?? 0);
+    if (variants.length) for (const v of variants) if (match(p, v.id)) prices.push(unitPrice(p.id, v.id, v.price ?? p.price ?? 0, local));
+    if (!variants.length && match(p, '')) prices.push(unitPrice(p.id, '', p.price ?? 0, local));
   }
   return prices.length ? Math.min(...prices) : null;
 }
@@ -200,10 +247,11 @@ const ordinal = (n: number): string => n + (['th', 'st', 'nd', 'rd'][(n % 100 - 
 
 /**
  * Every row a card can show, before its own labels and hidden rows: the prices, the deals of the
- * discounts that touch its items and apply on `today` (YYYY-MM-DD), then the small print.
+ * discounts that touch its items and apply on `today` (YYYY-MM-DD), then the small print. With an
+ * event's `local` prices, every price is what that event's till charges.
  */
-export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Product[], discounts: DiscountRule[], today: string): CardRow[] {
-  const units = cardUnits(def.source, products);
+export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Product[], discounts: DiscountRule[], today: string, local?: LocalPricing | null): CardRow[] {
+  const units = cardUnits(def.source, products, local);
   if (!units.length) return [];
   const rows: CardRow[] = [];
 
@@ -227,19 +275,22 @@ export function cardRows(def: Pick<CardDef, 'source' | 'notes'>, products: Produ
     const some = touched.length < units.length ? lineLabel(touched, units) : '';
     const offer = (text: string): string => (some ? `${some}: ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text);
     if (rule.type === 'tiered') {
-      for (const t of [...(rule.tiers ?? [])].sort((a, b) => a.qty - b.qty)) {
+      // Pinned totals are keyed by the tier's place in the rule, so the order is taken before sorting.
+      for (const [i, t] of [...(rule.tiers ?? []).entries()].sort((a, b) => a[1].qty - b[1].qty)) {
         if (t.qty < 2) continue;
         const id = `deal:${rule.id}:${t.qty}`;
-        rows.push(some ? { id, kind: 'line', label: `${t.qty} × ${some}`, price: round2(t.total), accent: true } : { id, kind: 'deal', qty: t.qty, price: round2(t.total) });
+        const total = local ? (local.tiers[`${rule.id}:${i}`] ?? toLocal(t.total, local)) : round2(t.total);
+        rows.push(some ? { id, kind: 'line', label: `${t.qty} × ${some}`, price: total, accent: true } : { id, kind: 'deal', qty: t.qty, price: total });
       }
     } else if (rule.type === 'combo') {
       const members = [
-        ...(rule.productIds ?? []).map((id) => memberPrice(products, (p) => p.id === id)),
-        ...(rule.variantIds ?? []).map((k) => memberPrice(products, (p, vid) => `${p.id}:${vid}` === k)),
-        ...(rule.productTypes ?? []).map((t) => memberPrice(products, (p) => p.type === t)),
+        ...(rule.productIds ?? []).map((id) => memberPrice(products, (p) => p.id === id, local)),
+        ...(rule.variantIds ?? []).map((k) => memberPrice(products, (p, vid) => `${p.id}:${vid}` === k, local)),
+        ...(rule.productTypes ?? []).map((t) => memberPrice(products, (p) => p.type === t, local)),
       ];
       if (members.length && members.every((m) => m !== null)) {
-        const price = round2(members.reduce<number>((s, m) => s + m!, 0) - (rule.comboDiscountAmount ?? 0));
+        const off = local ? (local.tiers[`${rule.id}:combo`] ?? toLocal(rule.comboDiscountAmount ?? 0, local)) : (rule.comboDiscountAmount ?? 0);
+        const price = round2(members.reduce<number>((s, m) => s + m!, 0) - off);
         rows.push({ id: `bundle:${rule.id}`, kind: 'line', label: 'Bundle', price, accent: true });
       }
     } else if (rule.type === 'bxgy') {

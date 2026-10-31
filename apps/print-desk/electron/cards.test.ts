@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DiscountRule, Product } from '@zollify/shared';
-import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardFor, cardLayout, cardRows, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows, withoutCard } from './cards.js';
+import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardFor, cardLayout, cardRows, cardUnits, eventPricing, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows, withoutCard } from './cards.js';
 
 const product = (p: Partial<Product> & { id: string }): Product => ({ title: p.id, forSale: true, unlisted: false, price: 0, variants: [], updatedAt: 1, ...p }) as Product;
 const rule = (r: Partial<DiscountRule> & { id: string; type: DiscountRule['type'] }): DiscountRule => ({ name: r.id, productIds: [], variantIds: [], updatedAt: 1, ...r }) as DiscountRule;
@@ -101,6 +101,33 @@ describe('withoutCard', () => {
     const card = cardFor(products.find((p) => p.id === 'bag')!, 'sky', 'c1');
     expect(card).toMatchObject({ id: 'c1', title: 'Bag', theme: 'sky', source: { types: [], items: ['bag:'] } });
     expect(withoutCard([...cards, card], products).map((p) => p.id)).toEqual(['wallet', 'fsticker']);
+  });
+});
+
+describe('event prices', () => {
+  const sek = { id: 'e', name: 'Narcon', currency: 'EUR', localCurrency: 'sek', exchangeRate: 11.06, roundingIncrement: 20 };
+  it('charges in the event currency: converted and rounded as the till does, pinned prices as set', () => {
+    const local = eventPricing({ ...sek, localPriceOverrides: { 'zodiac:a': 130, flower: 125 } })!;
+    expect(local.currency).toBe('SEK');
+    const prices = cardUnits({ types: ['Keychain'], items: [] }, products, local).map((u) => [u.key, u.price]);
+    // 12 EUR is 132.72 SEK, to the nearest 20: 140. Aries is pinned by "pid:vid", Flower by the older plain "pid".
+    expect(prices).toEqual([['zodiac:a', 130], ['zodiac:b', 140], ['flower:', 125]]);
+  });
+  it('takes pinned bundle totals by their place in the rule, before the tiers are sorted', () => {
+    const local = eventPricing({ ...sek, localTierOverrides: { 'kb:1': 200 } })!;
+    const rows = cardRows(def(['Keychain']), products, discounts, today, local);
+    // kb lists 3 for 30 first, then 2 for 20: tier 1 is the 2 for 20, pinned at 200; 30 EUR converts to 340.
+    expect(rows.filter((r) => r.kind === 'deal').map((r) => r.kind === 'deal' && [r.qty, r.price])).toEqual([[2, 200], [3, 340]]);
+  });
+  it('makes a combo from the members at the event prices, less its discount there', () => {
+    const rows = cardRows(def(['Bear']), products, discounts, today, eventPricing({ ...sek, localTierOverrides: { 'bear:combo': 100 } }));
+    // Wallet 55 EUR is 600 SEK, Bag 90 EUR is 1000 SEK: 1600 less the pinned 100.
+    expect(rows.find((r) => r.id === 'bundle:bear')).toMatchObject({ price: 1500 });
+  });
+  it('has no local prices for an event that charges in the catalogue currency', () => {
+    expect(eventPricing({ id: 'x', name: 'Facts', currency: 'EUR' })).toBeNull();
+    expect(eventPricing({ ...sek, localCurrency: 'EUR' })).toBeNull();
+    expect(eventPricing({ ...sek, exchangeRate: 0 })).toBeNull();
   });
 });
 

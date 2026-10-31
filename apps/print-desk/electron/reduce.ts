@@ -1,4 +1,5 @@
 import type { DiscountRule, InventoryItem, Product } from '@zollify/shared';
+import type { PricedEvent } from './cards.js';
 import { stockKey, type CatalogRow } from './shared.js';
 
 /**
@@ -34,14 +35,24 @@ function reduceProducts(ops: PulledOp[]): Map<string, Product> {
 }
 
 /**
- * Every live product (all types, not only art prints) and every live discount rule, for price
- * cards. Discounts reduce as the server's reduceDiscounts: discount.upsert last writer wins,
+ * Every live product (all types, not only art prints), every live discount rule and every event
+ * (for its local prices), for price cards. Events reduce as the server does: event.upsert last
+ * writer wins, event.close closes. Discounts reduce as the server's reduceDiscounts: discount.upsert last writer wins,
  * discount.delete ({ id, deletedAt }, or the older { ruleId, updatedAt }) deletes.
  */
-export function priceData(ops: PulledOp[]): { products: Product[]; discounts: DiscountRule[] } {
+export function priceData(ops: PulledOp[]): { products: Product[]; discounts: DiscountRule[]; events: PricedEvent[] } {
   const discounts = new Map<string, DiscountRule>();
+  const events = new Map<string, PricedEvent & { updatedAt: number }>();
   for (const op of ops) {
-    if (op.type === 'discount.upsert') {
+    if (op.type === 'event.upsert') {
+      const e = op.payload as PricedEvent & { updatedAt: number };
+      const cur = events.get(e.id);
+      if (!cur || e.updatedAt >= cur.updatedAt) events.set(e.id, e);
+    } else if (op.type === 'event.close') {
+      const { eventId, updatedAt } = op.payload as { eventId: string; updatedAt: number };
+      const e = events.get(eventId);
+      if (e && updatedAt >= e.updatedAt) events.set(eventId, { ...e, status: 'closed', updatedAt });
+    } else if (op.type === 'discount.upsert') {
       const r = op.payload as DiscountRule;
       const cur = discounts.get(r.id);
       if (!cur || r.updatedAt >= cur.updatedAt) discounts.set(r.id, r);
@@ -56,6 +67,7 @@ export function priceData(ops: PulledOp[]): { products: Product[]; discounts: Di
   return {
     products: [...reduceProducts(ops).values()].filter((p) => !p.deletedAt),
     discounts: [...discounts.values()].filter((d) => !d.deletedAt),
+    events: [...events.values()].filter((e) => !e.deletedAt),
   };
 }
 

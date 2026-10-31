@@ -156,6 +156,18 @@ describe('sizes and strips', () => {
   });
 });
 
+describe('numberShift', () => {
+  it('centres a price on its number: what the format adds after it hangs right, before it left', () => {
+    const price = [{ id: 'price', kind: 'price' as const, price: 35 }];
+    const art = { title: 'Cap', subtitle: '', rows: price, theme: DEFAULT_THEMES[1]!, mascot: null };
+    const x = (fmt: typeof DEFAULT_FORMAT, centreNumber?: boolean): number => Number(cardLayout({ ...art, centreNumber }, fmt).commands.find(([, p]) => p.name === 'price')![1].x);
+    expect(x(DEFAULT_FORMAT, true)).toBeGreaterThan(x(DEFAULT_FORMAT));
+    expect(x({ ...DEFAULT_FORMAT, pattern: '€{n}' }, true)).toBeLessThan(x({ ...DEFAULT_FORMAT, pattern: '€{n}' }));
+    expect(x({ ...DEFAULT_FORMAT, pattern: '{n}' }, true)).toBe(x({ ...DEFAULT_FORMAT, pattern: '{n}' }));
+    expect(cardLayout({ ...art, centreNumber: true }, DEFAULT_FORMAT).layout).toBe('centred|price');
+  });
+});
+
 describe('cardState', () => {
   it('tells a new price, which goes into the PSD in place, from a new row, which needs a redraw', () => {
     const rows: ReturnType<typeof cardRows> = [{ id: 'price', kind: 'price', price: 12 }];

@@ -72,6 +72,8 @@ export interface CardDef {
   style?: CardStyle;
   /** A strip without its heading: the title only names the card in the list. */
   noHeading?: boolean;
+  /** The big price centred on its number, what the price format adds (".-") hanging outside. */
+  centreNumber?: boolean;
   /** Its width in pixels, as drawn. */
   width?: number;
   /** The style, size and row ids it was drawn with: prices go into the PSD in place while these stay the same. */
@@ -290,8 +292,14 @@ export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
  */
 export type CardStyle = 'card' | 'strip';
 /** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
-export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean }, rows: CardRow[]): string =>
-  [...(art.style === 'strip' ? ['strip'] : []), ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []), ...(art.size === 'third' ? ['third'] : []), ...rows.map((r) => r.id)].join('|');
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean; centreNumber?: boolean }, rows: CardRow[]): string =>
+  [
+    ...(art.style === 'strip' ? ['strip'] : []),
+    ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []),
+    ...(art.size === 'third' ? ['third'] : []),
+    ...(art.centreNumber ? ['centred'] : []),
+    ...rows.map((r) => r.id),
+  ].join('|');
 const PX_PER_PT = 300 / 72;
 const FRAME = { x: 92, top: 192, width: 1056, radius: 165, stroke: 20 };
 const PILL = { x: 287, y: 100, width: 673, height: 177 };
@@ -316,6 +324,15 @@ const fit = (text: string, pt: number, width: number, tracking = 0): number => {
   return w > width ? Math.max(6, Math.floor((pt * width) / w * 10) / 10) : pt;
 };
 
+/**
+ * How far right a centred price moves so its number sits in the middle and what the price format
+ * adds around it hangs outside: "15.-" then centres on "15", with ".-" to its right.
+ */
+export function numberShift(fmt: PriceFormat, pt: number, tracking: number): number {
+  const [before = '', after = ''] = (fmt.pattern || '{n}').split('{n}');
+  return (textWidth(after, pt, tracking) - textWidth(before, pt, tracking)) / 2;
+}
+
 export type Command = [id: string, params: Record<string, unknown>];
 
 export interface CardArt {
@@ -328,6 +345,7 @@ export interface CardArt {
   size?: CardSize;
   style?: CardStyle;
   noHeading?: boolean;
+  centreNumber?: boolean;
 }
 
 /** A command with its positions and sizes times `s`: the master drawn smaller, all in proportion. */
@@ -399,7 +417,7 @@ function stripCommands(art: CardArt, fmt: PriceFormat): { height: number; comman
   }
   for (const r of art.rows) {
     if (r.kind === 'price') {
-      text(r.id, CARD_WIDTH / 2, y + 150, 34, c.ink, { tracking: 100 });
+      text(r.id, CARD_WIDTH / 2 + (art.centreNumber ? numberShift(fmt, 34, 100) : 0), y + 150, 34, c.ink, { tracking: 100 });
       y += 170;
     } else if (r.kind === 'deal') {
       text(`${r.id} qty`, 500, y + 75, 20, c.ink);
@@ -445,7 +463,8 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   let y = ROWS_TOP;
   for (const r of art.rows) {
     if (r.kind === 'price') {
-      text(r.id, CARD_WIDTH / 2, y + 170, fit(texts[r.id]!, 48, FRAME.width - 160, 100), c.ink, { tracking: 100 });
+      const pt = fit(texts[r.id]!, 48, FRAME.width - 160, 100);
+      text(r.id, CARD_WIDTH / 2 + (art.centreNumber ? numberShift(fmt, pt, 100) : 0), y + 170, pt, c.ink, { tracking: 100 });
       y += 277;
     } else if (r.kind === 'deal') {
       text(`${r.id} qty`, 296, y + 105, 30, c.ink);

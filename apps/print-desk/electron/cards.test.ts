@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DiscountRule, Product } from '@zollify/shared';
-import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, cardFor, cardLayout, cardRows, cardUnits, eventPricing, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows, withoutCard } from './cards.js';
+import { A4, DEFAULT_FORMAT, DEFAULT_THEMES, bandTitle, cardFor, cardLayout, hangShift, cardRows, cardUnits, eventPricing, cardState, cardTexts, changedTexts, cutMarks, formatPrice, packSheets, sheetCommands, shownRows, withoutCard } from './cards.js';
 
 const product = (p: Partial<Product> & { id: string }): Product => ({ title: p.id, forSale: true, unlisted: false, price: 0, variants: [], updatedAt: 1, ...p }) as Product;
 const rule = (r: Partial<DiscountRule> & { id: string; type: DiscountRule['type'] }): DiscountRule => ({ name: r.id, productIds: [], variantIds: [], updatedAt: 1, ...r }) as DiscountRule;
@@ -153,6 +153,28 @@ describe('cardLayout', () => {
   });
 });
 
+describe('title band', () => {
+  it('puts a long title alone over two lines when that makes it bigger, never with a small line', () => {
+    expect(bandTitle('Keychain', '')).toBe('KEYCHAIN');
+    expect(bandTitle('Coin pouch', '')).toBe('COIN POUCH');
+    expect(bandTitle('Flower stickers', '')).toBe('FLOWER\nSTICKERS');
+    expect(bandTitle('Sticker sheet bundle deal', '')).toBe('STICKER SHEET\nBUNDLE DEAL');
+    expect(bandTitle('Sticker sheet bundle deal', 'Large')).toBe('STICKER SHEET BUNDLE DEAL');
+    const art = { title: 'Sticker sheet bundle deal', subtitle: '', rows: [{ id: 'price', kind: 'price' as const, price: 7 }], theme: DEFAULT_THEMES[1]!, mascot: null };
+    const two = cardLayout(art, DEFAULT_FORMAT);
+    const line = (name: string) => two.commands.find(([, p]) => p.name === name)![1];
+    expect([line('Title').text, line('Title 2').text]).toEqual(['STICKER SHEET', 'BUNDLE DEAL']);
+    expect(Number(line('Title 2').y)).toBeGreaterThan(Number(line('Title').y));
+    expect(two.layout).toBe('title2|price');
+  });
+  it('centres a title on its words, an emoji at either end hanging outside', () => {
+    expect(hangShift('FLOWER STICKERS 🌼', 16, 360)).toBeGreaterThan(0);
+    expect(hangShift('🌼 FLOWER STICKERS', 16, 360)).toBeLessThan(0);
+    expect(hangShift('FLOWER STICKERS', 16, 360)).toBe(0);
+    expect(hangShift('BIG (WITH TAIL)', 16, 360)).toBe(0);
+  });
+});
+
 describe('sizes and strips', () => {
   const rows: ReturnType<typeof cardRows> = [{ id: 'line:a', kind: 'line', label: 'A4', price: 25 }, { id: 'line:b', kind: 'line', label: 'A3', price: 40 }];
   const art = { title: 'Available in:', subtitle: '', rows, theme: DEFAULT_THEMES[0]!, mascot: null };
@@ -163,7 +185,7 @@ describe('sizes and strips', () => {
     expect(Math.abs(third.height - (half.height * 826) / 1240)).toBeLessThan(2);
     const size = (l: typeof half): unknown => l.commands.find(([, p]) => p.name === 'line:a price')![1].size;
     expect(size(third)).toBeCloseTo((Number(size(half)) * 826) / 1240, 1);
-    expect(third.layout).toBe('third|line:a|line:b');
+    expect(third.layout).toBe(`third|${half.layout}`);
   });
   it('lays a strip out as a heading as typed with the sizes side by side', () => {
     const strip = cardLayout({ ...art, style: 'strip' }, DEFAULT_FORMAT);

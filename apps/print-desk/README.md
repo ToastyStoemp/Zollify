@@ -199,6 +199,12 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   (`photocraft-cli run --cmd type.edit`), so whatever was changed by hand stays.
   When the rows themselves change (a deal added, a new size), the card says
   "Rows changed: redraw": **Redraw** starts the PSD again from the master.
+  **Redraw all** does that for every card, after a theme or layout change
+  (it asks first: changes made by hand in the PSDs go).
+- **The title band**: the title and the small line under it are centred on the
+  band by their words, an emoji or symbol at either end hanging outside. A title
+  with no small line goes over two lines, split at the space that gives the
+  biggest letters, when that makes it at least a point bigger.
 - **Centre the number** (a theme setting, under Themes): on the theme's cards with
   one big price, the price sits in the middle by its number, what the price
   format adds (".-") hanging to the side, as "15" centred with ".-" to its right.

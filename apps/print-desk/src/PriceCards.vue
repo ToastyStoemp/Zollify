@@ -269,12 +269,21 @@ async function setSheet(patch: SheetOptions): Promise<void> {
   await save({ sheet: { ...sheetOpts.value, ...patch } });
 }
 async function makeSheets(): Promise<void> {
+  let made = false;
   await guard('Laying out sheets', async () => {
-    const made = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: c.width ?? 1240, height: c.height!, group: c.theme }))), plain(sheetOpts.value));
-    pages.value = await Promise.all(made.map(async (p) => ({ ...p, image: await api.cards.image(p.preview) })));
-    emit('notice', `${made.length} ${made.length === 1 ? 'sheet' : 'sheets'} saved in ${dir.value}.`);
+    const sheets = await api.cards.sheets(plain(sheetCards.value.map((c) => ({ key: c.id, file: c.file!, width: c.width ?? 1240, height: c.height!, group: c.theme }))), plain(sheetOpts.value));
+    pages.value = await Promise.all(sheets.map(async (p) => ({ ...p, image: await api.cards.image(p.preview) })));
+    emit('notice', `${sheets.length} ${sheets.length === 1 ? 'sheet' : 'sheets'} saved in ${dir.value}.`);
+    made = true;
   });
+  if (!made) return;
+  // The sheets come in under the card list: bring them into view, once their previews have their size.
+  await nextTick();
+  const shown = pagesEl.value?.querySelectorAll('img') ?? [];
+  await Promise.all([...shown].map((img) => (img.complete ? null : new Promise((ok) => img.addEventListener('load', ok, { once: true })))));
+  pagesEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+const pagesEl = ref<HTMLElement | null>(null);
 async function pdf(file: string): Promise<void> {
   await guard('Saving PDF', async () => emit('notice', `Saved ${await api.cards.pdf(file)}`));
 }
@@ -552,7 +561,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
       <button type="button" :disabled="!!busy" @click="printPages(pages.map((p) => p.file))">Print {{ pages.length === 1 ? 'it' : `all ${pages.length}` }}</button>
     </template>
   </section>
-  <div v-if="pages.length" class="pages">
+  <div v-if="pages.length" ref="pagesEl" class="pages">
     <figure v-for="(p, n) in pages" :key="p.file">
       <img :src="p.image" :alt="`Sheet ${n + 1}`" />
       <figcaption>

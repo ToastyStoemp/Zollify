@@ -381,7 +381,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
               <option v-for="(s, id) in CARD_SIZES" :key="id" :value="id">{{ s.label }}</option>
             </select>
           </label>
-          <label v-if="def.style !== 'strip'">Small line above the title <input :value="def.subtitle" placeholder="Pin & Charm" @change="patchCard(def.id, { subtitle: ($event.target as HTMLInputElement).value })" /></label>
+          <label v-if="def.style !== 'strip'">Small line under the title <input :value="def.subtitle" placeholder="40x90cm" @change="patchCard(def.id, { subtitle: ($event.target as HTMLInputElement).value })" /></label>
           <label>Theme
             <select :value="def.theme" @change="patchCard(def.id, { theme: ($event.target as HTMLSelectElement).value })">
               <option v-for="t in themes" :key="t.id" :value="t.id">{{ t.name }}</option>

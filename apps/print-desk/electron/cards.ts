@@ -49,7 +49,7 @@ export interface CardSource {
 export interface CardDef {
   id: string;
   title: string;
-  /** Small line above the title in the pill ("Pin & Charm"); '' for none. */
+  /** Small line under the title in the pill ("40x90cm"); '' for none. */
   subtitle: string;
   theme: string;
   /** '' takes the theme's mascot, 'none' draws none, else a PNG of its own. */
@@ -456,8 +456,9 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   const titleX = art.mascot ? PILL.x + 40 + titleRoom / 2 : PILL.x + PILL.width / 2;
   const head: Command[] = art.subtitle
     ? [
-        ['type.create', { x: titleX, y: 172, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: fit(art.subtitle, 10, titleRoom, 150), color: c.title, align: 'center', tracking: 150 }],
-        ['type.create', { x: titleX, y: 244, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 14, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }],
+        // The name first, the small line under it: "DESKMAT", then "40x90cm".
+        ['type.create', { x: titleX, y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 14, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }],
+        ['type.create', { x: titleX, y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: fit(art.subtitle, 10, titleRoom, 150), color: c.title, align: 'center', tracking: 150 }],
       ]
     : [['type.create', { x: titleX, y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: fit(texts.Title!, 16, titleRoom, 360), color: c.title, align: 'center', tracking: 360 }]];
 

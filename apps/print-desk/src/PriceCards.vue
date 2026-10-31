@@ -244,9 +244,21 @@ async function updateAll(): Promise<void> {
     'notice',
     [
       updated || drawn ? `${updated} cards updated, ${drawn} drawn.` : 'Every card is up to date.',
-      redraw.length ? `Redraw these by hand, their rows changed (a redraw starts the PSD again): ${redraw.join(', ')}.` : '',
+      redraw.length ? `These need a redraw, their rows changed (Redraw, or Redraw all; a redraw starts the PSD again): ${redraw.join(', ')}.` : '',
     ].join(' '),
   );
+}
+/** Every card drawn again from the master, after a theme or layout change. Changes made by hand in the PSDs go. */
+async function redrawAll(): Promise<void> {
+  const list = cards.value.filter((c) => stateOf(c) !== 'empty');
+  if (!list.length || !confirm(`Redraw all ${list.length} cards from scratch? Changes made by hand in their PSDs go.`)) return;
+  await guard('Redrawing cards', async () => {
+    for (const def of list) {
+      busy.value = `Drawing ${def.title}`;
+      await draw(def);
+    }
+  });
+  emit('notice', `${list.length} cards redrawn.`);
 }
 
 // ── Sheets ──
@@ -350,6 +362,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
   <div class="toolbar">
     <button type="button" class="primary" :disabled="!!busy" @click="addCard">New card</button>
     <button type="button" :disabled="!!busy || !cards.length" @click="updateAll">Update all</button>
+    <button type="button" :disabled="!!busy || !cards.length" title="Draws every card again from scratch, after a theme or layout change: changes made by hand in the PSDs go" @click="redrawAll">Redraw all</button>
     <button type="button" class="quiet" :disabled="!!busy" @click="reload">Reload prices</button>
     <button type="button" class="quiet" :aria-pressed="showMissing" :disabled="!missing.length" title="Products for sale that no card prices yet" @click="showMissing = !showMissing">Without a card ({{ missing.length }})</button>
     <span class="spacer"></span>

@@ -343,11 +343,13 @@ export const CARD_SIZES: Record<CardSize, { width: number; label: string }> = {
  */
 export type CardStyle = 'card' | 'strip';
 /** What a drawn card's layout is: style, size and row ids. A different one needs a redraw. */
-export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean; centred?: boolean }, rows: CardRow[]): string =>
+export const layoutKey = (art: { size?: CardSize; style?: CardStyle; noHeading?: boolean; centred?: boolean; title?: string; subtitle?: string }, rows: CardRow[]): string =>
   [
     ...(art.style === 'strip' ? ['strip'] : []),
     ...(art.style === 'strip' && art.noHeading ? ['noheading'] : []),
     ...(art.size === 'third' ? ['third'] : []),
+    // A title over two lines sits differently in the band: changing to or from it is a redraw.
+    ...(art.style !== 'strip' && bandTitle(art.title ?? '', art.subtitle ?? '').includes('\n') ? ['title2'] : []),
     // Only a card with a big price is drawn differently when its theme centres the number.
     ...(art.centred && rows.some((r) => r.kind === 'price') ? ['centred'] : []),
     ...rows.map((r) => r.id),
@@ -367,7 +369,7 @@ const LINE_RIGHT = 1058;
  */
 export function textWidth(text: string, pt: number, tracking = 0): number {
   let em = 0;
-  for (const ch of text) em += /[.,:;!|' ]/.test(ch) ? 0.28 : /[-1iIlj]/.test(ch) ? 0.38 : /[MW]/.test(ch) ? 0.85 : 0.6;
+  for (const ch of text) em += /[\uFE0F\u200D]/.test(ch) ? 0 : /\p{Extended_Pictographic}/u.test(ch) ? 1 : /[.,:;!|' ]/.test(ch) ? 0.28 : /[-1iIlj]/.test(ch) ? 0.38 : /[MW]/.test(ch) ? 0.85 : 0.6;
   return (em + (text.length * tracking) / 1000) * pt * PX_PER_PT;
 }
 /** The size, at most `pt`, at which the text fits in `width` pixels. */
@@ -375,6 +377,36 @@ const fit = (text: string, pt: number, width: number, tracking = 0): number => {
   const w = textWidth(text, pt, tracking);
   return w > width ? Math.max(6, Math.floor((pt * width) / w * 10) / 10) : pt;
 };
+
+/** The room a title has in the band, beside the mascot. */
+const TITLE_ROOM = 560;
+/**
+ * A card's title as its band shows it: in capitals; with no small line under it, over two lines
+ * (split at the space that gives the biggest letters) when that makes it at least a point bigger.
+ */
+export function bandTitle(title: string, subtitle: string): string {
+  const t = title.toUpperCase();
+  const words = t.split(' ');
+  if (subtitle || words.length < 2) return t;
+  let best = t;
+  let bestPt = fit(t, 16, TITLE_ROOM, 360);
+  for (let i = 1; i < words.length; i++) {
+    const [a, b] = [words.slice(0, i).join(' '), words.slice(i).join(' ')];
+    const pt = Math.min(fit(a, 14, TITLE_ROOM, 360), fit(b, 14, TITLE_ROOM, 360));
+    if (pt >= bestPt + 1) [best, bestPt] = [`${a}\n${b}`, pt];
+  }
+  return best;
+}
+
+/** Emoji and symbols at a text's ends: they hang outside its centring, the words go in the middle. */
+const EDGE_SYMBOLS = '[\\s\\p{Extended_Pictographic}\\p{So}\\uFE0F\\u200D]+';
+/** How far right centred text moves so its words, not its end symbols, sit in the middle. */
+export function hangShift(text: string, pt: number, tracking: number): number {
+  const lead = new RegExp(`^${EDGE_SYMBOLS}`, 'u').exec(text)?.[0] ?? '';
+  const trail = new RegExp(`${EDGE_SYMBOLS}$`, 'u').exec(text)?.[0] ?? '';
+  if (lead === text) return 0;
+  return (textWidth(trail, pt, tracking) - textWidth(lead, pt, tracking)) / 2;
+}
 
 /**
  * How far right a centred price moves so its number sits in the middle and what the price format
@@ -414,7 +446,12 @@ function scaled([id, p]: Command, s: number): Command {
 export function cardTexts(art: Pick<CardArt, 'title' | 'subtitle' | 'rows' | 'style' | 'noHeading'>, fmt: PriceFormat): Record<string, string> {
   // The card's title band is in capitals; a strip's heading reads as typed ("Available in:"), or is left off.
   const out: Record<string, string> = {};
-  if (art.style !== 'strip') out.Title = art.title.toUpperCase();
+  if (art.style !== 'strip') {
+    // Over two lines, each line is a layer of its own, so each sits centred on its words.
+    const [first, second] = bandTitle(art.title, art.subtitle).split('\n');
+    out.Title = first!;
+    if (second) out['Title 2'] = second;
+  }
   else if (!art.noHeading && art.title.trim()) out.Title = art.title;
   if (art.subtitle) out.Subtitle = art.subtitle;
   for (const r of art.rows) {
@@ -538,17 +575,22 @@ function cardCommands(art: CardArt, fmt: PriceFormat): { height: number; command
   // Centred on the pill; the mascot sits past its right end, so a long title clears it.
   const titleRoom = art.mascot ? 560 : PILL.width - 80;
   const pillX = PILL.x + PILL.width / 2;
-  /** Letter spacing follows the last letter too: half of it back keeps the word itself in the middle. */
-  const centred = (pt: number, tracking: number): number => pillX + (tracking / 1000) * pt * PX_PER_PT / 2;
-  const titlePt = fit(texts.Title!, art.subtitle ? 14 : 16, titleRoom, 360);
+  /**
+   * Letter spacing follows the last letter too: half of it back keeps the word itself in the middle.
+   * An emoji or symbol at either end hangs outside, so the words sit in the middle.
+   */
+  const centred = (text: string, pt: number, tracking: number): number => pillX + (tracking / 1000) * pt * PX_PER_PT / 2 + hangShift(text, pt, tracking);
+  const titleLines = [texts.Title!, ...(texts['Title 2'] ? [texts['Title 2']] : [])];
+  const titlePt = Math.min(...titleLines.map((l) => fit(l, art.subtitle || titleLines.length > 1 ? 14 : 16, titleRoom, 360)));
   const subPt = fit(art.subtitle, 10, titleRoom, 150);
   const head: Command[] = art.subtitle
     ? [
         // The name first, the small line under it: "DESKMAT", then "40x90cm".
-        ['type.create', { x: centred(titlePt, 360), y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }],
-        ['type.create', { x: centred(subPt, 150), y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: subPt, color: c.title, align: 'center', tracking: 150 }],
+        ['type.create', { x: centred(texts.Title!, titlePt, 360), y: 196, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }],
+        ['type.create', { x: centred(texts.Subtitle!, subPt, 150), y: 248, text: texts.Subtitle, name: 'Subtitle', font, fontStyle: 'Bold', size: subPt, color: c.title, align: 'center', tracking: 150 }],
       ]
-    : [['type.create', { x: centred(titlePt, 360), y: 212, text: texts.Title, name: 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }]];
+    : // Two lines start higher, so the pair sits in the middle of the band.
+      titleLines.map((line, i): Command => ['type.create', { x: centred(line, titlePt, 360), y: titleLines.length > 1 ? 176 + i * 68 : 212, text: line, name: i ? 'Title 2' : 'Title', font, fontStyle: 'Bold', size: titlePt, color: c.title, align: 'center', tracking: 360 }]);
 
   const commands: Command[] = [
     // Past the edges, so a scaled-down card rounding its height up has no strip without background.

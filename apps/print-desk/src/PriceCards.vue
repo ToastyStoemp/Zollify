@@ -51,7 +51,7 @@ const today = (): string => new Date().toLocaleDateString('sv-SE');
 
 const rowsOf = (def: CardDef): CardRow[] => shownRows(def, allRowsOf(def));
 const allRowsOf = (def: CardDef): CardRow[] => cardRows(def, products.value, discounts.value, today(), local.value);
-const stateOf = (def: CardDef): CardState => cardState(def, rowsOf(def), fmt.value);
+const stateOf = (def: CardDef): CardState => cardState(def, rowsOf(def), fmt.value, themeOf(def));
 const themeOf = (def: CardDef): CardTheme => themes.value.find((t) => t.id === def.theme) ?? themes.value[0]!;
 const STATE_TEXT: Record<CardState, string> = { new: 'Not drawn yet', current: 'Up to date', prices: 'New prices', layout: 'Rows changed: redraw', empty: 'Prices nothing for sale' };
 
@@ -196,7 +196,7 @@ function mascotOf(def: CardDef): string {
 async function draw(def: CardDef): Promise<void> {
   const rows = rowsOf(def);
   if (!rows.length) return emit('error', `"${def.title}" prices nothing for sale: pick a type, product or variant first.`);
-  const r = await api.cards.draw(plain({ id: def.id, title: def.title, subtitle: def.subtitle, rows, theme: themeOf(def), mascot: def.style === 'strip' ? '' : mascotOf(def), size: def.size, style: def.style, noHeading: def.noHeading, centreNumber: def.centreNumber }), plain(fmt.value));
+  const r = await api.cards.draw(plain({ id: def.id, title: def.title, subtitle: def.subtitle, rows, theme: themeOf(def), mascot: def.style === 'strip' ? '' : mascotOf(def), size: def.size, style: def.style, noHeading: def.noHeading }), plain(fmt.value));
   const texts = cardTexts({ title: def.title, subtitle: def.subtitle, rows, style: def.style, noHeading: def.noHeading }, fmt.value);
   await patchCard(def.id, { file: r.file, preview: r.preview, width: r.width, height: r.height, layout: r.layout, texts });
   onSheet[def.id] = true;
@@ -413,6 +413,7 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
         </label>
       </div>
       <label class="inline">Font <input :value="t.font" @change="setTheme(t.id, { font: ($event.target as HTMLInputElement).value || 'Bahnschrift' })" /></label>
+      <label class="inline" title="On cards in this theme with one big price, the number sits in the middle and what the price format adds hangs to the side. Cards with price lines stay as they are."><input type="checkbox" :checked="!!t.centreNumber" @change="setTheme(t.id, { centreNumber: ($event.target as HTMLInputElement).checked })" /> Centre the number, "{{ (fmt.pattern || '{n}').split('{n}').join('') || 'nothing' }}" hanging</label>
       <div class="inline-actions">
         <span>Mascot: {{ t.mascot ? fileName(t.mascot) : 'none' }}</span>
         <button type="button" class="quiet" @click="themeMascot(t)">Pick PNG</button>
@@ -452,7 +453,6 @@ const fileName = (p: string): string => p.split(/[\\/]/).pop() ?? p;
         <div class="fields">
           <label>{{ def.style !== 'strip' ? 'Title' : def.noHeading ? 'Name (not printed)' : 'Heading' }} <input :value="def.title" :placeholder="def.style === 'strip' ? 'Available in:' : ''" @change="patchCard(def.id, { title: ($event.target as HTMLInputElement).value })" /></label>
           <label v-if="def.style === 'strip'" class="inline heading"><input type="checkbox" :checked="!def.noHeading" @change="patchCard(def.id, { noHeading: !($event.target as HTMLInputElement).checked })" /> Show the heading</label>
-          <label v-if="rowsOf(def).some((r) => r.kind === 'price')" class="inline heading" title="The big price sits in the middle by its number, and what the price format adds hangs to the side"><input type="checkbox" :checked="!!def.centreNumber" @change="patchCard(def.id, { centreNumber: ($event.target as HTMLInputElement).checked })" /> Centre the number, "{{ (fmt.pattern || '{n}').split('{n}').join('') || 'nothing' }}" hanging</label>
           <label>Style
             <select :value="def.style ?? 'card'" @change="patchCard(def.id, { style: ($event.target as HTMLSelectElement).value as CardStyle })">
               <option value="card">Card: title band, rows under each other</option>

@@ -199,9 +199,11 @@ catalogue. It replaces the ZollPriceCards Photoshop plugin.
   (`photocraft-cli run --cmd type.edit`), so whatever was changed by hand stays.
   When the rows themselves change (a deal added, a new size), the card says
   "Rows changed: redraw": **Redraw** starts the PSD again from the master.
-- **Centre the number** (card editor, for a card with a big price): the price sits
-  in the middle by its number, what the price format adds (".-") hanging to the
-  side, as "15" centred with ".-" to its right. Switching it asks for a redraw.
+- **Centre the number** (a theme setting, under Themes): on the theme's cards with
+  one big price, the price sits in the middle by its number, what the price
+  format adds (".-") hanging to the side, as "15" centred with ".-" to its right.
+  Cards with price lines are left as they are. Switching it asks the cards it
+  changes for a redraw.
 - **Prices** (toolbar): the catalogue's, or an event's that charges in a currency
   of its own (Narcon · SEK, Herofest · CHF). With an event, every price on the
   cards is what its till charges: converted at its rate and rounded to its step,

@@ -187,11 +187,15 @@ describe('numberShift', () => {
   it('centres a price on its number: what the format adds after it hangs right, before it left', () => {
     const price = [{ id: 'price', kind: 'price' as const, price: 35 }];
     const art = { title: 'Cap', subtitle: '', rows: price, theme: DEFAULT_THEMES[1]!, mascot: null };
-    const x = (fmt: typeof DEFAULT_FORMAT, centreNumber?: boolean): number => Number(cardLayout({ ...art, centreNumber }, fmt).commands.find(([, p]) => p.name === 'price')![1].x);
+    const x = (fmt: typeof DEFAULT_FORMAT, centreNumber?: boolean): number => Number(cardLayout({ ...art, theme: { ...art.theme, centreNumber } }, fmt).commands.find(([, p]) => p.name === 'price')![1].x);
     expect(x(DEFAULT_FORMAT, true)).toBeGreaterThan(x(DEFAULT_FORMAT));
     expect(x({ ...DEFAULT_FORMAT, pattern: '€{n}' }, true)).toBeLessThan(x({ ...DEFAULT_FORMAT, pattern: '€{n}' }));
     expect(x({ ...DEFAULT_FORMAT, pattern: '{n}' }, true)).toBe(x({ ...DEFAULT_FORMAT, pattern: '{n}' }));
-    expect(cardLayout({ ...art, centreNumber: true }, DEFAULT_FORMAT).layout).toBe('centred|price');
+    const centring = { ...art.theme, centreNumber: true };
+    expect(cardLayout({ ...art, theme: centring }, DEFAULT_FORMAT).layout).toBe('centred|price');
+    // A card of price lines in that theme is drawn as before, and is not asked to redraw.
+    const lines = [{ id: 'line:a', kind: 'line' as const, label: 'A4', price: 25 }];
+    expect(cardLayout({ ...art, rows: lines, theme: centring }, DEFAULT_FORMAT).layout).toBe('line:a');
   });
 });
 
@@ -205,6 +209,8 @@ describe('cardState', () => {
     expect(cardState(drawn, [...rows, { id: 'note:0', kind: 'note', text: 'Vinyl' }], DEFAULT_FORMAT)).toBe('layout');
     expect(cardState({ ...drawn, file: undefined }, rows, DEFAULT_FORMAT)).toBe('new');
     expect(cardState(drawn, [], DEFAULT_FORMAT)).toBe('empty');
+    // Its theme starting to centre the number changes how it is drawn: a redraw.
+    expect(cardState(drawn, rows, DEFAULT_FORMAT, { centreNumber: true })).toBe('layout');
   });
 });
 

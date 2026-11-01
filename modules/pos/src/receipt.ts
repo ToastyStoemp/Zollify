@@ -1,11 +1,11 @@
 import type { PaymentLeg, Transaction } from '@zollify/shared';
-import { getSetting } from './lib/settings';
+import { getSetting, setSetting } from './lib/settings';
 import * as shared from '@zollify/shared';
 import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterLinks, vatIdLabel } from '@zollify/shared';
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
 import { lineLinkQrs, receiptQrPng, saleLineLinks } from './lib/after-sale';
-import { serverBranding, serverSocials } from './lib/branding';
+import { accountLogo, serverBranding, serverSocials } from './lib/branding';
 import { sdk } from './runtime';
 import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from './lib/given-away';
 
@@ -440,17 +440,28 @@ function pngBlob(b64: string): Blob {
   return new Blob([bytes], { type: 'image/png' });
 }
 
-let sharedLogo: Promise<string | undefined> | null = null;
-/** The account's logo, flattened onto white for the printer. Worked out once per session. */
-function sharedPrintLogo(): Promise<string | undefined> {
-  sharedLogo ??= serverBranding()
-    .then((b) => (b?.logo ? processLogoFile(pngBlob(b.logo)) : undefined))
-    .catch(() => undefined)
-    .then((logo) => {
-      if (!logo) sharedLogo = null; // try again next time, e.g. once back online
-      return logo;
-    });
-  return sharedLogo;
+/** The account's logo as last flattened for the printer, with the logo it was made from. */
+const SHARED_PRINT_LOGO_KEY = 'receipt.serverPrintLogoCache';
+/** How long a print may wait for the account's logo when the device has no copy yet. */
+const PRINT_LOGO_WAIT_MS = 2500;
+
+/**
+ * The account's logo, flattened onto white for the printer. Comes from the
+ * copy kept on the device, so it prints straight away in a new session and
+ * offline; it is only flattened again when the account's logo has changed.
+ */
+async function sharedPrintLogo(): Promise<string | undefined> {
+  try {
+    const src = await accountLogo(PRINT_LOGO_WAIT_MS);
+    if (!src) return undefined;
+    const kept = await getSetting<{ src: string; print: string }>(SHARED_PRINT_LOGO_KEY);
+    if (kept?.src === src && kept.print) return kept.print;
+    const print = await processLogoFile(pngBlob(src));
+    void setSetting(SHARED_PRINT_LOGO_KEY, { src, print }).catch(() => undefined);
+    return print;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

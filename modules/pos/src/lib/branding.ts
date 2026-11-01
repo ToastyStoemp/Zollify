@@ -36,6 +36,11 @@ const canEdit = (): boolean => {
 };
 
 let cached: Promise<Branding | null> | null = null;
+
+/** Keep the account's logo on the device for the next start, so it shows - and prints - offline too. */
+function keepLogo(b: Branding | null | undefined): void {
+  if (b) void setSetting(SERVER_LOGO_CACHE_KEY, b.logo ?? '').catch(() => undefined);
+}
 let failedAt = 0;
 
 /**
@@ -47,8 +52,7 @@ export function serverBranding(): Promise<Branding | null> {
   cached ??= sdk()
     .http.get<Branding>('branding')
     .then((b) => {
-      // Kept for the next start, so the logo shows offline too.
-      void setSetting(SERVER_LOGO_CACHE_KEY, b?.logo ?? '').catch(() => undefined);
+      keepLogo(b);
       return b;
     })
     .catch(() => {
@@ -70,6 +74,7 @@ export async function pushBranding(patch: Partial<Branding>): Promise<void> {
   if (!canEdit()) return;
   const next = await sdk().http.put<Branding>('branding', patch);
   cached = Promise.resolve(next);
+  keepLogo(next);
 }
 
 /** Fill blanks on the server from what this device already has. Never overwrites. */
@@ -85,23 +90,26 @@ export async function backfillBranding(): Promise<void> {
 }
 
 /**
- * The logo for on-screen use: this device's own, else the account's. As a
- * data: URL. Never waits long for the network: the account's logo comes from
- * the copy kept on the device (refreshed in the background), and only when
- * there is no copy yet does it wait - briefly - for the server.
+ * The account's logo (base64 PNG), without waiting on the network when it can
+ * help it: the copy kept on the device comes back at once (and is refreshed
+ * in the background for next time); only when there is no copy yet does it
+ * wait - at most `waitMs` - for the server.
  */
+export async function accountLogo(waitMs = FIRST_FETCH_MS): Promise<string | undefined> {
+  const kept = await getSetting<string>(SERVER_LOGO_CACHE_KEY);
+  const fresh = serverBranding().then((b) => b?.logo ?? undefined);
+  if (kept !== undefined) {
+    void fresh; // refreshes the kept copy for next time
+    return kept || undefined;
+  }
+  return Promise.race([fresh, new Promise<undefined>((ok) => setTimeout(() => ok(undefined), waitMs))]);
+}
+
+/** The logo for on-screen use: this device's own, else the account's. As a data: URL. */
 export async function screenLogo(): Promise<string | undefined> {
   const own = await getSetting<string>(LOGO_KEY);
   if (own) return `data:image/png;base64,${own}`;
-  const kept = await getSetting<string>(SERVER_LOGO_CACHE_KEY);
-  const fresh = serverBranding().then((b) => b?.logo ?? undefined);
-  let b64: string | null | undefined;
-  if (kept !== undefined) {
-    void fresh; // refreshes the kept copy for next time
-    b64 = kept;
-  } else {
-    b64 = await Promise.race([fresh, new Promise<undefined>((ok) => setTimeout(() => ok(undefined), FIRST_FETCH_MS))]);
-  }
+  const b64 = await accountLogo();
   return b64 ? `data:image/png;base64,${b64}` : undefined;
 }
 

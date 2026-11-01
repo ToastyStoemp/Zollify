@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Sdk } from '@zollify/sdk';
 import { setSdk, clearSdk } from '../runtime';
-import { resetBrandingCache, screenLogo, serverBranding } from '../lib/branding';
+import { accountLogo, pushBranding, resetBrandingCache, screenLogo, serverBranding } from '../lib/branding';
 
 /**
  * The thank-you screen must not wait for the network: the logo comes from the
@@ -11,6 +11,7 @@ import { resetBrandingCache, screenLogo, serverBranding } from '../lib/branding'
 
 let store: Map<string, unknown>;
 let get: ReturnType<typeof vi.fn>;
+let put: ReturnType<typeof vi.fn>;
 
 function fakeSdk(): Sdk {
   return {
@@ -19,7 +20,7 @@ function fakeSdk(): Sdk {
       set: async (k: string, v: unknown) => void store.set(k, v),
       remove: async (k: string) => void store.delete(k),
     },
-    http: { get },
+    http: { get, put },
     account: () => ({ role: 'owner' }),
   } as unknown as Sdk;
 }
@@ -27,6 +28,7 @@ function fakeSdk(): Sdk {
 beforeEach(() => {
   store = new Map();
   get = vi.fn();
+  put = vi.fn();
   setSdk(fakeSdk());
   resetBrandingCache();
   vi.useFakeTimers();
@@ -67,5 +69,29 @@ describe('screen logo', () => {
     await vi.advanceTimersByTimeAsync(61_000);
     await serverBranding();
     expect(get).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('account logo (used for printing too)', () => {
+  it('comes from the copy kept on the device in a new session, without waiting for the server', async () => {
+    store.set('receipt.serverLogoCache', 'KEPT');
+    get.mockReturnValue(new Promise(() => {}));
+    expect(await accountLogo(2500)).toBe('KEPT');
+  });
+
+  it('is kept after a fetch, so the next session has it offline', async () => {
+    get.mockResolvedValueOnce({ logo: 'SRV', footer: null });
+    expect(await accountLogo()).toBe('SRV');
+    resetBrandingCache();
+    get.mockRejectedValue(new Error('offline'));
+    expect(await accountLogo()).toBe('SRV');
+  });
+
+  it('follows a deliberate change made on this device', async () => {
+    store.set('receipt.serverLogoCache', 'OLD');
+    put.mockResolvedValueOnce({ logo: null, footer: null });
+    await pushBranding({ logo: null });
+    expect(store.get('receipt.serverLogoCache')).toBe('');
+    expect(await accountLogo()).toBeUndefined();
   });
 });

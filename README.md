@@ -37,6 +37,7 @@ modules/
   sourcing/       suppliers and reorder drafts (client + server half)
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
+  print-stories/  points of interest on a print's picture, story cards, Shopify hotspots
   label-printer/  Bluetooth label printer for price tags and staff badges
   costs/          per-item cost from shipment batches, margins in the catalogue
   convention-checklist/  packing checklist per convention
@@ -172,7 +173,7 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
 Shopify sync, Price Cards, Label Printer, Costs, Convention Checklist, Migration,
 Public events, Tax & books, Consignment (and the artist's own view), Commissions,
 Storage locations, E-invoices for Belgium (Peppol), Tax deadlines, Wholesale,
-Loyalty.
+Loyalty, Print Stories.
 
 *Storage locations* - the `multi-storage` module splits the one inventory by
 where it physically is: a storage unit, the studio, a friend's garage. Each
@@ -570,6 +571,21 @@ while the menu shows that product. With no claims, or no open event, the
 whole catalogue stands in, so a QR printed once keeps working; only what is
 for sale and listed appears, never stock, costs or what sold. The rule is
 `tableMenu` in `@zollify/shared`; `/table.json` carries the same figures.
+
+*Print stories* - the `print-stories` module (admins, under Products) tells
+the story behind a print: click its photo to drop numbered points of
+interest, give each a label and a description (and optionally a close-up
+picture by URL), and add a few lines on the print as a whole. Drag a number
+to move it, arrow keys nudge it. Each print's story is its own synced
+setting (`print-stories.story.<productId>`), saved as you type. Points are
+kept in the Shopify theme's *Painting hotspots* format, the JSON its
+`custom.hotspots` product metafield holds (`id`, `label`, `description`,
+`x` and `y` in percent from the top left, `image`, `image_alt`), so *Copy
+for Shopify* pastes straight into the metafield and *Take points from
+Shopify* reads one back. *Story card* opens a printable A5 or A4 card: the
+photo with its numbers, the introduction and what each number shows; *All
+story cards* prints every print that has a story, one per page, for a
+booklet at the booth.
 
 *Wholesale* - the `wholesale` module (admins) sells to shops outright, the
 reverse of consignment. **Trade prices**: per product, whether it is offered

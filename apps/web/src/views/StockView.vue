@@ -20,6 +20,7 @@ import {
 } from '@zollify/platform';
 import { typeColor } from '@zollify/ui';
 import ProductThumb from '../components/ProductThumb.vue';
+import RefillBoxes from '../components/RefillBoxes.vue';
 
 /**
  * One inventory, with per-event claims on top.
@@ -31,7 +32,7 @@ import ProductThumb from '../components/ProductThumb.vue';
  */
 
 const account = currentAccount;
-const mode = ref<'inventory' | 'claims'>('inventory');
+const mode = ref<'inventory' | 'claims' | 'refill'>('inventory');
 const eventId = ref<string>('');
 const error = ref<string | null>(null);
 
@@ -244,6 +245,7 @@ async function carryOver(): Promise<void> {
         <div class="seg" role="tablist">
           <button type="button" role="tab" :aria-selected="mode === 'inventory'" :class="{ active: mode === 'inventory' }" @click="mode = 'inventory'">What we own</button>
           <button type="button" role="tab" :aria-selected="mode === 'claims'" :class="{ active: mode === 'claims' }" @click="mode = 'claims'">Claimed for an event</button>
+          <button type="button" role="tab" :aria-selected="mode === 'refill'" :class="{ active: mode === 'refill' }" @click="mode = 'refill'">Refill boxes</button>
         </div>
       </div>
     </header>
@@ -312,6 +314,9 @@ async function carryOver(): Promise<void> {
         </tbody>
       </table></div>
     </template>
+
+    <!-- ── Refilling the travelling boxes after an event ─────────────────── -->
+    <RefillBoxes v-else-if="mode === 'refill'" :search="search" :can-edit="canEdit" :upcoming-events="upcomingEvents" :past-events="pastEvents" />
 
     <!-- ── Claims for one event ─────────────────────────────────────────── -->
     <template v-else>

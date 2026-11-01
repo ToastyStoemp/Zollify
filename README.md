@@ -167,6 +167,14 @@ instead of a rewrite. It is enforced in review, so it belongs in every PR.
   is reserved for it. Selling past a claim draws the overage from the unclaimed
   pool. Availability is derived from sales, never decremented, so reverting a
   sale returns the stock with no compensating write.
+- Refill boxes (Inventory): after an event, each item it claimed with what came
+  back unsold and how many to put in from home to fill the travelling box back
+  up to the claim, most first, against what is at home (what nobody else
+  holds, outside the box); items short at home are flagged. One step claims the
+  full boxes for the next event: what came back is carried on (never reserved
+  twice, also while the first event is still open), the rest comes off home,
+  and the put-in figure can be typed over per item. Ticks for what is packed
+  stay on the device. `refillPlan` and `claimRefill` in the platform core.
 - Charging in a local currency while the books stay in the base one.
 
 *Modules* - POS, Customs (Switzerland, Germany and the hub over them), Sourcing,

@@ -406,6 +406,78 @@ export async function claimUnsoldFrom(sourceId: string, targetId: string): Promi
   return rows.length;
 }
 
+export interface RefillRow {
+  productId: string;
+  variantId: string;
+  label: string;
+  /** What the event claimed: what the box held going in, and what it is filled back up to. */
+  claimed: number;
+  sold: number;
+  /** What came back unsold - still in the box (less what was already carried on to another event). */
+  inBox: number;
+  /** What to put in to fill the box back up to the claim. */
+  need: number;
+  /** Units at home to fill it from: what nobody else holds, outside the box. Null for an item never counted. */
+  home: number | null;
+  /** What can go in: the need, as far as home has it. */
+  refill: number;
+}
+
+/**
+ * The travelling boxes after an event: for each item it claimed, what came
+ * back in the box and what to put in to fill it back up to the claim, set
+ * against what is at home. Most to put in first. `targetId` is the event
+ * the boxes go to next: its own claim on these items is left out of what
+ * home has, so the plan reads the same after it is claimed (claimRefill).
+ * Only claimed items appear - an item sold from the shared pool had no box.
+ */
+export function refillPlan(sourceId: string, targetId = ''): RefillRow[] {
+  const titles = new Map<string, string>();
+  for (const p of allProducts.value) {
+    titles.set(stockKey(p.id, ''), p.title);
+    for (const v of p.variants ?? []) titles.set(stockKey(p.id, v.id), `${p.title} · ${v.name}`);
+  }
+  const rows: RefillRow[] = [];
+  for (const c of claimsForEvent(sourceId)) {
+    const key = stockKey(c.productId, c.variantId);
+    const label = titles.get(key);
+    if (label === undefined || c.broughtQty <= 0) continue;
+    const sold = soldAt(sourceId, c.productId, c.variantId);
+    const inBox = Math.max(0, c.broughtQty - carriedOut(sourceId, key, targetId || undefined) - sold);
+    const need = c.broughtQty - inBox;
+    // The pile is home, the box and what other running events hold; this event's and the next one's holds are the box and the refill.
+    const others = heldTotal(c.productId, c.variantId) - heldFor(sourceId, c.productId, c.variantId) - (targetId ? heldFor(targetId, c.productId, c.variantId) : 0);
+    const home = countedAt(c.productId, c.variantId) > 0 ? remainingFor(c.productId, c.variantId) - others - inBox : null;
+    rows.push({ productId: c.productId, variantId: c.variantId, label, claimed: c.broughtQty, sold, inBox, need, home, refill: Math.max(0, Math.min(need, home ?? need)) });
+  }
+  return rows.sort((a, b) => b.need - a.need || b.sold - a.sold || a.label.localeCompare(b.label));
+}
+
+/**
+ * Claims the refilled boxes for the next event: per item, what came back in
+ * the box (carried on from `sourceId`, so it is never reserved twice) plus
+ * what is put in from home - `refill` per item, the plan's own figure where
+ * none is given. Replaces the target's claims on those items; an item with
+ * nothing in the box and nothing put in is skipped. Returns the items and
+ * units claimed.
+ */
+export async function claimRefill(sourceId: string, targetId: string, refills: Record<string, number> = {}, only?: ReadonlySet<string>): Promise<{ items: number; units: number }> {
+  if (!targetId || sourceId === targetId) throw new Error('Pick the next event to claim the boxes for.');
+  let items = 0;
+  let units = 0;
+  for (const row of refillPlan(sourceId, targetId)) {
+    const key = stockKey(row.productId, row.variantId);
+    if (only && !only.has(key)) continue;
+    const refill = Math.max(0, Math.floor(refills[key] ?? row.refill));
+    const qty = row.inBox + refill;
+    if (qty <= 0) continue;
+    await setClaim(targetId, row.productId, row.variantId, qty, { carried: { from: sourceId, qty: row.inBox } });
+    items += 1;
+    units += qty;
+  }
+  return { items, units };
+}
+
 export interface Availability {
   productId: string;
   variantId: string;

@@ -232,6 +232,7 @@ const SUPPLIES_MS = 5 * 60_000;
 const deskPrinter = computed(() => String(globalParams.value?.printer ?? printers.value.find((p) => p.default)?.name ?? ''));
 const supplyMaterial = (s: Supply): Material | undefined => materialOf(settings.value?.supplyMaterials?.[s.id]);
 const supplyLabel = (s: Supply): string => (s.kind === 'maintenance' ? 'Maintenance cartridge' : `${s.name} ink`);
+const supplyLevel = (s: Supply): string => (s.kind === 'maintenance' ? `${s.level}% full` : `${s.level}%`);
 const supplyWarning = (s: Supply): string => (s.kind === 'maintenance' ? (s.state === 'out' ? 'full' : 'nearly full') : s.state === 'out' ? 'empty' : 'low');
 /** Tanks low or empty (the cartridge nearly full), for the warning under the toolbar. */
 const lowSupplies = computed(() => (supplies.value ?? []).filter((s) => s.state === 'low' || s.state === 'out'));
@@ -253,7 +254,9 @@ async function countSwapped(fresh: Supply[]): Promise<void> {
   for (const s of fresh) {
     const was = seen[s.id];
     const material = settings.value?.supplyMaterials?.[s.id];
-    if (was === undefined || s.level - was < 40 || !material || !paperVia.value) continue;
+    if (was === undefined || !material || !paperVia.value) continue;
+    // A new tank fills the level back up; a new maintenance cartridge (which fills with waste) empties it.
+    if ((s.kind === 'maintenance' ? was - s.level : s.level - was) < 40) continue;
     try {
       const res = await api.materials.use({ material, qty: 1, note: `${supplyLabel(s)} replaced in ${deskPrinter.value} · Print Desk`, job: `swap|${s.id}|${Date.now()}` });
       const i = materials.value.findIndex((m) => m.id === res.material.id);
@@ -1151,7 +1154,7 @@ async function printAll(): Promise<void> {
           <p class="muted">Link each to its material: a warning then says whether one is in stock, and a tank swapped for a new one takes one off.</p>
           <div class="paper-sizes">
             <label v-for="s in supplies" :key="s.id" :class="['supply-row', `is-${s.state}`]">
-              <span>{{ supplyLabel(s) }} <small>{{ s.level }}%{{ s.state === 'low' || s.state === 'out' ? ` · ${supplyWarning(s)}` : '' }}</small></span>
+              <span>{{ supplyLabel(s) }} <small>{{ supplyLevel(s) }}{{ s.state === 'low' || s.state === 'out' ? ` · ${supplyWarning(s)}` : '' }}</small></span>
               <select :value="settings?.supplyMaterials?.[s.id] ?? ''" @change="setSupplyMaterial(s, ($event.target as HTMLSelectElement).value)">
                 <option value="">No material</option>
                 <option v-for="m in materials" :key="m.id" :value="m.id">{{ m.name }} ({{ m.onHand }} {{ m.unit }}{{ m.onHand === 1 ? '' : 's' }})</option>
@@ -1173,7 +1176,7 @@ async function printAll(): Promise<void> {
       <button v-if="globalParams" type="button" class="quiet" @click="saveGlobal(null)">Stop using global settings</button>
     </section>
     <p v-for="s in lowSupplies" :key="s.id" :class="['supply-warn', { none: supplyMaterial(s)?.onHand === 0 }]" role="status">
-      <Icon name="alert-triangle" :size="14" /> {{ supplyLabel(s) }} {{ supplyWarning(s) }} ({{ s.level }}%)<template v-if="supplyMaterial(s)"> - {{ supplyMaterial(s)!.onHand > 0 ? `${supplyMaterial(s)!.onHand} in stock` : `none in stock: order ${supplyMaterial(s)!.name}` }}</template>
+      <Icon name="alert-triangle" :size="14" /> {{ supplyLabel(s) }} {{ supplyWarning(s) }} ({{ supplyLevel(s) }})<template v-if="supplyMaterial(s)"> - {{ supplyMaterial(s)!.onHand > 0 ? `${supplyMaterial(s)!.onHand} in stock` : `none in stock: order ${supplyMaterial(s)!.name}` }}</template>
     </p>
     <p v-if="copiesLeft !== null" class="queue" role="status">Printing: <strong>{{ copiesLeft }}</strong> {{ copiesLeft === 1 ? 'copy' : 'copies' }} left, as the print queue reports it</p>
 

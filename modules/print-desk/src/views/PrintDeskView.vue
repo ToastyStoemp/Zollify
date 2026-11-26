@@ -237,9 +237,9 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
           <h3>Ink and maintenance</h3>
           <ul>
             <li v-for="s in desk.supplies" :key="s.id" :class="['supply', `is-${s.state}`, { none: s.stock !== undefined && s.stock <= 0 }]" :title="s.material ? `${s.material}: ${s.stock} in stock` : 'No material linked in Print Desk'">
-              <span class="tank" :aria-label="`${s.name}: ${s.level}% left`"><span :style="{ height: `${s.level}%` }"></span></span>
+              <span class="tank" :aria-label="`${s.name}: ${s.level}% ${s.kind === 'maintenance' ? 'full' : 'left'}`"><span :style="{ height: `${s.level}%` }"></span></span>
               <span class="sname">{{ s.kind === 'maintenance' ? 'Maint.' : s.name }}</span>
-              <span class="hint">{{ s.level }}%<template v-if="s.stock !== undefined"> · {{ s.stock }}</template></span>
+              <span class="hint">{{ s.level }}%{{ s.kind === 'maintenance' ? ' full' : '' }}<template v-if="s.stock !== undefined"> · {{ s.stock }}</template></span>
             </li>
           </ul>
           <p v-for="s in desk.supplies.filter((x) => x.state === 'low' || x.state === 'out')" :key="'w' + s.id" :class="s.stock !== undefined && s.stock <= 0 ? 'error' : 'warn'">

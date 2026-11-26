@@ -66,7 +66,7 @@ export interface Supply {
   id: string;
   name: string;
   kind: 'ink' | 'maintenance';
-  /** Percent left, in the printer's 10% steps. */
+  /** Ink: percent left. The maintenance cartridge, which fills up: percent full. In the printer's 10% steps. */
   level: number;
   /** The printer's own warning: low, out (the cartridge: full), or none. */
   state: 'ok' | 'low' | 'out' | 'unknown';

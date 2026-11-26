@@ -41,7 +41,7 @@ export interface Desk {
   counts: Record<string, number>;
   run: RunItem[];
   paper: Record<string, { needed: number; onHand: number | null }>;
-  /** Ink tanks and the maintenance cartridge: percent left, the printer's warning, and the linked material's stock. */
+  /** Ink tanks (percent left) and the maintenance cartridge (percent full), the printer's warning, and the linked material's stock. */
   supplies?: { id: string; name: string; kind: 'ink' | 'maintenance'; level: number; state: 'ok' | 'low' | 'out' | 'unknown'; material?: string; stock?: number }[];
   busy?: string;
   error?: string;

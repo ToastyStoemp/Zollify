@@ -106,9 +106,9 @@ describe('desks reporting', () => {
     await report([ink('R', 10, 'low', { material: 'PFI-1000 R', stock: 0 })]);
     expect(await supplyNotes()).toHaveLength(1);
     expect((await supplyNotes())[0]).toMatchObject({ title: 'R ink low - none in stock', body: 'Print Desk: 10% left. Order PFI-1000 R.', level: 'normal' });
-    await report([ink('R', 0, 'out', { stock: 0 }), { id: 'maintenance', name: 'Maintenance cartridge', kind: 'maintenance', level: 10, state: 'low', stock: 2 }]);
+    await report([ink('R', 0, 'out', { stock: 0 }), { id: 'maintenance', name: 'Maintenance cartridge', kind: 'maintenance', level: 90, state: 'low', stock: 2 }]);
     const [cartridge, empty] = await supplyNotes();
-    expect(cartridge).toMatchObject({ title: 'Maintenance cartridge nearly full - 2 in stock', level: 'low' });
+    expect(cartridge).toMatchObject({ title: 'Maintenance cartridge nearly full - 2 in stock', body: 'Print Desk: 90% full.', level: 'low' });
     expect(empty).toMatchObject({ title: 'R ink empty - none in stock' });
     // Replaced, and low again later: told again.
     await report([ink('R', 100, 'ok')]);

@@ -29,7 +29,7 @@ export function parseCanonModel(js: string): Supply[] {
   }
   const c = /g_cartridge_rest\s*=\s*\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]/.exec(js);
   if (c && c[1] !== '-1') {
-    // Steps from empty: 0 is none left, 10 is 100% left.
+    // How full it is (it fills with waste ink): 0 is empty, 10 is full.
     out.push({ id: MAINTENANCE_ID, name: 'Maintenance cartridge', kind: 'maintenance', level: Math.max(0, Math.min(10, Number(c[1]))) * 10, state: CARTRIDGE_STATE[Number(c[2])] ?? 'unknown' });
   }
   return out;

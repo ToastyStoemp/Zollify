@@ -138,7 +138,7 @@ export function supplyAlerts(now: StatusDoc, was: StatusDoc | null, notify: (n: 
     const stock = s.stock === undefined ? '' : none ? ' - none in stock' : ` - ${s.stock} in stock`;
     notify({
       title: `${what} ${how}${stock}`,
-      body: `${now.name}: ${s.kind === 'maintenance' ? `${s.level}% space left` : `${s.level}% left`}.${none ? ` Order ${s.material ?? 'a new one'}.` : ''}`,
+      body: `${now.name}: ${s.kind === 'maintenance' ? `${s.level}% full` : `${s.level}% left`}.${none ? ` Order ${s.material ?? 'a new one'}.` : ''}`,
       link: '/m/print-desk',
       kind: 'printer-supplies',
       level: none ? 'normal' : 'low',

@@ -613,9 +613,10 @@ reporting shows as offline after 45 s. The targets (main, per A size, per
 item), hidden items, print order, paper materials and global print settings
 are one document per account that every desk syncs, merged per setting so
 two devices changing different ones never overwrite each other; the linked
-files stay on each computer. Owners and admins can change the targets, fill
-the counts to target and send them to a desk, or ask it to print (one paper
-size or all). A request is taken by one desk, once, and expires after 10
+files stay on each computer. Owners and admins can change the targets (saved as
+they type), set the copies to print - by hand or filled to target, for one
+paper size or all, sent to the desk by themselves a moment after the last
+change - and ask it to print. A request is taken by one desk, once, and expires after 10
 minutes; printing on request only happens on a desk that has *Print when
 asked from Zollify* switched on under Setup. Nothing pushes: desks and the
 page poll. When the printer waits for someone (a Canon asking for the next

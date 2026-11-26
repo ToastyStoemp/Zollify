@@ -18,8 +18,12 @@ const desks = ref<Desk[]>([]);
 const requests = ref<DeskRequest[]>([]);
 const deskId = ref<string | null>(null);
 const counts = ref<Record<string, number>>({});
-/** Counts changed here and not sent yet: the desk's reports don't overwrite them. */
+/** Counts changed here that the desk has not taken yet: its reports don't overwrite them meanwhile. */
 const edited = ref(false);
+/** The counts request on its way to the desk, until it has taken it. */
+const sentId = ref<string | null>(null);
+/** When the desk took it: its reports from before still have the old counts. */
+let takenAt = 0;
 const onlySize = ref('');
 const error = ref('');
 const notice = ref('');
@@ -36,6 +40,21 @@ async function refresh(withConfig = false): Promise<void> {
     const [d, r, c] = await Promise.all([getDesks(), getRequests(), withConfig ? getConfig() : Promise.resolve(null)]);
     desks.value = d.desks;
     requests.value = r.requests;
+    // The desk took the counts sent from here: its reports count again, from the first one after.
+    const sent = sentId.value ? r.requests.find((x) => x.id === sentId.value) : undefined;
+    if (sent && sent.status !== 'pending' && sent.status !== 'taken') {
+      sentId.value = null;
+      takenAt = sent.status === 'done' ? sent.updatedAt : 0;
+      if (sent.status !== 'done') {
+        error.value = `${desk.value?.name ?? 'The desk'} did not take the copies to print: ${sent.result || sent.status}`;
+        if (!sendTimer) edited.value = false;
+      }
+    }
+    if (takenAt && !sentId.value && !sendTimer && desk.value && desk.value.updatedAt > takenAt) {
+      takenAt = 0;
+      edited.value = false;
+      counts.value = { ...desk.value.counts };
+    }
     if (c) config.value = c.config;
     error.value = '';
   } catch (err) {
@@ -111,7 +130,15 @@ const label = (size: string): string => (/^a\d$/.test(size) ? size.toUpperCase()
 
 function setCount(key: string, value: number): void {
   counts.value = { ...counts.value, [key]: Math.max(0, Math.min(999, Math.floor(value) || 0)) };
+  queueSend();
+}
+/** Copies to print go to the desk by themselves, a moment after the last change. */
+const SEND_AFTER_MS = 800;
+let sendTimer: ReturnType<typeof setTimeout> | undefined;
+function queueSend(): void {
   edited.value = true;
+  clearTimeout(sendTimer);
+  sendTimer = setTimeout(() => void sendCounts(), SEND_AFTER_MS);
 }
 /** Counts that bring every item up to its target, from what Zollify says is in stock. */
 function fillToTarget(): void {
@@ -120,11 +147,7 @@ function fillToTarget(): void {
   const kept = Object.entries(counts.value).filter(([k]) => !keys.has(k));
   const filled = shown.value.map((i) => [i.key, Math.max(0, targetOf(config.value, i.key, i.size) - i.inStock)] as const);
   counts.value = Object.fromEntries([...kept, ...filled].filter(([, n]) => n > 0));
-  edited.value = true;
-}
-function resetCounts(): void {
-  counts.value = { ...(desk.value?.counts ?? {}) };
-  edited.value = false;
+  queueSend();
 }
 
 async function saveTarget(patch: PrintDeskConfig): Promise<void> {
@@ -148,28 +171,31 @@ function setSizeTarget(size: string, value: number): void {
   void saveTarget({ sizeTargets: next });
 }
 
+/** Sends the copies to print as they are here; the desk sets them within a few seconds. */
 async function sendCounts(): Promise<void> {
-  if (!desk.value) return;
-  busy.value = true;
+  clearTimeout(sendTimer);
+  sendTimer = undefined;
+  if (!desk.value || !canControl.value) return;
   try {
     const clean = Object.fromEntries(Object.entries(counts.value).filter(([, n]) => n > 0));
-    await sendRequest({ kind: 'counts', deviceId: desk.value.deviceId, counts: clean });
-    edited.value = false;
-    notice.value = `Sent to ${desk.value.name}: ${totalCopies.value} copies. It sets them the next time it checks, within a few seconds.`;
-    await refresh();
+    sentId.value = (await sendRequest({ kind: 'counts', deviceId: desk.value.deviceId, counts: clean })).request.id;
   } catch (err) {
-    error.value = `Could not send the counts: ${err instanceof Error ? err.message : String(err)}`;
-  } finally {
-    busy.value = false;
+    error.value = `Could not send the copies to print: ${err instanceof Error ? err.message : String(err)}`;
   }
 }
+onBeforeUnmount(() => {
+  // Leaving the page with a change not sent yet: send it now rather than lose it.
+  if (sendTimer) void sendCounts();
+});
 async function printNow(): Promise<void> {
   const d = desk.value;
   if (!d) return;
   const what = onlySize.value ? `the ${label(onlySize.value)} copies` : 'everything';
-  if (!window.confirm(`Ask ${d.name} to print ${what} it has queued now? The printer starts as soon as the desk takes the request.`)) return;
+  if (!(await sdk().ui.confirm(`${d.name} prints ${what} it has queued (${onlySize.value ? shownCopies.value : totalCopies.value} copies) as soon as it takes the request.`, 'Print now?', { confirm: 'Print' }))) return;
   busy.value = true;
   try {
+    // A change still waiting goes first: the desk takes requests in order.
+    if (sendTimer) await sendCounts();
     await sendRequest({ kind: 'print', deviceId: d.deviceId, ...(onlySize.value ? { onlySize: onlySize.value } : {}) });
     notice.value = `Asked ${d.name} to print ${what}.`;
     await refresh();
@@ -179,6 +205,8 @@ async function printNow(): Promise<void> {
     busy.value = false;
   }
 }
+/** Print requests, and copies to print that did not get through; the ones that did are no news. */
+const shownRequests = computed(() => requests.value.filter((r) => r.kind === 'print' || r.status !== 'done').slice(0, 8));
 const requestLine = (r: DeskRequest): string => {
   const copies = Object.values(r.payload.counts ?? {}).reduce((n, c) => n + c, 0);
   return r.kind === 'counts' ? `Set counts: ${copies} copies` : `Print ${r.payload.onlySize ? label(r.payload.onlySize) + ' only' : 'everything queued'}`;
@@ -262,7 +290,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
       <article class="card">
         <div class="desk-head">
           <h2>Copies to print</h2>
-          <span class="hint">{{ onlySize ? `${shownCopies} of ${totalCopies}` : totalCopies }} copies{{ edited ? ' · not sent yet' : ` · as ${desk.name} has them` }}</span>
+          <span class="hint">{{ onlySize ? `${shownCopies} of ${totalCopies}` : totalCopies }} copies{{ edited ? ` · sending to ${desk.name}…` : ` · as ${desk.name} has them` }}</span>
         </div>
         <div v-if="sizes.length > 1" class="desk-pick" role="group" aria-label="Paper size">
           <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All sizes</button>
@@ -270,13 +298,16 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
         </div>
         <div v-if="canControl" class="actions">
           <button type="button" class="secondary" @click="fillToTarget">Fill to target</button>
-          <button v-if="edited" type="button" class="secondary" @click="resetCounts">Back to the desk's counts</button>
-          <button type="button" class="primary" :disabled="busy || !edited" @click="sendCounts">Send counts to {{ desk.name }}</button>
           <span class="spacer"></span>
-          <button type="button" class="primary" :disabled="busy || !desk.online || !desk.allowRemote || edited" :title="!desk.allowRemote ? 'Printing on request is off on this desk' : edited ? 'Send the counts first' : ''" @click="printNow">
+          <button type="button" class="primary" :disabled="busy || !desk.online || !desk.allowRemote || !(onlySize ? shownCopies : totalCopies)" @click="printNow">
             <Icon name="printer" :size="14" /> {{ onlySize ? `Print ${label(onlySize)} only` : 'Print now' }}
           </button>
         </div>
+        <p v-if="canControl && !desk.allowRemote" class="hint">
+          Print is off: {{ desk.name }} only prints when asked from Zollify once <strong>Print when asked from Zollify</strong> is switched on in Print Desk, under Setup.
+        </p>
+        <p v-else-if="canControl && !desk.online" class="hint">Print waits for {{ desk.name }} to be online.</p>
+        <p class="hint">Targets save as you type and every desk shares them. Copies to print go to {{ desk.name }} by themselves.</p>
         <table>
           <thead>
             <tr><th>Print</th><th>In stock</th><th>Target</th><th>To print</th></tr>
@@ -313,10 +344,10 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
         </details>
       </article>
 
-      <article v-if="requests.length" class="card">
+      <article v-if="shownRequests.length" class="card">
         <h2>Requests</h2>
         <ul class="list">
-          <li v-for="r in requests.slice(0, 8)" :key="r.id">
+          <li v-for="r in shownRequests" :key="r.id">
             <span class="name">{{ requestLine(r) }}</span>
             <span :class="['status', r.status]">{{ STATUS[r.status] }}</span>
             <span class="hint">{{ r.result || ago(r.createdAt) }}</span>

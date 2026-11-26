@@ -90,10 +90,20 @@ export const systemNotificationState = (): NotificationPermission | null => {
   return typeof Notification !== 'undefined' ? Notification.permission : null;
 };
 
+/**
+ * Kinds that ask someone to go and do something now (the printer waiting for the next sheet): a
+ * silent toast is easy to miss there, so they get a system notification, with its sound, even
+ * with the app in front.
+ */
+const CALLS_FOR_SOMEONE = new Set(['print-desk']);
+
+/** Whether a note gets a system notification too: in the background always, in front only when it calls for someone. */
+export const wantsSystemNotification = (n: Pick<AppNotification, 'kind'>, visible: boolean): boolean => !visible || (!!n.kind && CALLS_FOR_SOMEONE.has(n.kind));
+
 function showOnScreen(n: AppNotification): void {
   createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
-  // A system notification only while the app is in the background: in front, the toast already said it.
-  if (document.visibilityState === 'visible') return;
+  // In front, the toast already said most news; only what calls for someone is posted as well.
+  if (!wantsSystemNotification(n, document.visibilityState === 'visible')) return;
   if (isNative()) {
     if (nativePermission !== 'granted') return;
     notificationsModule()

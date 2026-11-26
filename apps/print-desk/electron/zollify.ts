@@ -159,6 +159,11 @@ export class Zollify {
     return json;
   }
 
+  /** Zollify's Print Desk module (/api/m/print-desk): shared settings, this desk's status, requests to it. */
+  desk<T>(method: 'GET' | 'PUT' | 'POST', path: string, body?: unknown): Promise<T> {
+    return this.request<T>(`/api/m/print-desk/${path}`, { method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  }
+
   /** The whole op log, reduced to one row per sellable item with its counted stock. */
   async catalog(): Promise<CatalogRow[]> {
     return catalogRows(await this.pullAll());

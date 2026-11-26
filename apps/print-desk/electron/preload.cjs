@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('printDesk', {
     image: invoke('cards:image'),
     open: invoke('cards:open'),
   },
+  desk: {
+    sync: invoke('desk:sync'),
+    report: invoke('desk:report'),
+    requests: invoke('desk:requests'),
+    claim: invoke('desk:claim'),
+    outcome: invoke('desk:outcome'),
+  },
   materials: {
     setKey: invoke('materials:setKey'),
     list: invoke('materials:list'),
@@ -44,6 +51,11 @@ contextBridge.exposeInMainWorld('printDesk', {
     lastPrint: invoke('photocraft:lastPrint'),
     describeSettings: invoke('photocraft:describeSettings'),
     print: invoke('photocraft:print'),
+    onMonitor: (cb) => {
+      const handler = (_e, state) => cb(state);
+      ipcRenderer.on('monitor:state', handler);
+      return () => ipcRenderer.off('monitor:state', handler);
+    },
     onQueue: (cb) => {
       const handler = (_e, progress) => cb(progress);
       ipcRenderer.on('spooler:progress', handler);

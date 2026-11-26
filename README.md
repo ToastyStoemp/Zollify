@@ -38,6 +38,7 @@ modules/
   shopify-sync/   catalogue matching against a storefront (client + server half)
   price-cards/    printable price tags from the catalogue
   print-stories/  points of interest on a print's picture, story cards, Shopify hotspots
+  print-desk/     the Print Desk app from any device: status, shared targets, requests (client + server half)
   label-printer/  Bluetooth label printer for price tags and staff badges
   costs/          per-item cost from shipment batches, margins in the catalogue
   convention-checklist/  packing checklist per convention
@@ -586,6 +587,26 @@ Shopify* reads one back. *Story card* opens a printable A5 or A4 card: the
 photo with its numbers, the introduction and what each number shows; *All
 story cards* prints every print that has a story, one per page, for a
 booklet at the booth.
+
+*Print Desk* - the `print-desk` module (under Products) shows the Print Desk
+desktop app (apps/print-desk) from any device. Each desk reports every few
+seconds: its printer, the copies queued, the run in progress with copies
+left, and the paper it needs against what is on hand; a desk that stops
+reporting shows as offline after 45 s. The targets (main, per A size, per
+item), hidden items, print order, paper materials and global print settings
+are one document per account that every desk syncs, merged per setting so
+two devices changing different ones never overwrite each other; the linked
+files stay on each computer. Owners and admins can change the targets, fill
+the counts to target and send them to a desk, or ask it to print (one paper
+size or all). A request is taken by one desk, once, and expires after 10
+minutes; printing on request only happens on a desk that has *Print when
+asked from Zollify* switched on under Setup. Nothing pushes: desks and the
+page poll. When the printer waits for someone (a Canon asking for the next
+sheet in the manual feed tray and a press on OK), the desk says so and the
+page shows it; each new wait also raises a *Printer waiting* notification
+(kind `print-desk`, low level), so it pops up only on devices that switched
+it on under Settings → This device → Notifications, and reaches webhooks
+that listen for it.
 
 *Wholesale* - the `wholesale` module (admins) sells to shops outright, the
 reverse of consignment. **Trade prices**: per product, whether it is offered

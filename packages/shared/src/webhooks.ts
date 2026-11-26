@@ -22,6 +22,7 @@ export const WEBHOOK_EVENTS = [
   { id: 'fees', label: 'Fees', hint: 'Fees charged, objected to or waived.' },
   { id: 'reports', label: 'Consignment reports', hint: 'A store report period closing.' },
   { id: 'tax-deadlines', label: 'Tax deadlines', hint: 'Reminders to file or pay taxes, at the lead times set under Tax deadlines.' },
+  { id: 'print-desk', label: 'Printer waiting', hint: 'Print Desk: the printer waits for you, e.g. to load a sheet in the manual feed tray and press OK.' },
   { id: 'other', label: 'Everything else from the bell', hint: 'Any other notification.' },
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number]['id'];

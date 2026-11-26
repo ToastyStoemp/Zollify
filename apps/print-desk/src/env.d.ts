@@ -5,6 +5,8 @@ import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
+import type { DeskRequest, DeskStatus } from '../electron/desk';
+import type { MonitorState } from '../electron/statusmonitor';
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
@@ -56,6 +58,17 @@ export interface PrintDeskApi {
     /** Opens a file in its default app (PhotoCraft for a PSD); '' or why it could not. */
     open(file: string): Promise<string>;
   };
+  /** Zollify's Print Desk module: settings every desk shares, this desk's status, requests from other devices. */
+  desk: {
+    /** Sends shared settings changed here, takes on what other devices set; the settings after. */
+    sync(): Promise<Settings>;
+    report(status: DeskStatus): Promise<void>;
+    /** Requests waiting for this desk. */
+    requests(): Promise<DeskRequest[]>;
+    /** True when this desk got the request, false when another took it or it expired. */
+    claim(id: string): Promise<boolean>;
+    outcome(id: string, status: 'done' | 'failed' | 'refused', result: string): Promise<void>;
+  };
   /** Zollify's materials, through the printer key. */
   materials: {
     /** Stores the key once Zollify accepts it ('' removes it). */
@@ -74,6 +87,8 @@ export interface PrintDeskApi {
     /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */
     describeSettings(hex: string): Promise<DevModeSummary[] | null>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
+    /** What the printer's status monitor says (Canon): the sheet printing, and a prompt when it waits for someone. */
+    onMonitor(cb: (state: MonitorState) => void): () => void;
     /** Copies left per item, from the print queue, until each job leaves it. */
     onQueue(cb: (progress: CopyProgress) => void): () => void;
   };

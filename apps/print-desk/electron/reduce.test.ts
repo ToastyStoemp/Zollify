@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { catalogRows, demandForecast, lastClosedEventSold } from './reduce.js';
+import { catalogRows, demandForecast, lastClosedEventSold, stockSales } from './reduce.js';
 import { printParams } from './shared.js';
 
 describe('catalogRows', () => {
@@ -96,5 +96,32 @@ describe('demandForecast', () => {
     const f = demandForecast(ops.filter((o) => (o.payload as { id?: string }).id !== 'fair-2026'), '2026-10-29');
     expect(f.event).toBeNull();
     expect(f.horizonDays).toBeCloseTo(1.5, 6);
+  });
+});
+
+describe('on hand, as Zollify shows it', () => {
+  const product = { type: 'product.upsert', payload: { id: 'p', title: 'Kyoto', type: 'Art Print', variants: [{ id: 'a3', name: 'A3' }, { id: 'a4', name: 'A4' }], updatedAt: 1 } };
+  const count = (vid: string, onHand: number, at: number) => ({ type: 'inventory.set', payload: { productId: 'p', variantId: vid, onHand, updatedAt: at } });
+  const sale = (id: string, at: number, qty: number, type = 'tx.create', extra = {}) => ({ type, payload: { id, timestamp: at, items: [{ pid: 'p', vid: 'a3', qty }], ...extra } });
+  const onHand = (ops: { type: string; payload: unknown }[]) => Object.fromEntries(catalogRows([product, ...ops]).map((r) => [r.variant, r.onHand]));
+
+  it('is the last count less the sales made since it', () => {
+    expect(onHand([count('a3', 10, 100), sale('before', 50, 4), sale('after', 150, 3), sale('later', 200, 1)])).toEqual({ A3: 6, A4: 0 });
+  });
+  it('leaves out reverted sales, either way of naming them', () => {
+    expect(onHand([count('a3', 10, 100), sale('s1', 150, 3), sale('s2', 160, 2), { type: 'tx.revert', payload: { id: 's1' } }, { type: 'tx.revert', payload: { txId: 's2' } }])).toEqual({ A3: 10, A4: 0 });
+  });
+  it('counts test sales while their run is on, not once it ended or test data was cleared', () => {
+    const test = (id: string, at: number, run: string) => sale(id, at, 1, 'tx.test.create', { testRun: run });
+    expect(onHand([count('a3', 10, 100), test('t1', 150, 'r1'), test('t2', 160, 'r2')])).toEqual({ A3: 8, A4: 0 });
+    expect(onHand([count('a3', 10, 100), test('t1', 150, 'r1'), test('t2', 160, 'r2'), { type: 'tx.test.end', payload: { run: 'r1' } }])).toEqual({ A3: 9, A4: 0 });
+    expect(onHand([count('a3', 10, 100), test('t1', 150, 'r1'), test('t2', 300, 'r2'), { type: 'tx.test.clear', payload: { at: 200 } }])).toEqual({ A3: 9, A4: 0 });
+    expect(onHand([count('a3', 10, 100), test('t1', 150, 'r1'), { type: 'tx.test.revert', payload: { id: 't1' } }])).toEqual({ A3: 10, A4: 0 });
+  });
+  it('is 0 for an item never counted, whatever it sold', () => {
+    expect(onHand([sale('s', 150, 3)])).toEqual({ A3: 0, A4: 0 });
+  });
+  it('counts a sale once, however often its op comes', () => {
+    expect(stockSales([sale('s', 150, 3), sale('s', 150, 3)])).toHaveLength(1);
   });
 });

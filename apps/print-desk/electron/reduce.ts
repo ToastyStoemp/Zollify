@@ -76,6 +76,45 @@ export function priceData(ops: PulledOp[]): { products: Product[]; discounts: Di
  * product.delete and inventory.set, last writer wins by updatedAt - the same
  * rules the server and the web app apply.
  */
+/**
+ * The sales that come off the stock, as Zollify's inventory counts them (stockTransactions in the
+ * platform): every sale (tx.create) not reverted, and test-mode sales (tx.test.create) while
+ * their run is on: a run's sales stop counting once it ends (tx.test.end), and clearing test data
+ * (tx.test.clear) removes the test sales made up to then.
+ */
+export function stockSales(ops: PulledOp[]): { timestamp: number; items: { pid: string; vid: string | null; qty: number }[] }[] {
+  type Sale = { timestamp: number; items: { pid: string; vid: string | null; qty: number }[]; run?: string; reverted?: boolean };
+  const sales = new Map<string, Sale>();
+  const ended = new Set<string>();
+  let clearedAt = 0;
+  for (const op of ops) {
+    const p = op.payload as Record<string, unknown>;
+    if (op.type === 'tx.create' || op.type === 'tx.test.create') {
+      const id = String(p.id ?? '');
+      if (!id || sales.has(id)) continue;
+      sales.set(id, {
+        timestamp: Number(p.timestamp) || 0,
+        items: (p.items as Sale['items'] | undefined) ?? [],
+        ...(op.type === 'tx.test.create' ? { run: typeof p.testRun === 'string' ? p.testRun : 'unknown' } : {}),
+      });
+    } else if (op.type === 'tx.revert' || op.type === 'tx.test.revert') {
+      // ZollTool wrote `txId`, Zollify writes `id`.
+      const sale = sales.get(String(p.txId ?? p.id ?? ''));
+      if (sale) sale.reverted = true;
+    } else if (op.type === 'tx.test.end') {
+      if (typeof p.run === 'string') ended.add(p.run);
+    } else if (op.type === 'tx.test.clear') {
+      if (typeof p.at === 'number') clearedAt = Math.max(clearedAt, p.at);
+    }
+  }
+  return [...sales.values()].filter((s) => !s.reverted && (s.run === undefined || (!ended.has(s.run) && s.timestamp > clearedAt)));
+}
+
+/**
+ * The live art prints and their stock, as Zollify shows it: the last count (inventory.set, last
+ * writer wins by updatedAt) less every sale made since that count, since a count already includes
+ * what sold before it. An item never counted has 0, as in Zollify.
+ */
 export function catalogRows(ops: PulledOp[]): CatalogRow[] {
   const products = reduceProducts(ops);
   const stock = new Map<string, InventoryItem>();
@@ -87,13 +126,26 @@ export function catalogRows(ops: PulledOp[]): CatalogRow[] {
       if (!cur || i.updatedAt >= cur.updatedAt) stock.set(k, i);
     }
   }
+  const soldSinceCount = new Map<string, number>();
+  for (const sale of stockSales(ops)) {
+    for (const it of sale.items) {
+      const k = stockKey(it.pid, it.vid);
+      const count = stock.get(k);
+      if (!count || sale.timestamp < count.updatedAt) continue;
+      soldSinceCount.set(k, (soldSinceCount.get(k) ?? 0) + (Number(it.qty) || 0));
+    }
+  }
+  const inStock = (k: string): number => {
+    const count = stock.get(k);
+    return count ? count.onHand - (soldSinceCount.get(k) ?? 0) : 0;
+  };
   const rows: CatalogRow[] = [];
   for (const p of products.values()) {
     if (p.deletedAt || !isArtPrint(p.type)) continue;
     const variants = p.variants ?? [];
     const row = (variantId: string, variant: string, sku: string): CatalogRow => {
       const key = stockKey(p.id, variantId);
-      return { key, productId: p.id, variantId, title: p.title || '', variant, sku, onHand: stock.get(key)?.onHand ?? 0 };
+      return { key, productId: p.id, variantId, title: p.title || '', variant, sku, onHand: inStock(key) };
     };
     if (variants.length) for (const v of variants) rows.push(row(v.id, v.name || '', v.sku || p.sku || ''));
     else rows.push(row('', '', p.sku || ''));

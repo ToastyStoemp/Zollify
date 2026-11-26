@@ -208,8 +208,10 @@ export class Zollify {
    * last saw it: a count made elsewhere in the meantime is kept. Returns each item's new count.
    */
   async addOnHand(items: { productId: string; variantId: string; add: number }[]): Promise<{ key: string; onHand: number }[]> {
+    // A count is "this many, now": so it starts from what is here now (the last count less sales
+    // since), not the last count, or the sales since it would be forgotten.
     const now = new Map(catalogRows(await this.pullAll()).map((r) => [r.key, r.onHand]));
-    const next = items.map((i) => ({ ...i, key: stockKey(i.productId, i.variantId), onHand: (now.get(stockKey(i.productId, i.variantId)) ?? 0) + i.add }));
+    const next = items.map((i) => ({ ...i, key: stockKey(i.productId, i.variantId), onHand: Math.max(0, now.get(stockKey(i.productId, i.variantId)) ?? 0) + i.add }));
     await this.setOnHand(next);
     return next.map(({ key, onHand }) => ({ key, onHand }));
   }

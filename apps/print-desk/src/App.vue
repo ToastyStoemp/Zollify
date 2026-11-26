@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 // Straight from its file, not the @zollify/ui barrel: the barrel pulls in @zollify/shared and zod.
 import QrCode from '@zollify/ui/QrCode.vue';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
-import { effectiveParams, fitToStock, isPrintFile, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
+import { effectiveParams, fitToStock, isPrintFile, moveKey, orderRows, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
 import Menu from './Menu.vue';
@@ -45,9 +45,11 @@ const hiddenKeys = computed(() => new Set(session.value ? (settings.value?.hidde
 const isHidden = (r: CatalogRow): boolean => hiddenKeys.value.has(r.key);
 const showHidden = ref(false);
 /** The items printed here. */
-const active = computed(() => rows.value.filter((r) => !isHidden(r)));
+/** The catalogue in print order: as dragged in the table, items never dragged after, as Zollify lists them. */
+const ordered = computed(() => orderRows(rows.value, session.value ? (settings.value?.order?.[session.value.accountId] ?? []) : []));
+const active = computed(() => ordered.value.filter((r) => !isHidden(r)));
 /** The table's rows before the size and text filters: the hidden ones too when they are shown. */
-const listed = computed(() => (showHidden.value ? rows.value : active.value));
+const listed = computed(() => (showHidden.value ? ordered.value : active.value));
 const shown = computed(() => {
   const q = filter.value.trim().toLowerCase();
   return listed.value.filter(
@@ -442,6 +444,32 @@ async function setOverrides(row: CatalogRow, overrides: Record<string, unknown>)
   await saveLink(row.key, { ...cur, file: cur?.file ?? '', params: cur?.params ?? defaultParams(), overrides });
 }
 
+/** Items whose print settings another can copy: every other item with settings of its own or changes to the global ones. */
+const copySources = (row: CatalogRow): CatalogRow[] =>
+  ordered.value.filter((r) => r.key !== row.key && (links.value[r.key]?.own || Object.keys(links.value[r.key]?.overrides ?? {}).length || (!globalParams.value && links.value[r.key])));
+const settingsKind = (r: CatalogRow): string =>
+  links.value[r.key]?.own || !globalParams.value ? `own settings, ${paperLabel(paramsFor(r).paper)}` : `global, changed`;
+/**
+ * Copies another item's print settings onto this one: own settings or the global ones with its
+ * changes, printer, paper, scaling and driver settings. The item keeps its orientation (from its
+ * image), and its own paper when its name says another size than the source's. Its file stays.
+ */
+async function copySettings(row: CatalogRow, sourceKey: string): Promise<void> {
+  const source = ordered.value.find((r) => r.key === sourceKey);
+  const from = links.value[sourceKey];
+  if (!source || !from) return;
+  const cur = links.value[row.key];
+  const orientation = cur?.params.orientation;
+  const sameSize = !sizeOf(row) || sizeOf(row) === sizeOf(source);
+  const params = { ...settingsFor(plain(from.params), sizeOf(source), sizeOf(row)), ...(orientation ? { orientation } : {}) };
+  const overrides = Object.fromEntries(Object.entries(plain(from.overrides ?? {})).filter(([k]) => k !== 'orientation' && (sameSize || k !== 'paper')));
+  await saveLink(row.key, { file: cur?.file ?? '', params, ...(from.own ? { own: true } : {}), ...(Object.keys(overrides).length ? { overrides } : {}) });
+  notice.value =
+    `Print settings copied from ${source.variant ? `${source.title} ${source.variant}` : source.title}.` +
+    (orientation ? ' The orientation stays as its image has it.' : '') +
+    (sameSize ? '' : ` The paper stays ${paperLabel(paramsFor(row).paper)}, the size in its name.`);
+}
+
 /** Gives an item its own settings (a copy of what it prints with now), or back to the global ones. */
 async function setOwn(row: CatalogRow, own: boolean): Promise<void> {
   const cur = links.value[row.key];
@@ -611,7 +639,57 @@ async function pickFile(row: CatalogRow): Promise<void> {
 /** The row a file is being dragged over. */
 const dropRow = ref<string | null>(null);
 const carriesFiles = (e: DragEvent): boolean => !!e.dataTransfer?.types.includes('Files');
+
+// ── Print order: an item dragged by its grip to another place in the table ──
+/** The row being moved, and where it would land: before or after the row under the pointer. */
+const moving = ref<string | null>(null);
+const landing = ref<{ key: string; after: boolean } | null>(null);
+async function saveOrder(keys: string[]): Promise<void> {
+  if (!session.value) return;
+  const all = plain(settings.value?.order ?? {});
+  all[session.value.accountId] = keys;
+  settings.value = await api.settings.set({ order: all });
+}
+/** Moves `row` to before `target` (after it when `after`), in the whole order, not just what is shown. */
+async function moveRow(row: CatalogRow, target: CatalogRow, after: boolean): Promise<void> {
+  if (row.key === target.key) return;
+  const keys = ordered.value.map((r) => r.key);
+  const next = after ? keys[keys.indexOf(target.key) + 1] ?? null : target.key;
+  await saveOrder(moveKey(keys, row.key, next === row.key ? (keys[keys.indexOf(row.key) + 1] ?? null) : next));
+}
+function startMove(row: CatalogRow, e: DragEvent): void {
+  moving.value = row.key;
+  e.dataTransfer?.setData('application/x-print-desk-row', row.key);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  // The whole row as the drag image, not just the grip.
+  const tr = (e.target as HTMLElement).closest('tr');
+  if (tr && e.dataTransfer) e.dataTransfer.setDragImage(tr, 24, tr.offsetHeight / 2);
+}
+function endMove(): void {
+  moving.value = null;
+  landing.value = null;
+}
+/** Arrow keys on the grip move the item one place up or down among the rows shown. */
+async function moveByKey(row: CatalogRow, e: KeyboardEvent): Promise<void> {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const list = shown.value;
+  const i = list.findIndex((r) => r.key === row.key);
+  const target = list[e.key === 'ArrowUp' ? i - 1 : i + 1];
+  if (!target) return;
+  await moveRow(row, target, e.key === 'ArrowDown');
+  await nextTick();
+  document.querySelector<HTMLElement>(`[data-grip="${CSS.escape(row.key)}"]`)?.focus();
+}
+
 function dragOver(row: CatalogRow, e: DragEvent): void {
+  if (moving.value) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    landing.value = { key: row.key, after: e.clientY > r.top + r.height / 2 };
+    return;
+  }
   if (!carriesFiles(e)) return;
   e.preventDefault();
   e.dataTransfer!.dropEffect = 'link';
@@ -623,6 +701,14 @@ function dragLeave(row: CatalogRow, e: DragEvent): void {
 }
 async function drop(row: CatalogRow, e: DragEvent): Promise<void> {
   dropRow.value = null;
+  if (moving.value) {
+    e.preventDefault();
+    const from = ordered.value.find((r) => r.key === moving.value);
+    const after = landing.value?.after ?? false;
+    endMove();
+    if (from) await moveRow(from, row, after);
+    return;
+  }
   const files = e.dataTransfer?.files;
   if (!files?.length) return;
   e.preventDefault();
@@ -913,11 +999,39 @@ async function printAll(): Promise<void> {
 
     <table>
       <thead>
-        <tr><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th><span class="sr-only">Actions</span></th><th>Print</th><th>Result</th></tr>
+        <tr><th class="grip-cell"><span class="sr-only">Print order</span></th><th>Product</th><th v-if="hasSku">SKU</th><th>On hand</th><th title="Stock to print up to. Empty: the size's or the main target, shown in grey">Target</th><th>File</th><th>Printer / paper</th><th><span class="sr-only">Actions</span></th><th>Print</th><th>Result</th></tr>
       </thead>
       <tbody>
         <template v-for="(row, i) in shown" :key="row.key">
-          <tr :class="{ drop: dropRow === row.key, hidden: isHidden(row), alt: i % 2 === 1 }" @dragenter="dragOver(row, $event)" @dragover="dragOver(row, $event)" @dragleave="dragLeave(row, $event)" @drop="drop(row, $event)">
+          <tr
+            :class="{
+              drop: dropRow === row.key,
+              hidden: isHidden(row),
+              alt: i % 2 === 1,
+              moving: moving === row.key,
+              'land-before': landing?.key === row.key && !landing.after && moving !== row.key,
+              'land-after': landing?.key === row.key && landing.after && moving !== row.key,
+            }"
+            @dragenter="dragOver(row, $event)"
+            @dragover="dragOver(row, $event)"
+            @dragleave="dragLeave(row, $event)"
+            @drop="drop(row, $event)"
+          >
+            <td class="grip-cell">
+              <button
+                type="button"
+                class="grip"
+                draggable="true"
+                :data-grip="row.key"
+                :aria-label="`Move ${row.variant ? `${row.title} ${row.variant}` : row.title} in the print order (drag, or arrow keys)`"
+                title="Drag to set the print order (or arrow keys): items print top to bottom"
+                @dragstart="startMove(row, $event)"
+                @dragend="endMove"
+                @keydown="moveByKey(row, $event)"
+              >
+                <Icon name="grip" />
+              </button>
+            </td>
             <td><div>{{ row.title }}</div><div v-if="row.variant" class="muted">{{ row.variant }}</div></td>
             <td v-if="hasSku"><code>{{ row.sku }}</code></td>
             <td>{{ row.onHand }}</td>
@@ -999,7 +1113,14 @@ async function printAll(): Promise<void> {
             </td>
           </tr>
           <tr v-if="open === row.key" class="settings" :class="{ alt: i % 2 === 1 }">
-            <td :colspan="hasSku ? 9 : 8">
+            <td :colspan="hasSku ? 10 : 9">
+              <label class="copy-from">
+                <span class="muted">Copy print settings from</span>
+                <select :value="''" @change="copySettings(row, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''">
+                  <option value="">another item…</option>
+                  <option v-for="r in copySources(row)" :key="r.key" :value="r.key">{{ r.variant ? `${r.title} ${r.variant}` : r.title }} · {{ settingsKind(r) }}</option>
+                </select>
+              </label>
               <ItemOverrides
                 v-if="usesGlobal(row)"
                 :base="effectiveParams(links[row.key], globalParams, sizeOf(row), false) ?? {}"
@@ -1070,6 +1191,15 @@ tr.settings.alt td { background: color-mix(in srgb, var(--zfy-ink) 4%, var(--zfy
 .icon-button:hover { color: var(--zfy-ink); border-color: color-mix(in srgb, var(--zfy-ink) 30%, var(--zfy-line)); }
 .icon-button[aria-pressed='true'] { color: var(--zfy-primary); border-color: var(--zfy-primary); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.grip-cell { width: 1%; padding-left: .3rem; padding-right: 0; }
+.grip { display: inline-grid; place-items: center; width: 1.6rem; height: 2rem; padding: 0; border: 0; background: transparent; color: var(--zfy-muted); cursor: grab; }
+.grip:hover, .grip:focus-visible { color: var(--zfy-ink); }
+.grip:active { cursor: grabbing; }
+tr.moving td { opacity: .45; }
+/* Where a dragged row lands: a line above or below the row under the pointer. */
+tr.land-before td { box-shadow: inset 0 3px 0 var(--zfy-primary); }
+tr.land-after td { box-shadow: inset 0 -3px 0 var(--zfy-primary); }
+.copy-from { flex-direction: row; align-items: center; gap: .5rem; margin-bottom: .6rem; }
 tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
 tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }

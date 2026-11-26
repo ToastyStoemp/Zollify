@@ -85,6 +85,8 @@ export interface Settings {
   hasPrinterKey: boolean;
   /** Account id -> stock keys of items printed elsewhere (outsourced): out of the fills and the print run. */
   hidden: Record<string, string[]>;
+  /** Account id -> stock keys in the order they print (dragged in the table); items not in it follow. */
+  order: Record<string, string[]>;
   priceCards: PriceCardSettings;
 }
 
@@ -365,4 +367,21 @@ export function smartFit(items: SmartItem[], stock: Record<string, number>): { c
     }
   }
   return { counts, gain };
+}
+
+/** Rows in the saved order; rows the order doesn't name (new items) follow in their own order. */
+export function orderRows<T extends { key: string }>(rows: T[], order: string[]): T[] {
+  const at = new Map(order.map((k, i) => [k, i]));
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => (at.get(a.r.key) ?? order.length + a.i) - (at.get(b.r.key) ?? order.length + b.i))
+    .map(({ r }) => r);
+}
+
+/** `keys` (the whole order) with `key` moved to just before `before`, or to the end when it is null. */
+export function moveKey(keys: string[], key: string, before: string | null): string[] {
+  if (key === before) return keys;
+  const rest = keys.filter((k) => k !== key);
+  const at = before === null ? -1 : rest.indexOf(before);
+  return at < 0 ? [...rest, key] : [...rest.slice(0, at), key, ...rest.slice(at)];
 }

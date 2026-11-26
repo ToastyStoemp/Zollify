@@ -130,6 +130,13 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   while the pointer is on it), an error stays until dismissed.
 - **Paper size quick filter** (next to the search): shows only one size's
   items and prints only that size, the same choice as the Paper needed chips.
+- **Print order**: drag a row by its grip (or use the arrow keys on it) to move
+  it; items print top to bottom, so the ones that matter most go first. Kept
+  per account; new items join at the bottom.
+- **Copy print settings from** another item, at the top of a row's settings:
+  its own settings, or the global ones with its changes. The item keeps its
+  orientation (from its image), and its own paper when its name says another
+  size; its file stays.
 - **Hide** (per row) is for items printed elsewhere, such as outsourced ones:
   they leave the table, the fills and the print run. "Show hidden" lists them
   again, dimmed, with **Unhide**. Kept per account between sessions.

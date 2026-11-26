@@ -29,6 +29,7 @@ export const DEFAULTS: Stored = {
   paperMaterials: {},
   hasPrinterKey: false,
   hidden: {},
+  order: {},
   priceCards: { themes: DEFAULT_THEMES, cards: {}, format: DEFAULT_FORMAT, outDir: '' },
 };
 

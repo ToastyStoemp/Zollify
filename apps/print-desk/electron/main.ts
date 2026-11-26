@@ -14,6 +14,7 @@ import { listMaterials, sessionRefusal, useMaterial, type MaterialUse, type Pape
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 import { sharedOf, statusReport, withShared, type DeskRequest, type DeskStatus, type SharedConfig } from './desk.js';
 import { hostname } from 'node:os';
+import { watchStatusMonitor } from './statusmonitor.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const store = new Store(join(app.getPath('userData'), 'print-desk.json'));
@@ -353,6 +354,12 @@ void app.whenReady().then(() => {
     }
     return results;
   });
+
+  // The printer waiting for someone (Canon's status monitor), for the window and the desk's status in Zollify.
+  const stopMonitor = watchStatusMonitor((state) => {
+    for (const w of BrowserWindow.getAllWindows()) w.webContents.send('monitor:state', state);
+  });
+  app.on('will-quit', stopMonitor);
 
   createWindow();
   app.on('activate', () => {

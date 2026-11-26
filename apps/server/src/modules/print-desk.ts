@@ -94,8 +94,13 @@ const Status = z
     paper: z.record(z.string().max(20), z.object({ needed: z.number().min(0), onHand: z.number().nullable() })).default({}),
     busy: z.string().max(200).optional(),
     error: z.string().max(500).optional(),
+    /** What the printer asks for before it goes on (its driver's prompt: "Starting manual feed printing."). */
+    waiting: z.string().max(500).optional(),
+    /** The copy that waits ("Kyoto A3, copy 2 of 5"). */
+    waitingFor: z.string().max(160).optional(),
   })
   .strict();
+type StatusDoc = z.infer<typeof Status>;
 
 const RequestBody = z.discriminatedUnion('kind', [
   /** Set the desk's print counts; items not named go to 0. */
@@ -160,6 +165,19 @@ function routes(ctx: ModuleContext): FastifyPluginAsync {
       const who = ctx.identity(req);
       const body = Status.safeParse(req.body);
       if (!body.success || req.params.deviceId.length > 120) return reply.code(400).send({ error: 'invalid_request', message: 'Check the status report.' });
+      const before = db.prepare('SELECT doc FROM print_desk_status WHERE accountId = ? AND deviceId = ?').get(who.accountId, req.params.deviceId) as { doc: string } | undefined;
+      const was = before ? (JSON.parse(before.doc) as StatusDoc) : null;
+      const now = body.data;
+      // The printer started waiting for someone, or a next copy does: tell the devices that asked.
+      if (now.waiting && (now.waiting !== was?.waiting || now.waitingFor !== was?.waitingFor)) {
+        ctx.notify(who.accountId, {
+          title: `Printer waiting${now.waitingFor ? `: ${now.waitingFor}` : ''}`,
+          body: `${now.name}: ${now.waiting}`,
+          link: '/m/print-desk',
+          kind: 'print-desk',
+          level: 'low',
+        });
+      }
       db.prepare('INSERT INTO print_desk_status (accountId, deviceId, doc, updatedAt) VALUES (?, ?, ?, ?) ON CONFLICT(accountId, deviceId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt').run(who.accountId, req.params.deviceId, JSON.stringify(body.data), Date.now());
       return { ok: true };
     });

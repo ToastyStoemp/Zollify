@@ -6,6 +6,7 @@ import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
 import type { DeskRequest, DeskStatus } from '../electron/desk';
+import type { MonitorState } from '../electron/statusmonitor';
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
@@ -86,6 +87,8 @@ export interface PrintDeskApi {
     /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */
     describeSettings(hex: string): Promise<DevModeSummary[] | null>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
+    /** What the printer's status monitor says (Canon): the sheet printing, and a prompt when it waits for someone. */
+    onMonitor(cb: (state: MonitorState) => void): () => void;
     /** Copies left per item, from the print queue, until each job leaves it. */
     onQueue(cb: (progress: CopyProgress) => void): () => void;
   };

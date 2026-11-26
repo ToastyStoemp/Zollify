@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import QrCode from '@zollify/ui/QrCode.vue';
 import type { DeskRequest } from '../electron/desk';
 import type { Material } from '../electron/materials';
+import type { MonitorState } from '../electron/statusmonitor';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
 import { effectiveParams, fitToStock, isPrintFile, moveKey, orderRows, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
 import Icon from './Icon.vue';
@@ -92,6 +93,12 @@ onMounted(async () => {
   login.server = settings.value.server || 'https://';
   session.value = await api.zollify.resume();
   if (session.value) await loadAll();
+  api.photocraft.onMonitor((state) => {
+    const was = monitor.value?.prompt;
+    monitor.value = state;
+    // A new wait goes to Zollify now, not at the next report, so the phone hears it while it matters.
+    if (state.prompt && state.prompt !== was) void deskTick();
+  });
   api.photocraft.onQueue((p) => {
     progress[p.key] = p;
     void countPrinted(p);
@@ -139,6 +146,17 @@ async function syncShared(): Promise<void> {
     /* the module is off for this account, or Zollify can't be reached: the settings here stand */
   }
 }
+/** What the printer's status monitor says: the sheet printing, and what it waits for. */
+const monitor = ref<MonitorState | null>(null);
+/** The copy the printer waits on: the item whose file the monitor names, with the sheet it is at. */
+const waitingFor = computed(() => {
+  const m = monitor.value;
+  if (!m?.prompt) return '';
+  const doc = m.document.toLowerCase();
+  const row = doc ? rows.value.find((r) => (links.value[r.key]?.file ?? '').split(/[\\/]/).pop()?.toLowerCase() === doc) : undefined;
+  const name = row ? (row.variant ? `${row.title} ${row.variant}` : row.title) : m.document;
+  return [name, m.page ? `copy ${m.page.at} of ${m.page.of}` : ''].filter(Boolean).join(', ');
+});
 /** How often the desk tells Zollify what it is doing, and looks for requests. */
 const DESK_MS = 5000;
 let deskTicking = false;
@@ -154,6 +172,8 @@ async function deskTick(): Promise<void> {
         paper: Object.fromEntries(Object.entries(needs.value).map(([size, needed]) => [size, { needed, onHand: paperOnHand(size) }])),
         busy: busy.value,
         error: error.value,
+        waiting: monitor.value?.prompt ?? '',
+        waitingFor: waitingFor.value,
       }),
     );
     // Not awaited: a print request runs as long as the run, and the reports keep going meanwhile.

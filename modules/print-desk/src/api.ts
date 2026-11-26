@@ -42,6 +42,9 @@ export interface Desk {
   paper: Record<string, { needed: number; onHand: number | null }>;
   busy?: string;
   error?: string;
+  /** What the printer waits for (its driver's prompt), and the copy that waits. */
+  waiting?: string;
+  waitingFor?: string;
 }
 
 export interface DeskRequest {

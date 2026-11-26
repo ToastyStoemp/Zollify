@@ -45,6 +45,9 @@ export interface DeskStatus {
   paper: Record<string, { needed: number; onHand: number | null }>;
   busy?: string;
   error?: string;
+  /** What the printer waits for (its status monitor's prompt), and the copy that waits. */
+  waiting?: string;
+  waitingFor?: string;
 }
 const cut = (s: string | undefined, n: number): string | undefined => (s ? s.slice(0, n) : undefined);
 /** A status report within what the server takes: counts over 0, long messages cut short. */
@@ -56,6 +59,8 @@ export function statusReport(s: DeskStatus): DeskStatus {
     paper: s.paper,
     ...(s.busy ? { busy: cut(s.busy, 200) } : {}),
     ...(s.error ? { error: cut(s.error, 500) } : {}),
+    ...(s.waiting ? { waiting: cut(s.waiting, 500) } : {}),
+    ...(s.waitingFor ? { waitingFor: cut(s.waitingFor, 160) } : {}),
   };
 }
 

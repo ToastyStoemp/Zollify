@@ -84,6 +84,17 @@ describe('desks reporting', () => {
     app.zollify.db.prepare('UPDATE print_desk_status SET updatedAt = ? WHERE deviceId = ?').run(Date.now() - 60_000, 'desk-1');
     expect((await call('GET', '/status')).json().desks[0].online).toBe(false);
   });
+  it('notifies once when the printer starts waiting, and again for the next copy', async () => {
+    const waiting = () => app.inject({ method: 'GET', url: '/api/notifications', headers: as(owner) }).then((r) => r.json().notifications.filter((n: { kind: string }) => n.kind === 'print-desk'));
+    const report = (extra = {}) => call('PUT', '/status/desk-1', status(extra));
+    await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 1 of 3' });
+    await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 1 of 3' });
+    expect(await waiting()).toHaveLength(1);
+    expect((await waiting())[0]).toMatchObject({ title: 'Printer waiting: Kyoto A3, copy 1 of 3', body: 'Print Desk: Starting manual feed printing.', level: 'low', link: '/m/print-desk' });
+    await report();
+    await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 2 of 3' });
+    expect(await waiting()).toHaveLength(2);
+  });
   it('turns away a report it does not understand', async () => {
     expect((await call('PUT', '/status/desk-1', { name: 'x' })).statusCode).toBe(400);
   });

@@ -204,6 +204,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
           {{ desk.printer || 'Default printer' }}<template v-if="desk.email"> · signed in as {{ desk.email }}</template> ·
           printing on request is <strong>{{ desk.allowRemote ? 'allowed' : 'off' }}</strong><template v-if="!desk.allowRemote"> (switch it on in Print Desk under Setup)</template>
         </p>
+        <p v-if="desk.online && desk.waiting" class="waiting" role="status"><Icon name="alert-triangle" :size="16" /> <span><strong>Printer waiting{{ desk.waitingFor ? `: ${desk.waitingFor}` : '' }}</strong> {{ desk.waiting }}</span></p>
         <p v-if="desk.busy" class="note"><Icon name="clock" :size="14" /> {{ desk.busy }}</p>
         <p v-if="desk.error" class="error">{{ desk.error }}</p>
 
@@ -312,6 +313,7 @@ h3 { margin: 0 0 .3rem; font-size: .85rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); }
 .note { margin: 0; display: flex; gap: .4rem; align-items: center; font-size: .85rem; }
+.waiting { margin: 0; display: flex; gap: .5rem; align-items: flex-start; padding: .5rem .7rem; border-radius: 8px; border: 1px solid var(--zfy-warning-ink, #8a5a1e); color: var(--zfy-warning-ink, #8a5a1e); font-size: .88rem; }
 .link { border: 0; background: none; padding: 0; text-decoration: underline; cursor: pointer; color: inherit; font-size: .8rem; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .desk-head { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; flex-wrap: wrap; }

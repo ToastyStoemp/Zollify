@@ -176,6 +176,13 @@ the app syncs with Zollify while signed in (electron/desk.ts, main.ts):
   needed) and takes requests made in Zollify: "set counts" always, "print"
   only with **Print when asked from Zollify** switched on under Setup (off by
   default). A print request is refused while a run is going.
+- When the printer waits for someone, the desk reports it at once and Zollify
+  notifies the devices that asked for *Printer waiting*. The Windows spooler
+  never hears of such a wait (the job just says Printing, every page sent) and
+  the printer answers SNMP with plain idle, so it is read from Canon's status
+  monitor (electron/statusmonitor.ts): one helper process looks for its prompt
+  window (class `CNMSTMN_ERRDLG`, "Starting manual feed printing...") once a
+  second, and reads the sheet the printer is at from the monitor itself.
 
 ## Price cards
 

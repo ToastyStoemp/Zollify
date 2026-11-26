@@ -601,7 +601,12 @@ the counts to target and send them to a desk, or ask it to print (one paper
 size or all). A request is taken by one desk, once, and expires after 10
 minutes; printing on request only happens on a desk that has *Print when
 asked from Zollify* switched on under Setup. Nothing pushes: desks and the
-page poll.
+page poll. When the printer waits for someone (a Canon asking for the next
+sheet in the manual feed tray and a press on OK), the desk says so and the
+page shows it; each new wait also raises a *Printer waiting* notification
+(kind `print-desk`, low level), so it pops up only on devices that switched
+it on under Settings → This device → Notifications, and reaches webhooks
+that listen for it.
 
 *Wholesale* - the `wholesale` module (admins) sells to shops outright, the
 reverse of consignment. **Trade prices**: per product, whether it is offered

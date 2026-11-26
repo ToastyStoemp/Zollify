@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('printDesk', {
     lastPrint: invoke('photocraft:lastPrint'),
     describeSettings: invoke('photocraft:describeSettings'),
     print: invoke('photocraft:print'),
+    onMonitor: (cb) => {
+      const handler = (_e, state) => cb(state);
+      ipcRenderer.on('monitor:state', handler);
+      return () => ipcRenderer.off('monitor:state', handler);
+    },
     onQueue: (cb) => {
       const handler = (_e, progress) => cb(progress);
       ipcRenderer.on('spooler:progress', handler);

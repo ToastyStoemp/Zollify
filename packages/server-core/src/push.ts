@@ -66,8 +66,12 @@ export function pushTargets(db: Database.Database, accountId: string, n: Pick<No
 }
 
 export interface Push {
+  /** Whether a service account is set, so anything is pushed at all. */
+  configured(): boolean;
   /** Sends the note to the devices that should get it; never throws. */
   send(accountId: string, n: NotificationInput): Promise<void>;
+  /** Sends a note to one device's token; whether Google took it. */
+  sendTo(device: { id: string; token: string }, n: NotificationInput): Promise<boolean>;
 }
 
 export function createPush(
@@ -93,7 +97,29 @@ export function createPush(
 
   const forget = db.prepare('UPDATE devices SET pushToken = NULL WHERE id = ? AND pushToken = ?');
 
+  async function one(sa: ServiceAccount, auth: string, t: { id: string; token: string }, n: NotificationInput): Promise<boolean> {
+    const res = await http(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(sa.project_id)}/messages:send`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: {
+          token: t.token,
+          notification: { title: n.title.slice(0, 160), body: (n.body ?? '').slice(0, 1000) },
+          data: { link: n.link ?? '', kind: n.kind ?? '' },
+          android: { priority: 'HIGH' },
+        },
+      }),
+    });
+    if (res.ok) return true;
+    const err = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string } };
+    // The app was uninstalled or the token replaced: stop sending to it.
+    if (res.status === 404 || err.error?.status === 'NOT_FOUND' || err.error?.status === 'UNREGISTERED') forget.run(t.id, t.token);
+    else deps.log?.(new Error(`Push to a device failed: ${err.error?.message ?? res.status}`));
+    return false;
+  }
+
   return {
+    configured: () => !!parseServiceAccount(config()),
     async send(accountId, n) {
       const sa = parseServiceAccount(config());
       if (!sa) return;
@@ -101,29 +127,19 @@ export function createPush(
         const targets = pushTargets(db, accountId, n);
         if (!targets.length) return;
         const auth = await accessToken(sa);
-        await Promise.all(
-          targets.map(async (t) => {
-            const res = await http(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(sa.project_id)}/messages:send`, {
-              method: 'POST',
-              headers: { authorization: `Bearer ${auth}`, 'content-type': 'application/json' },
-              body: JSON.stringify({
-                message: {
-                  token: t.token,
-                  notification: { title: n.title.slice(0, 160), body: (n.body ?? '').slice(0, 1000) },
-                  data: { link: n.link ?? '', kind: n.kind ?? '' },
-                  android: { priority: 'HIGH' },
-                },
-              }),
-            });
-            if (res.ok) return;
-            const err = (await res.json().catch(() => ({}))) as { error?: { status?: string; message?: string } };
-            // The app was uninstalled or the token replaced: stop sending to it.
-            if (res.status === 404 || err.error?.status === 'NOT_FOUND' || err.error?.status === 'UNREGISTERED') forget.run(t.id, t.token);
-            else deps.log?.(new Error(`Push to a device failed: ${err.error?.message ?? res.status}`));
-          }),
-        );
+        await Promise.all(targets.map((t) => one(sa, auth, t, n)));
       } catch (err) {
         deps.log?.(err);
+      }
+    },
+    async sendTo(device, n) {
+      const sa = parseServiceAccount(config());
+      if (!sa) return false;
+      try {
+        return await one(sa, await accessToken(sa), device, n);
+      } catch (err) {
+        deps.log?.(err);
+        return false;
       }
     },
   };

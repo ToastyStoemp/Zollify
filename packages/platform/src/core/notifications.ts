@@ -129,12 +129,25 @@ function showOnScreen(n: AppNotification, always = false): void {
  * notification (asking for permission first where it has not been answered). After `delayMs`, so
  * there is time to lock the screen or switch apps and see whether it still arrives.
  */
-export async function testNotification(delayMs = 0): Promise<void> {
+export async function testNotification(delayMs = 0): Promise<'push' | 'app'> {
   await askPermission();
-  await new Promise((r) => setTimeout(r, delayMs));
-  const id = `test-${Date.now()}`;
-  showOnScreen({ id, moduleId: null, title: 'Test notification', body: 'Notifications reach this device.', link: null, createdAt: Date.now(), readAt: null, level: 'normal', kind: null }, true);
+  const wait = () => new Promise((r) => setTimeout(r, delayMs));
+  // Registered for push: the server sends a real one (it waits as long), which Android shows
+  // with the app frozen too - the only way to know a printer note will reach a locked phone.
+  if (pushRegistered) {
+    try {
+      await authFetch('/devices/me/test-push', { method: 'POST', body: '{}' });
+      await wait();
+      return 'push';
+    } catch {
+      /* push not set up on the server: the app shows it itself */
+    }
+  }
+  await wait();
+  showOnScreen(testNote(), true);
+  return 'app';
 }
+const testNote = (): AppNotification => ({ id: `test-${Date.now()}`, moduleId: null, title: 'Test notification', body: 'Notifications reach this device.', link: null, createdAt: Date.now(), readAt: null, level: 'normal', kind: 'test' });
 
 // ── Push on Android ─────────────────────────────────────────────────────────
 // Android freezes the app in the background, so it cannot hear a note over the live channel
@@ -170,6 +183,10 @@ export async function startPush(): Promise<void> {
         () => (pushRegistered = true),
         () => undefined,
       );
+    });
+    // In front Android shows no push; real notes come over the live channel, a test one does not.
+    await PushNotifications.addListener('pushNotificationReceived', (n) => {
+      if ((n.data as { kind?: unknown } | undefined)?.kind === 'test') showOnScreen(testNote(), true);
     });
     await PushNotifications.addListener('pushNotificationActionPerformed', ({ notification }) => {
       const link = (notification.data as { link?: unknown } | undefined)?.link;

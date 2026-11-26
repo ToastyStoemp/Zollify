@@ -326,7 +326,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
       if (mod.onOps && isEnabled(db, accountId, mod.id)) mod.onOps(services(mod), accountId, ops);
     }
   }, problems);
-  registerDeviceRoutes(app, db);
+  registerDeviceRoutes(app, db, push);
   registerAccountRoutes(app, db, opts.dataDir, forgetAccount);
   registerNotificationRoutes(app, db);
   registerWebhookRoutes(app, db, webhooks, problems);

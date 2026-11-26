@@ -92,6 +92,17 @@ describe('sending', () => {
     await push.send(accountId, { title: 'Again', level: 'normal' });
     expect(calls.map((c) => c.url)).toEqual(['https://fcm.googleapis.com/v1/projects/zollify-test/messages:send']);
   });
+  it('sends a test push only where push is set up and the device registered', async () => {
+    const test = (t: string) => app.inject({ method: 'POST', url: '/api/devices/me/test-push', headers: auth(t), payload: {} });
+    expect((await test(owner)).json().error).toBe('no_push');
+    process.env.FCM_SERVICE_ACCOUNT = SA;
+    try {
+      // The helper's token was dropped above.
+      expect((await test(helper)).json().error).toBe('no_token');
+    } finally {
+      delete process.env.FCM_SERVICE_ACCOUNT;
+    }
+  });
   it('sends nothing without a service account', async () => {
     let called = false;
     const push = createPush(app.zollify.db, { config: () => undefined, fetch: (async () => ((called = true), new Response('{}'))) as typeof fetch });

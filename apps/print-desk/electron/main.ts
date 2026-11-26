@@ -12,6 +12,8 @@ import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } f
 import { Store } from './store.js';
 import { listMaterials, sessionRefusal, useMaterial, type MaterialUse, type PaperAccess } from './materials.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
+import { sharedOf, statusReport, withShared, type DeskRequest, type DeskStatus, type SharedConfig } from './desk.js';
+import { hostname } from 'node:os';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const store = new Store(join(app.getPath('userData'), 'print-desk.json'));
@@ -70,8 +72,60 @@ void app.whenReady().then(() => {
     Object.assign(store.data, patch);
     store.save();
     if (patch.theme) nativeTheme.themeSource = patch.theme;
+    pushShared(patch);
     return store.settings();
   });
+
+  // ── Zollify's Print Desk module: settings every desk shares, this desk's status, requests to it ──
+  /** Shared settings changed here and not on the server yet; sent in order, one change after another. */
+  let unsent: Record<string, unknown> = {};
+  let sharing: Promise<void> = Promise.resolve();
+  const sendUnsent = async (): Promise<void> => {
+    const body = { ...unsent };
+    if (!Object.keys(body).length) return;
+    try {
+      await zollify.desk('PUT', 'config', body);
+      // What changed again while this was on its way stays to be sent.
+      for (const k of Object.keys(body)) if (unsent[k] === body[k]) delete unsent[k];
+    } catch (err) {
+      // Not this desk's to change (a member's sign-in) or the module is off: nothing to send again.
+      if (err instanceof ZollifyError && (err.status === 403 || err.status === 404)) unsent = {};
+    }
+  };
+  function pushShared(patch: Partial<Settings>): void {
+    const account = zollify.session?.accountId;
+    const change = account ? sharedOf(patch, account) : {};
+    if (!Object.keys(change).length) return;
+    unsent = { ...unsent, ...change };
+    sharing = sharing.then(sendUnsent);
+  }
+  /** Takes on what other devices set; the first desk to sync gives Zollify its own settings. */
+  async function syncShared(): Promise<Settings> {
+    const account = zollify.session?.accountId;
+    if (!account) return store.settings();
+    await (sharing = sharing.then(sendUnsent));
+    const { config, updatedAt } = await zollify.desk<{ config: SharedConfig; updatedAt: number }>('GET', 'config');
+    if (!updatedAt) pushShared(store.data);
+    else if (!Object.keys(unsent).length) {
+      Object.assign(store.data, withShared(store.data, account, config));
+      store.save();
+    }
+    return store.settings();
+  }
+  const desk = encodeURIComponent(store.data.deviceId);
+  ipcMain.handle('desk:sync', () => syncShared().catch(fail));
+  ipcMain.handle('desk:report', (_e, status: DeskStatus) =>
+    zollify
+      .desk('PUT', `status/${desk}`, { ...statusReport(status), name: hostname().slice(0, 80) || 'Print Desk', version: app.getVersion(), email: zollify.session?.email, allowRemote: store.data.allowRemote })
+      .then(() => undefined)
+      .catch(fail),
+  );
+  ipcMain.handle('desk:requests', () => zollify.desk<{ requests: DeskRequest[] }>('GET', `requests?deviceId=${desk}`).then((r) => r.requests).catch(fail));
+  /** True when this desk got the request; false when another desk took it first, or it expired. */
+  ipcMain.handle('desk:claim', (_e, id: string) => zollify.desk('POST', `requests/${encodeURIComponent(id)}/claim`, { deviceId: store.data.deviceId }).then(() => true, () => false));
+  ipcMain.handle('desk:outcome', (_e, id: string, status: 'done' | 'failed' | 'refused', result: string) =>
+    zollify.desk('POST', `requests/${encodeURIComponent(id)}/outcome`, { status, result: String(result).slice(0, 500) }).then(() => undefined).catch(fail),
+  );
   ipcMain.handle('pick:file', async (e) => {
     const r = await dialog.showOpenDialog(owner(e), { properties: ['openFile'], filters: [{ name: 'Images', extensions: [...PRINT_FILE_EXTENSIONS] }] });
     return r.canceled ? null : (r.filePaths[0] ?? null);

@@ -5,6 +5,7 @@ import type { DevModeSummary } from '../electron/devmode';
 import type { Material, PaperAccess } from '../electron/materials';
 import type { DemandForecast, EventSold } from '../electron/reduce';
 import type { LinkPoll, LinkStart } from '../electron/zollify';
+import type { DeskRequest, DeskStatus } from '../electron/desk';
 
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
@@ -55,6 +56,17 @@ export interface PrintDeskApi {
     image(file: string): Promise<string>;
     /** Opens a file in its default app (PhotoCraft for a PSD); '' or why it could not. */
     open(file: string): Promise<string>;
+  };
+  /** Zollify's Print Desk module: settings every desk shares, this desk's status, requests from other devices. */
+  desk: {
+    /** Sends shared settings changed here, takes on what other devices set; the settings after. */
+    sync(): Promise<Settings>;
+    report(status: DeskStatus): Promise<void>;
+    /** Requests waiting for this desk. */
+    requests(): Promise<DeskRequest[]>;
+    /** True when this desk got the request, false when another took it or it expired. */
+    claim(id: string): Promise<boolean>;
+    outcome(id: string, status: 'done' | 'failed' | 'refused', result: string): Promise<void>;
   };
   /** Zollify's materials, through the printer key. */
   materials: {

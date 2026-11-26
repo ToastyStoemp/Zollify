@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('printDesk', {
     image: invoke('cards:image'),
     open: invoke('cards:open'),
   },
+  desk: {
+    sync: invoke('desk:sync'),
+    report: invoke('desk:report'),
+    requests: invoke('desk:requests'),
+    claim: invoke('desk:claim'),
+    outcome: invoke('desk:outcome'),
+  },
   materials: {
     setKey: invoke('materials:setKey'),
     list: invoke('materials:list'),

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 // Straight from its file, not the @zollify/ui barrel: the barrel pulls in @zollify/shared and zod.
 import QrCode from '@zollify/ui/QrCode.vue';
+import type { DeskRequest } from '../electron/desk';
 import type { Material } from '../electron/materials';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
 import { effectiveParams, fitToStock, isPrintFile, moveKey, orderRows, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
@@ -98,7 +99,7 @@ onMounted(async () => {
 });
 
 async function loadAll(): Promise<void> {
-  await Promise.all([refreshCatalog(), refreshPrinters(), loadMaterials()]);
+  await Promise.all([refreshCatalog(), refreshPrinters(), loadMaterials(), syncShared()]);
 }
 async function refreshCatalog(): Promise<void> {
   await guard('Loading catalogue', async () => {
@@ -122,16 +123,77 @@ async function resync(): Promise<void> {
       rows.value = fresh;
       syncedAt.value = new Date();
     }
-    await loadMaterials();
+    await Promise.all([loadMaterials(), syncShared()]);
   } catch {
     /* offline for a moment: the next resync tries again */
   }
 }
 const resyncTimer = setInterval(() => void resync(), RESYNC_MS);
+
+// ── Zollify's Print Desk module: settings shared with the other desks, this desk's status, requests ──
+/** Sends shared settings changed here and takes on what other devices set. */
+async function syncShared(): Promise<void> {
+  try {
+    settings.value = await api.desk.sync();
+  } catch {
+    /* the module is off for this account, or Zollify can't be reached: the settings here stand */
+  }
+}
+/** How often the desk tells Zollify what it is doing, and looks for requests. */
+const DESK_MS = 5000;
+let deskTicking = false;
+async function deskTick(): Promise<void> {
+  if (!session.value || deskTicking) return;
+  deskTicking = true;
+  try {
+    await api.desk.report(
+      plain({
+        printer: String(globalParams.value?.printer ?? printers.value.find((p) => p.default)?.name ?? ''),
+        counts: Object.fromEntries(active.value.map((r) => [r.key, qty[r.key] ?? 0])),
+        run: Object.values(progress),
+        paper: Object.fromEntries(Object.entries(needs.value).map(([size, needed]) => [size, { needed, onHand: paperOnHand(size) }])),
+        busy: busy.value,
+        error: error.value,
+      }),
+    );
+    // Not awaited: a print request runs as long as the run, and the reports keep going meanwhile.
+    for (const r of await api.desk.requests()) if (await api.desk.claim(r.id)) void doRequest(r);
+  } catch {
+    /* the module is off, or offline: the next tick tries again */
+  } finally {
+    deskTicking = false;
+  }
+}
+/** Does what another device asked; printing only when this desk allows it. */
+async function doRequest(r: DeskRequest): Promise<void> {
+  const answer = (status: 'done' | 'failed' | 'refused', result: string): Promise<void> => api.desk.outcome(r.id, status, result).catch(() => undefined);
+  const copiesOf = (n: number): string => `${n} ${n === 1 ? 'copy' : 'copies'}`;
+  if (r.kind === 'counts') {
+    const counts = r.payload.counts ?? {};
+    for (const row of rows.value) qty[row.key] = counts[row.key] ?? 0;
+    const copies = Object.values(counts).reduce((n, c) => n + c, 0);
+    notice.value = `Print counts set from another device: ${copiesOf(copies)}.`;
+    return answer('done', `Counts set: ${copiesOf(copies)}.`);
+  }
+  if (!settings.value?.allowRemote) return answer('refused', 'Printing on request is off on this desk: switch it on under Setup.');
+  if (busy.value || copiesLeft.value !== null) return answer('failed', 'The desk is busy printing. Try again when this run is done.');
+  onlySize.value = r.payload.onlySize ?? '';
+  if (!queued.value.length) return answer('failed', `Nothing to print${onlySize.value ? ` in ${sizeLabel(onlySize.value)}` : ''}: no copies queued with a file linked.`);
+  const copies = totalCopies.value;
+  notice.value = `Printing ${copiesOf(copies)}, as asked from another device.`;
+  await printAll();
+  return error.value ? answer('failed', error.value) : answer('done', `Sent ${copiesOf(copies)} to the printer.`);
+}
+const deskTimer = setInterval(() => void deskTick(), DESK_MS);
+async function toggleAllowRemote(on: boolean): Promise<void> {
+  settings.value = await api.settings.set({ allowRemote: on });
+  void deskTick();
+}
 const onFocus = (): void => void resync();
 window.addEventListener('focus', onFocus);
 onBeforeUnmount(() => {
   clearInterval(resyncTimer);
+  clearInterval(deskTimer);
   window.removeEventListener('focus', onFocus);
 });
 async function refreshPrinters(): Promise<void> {
@@ -920,6 +982,7 @@ async function printAll(): Promise<void> {
         <button type="button" role="menuitem" :disabled="!!busy || !rows.length" @click="detectSizes">Detect sizes<small>Each item's paper from the A size in its name</small></button>
         <hr />
         <label role="menuitemcheckbox" :aria-checked="!!settings?.addToStock"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
+        <label role="menuitemcheckbox" :aria-checked="!!settings?.allowRemote" title="Zollify's Print Desk module can always set the print counts; with this on, it can also start printing"><input type="checkbox" :checked="settings?.allowRemote" @change="toggleAllowRemote(($event.target as HTMLInputElement).checked)" /> Print when asked from Zollify</label>
       </Menu>
       <button v-if="hiddenKeys.size" type="button" class="quiet" :aria-pressed="showHidden" @click="showHidden = !showHidden">{{ showHidden ? `Leave out hidden (${hiddenKeys.size})` : `Show hidden (${hiddenKeys.size})` }}</button>
       <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>

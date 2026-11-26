@@ -88,6 +88,8 @@ export interface Settings {
   /** Account id -> stock keys in the order they print (dragged in the table); items not in it follow. */
   order: Record<string, string[]>;
   priceCards: PriceCardSettings;
+  /** Print when asked from another device (Zollify's Print Desk module). Off until switched on here; counts are always taken. */
+  allowRemote: boolean;
 }
 
 /** Price cards: the themes, each account's cards, how prices read, and where the PSDs go. */

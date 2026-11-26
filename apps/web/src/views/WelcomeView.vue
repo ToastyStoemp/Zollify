@@ -60,6 +60,7 @@ const GUIDE: Record<string, { forWhom: string; recommended: boolean }> = {
     forWhom: 'Reminders before each filing and payment date, worked out from your VAT answers here - Germany in full, the EU SME scheme report anywhere in the EU, and your own dates.',
     recommended: false,
   },
+  'print-desk': { forWhom: 'If you print your own art prints with the Print Desk app: see the printer from your phone, share targets between computers, and send it copies to print.', recommended: false },
   economic: { forWhom: 'Danish books: each day of sales goes into your e-conomic journal with its VAT codes, renters’ shares kept apart, for your accountant to post.', recommended: false },
   consignment: { forWhom: 'For stores selling artists’ work on consignment: commissions, payouts, shelf rentals and setups.', recommended: false },
   commissions: { forWhom: 'For artists taking custom work: save the customer, take a deposit at the till, and give them a QR code to follow progress.', recommended: false },
@@ -350,7 +351,7 @@ const GROUPS: { title: string; ids: string[] }[] = [
   { title: 'Selling', ids: ['pos', 'price-cards', 'label-printer', 'commissions', 'loyalty'] },
   { title: 'Events', ids: ['public-events', 'print-stories', 'convention-checklist', 'customs'] },
   { title: 'Stores', ids: ['consignment', 'consignment-artist', 'multi-storage'] },
-  { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'shopify-sync', 'wholesale'] },
+  { title: 'Books and stock', ids: ['sme-scheme', 'tax', 'tax-deadlines', 'economic', 'peppol-be', 'costs', 'sourcing', 'print-desk', 'shopify-sync', 'wholesale'] },
   { title: 'Moving in', ids: ['migration'] },
 ];
 const CUSTOMS: { id: string; label: string }[] = [

@@ -16,6 +16,7 @@ import { economicServerModule } from './modules/economic';
 import { taxDeadlinesServerModule } from './modules/tax-deadlines';
 import { wholesaleServerModule } from './modules/wholesale';
 import { loyaltyServerModule } from './modules/loyalty';
+import { printDeskServerModule } from './modules/print-desk';
 
 loadDotEnv();
 
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
     taxDeadlinesServerModule,
     wholesaleServerModule,
     loyaltyServerModule(jwtSecret),
+    printDeskServerModule,
   ];
 
   const app = await buildGateway({

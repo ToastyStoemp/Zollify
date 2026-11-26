@@ -31,6 +31,7 @@ export const DEFAULTS: Stored = {
   hidden: {},
   order: {},
   priceCards: { themes: DEFAULT_THEMES, cards: {}, format: DEFAULT_FORMAT, outDir: '' },
+  allowRemote: false,
 };
 
 export class Store {

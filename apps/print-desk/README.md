@@ -161,6 +161,22 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   copies left in the whole run. "Printed" is what the driver has sent to the
   printer. Elsewhere a job shows as sent, without progress.
 
+## In Zollify
+
+With the Print Desk module switched on for the account (`modules/print-desk`),
+the app syncs with Zollify while signed in (electron/desk.ts, main.ts):
+
+- The targets, hidden items, print order, paper materials, global print
+  settings, "add to stock" and units are shared with every desk of the
+  account: a change here is sent as soon as it is saved, and what other
+  devices changed comes in with each resync (every 30 s, and when the window
+  gets focus). The first desk to sync gives Zollify its settings. Links to
+  files stay on this computer.
+- Every 5 s the desk reports its status (printer, counts, run progress, paper
+  needed) and takes requests made in Zollify: "set counts" always, "print"
+  only with **Print when asked from Zollify** switched on under Setup (off by
+  default). A print request is refused while a run is going.
+
 ## Price cards
 
 **Price cards** (next to **Prints**, above the toolbar) makes the price cards for

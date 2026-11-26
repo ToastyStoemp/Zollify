@@ -31,6 +31,7 @@ import {
   pendingCount,
   setNotifyKinds,
   systemNotificationState,
+  testNotification,
   sendDiagnosticLog,
   diagnosticLogText,
   copyText,
@@ -232,6 +233,20 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
     systemState.value = systemNotificationState();
   }
 }
+/** Seconds until the test notification shows; 0 while none is on its way. */
+const testIn = ref(0);
+const TEST_DELAY_S = 10;
+async function sendTest(): Promise<void> {
+  testIn.value = TEST_DELAY_S;
+  const tick = setInterval(() => (testIn.value = Math.max(0, testIn.value - 1)), 1000);
+  try {
+    await testNotification(TEST_DELAY_S * 1000);
+  } finally {
+    clearInterval(tick);
+    testIn.value = 0;
+    systemState.value = systemNotificationState();
+  }
+}
 </script>
 
 <template>
@@ -281,6 +296,10 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
         <span class="body"><span class="label">{{ k.label }}</span><span class="sub">{{ k.hint }}</span></span>
       </label>
     </div>
+    <div class="row">
+      <button type="button" :disabled="testIn > 0" @click="sendTest">{{ testIn ? `Test notification in ${testIn} s…` : 'Send a test notification' }}</button>
+    </div>
+    <p class="hint">Shows in {{ TEST_DELAY_S }} seconds, on this device only: time to lock the screen or switch apps, to see that it still arrives.</p>
 
     <SharedTillSettings />
 

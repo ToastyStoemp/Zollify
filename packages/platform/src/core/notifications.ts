@@ -64,6 +64,17 @@ const notificationNumber = (id: string): number => {
   return h;
 };
 
+/** Asks for permission to post system notifications, where it has not been answered yet. */
+async function askPermission(): Promise<void> {
+  if (isNative()) {
+    try {
+      nativePermission = toPermission((await (await notificationsModule()).LocalNotifications.requestPermissions()).display);
+    } catch {
+      /* an app without the plugin: toasts only */
+    }
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission().catch(() => undefined);
+}
+
 /** Saves the choice here and on the server, and asks for permission the first time something is on. */
 export async function setNotifyKinds(kinds: string[]): Promise<void> {
   notifyKinds.value = kinds;
@@ -72,15 +83,7 @@ export async function setNotifyKinds(kinds: string[]): Promise<void> {
   } catch {
     /* no storage: the server copy still steers the reminders */
   }
-  if (kinds.length) {
-    if (isNative()) {
-      try {
-        nativePermission = toPermission((await (await notificationsModule()).LocalNotifications.requestPermissions()).display);
-      } catch {
-        /* an app without the plugin: toasts only */
-      }
-    } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') await Notification.requestPermission().catch(() => undefined);
-  }
+  if (kinds.length) await askPermission();
   await authFetch('/devices/me/notifications', { method: 'PUT', body: JSON.stringify({ kinds, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }) });
 }
 
@@ -100,10 +103,10 @@ const CALLS_FOR_SOMEONE = new Set(['print-desk']);
 /** Whether a note gets a system notification too: in the background always, in front only when it calls for someone. */
 export const wantsSystemNotification = (n: Pick<AppNotification, 'kind'>, visible: boolean): boolean => !visible || (!!n.kind && CALLS_FOR_SOMEONE.has(n.kind));
 
-function showOnScreen(n: AppNotification): void {
+function showOnScreen(n: AppNotification, always = false): void {
   createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
   // In front, the toast already said most news; only what calls for someone is posted as well.
-  if (!wantsSystemNotification(n, document.visibilityState === 'visible')) return;
+  if (!always && !wantsSystemNotification(n, document.visibilityState === 'visible')) return;
   if (isNative()) {
     if (nativePermission !== 'granted') return;
     notificationsModule()
@@ -117,6 +120,18 @@ function showOnScreen(n: AppNotification): void {
   } catch {
     /* some browsers only allow these from a service worker */
   }
+}
+
+/**
+ * A made-up note, shown on this device only, the way a real one is: a toast, and a system
+ * notification (asking for permission first where it has not been answered). After `delayMs`, so
+ * there is time to lock the screen or switch apps and see whether it still arrives.
+ */
+export async function testNotification(delayMs = 0): Promise<void> {
+  await askPermission();
+  await new Promise((r) => setTimeout(r, delayMs));
+  const id = `test-${Date.now()}`;
+  showOnScreen({ id, moduleId: null, title: 'Test notification', body: 'Notifications reach this device.', link: null, createdAt: Date.now(), readAt: null, level: 'normal', kind: null }, true);
 }
 
 let loading: Promise<void> | null = null;

@@ -92,7 +92,7 @@ onMounted(async () => {
   settings.value = await api.settings.get();
   login.server = settings.value.server || 'https://';
   session.value = await api.zollify.resume();
-  if (session.value) await loadAll();
+  // Listening before loadAll: it picks up jobs from before a restart, whose progress comes at once.
   api.photocraft.onMonitor((state) => {
     const was = monitor.value?.prompt;
     monitor.value = state;
@@ -101,12 +101,21 @@ onMounted(async () => {
   });
   api.photocraft.onQueue((p) => {
     progress[p.key] = p;
+    // A job picked up again: what was counted before is where this desk's counting starts.
+    if (p.base !== undefined && counted[p.key] === undefined) {
+      counted[p.key] = p.base;
+      paperCounted[p.key] = p.base;
+    }
     void countPrinted(p);
   });
+  if (session.value) await loadAll();
 });
 
 async function loadAll(): Promise<void> {
   await Promise.all([refreshCatalog(), refreshPrinters(), loadMaterials(), syncShared()]);
+  // Jobs still in the print queue from before this start: followed (and counted) again.
+  const following = await api.photocraft.resume().catch(() => 0);
+  if (following) notice.value = `Following ${following} ${following === 1 ? 'print job' : 'print jobs'} already in the print queue: their copies count as they come out.`;
 }
 async function refreshCatalog(): Promise<void> {
   await guard('Loading catalogue', async () => {

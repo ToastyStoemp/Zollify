@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { finishedOf, newJob, parseOutcome, parseSnapshot, progressOf, targetPrinter } from './spooler.js';
+import { adoptable, finishedOf, newJob, parseOutcome, parseSnapshot, progressOf, targetPrinter } from './spooler.js';
 
 // Shaped like the real Win32 output on this machine: a printing job whose TotalPages is 0, queued ones with null status.
 const before = parseSnapshot(
@@ -17,13 +17,13 @@ const before = parseSnapshot(
 
 describe('spooler', () => {
   it('splits the printer from the job name and maps printer problems', () => {
-    expect(before.jobs[0]).toEqual({ printer: 'Canon PRO-1000 series', id: 2, document: 'Kyoto_A3.png', status: 'Printing', pagesPrinted: 8 });
+    expect(before.jobs[0]).toEqual({ printer: 'Canon PRO-1000 series', id: 2, document: 'Kyoto_A3.png', status: 'Printing', pagesPrinted: 8, totalPages: 0 });
     expect(before.printers.map((p) => p.issue)).toEqual(['Low ink', '']);
   });
 
   it('reads a lone job or printer that PowerShell did not wrap in an array', () => {
     const s = parseSnapshot('{"jobs":{"name":"P, 7","id":7,"document":"a.png","status":null,"pages":null},"printers":{"name":"P","default":true,"error":null,"offline":true}}');
-    expect(s.jobs).toEqual([{ printer: 'P', id: 7, document: 'a.png', status: '', pagesPrinted: 0 }]);
+    expect(s.jobs).toEqual([{ printer: 'P', id: 7, document: 'a.png', status: '', pagesPrinted: 0, totalPages: 0 }]);
     expect(s.printers).toEqual([{ name: 'P', default: true, issue: 'Offline' }]);
   });
 
@@ -83,5 +83,33 @@ describe('finishedOf', () => {
   });
   it('takes all copies when Windows logged nothing', () => {
     expect(finishedOf('k', 9, 4, null)).toMatchObject({ printed: 9, done: true });
+  });
+});
+
+describe('picking up jobs after a restart', () => {
+  const queue = parseSnapshot(
+    JSON.stringify({
+      jobs: [
+        { name: 'Canon PRO-1000 series, 6', id: 6, document: 'Sky_A3.png', status: null, pages: 0, total: 8 },
+        { name: 'Canon PRO-1000 series, 4', id: 4, document: 'Moon.psd', status: 'Printing', pages: 2, total: 7 },
+        { name: 'Canon PRO-1000 series, 5', id: 5, document: 'FreeTime.png', status: null, pages: 0, total: 0 },
+        { name: 'Canon PRO-1000 series, 7', id: 7, document: 'Unlinked.png', status: null, pages: 0, total: 3 },
+        { name: 'Canon PRO-1000 series, 8', id: 8, document: 'moon.PSD', status: null, pages: 0, total: 4 },
+      ],
+      printers: [],
+    }),
+  );
+  const links = { 'sky:a3': { file: String.raw`C:\prints\Sky_A3.png` }, 'moon:': { file: 'D:/art/Moon.psd' }, 'free:': { file: 'C:/p/FreeTime.png' } };
+  it('takes on the jobs printing linked files, its copies from the page count, once per item, in queue order', () => {
+    expect(adoptable(queue, links, new Set()).map((a) => [a.key, a.job.id, a.copies])).toEqual([
+      ['moon:', 4, 7],
+      ['sky:a3', 6, 8],
+    ]);
+  });
+  it('leaves jobs it already follows alone', () => {
+    expect(adoptable(queue, links, new Set(['Canon PRO-1000 series|4'])).map((a) => [a.key, a.job.id])).toEqual([
+      ['sky:a3', 6],
+      ['moon:', 8],
+    ]);
   });
 });

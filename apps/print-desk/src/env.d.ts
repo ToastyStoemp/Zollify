@@ -87,6 +87,8 @@ export interface PrintDeskApi {
     /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */
     describeSettings(hex: string): Promise<DevModeSummary[] | null>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;
+    /** Follows again the jobs in the print queue from before a restart, and ones printing linked files; how many. */
+    resume(): Promise<number>;
     /** What the printer's status monitor says (Canon): the sheet printing, and a prompt when it waits for someone. */
     onMonitor(cb: (state: MonitorState) => void): () => void;
     /** Copies left per item, from the print queue, until each job leaves it. */

@@ -1,4 +1,4 @@
-import type { CopyProgress, Settings, Units } from './shared.js';
+import type { CopyProgress, Settings, Supply, Units } from './shared.js';
 
 /**
  * Print Desk in Zollify (modules/print-desk, apps/server/src/modules/print-desk.ts): the settings
@@ -13,13 +13,14 @@ export interface SharedConfig {
   hidden?: string[];
   order?: string[];
   paperMaterials?: Record<string, string>;
+  supplyMaterials?: Record<string, string>;
   global?: Record<string, unknown> | null;
   addToStock?: boolean;
   units?: Units;
 }
 /** Kept per account here (Settings maps account id -> value), one account's value on the server. */
 const PER_ACCOUNT = ['itemTargets', 'hidden', 'order'] as const;
-const PLAIN = ['target', 'sizeTargets', 'paperMaterials', 'global', 'addToStock', 'units'] as const;
+const PLAIN = ['target', 'sizeTargets', 'paperMaterials', 'supplyMaterials', 'global', 'addToStock', 'units'] as const;
 
 /** The shared settings in `patch`, as the server takes them; {} when it changes none. */
 export function sharedOf(patch: Partial<Settings>, account: string): SharedConfig {
@@ -43,6 +44,8 @@ export interface DeskStatus {
   counts: Record<string, number>;
   run: CopyProgress[];
   paper: Record<string, { needed: number; onHand: number | null }>;
+  /** Ink and maintenance cartridge, with the linked material's name and stock. */
+  supplies?: (Supply & { material?: string; stock?: number })[];
   busy?: string;
   error?: string;
   /** What the printer waits for (its status monitor's prompt), and the copy that waits. */
@@ -57,6 +60,7 @@ export function statusReport(s: DeskStatus): DeskStatus {
     counts: Object.fromEntries(Object.entries(s.counts).filter(([, n]) => n > 0).map(([k, n]) => [k, Math.min(999, Math.floor(n))])),
     run: s.run.slice(0, 500).map((p) => ({ ...p, status: cut(p.status, 300) ?? '' })),
     paper: s.paper,
+    ...(s.supplies ? { supplies: s.supplies.slice(0, 40).map((x) => ({ ...x, id: x.id.slice(0, 40), name: x.name.slice(0, 60), ...(x.material ? { material: x.material.slice(0, 120) } : {}) })) } : {}),
     ...(s.busy ? { busy: cut(s.busy, 200) } : {}),
     ...(s.error ? { error: cut(s.error, 500) } : {}),
     ...(s.waiting ? { waiting: cut(s.waiting, 500) } : {}),

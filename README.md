@@ -623,7 +623,15 @@ sheet in the manual feed tray and a press on OK), the desk says so and the
 page shows it; each new wait also raises a *Printer waiting* notification
 (kind `print-desk`, low level), so it pops up only on devices that switched
 it on under Settings → This device → Notifications, and reaches webhooks
-that listen for it.
+that listen for it. The desk also reads the printer's ink tanks and
+maintenance cartridge every five minutes (a Canon on the network serves them
+in its Remote UI's `/JS_MDL/model.js`, in 10% steps); each can be linked to a
+Sourcing material in Print Desk (shared like the paper materials). The page
+shows the levels with the stock, and a tank turning low or empty, or the
+cartridge nearly full, raises an *Ink and maintenance* note once: for everyone
+when none of its material is in stock, quietly for the devices that asked
+otherwise. A tank whose level jumps back up was swapped, and takes one off its
+material.
 
 *Wholesale* - the `wholesale` module (admins) sells to shops outright, the
 reverse of consignment. **Trade prices**: per product, whether it is offered

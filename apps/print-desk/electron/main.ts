@@ -15,6 +15,7 @@ import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
 import { sharedOf, statusReport, withShared, type DeskRequest, type DeskStatus, type SharedConfig } from './desk.js';
 import { hostname } from 'node:os';
 import { watchStatusMonitor } from './statusmonitor.js';
+import { readSupplies } from './supplies.js';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const store = new Store(join(app.getPath('userData'), 'print-desk.json'));
@@ -267,6 +268,7 @@ void app.whenReady().then(() => {
   ipcMain.handle('photocraft:printers', () => printers(store.data.photocraft).catch(fail));
   ipcMain.handle('photocraft:size', (_e, file: string) => imageSize(store.data.photocraft, file).catch(fail));
   ipcMain.handle('photocraft:lastPrint', () => lastPrint(store.data.photocraft).catch(fail));
+  ipcMain.handle('printer:supplies', (_e, printer: string) => readSupplies(String(printer ?? '')));
   // Driver settings hex as names; the printer's own names and options when its driver answers, codes otherwise.
   ipcMain.handle('photocraft:describeSettings', async (_e, hex: string): Promise<DevModeSummary[] | null> => {
     const dm = decodeDevMode(String(hex));

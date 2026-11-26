@@ -70,6 +70,7 @@ export const ConfigPatch = z
     hidden: z.array(Key).max(5000),
     order: z.array(Key).max(5000),
     paperMaterials: z.record(z.string().max(20), z.string().max(120)),
+    supplyMaterials: z.record(z.string().max(40), z.string().max(120)),
     global: z.record(z.string(), z.unknown()).nullable(),
     addToStock: z.boolean(),
     units: z.enum(['cm', 'mm', 'in']),
@@ -92,6 +93,20 @@ const Status = z
       .max(500)
       .default([]),
     paper: z.record(z.string().max(20), z.object({ needed: z.number().min(0), onHand: z.number().nullable() })).default({}),
+    supplies: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(40),
+          name: z.string().max(60),
+          kind: z.enum(['ink', 'maintenance']),
+          level: z.number().min(0).max(100),
+          state: z.enum(['ok', 'low', 'out', 'unknown']),
+          material: z.string().max(120).optional(),
+          stock: z.number().optional(),
+        }),
+      )
+      .max(40)
+      .optional(),
     busy: z.string().max(200).optional(),
     error: z.string().max(500).optional(),
     /** What the printer asks for before it goes on (its driver's prompt: "Starting manual feed printing."). */
@@ -100,7 +115,37 @@ const Status = z
     waitingFor: z.string().max(160).optional(),
   })
   .strict();
-type StatusDoc = z.infer<typeof Status>;
+type StatusDoc = z.infer<typeof Status> & { supplyAlerts?: Record<string, string> };
+
+/**
+ * Tells the account when an ink tank turns low or runs out, or the maintenance cartridge nearly
+ * fills, once per change (`supplyAlerts` remembers what was told, over restarts and reports
+ * without supplies). With none of its material in stock it is news for everyone; with stock it
+ * is a quiet note for the devices that asked. The alerts to keep.
+ */
+export function supplyAlerts(now: StatusDoc, was: StatusDoc | null, notify: (n: { title: string; body: string; link: string; kind: string; level: 'low' | 'normal' }) => void): Record<string, string> {
+  const alerts = { ...(was?.supplyAlerts ?? {}) };
+  for (const s of now.supplies ?? []) {
+    if (s.state !== 'low' && s.state !== 'out') {
+      delete alerts[s.id];
+      continue;
+    }
+    if (alerts[s.id] === s.state) continue;
+    alerts[s.id] = s.state;
+    const what = s.kind === 'maintenance' ? 'Maintenance cartridge' : `${s.name} ink`;
+    const how = s.kind === 'maintenance' ? (s.state === 'out' ? 'full' : 'nearly full') : s.state === 'out' ? 'empty' : 'low';
+    const none = s.stock !== undefined && s.stock <= 0;
+    const stock = s.stock === undefined ? '' : none ? ' - none in stock' : ` - ${s.stock} in stock`;
+    notify({
+      title: `${what} ${how}${stock}`,
+      body: `${now.name}: ${s.kind === 'maintenance' ? `${s.level}% full` : `${s.level}% left`}.${none ? ` Order ${s.material ?? 'a new one'}.` : ''}`,
+      link: '/m/print-desk',
+      kind: 'printer-supplies',
+      level: none ? 'normal' : 'low',
+    });
+  }
+  return alerts;
+}
 
 const RequestBody = z.discriminatedUnion('kind', [
   /** Set the desk's print counts; items not named go to 0. */
@@ -178,7 +223,8 @@ function routes(ctx: ModuleContext): FastifyPluginAsync {
           level: 'low',
         });
       }
-      db.prepare('INSERT INTO print_desk_status (accountId, deviceId, doc, updatedAt) VALUES (?, ?, ?, ?) ON CONFLICT(accountId, deviceId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt').run(who.accountId, req.params.deviceId, JSON.stringify(body.data), Date.now());
+      const alerts = supplyAlerts(now, was, (n) => ctx.notify(who.accountId, n));
+      db.prepare('INSERT INTO print_desk_status (accountId, deviceId, doc, updatedAt) VALUES (?, ?, ?, ?) ON CONFLICT(accountId, deviceId) DO UPDATE SET doc = excluded.doc, updatedAt = excluded.updatedAt').run(who.accountId, req.params.deviceId, JSON.stringify({ ...body.data, supplyAlerts: alerts }), Date.now());
       return { ok: true };
     });
 

@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('printDesk', {
     printers: invoke('photocraft:printers'),
     size: invoke('photocraft:size'),
     lastPrint: invoke('photocraft:lastPrint'),
+    supplies: invoke('printer:supplies'),
     describeSettings: invoke('photocraft:describeSettings'),
     print: invoke('photocraft:print'),
     resume: invoke('photocraft:resume'),

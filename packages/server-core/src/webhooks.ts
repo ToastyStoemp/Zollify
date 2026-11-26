@@ -206,7 +206,7 @@ export interface Webhooks {
   stop(): void;
 }
 
-const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 'sharing', 'discounts', 'fees', 'reports', 'tax-deadlines', 'print-desk']);
+const NOTIFICATION_EVENTS = new Set<string>(['planner', 'stock', 'programme', 'sharing', 'discounts', 'fees', 'reports', 'tax-deadlines', 'print-desk', 'printer-supplies']);
 
 /** A note for the bell only: the webhooks that want the same news get it through `emit`, not by hearing the bell. */
 type BellNote = { title: string; body?: string; link?: string; minRole?: 'admin'; kind?: string; level?: 'low' | 'normal' };

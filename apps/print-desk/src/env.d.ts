@@ -1,4 +1,4 @@
-import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings } from '../electron/shared';
+import type { ImageInfo, CatalogRow, CopyProgress, PrintJob, PrintResult, Printer, Session, Settings, Supply } from '../electron/shared';
 import type { DiscountRule, Product } from '@zollify/shared';
 import type { CardRow, CardSize, CardStyle, CardTheme, PricedEvent, PriceFormat, SheetOptions } from '../electron/cards';
 import type { DevModeSummary } from '../electron/devmode';
@@ -84,6 +84,8 @@ export interface PrintDeskApi {
     size(file: string): Promise<ImageInfo>;
     /** The settings of PhotoCraft's last print (File › Print), as an item's print params. */
     lastPrint(): Promise<Record<string, unknown>>;
+    /** A printer's ink tanks and maintenance cartridge (a Canon on the network); null when it can't say. */
+    supplies(printer: string): Promise<Supply[] | null>;
     /** Driver settings hex (printerSettings) as label/value lines; null when it isn't driver settings. */
     describeSettings(hex: string): Promise<DevModeSummary[] | null>;
     print(jobs: PrintJob[]): Promise<PrintResult[]>;

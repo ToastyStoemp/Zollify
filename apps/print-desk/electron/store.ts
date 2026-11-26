@@ -44,6 +44,7 @@ export const DEFAULTS: Stored = {
   order: {},
   priceCards: { themes: DEFAULT_THEMES, cards: {}, format: DEFAULT_FORMAT, outDir: '' },
   allowRemote: false,
+  supplyMaterials: {},
 };
 
 export class Store {

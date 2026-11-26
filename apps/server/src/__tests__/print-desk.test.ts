@@ -95,6 +95,26 @@ describe('desks reporting', () => {
     await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 2 of 3' });
     expect(await waiting()).toHaveLength(2);
   });
+  it('warns once when ink runs low, loudly when none is in stock', async () => {
+    const supplyNotes = () => app.inject({ method: 'GET', url: '/api/notifications', headers: as(owner) }).then((r) => r.json().notifications.filter((n: { kind: string }) => n.kind === 'printer-supplies'));
+    const report = (supplies?: unknown[]) => call('PUT', '/status/desk-ink', status(supplies ? { supplies } : {}));
+    const ink = (id: string, level: number, state: string, extra = {}) => ({ id, name: id, kind: 'ink', level, state, ...extra });
+    await report([ink('R', 10, 'low', { material: 'PFI-1000 R', stock: 0 }), ink('C', 50, 'ok')]);
+    await report([ink('R', 10, 'low', { material: 'PFI-1000 R', stock: 0 }), ink('C', 50, 'ok')]);
+    // A report without supplies (the printer could not be read) forgets nothing.
+    await report();
+    await report([ink('R', 10, 'low', { material: 'PFI-1000 R', stock: 0 })]);
+    expect(await supplyNotes()).toHaveLength(1);
+    expect((await supplyNotes())[0]).toMatchObject({ title: 'R ink low - none in stock', body: 'Print Desk: 10% left. Order PFI-1000 R.', level: 'normal' });
+    await report([ink('R', 0, 'out', { stock: 0 }), { id: 'maintenance', name: 'Maintenance cartridge', kind: 'maintenance', level: 90, state: 'low', stock: 2 }]);
+    const [cartridge, empty] = await supplyNotes();
+    expect(cartridge).toMatchObject({ title: 'Maintenance cartridge nearly full - 2 in stock', body: 'Print Desk: 90% full.', level: 'low' });
+    expect(empty).toMatchObject({ title: 'R ink empty - none in stock' });
+    // Replaced, and low again later: told again.
+    await report([ink('R', 100, 'ok')]);
+    await report([ink('R', 10, 'low', { stock: 1 })]);
+    expect((await supplyNotes())[0]).toMatchObject({ title: 'R ink low - 1 in stock', level: 'low' });
+  });
   it('turns away a report it does not understand', async () => {
     expect((await call('PUT', '/status/desk-1', { name: 'x' })).statusCode).toBe(400);
   });

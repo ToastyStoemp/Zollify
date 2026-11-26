@@ -287,7 +287,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
           {{ desk.printer || 'Default printer' }}<template v-if="desk.email"> · signed in as {{ desk.email }}</template> ·
           printing on request is <strong>{{ desk.allowRemote ? 'allowed' : 'off' }}</strong><template v-if="!desk.allowRemote"> (switch it on in Print Desk under Setup)</template>
         </p>
-        <p v-if="desk.online && desk.waiting" class="waiting" role="status"><Icon name="alert-triangle" :size="16" /> <span><strong>Printer waiting{{ desk.waitingFor ? `: ${desk.waitingFor}` : '' }}</strong> {{ desk.waiting }}</span></p>
+        <p v-if="desk.online && desk.waiting" class="waiting" role="status"><Icon name="alert-triangle" :size="16" /> <span><strong>{{ [desk.waitingPaper ? `Load ${desk.waitingPaper} paper` : 'Printer waiting', desk.waitingFor].filter(Boolean).join(desk.waitingPaper ? ' - ' : ': ') }}</strong> {{ desk.waiting }}</span></p>
         <p v-if="desk.busy" class="note"><Icon name="clock" :size="14" /> {{ desk.busy }}</p>
         <p v-if="desk.error" class="error">{{ desk.error }}</p>
 

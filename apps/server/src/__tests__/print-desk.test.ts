@@ -92,8 +92,10 @@ describe('desks reporting', () => {
     expect(await waiting()).toHaveLength(1);
     expect((await waiting())[0]).toMatchObject({ title: 'Printer waiting: Kyoto A3, copy 1 of 3', body: 'Print Desk: Starting manual feed printing.', level: 'low', link: '/m/print-desk' });
     await report();
-    await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 2 of 3' });
+    await report({ waiting: 'Starting manual feed printing.', waitingFor: 'Kyoto A3, copy 2 of 3', waitingPaper: 'A3' });
     expect(await waiting()).toHaveLength(2);
+    // The paper to load leads, when the desk knows it.
+    expect((await waiting())[0]).toMatchObject({ title: 'Load A3 paper - Kyoto A3, copy 2 of 3' });
   });
   it('warns once when ink runs low, loudly when none is in stock', async () => {
     const supplyNotes = () => app.inject({ method: 'GET', url: '/api/notifications', headers: as(owner) }).then((r) => r.json().notifications.filter((n: { kind: string }) => n.kind === 'printer-supplies'));

@@ -22,7 +22,7 @@ const source = join(root, 'android/app/src/main/assets/capacitor.plugins.json');
 const target = join(root, 'android/app/src/carbon/assets/capacitor.plugins.json');
 
 /** npm packages whose native module build.gradle excludes from the carbon variant. */
-export const CARBON_EXCLUDED = ['@capacitor-community/bluetooth-le'];
+export const CARBON_EXCLUDED = ['@capacitor-community/bluetooth-le', '@capacitor/push-notifications'];
 
 export function carbonPlugins(list) {
   return list.filter((p) => !CARBON_EXCLUDED.includes(p.pkg));

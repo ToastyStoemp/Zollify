@@ -14,7 +14,7 @@ import { getAccessToken, getAccount, getApiBase, refreshAccessToken } from '../s
 import { announceShellUpdate } from '../shell-updates';
 import { deviceFlavor, deviceId } from './device';
 import { setLiveChannelProbe, syncNow } from './sync';
-import { loadNotifications, resetNotifications } from './notifications';
+import { loadNotifications, resetNotifications, startPush } from './notifications';
 
 /**
  * The account's live channel. Sync data never travels here - the socket is a
@@ -148,6 +148,8 @@ function scheduleReconnect(): void {
 
 export function startRealtime(): void {
   wanted = true;
+  // Signed in: notes also come as pushes on Android, which reach the app while it is frozen.
+  void startPush();
   if (typeof window !== 'undefined') window.addEventListener('online', onOnline);
   void connect();
 }

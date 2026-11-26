@@ -75,6 +75,14 @@ jobs:
         env:
           KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
 
+      # The Firebase project the app registers with for push notifications (Firebase console →
+      # Project settings → your Android app → google-services.json, pasted as the secret).
+      # Without it the APKs build as before, without push.
+      - name: Restore Firebase config
+        run: if [ -n "$GS" ]; then printf '%s' "$GS" > android/app/google-services.json; else echo "No GOOGLE_SERVICES_JSON secret - built without push notifications"; fi
+        env:
+          GS: ${{ secrets.GOOGLE_SERVICES_JSON }}
+
       - name: Assemble release APKs
         working-directory: android
         run: |

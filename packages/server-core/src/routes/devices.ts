@@ -44,6 +44,17 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Database.Database
     return { kinds };
   });
 
+  /** This device's push token (the Android app's, from Firebase), or null to stop pushes to it. */
+  app.put('/api/devices/me/push', { preHandler: app.authenticate }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    if (!claims.dev) return reply.code(400).send({ error: 'This sign-in named no device.' });
+    const token = (req.body as { token?: unknown } | null)?.token;
+    if (token !== null && (typeof token !== 'string' || !/^[\w:.-]{20,4096}$/.test(token))) return reply.code(400).send({ error: 'Not a push token.' });
+    const info = db.prepare('UPDATE devices SET pushToken = ? WHERE accountId = ? AND id = ?').run(token, claims.accountId, claims.dev);
+    if (!info.changes) return reply.code(404).send({ error: 'Device not found' });
+    return { ok: true };
+  });
+
   /** Remove a device from the account and sign it out. Admins may remove any; a member only one they signed in. */
   app.delete<{ Params: { id: string } }>('/api/devices/:id', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;

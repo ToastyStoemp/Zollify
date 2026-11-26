@@ -328,6 +328,11 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (accountId, key)
   );
   `,
+  // v22 - the Android app's push token (Firebase Cloud Messaging), so notes reach it while
+  // Android keeps it frozen in the background (see push.ts)
+  `
+  ALTER TABLE devices ADD COLUMN pushToken TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Database.Database {

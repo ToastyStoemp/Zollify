@@ -35,6 +35,7 @@ import { Rooms, registerWs } from './ws';
 import { configureCaptchaKey } from './captcha';
 import { createMailer, isPlainEmail, type Mailer } from './mailer';
 import { createNotifier, registerNotificationRoutes, type Notify } from './notifications';
+import { createPush } from './push';
 import { createWebhooks, migrateWebhooks, registerWebhookRoutes } from './webhooks';
 import { checkDeployStatus } from './deploy-status';
 import { createProblems, migrateProblems, registerProblemRoutes, type Problems } from './problems';
@@ -251,7 +252,13 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // root instance rather than inside the /api scope below.
 
   const rooms = new Rooms();
-  const ring = createNotifier(db, rooms);
+  const push = createPush(db, { log: (err) => app.log.warn({ err }, 'push notification not sent') });
+  const toBell = createNotifier(db, rooms);
+  // The bell, and the same note as a push to the Android apps that would pop it up.
+  const ring: Notify = (accountId, n) => {
+    toBell(accountId, n);
+    void push.send(accountId, n);
+  };
   const rawMail = opts.mailer ?? createMailer({}, (err) => app.log.warn({ err }, 'email not sent'));
   // Every mail that names its account tells Problems how it went: one failure opens a warning, a success closes it.
   // A malformed recipient is the caller's mistake, not the mail server's, so it never counts.

@@ -105,6 +105,8 @@ export const wantsSystemNotification = (n: Pick<AppNotification, 'kind'>, visibl
 
 function showOnScreen(n: AppNotification, always = false): void {
   createShellUi('core').toast(n.title, { kind: n.level === 'urgent' ? 'warning' : 'info', timeoutMs: n.level === 'urgent' ? 10000 : 6000 });
+  // Heard late (the app was frozen in the background): the push already showed it.
+  if (pushRegistered && !always && Date.now() - n.createdAt > PUSH_LATE_MS) return;
   // In front, the toast already said most news; only what calls for someone is posted as well.
   if (!always && !wantsSystemNotification(n, document.visibilityState === 'visible')) return;
   if (isNative()) {
@@ -132,6 +134,51 @@ export async function testNotification(delayMs = 0): Promise<void> {
   await new Promise((r) => setTimeout(r, delayMs));
   const id = `test-${Date.now()}`;
   showOnScreen({ id, moduleId: null, title: 'Test notification', body: 'Notifications reach this device.', link: null, createdAt: Date.now(), readAt: null, level: 'normal', kind: null }, true);
+}
+
+// ── Push on Android ─────────────────────────────────────────────────────────
+// Android freezes the app in the background, so it cannot hear a note over the live channel
+// and post it itself: the server sends each note as a Firebase push too (server-core push.ts),
+// which Android shows with the app frozen or closed. In front, the push is not shown and the
+// live channel goes on as before.
+const pushModule = () => import('@capacitor/push-notifications');
+let pushStarted = false;
+/** This device's push token is on the server: notes it hears of late were already pushed. */
+let pushRegistered = false;
+const PUSH_LATE_MS = 20_000;
+
+/** Whether the app can register: the plugin is in it, and the APK was built with Firebase (registering without would crash it). */
+async function pushReady(): Promise<boolean> {
+  const cap = (globalThis as { Capacitor?: { isPluginAvailable?: (n: string) => boolean; Plugins?: Record<string, unknown> } }).Capacitor;
+  if (!isNative() || !cap?.isPluginAvailable?.('PushNotifications')) return false;
+  const updater = cap.Plugins?.Updater as { getCurrentVersion(): Promise<{ push?: boolean }> } | undefined;
+  try {
+    return (await updater?.getCurrentVersion())?.push === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Registers this device for push and gives the server its token; a tap on a push opens its page. Once per start. */
+export async function startPush(): Promise<void> {
+  if (pushStarted || !(await pushReady())) return;
+  pushStarted = true;
+  try {
+    const { PushNotifications } = await pushModule();
+    await PushNotifications.addListener('registration', ({ value }) => {
+      authFetch('/devices/me/push', { method: 'PUT', body: JSON.stringify({ token: value }) }).then(
+        () => (pushRegistered = true),
+        () => undefined,
+      );
+    });
+    await PushNotifications.addListener('pushNotificationActionPerformed', ({ notification }) => {
+      const link = (notification.data as { link?: unknown } | undefined)?.link;
+      if (typeof link === 'string' && /^\/(?!\/)/.test(link)) window.location.hash = `#${link}`;
+    });
+    await PushNotifications.register();
+  } catch {
+    /* no Google Play services on this device: the live channel only */
+  }
 }
 
 let loading: Promise<void> | null = null;

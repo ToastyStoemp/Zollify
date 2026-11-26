@@ -170,7 +170,7 @@ export {
 } from './editions';
 export * from './exchange-rate';
 export { mergeProducts, materializeMerge } from './merge';
-export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead, notifyKinds, setNotifyKinds, systemNotificationState, testNotification } from './notifications';
+export { notifications, unreadNotifications, urgentNotifications, anyUnreadNotifications, loadNotifications, markNotificationsRead, notifyKinds, setNotifyKinds, systemNotificationState, testNotification, startPush } from './notifications';
 export { startRealtime, stopRealtime, setDisplaySubscribed, sendDisplayCart, sendPaymentMessage, onPaymentMessage, displayCarts, realtimeConnected, type DisplayCartSnapshot, type PaymentMessage } from './realtime';
 export { installDiagnostics, logDiagnostic, diagnosticLogText, sendDiagnosticLog } from './diagnostics';
 export { getSyncedSetting, setSyncedSetting, listSyncedSettings } from './synced-settings';

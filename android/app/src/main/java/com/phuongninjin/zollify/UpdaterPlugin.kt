@@ -42,6 +42,9 @@ class UpdaterPlugin : Plugin() {
         // Which build this is decides which APK to fetch - and that the carbon
         // build is updated through the terminal's own channel, never from here.
         result.put("flavor", BuildConfig.FLAVOR)
+        // Whether this APK was built with a Firebase project (google-services.json, which
+        // generates google_app_id): without one, registering for push would crash the app.
+        result.put("push", activity.resources.getIdentifier("google_app_id", "string", activity.packageName) != 0)
         call.resolve(result)
     }
 

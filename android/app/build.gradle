@@ -108,6 +108,9 @@ android.applicationVariants.all { variant ->
     if (variant.flavorName == 'carbon') {
         variant.getCompileConfiguration().exclude(module: 'capacitor-community-bluetooth-le')
         variant.getRuntimeConfiguration().exclude(module: 'capacitor-community-bluetooth-le')
+        // No Google Play services on the terminal, and no Firebase in an APK myPOS validates.
+        variant.getCompileConfiguration().exclude(module: 'capacitor-push-notifications')
+        variant.getRuntimeConfiguration().exclude(module: 'capacitor-push-notifications')
     }
 }
 

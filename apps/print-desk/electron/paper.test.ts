@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor, fitToStock, paperNeeds, poissonTail, smartFit } from './shared.js';
+import { effectiveParams, orientFor, paperMm, paperName, paperParam, printSizeMm, scaleForMm, settingsFor, sizeFromName, targetFor, fitToStock, paperNeeds, poissonTail, smartFit, moveKey, orderRows } from './shared.js';
 
 describe('orientFor', () => {
   const portrait = { paper: 'a3', orientation: 'portrait', printerSettings: 'hex' };
@@ -194,5 +194,21 @@ describe('smartFit', () => {
     const { gain } = smartFit([item('a', 3, 0, 1), item('b', 3, 0, 1)], { a3: 2 });
     expect(gain.a3!.units).toBeCloseTo(2 * (1 - Math.exp(-1)), 6);
     expect(gain.a3!.value).toBeCloseTo(60 * (1 - Math.exp(-1)), 6);
+  });
+});
+
+describe('orderRows and moveKey', () => {
+  const rows = ['a', 'b', 'c', 'd'].map((key) => ({ key }));
+  const keys = (list: { key: string }[]) => list.map((r) => r.key).join('');
+  it('puts the rows in the saved order, new ones after in their own order', () => {
+    expect(keys(orderRows(rows, ['c', 'a']))).toBe('cabd');
+    expect(keys(orderRows(rows, []))).toBe('abcd');
+    expect(keys(orderRows(rows, ['gone', 'd']))).toBe('dabc');
+  });
+  it('moves a key before another, or to the end', () => {
+    expect(moveKey(['a', 'b', 'c', 'd'], 'd', 'b').join('')).toBe('adbc');
+    expect(moveKey(['a', 'b', 'c', 'd'], 'a', 'd').join('')).toBe('bcad');
+    expect(moveKey(['a', 'b', 'c', 'd'], 'b', null).join('')).toBe('acdb');
+    expect(moveKey(['a', 'b', 'c'], 'b', 'b').join('')).toBe('abc');
   });
 });

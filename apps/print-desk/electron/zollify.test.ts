@@ -57,6 +57,20 @@ describe('Zollify stock sync', () => {
     expect((await z.catalog())[0]!.onHand).toBe(12);
   });
 
+  it('adds printed copies onto what is here now, so sales since the last count stay off', async () => {
+    const server = fakeServer();
+    server.add('product.upsert', product);
+    const counted = Date.now() - 60_000;
+    server.add('inventory.set', { productId: 'p', variantId: 'a3', onHand: 10, updatedAt: counted });
+    server.add('tx.create', { id: 'sale', eventId: 'fair', timestamp: counted + 1000, items: [{ pid: 'p', vid: 'a3', qty: 3 }] });
+    const z = new Zollify('http://zollify.test', 'r', 'dev', () => {});
+    await z.resume();
+    expect((await z.catalog())[0]!.onHand).toBe(7);
+    // 7 here, 2 printed: 9, not the old count's 10 + 2.
+    expect(await z.addOnHand([{ productId: 'p', variantId: 'a3', add: 2 }])).toEqual([{ key: 'p:a3', onHand: 9 }]);
+    expect((await z.catalog())[0]!.onHand).toBe(9);
+  });
+
   it('runs one pull at a time, so ops are never added twice', async () => {
     const server = fakeServer();
     server.add('product.upsert', product);

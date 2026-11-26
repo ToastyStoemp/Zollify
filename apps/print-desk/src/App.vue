@@ -5,7 +5,7 @@ import QrCode from '@zollify/ui/QrCode.vue';
 import type { DeskRequest } from '../electron/desk';
 import type { Material } from '../electron/materials';
 import type { MonitorState } from '../electron/statusmonitor';
-import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Theme, Units } from '../electron/shared';
+import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Supply, Theme, Units } from '../electron/shared';
 import { effectiveParams, fitToStock, isPrintFile, moveKey, orderRows, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
@@ -113,6 +113,7 @@ onMounted(async () => {
 
 async function loadAll(): Promise<void> {
   await Promise.all([refreshCatalog(), refreshPrinters(), loadMaterials(), syncShared()]);
+  void refreshSupplies();
   // Jobs still in the print queue from before this start: followed (and counted) again.
   const following = await api.photocraft.resume().catch(() => 0);
   if (following) notice.value = `Following ${following} ${following === 1 ? 'print job' : 'print jobs'} already in the print queue: their copies count as they come out.`;
@@ -179,6 +180,14 @@ async function deskTick(): Promise<void> {
         counts: Object.fromEntries(active.value.map((r) => [r.key, qty[r.key] ?? 0])),
         run: Object.values(progress),
         paper: Object.fromEntries(Object.entries(needs.value).map(([size, needed]) => [size, { needed, onHand: paperOnHand(size) }])),
+        ...(supplies.value
+          ? {
+              supplies: supplies.value.map((s) => {
+                const m = supplyMaterial(s);
+                return { ...s, ...(m ? { material: m.name, stock: m.onHand } : {}) };
+              }),
+            }
+          : {}),
         busy: busy.value,
         error: error.value,
         waiting: monitor.value?.prompt ?? '',
@@ -214,6 +223,66 @@ async function doRequest(r: DeskRequest): Promise<void> {
   return error.value ? answer('failed', error.value) : answer('done', `Sent ${copiesOf(copies)} to the printer.`);
 }
 const deskTimer = setInterval(() => void deskTick(), DESK_MS);
+
+// ── Ink and maintenance cartridge: levels from the printer, stock from Zollify materials ──
+/** The printer's tanks and maintenance cartridge, as last read; null before (or when it can't say). */
+const supplies = ref<Supply[] | null>(null);
+const SUPPLIES_MS = 5 * 60_000;
+/** The printer this desk prints on: the global settings', else the system default. */
+const deskPrinter = computed(() => String(globalParams.value?.printer ?? printers.value.find((p) => p.default)?.name ?? ''));
+const supplyMaterial = (s: Supply): Material | undefined => materialOf(settings.value?.supplyMaterials?.[s.id]);
+const supplyLabel = (s: Supply): string => (s.kind === 'maintenance' ? 'Maintenance cartridge' : `${s.name} ink`);
+const supplyWarning = (s: Supply): string => (s.kind === 'maintenance' ? (s.state === 'out' ? 'full' : 'nearly full') : s.state === 'out' ? 'empty' : 'low');
+/** Tanks low or empty (the cartridge nearly full), for the warning under the toolbar. */
+const lowSupplies = computed(() => (supplies.value ?? []).filter((s) => s.state === 'low' || s.state === 'out'));
+/** Levels last seen, kept over restarts, to notice a tank swapped for a new one. */
+const LEVELS_KEY = 'print-desk.supplyLevels';
+function seenLevels(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(LEVELS_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+/**
+ * A tank (or cartridge) whose level jumped up was swapped for a new one: one comes off its
+ * material in Zollify, so the stock the warnings go by stays right.
+ */
+async function countSwapped(fresh: Supply[]): Promise<void> {
+  const seen = seenLevels();
+  for (const s of fresh) {
+    const was = seen[s.id];
+    const material = settings.value?.supplyMaterials?.[s.id];
+    if (was === undefined || s.level - was < 40 || !material || !paperVia.value) continue;
+    try {
+      const res = await api.materials.use({ material, qty: 1, note: `${supplyLabel(s)} replaced in ${deskPrinter.value} · Print Desk`, job: `swap|${s.id}|${Date.now()}` });
+      const i = materials.value.findIndex((m) => m.id === res.material.id);
+      if (i >= 0) materials.value[i] = res.material;
+      notice.value = `${supplyLabel(s)} replaced: one taken off ${res.material.name} (${res.material.onHand} left).`;
+    } catch (err) {
+      error.value = `Could not take the new ${supplyLabel(s)} off the materials: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+  try {
+    localStorage.setItem(LEVELS_KEY, JSON.stringify(Object.fromEntries(fresh.map((s) => [s.id, s.level]))));
+  } catch {
+    /* no storage: a swap goes unnoticed */
+  }
+}
+async function refreshSupplies(): Promise<void> {
+  if (!deskPrinter.value) return;
+  const fresh = await api.photocraft.supplies(deskPrinter.value).catch(() => null);
+  if (!fresh) return;
+  await countSwapped(fresh);
+  supplies.value = fresh;
+}
+const suppliesTimer = setInterval(() => void refreshSupplies(), SUPPLIES_MS);
+async function setSupplyMaterial(s: Supply, id: string): Promise<void> {
+  const next = { ...(settings.value?.supplyMaterials ?? {}) };
+  if (id) next[s.id] = id;
+  else delete next[s.id];
+  settings.value = await api.settings.set({ supplyMaterials: next });
+}
 async function toggleAllowRemote(on: boolean): Promise<void> {
   settings.value = await api.settings.set({ allowRemote: on });
   void deskTick();
@@ -223,6 +292,7 @@ window.addEventListener('focus', onFocus);
 onBeforeUnmount(() => {
   clearInterval(resyncTimer);
   clearInterval(deskTimer);
+  clearInterval(suppliesTimer);
   window.removeEventListener('focus', onFocus);
 });
 async function refreshPrinters(): Promise<void> {
@@ -1007,7 +1077,7 @@ async function printAll(): Promise<void> {
       </Menu>
       <Menu label="Setup" title="Print settings, paper and stock" align="right">
         <button type="button" role="menuitem" @click="open = open === GLOBAL ? null : GLOBAL">Global print settings{{ globalParams ? ' (on)' : '' }}<small>One set for every item, each on its own paper</small></button>
-        <button type="button" role="menuitem" @click="open = open === PAPER ? null : PAPER">Paper stock<small>{{ paperVia ? 'Paper is taken off Zollify materials' : 'Take printed paper off Zollify materials' }}</small></button>
+        <button type="button" role="menuitem" @click="open = open === PAPER ? null : PAPER">Paper and ink stock<small>{{ paperVia ? 'Paper is taken off Zollify materials' : 'Take printed paper off Zollify materials' }}</small></button>
         <button type="button" role="menuitem" :disabled="!!busy || !rows.length" @click="detectSizes">Detect sizes<small>Each item's paper from the A size in its name</small></button>
         <hr />
         <label role="menuitemcheckbox" :aria-checked="!!settings?.addToStock"><input type="checkbox" :checked="settings?.addToStock" @change="toggleAddToStock(($event.target as HTMLInputElement).checked)" /> Add printed copies to Zollify stock</label>
@@ -1075,6 +1145,21 @@ async function printAll(): Promise<void> {
           </label>
           <p v-if="!paperSizes.length" class="muted">No item has a named paper size yet.</p>
         </div>
+        <h3 class="supplies-head">Ink and maintenance cartridge</h3>
+        <p v-if="!supplies" class="muted">{{ deskPrinter ? `${deskPrinter} does not say its ink levels (Print Desk reads them from a Canon printer on the network).` : 'No printer chosen.' }}</p>
+        <template v-else>
+          <p class="muted">Link each to its material: a warning then says whether one is in stock, and a tank swapped for a new one takes one off.</p>
+          <div class="paper-sizes">
+            <label v-for="s in supplies" :key="s.id" :class="['supply-row', `is-${s.state}`]">
+              <span>{{ supplyLabel(s) }} <small>{{ s.level }}%{{ s.state === 'low' || s.state === 'out' ? ` · ${supplyWarning(s)}` : '' }}</small></span>
+              <select :value="settings?.supplyMaterials?.[s.id] ?? ''" @change="setSupplyMaterial(s, ($event.target as HTMLSelectElement).value)">
+                <option value="">No material</option>
+                <option v-for="m in materials" :key="m.id" :value="m.id">{{ m.name }} ({{ m.onHand }} {{ m.unit }}{{ m.onHand === 1 ? '' : 's' }})</option>
+                <option v-if="settings?.supplyMaterials?.[s.id] && !materialOf(settings.supplyMaterials[s.id])" :value="settings.supplyMaterials[s.id]">(a material Zollify no longer lists)</option>
+              </select>
+            </label>
+          </div>
+        </template>
         <button v-if="settings?.hasPrinterKey" type="button" class="quiet" @click="removeKey">{{ paperVia === 'session' ? 'Remove the printer key (not needed with your sign-in)' : 'Remove the printer key' }}</button>
       </template>
       <p v-if="paperNote" class="error" role="alert">{{ paperNote }}</p>
@@ -1087,6 +1172,9 @@ async function printAll(): Promise<void> {
       <PrintSettings :params="globalParams ?? defaultParams()" :printers="printers" :size="null" :units="units" no-apply @update="saveGlobal" @units="setUnits" />
       <button v-if="globalParams" type="button" class="quiet" @click="saveGlobal(null)">Stop using global settings</button>
     </section>
+    <p v-for="s in lowSupplies" :key="s.id" :class="['supply-warn', { none: supplyMaterial(s)?.onHand === 0 }]" role="status">
+      <Icon name="alert-triangle" :size="14" /> {{ supplyLabel(s) }} {{ supplyWarning(s) }} ({{ s.level }}%)<template v-if="supplyMaterial(s)"> - {{ supplyMaterial(s)!.onHand > 0 ? `${supplyMaterial(s)!.onHand} in stock` : `none in stock: order ${supplyMaterial(s)!.name}` }}</template>
+    </p>
     <p v-if="copiesLeft !== null" class="queue" role="status">Printing: <strong>{{ copiesLeft }}</strong> {{ copiesLeft === 1 ? 'copy' : 'copies' }} left, as the print queue reports it</p>
 
     <table>
@@ -1295,6 +1383,10 @@ tr.land-after td { box-shadow: inset 0 -3px 0 var(--zfy-primary); }
 tr.drop td { background: color-mix(in srgb, var(--zfy-primary) 18%, var(--zfy-surface)); }
 tr.drop td:first-child { box-shadow: inset 3px 0 0 var(--zfy-primary); }
 .queue { margin: 0; }
+.supply-warn { margin: 0; display: flex; align-items: center; gap: .35rem; color: var(--zfy-warning); font-size: .9rem; }
+.supply-warn.none { color: var(--zfy-danger); font-weight: 600; }
+.supplies-head { margin: .8rem 0 .2rem; font-size: .95rem; }
+.supply-row.is-low span, .supply-row.is-out span { color: var(--zfy-warning); }
 .toasts { position: fixed; left: 1rem; bottom: 1rem; z-index: 20; display: flex; flex-direction: column; gap: .5rem; max-width: min(36rem, calc(100vw - 12rem)); pointer-events: none; }
 .toast { pointer-events: auto; margin: 0; padding: .6rem .75rem; border-radius: 10px; background: var(--zfy-surface); border: 1px solid var(--zfy-line); box-shadow: 0 8px 24px rgb(0 0 0 / 18%); }
 .toast.error { border-color: var(--zfy-danger); }

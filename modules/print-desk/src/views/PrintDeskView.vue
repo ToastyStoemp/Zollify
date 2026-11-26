@@ -233,6 +233,19 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
             {{ label(String(size)) }}: {{ p.needed }}<template v-if="p.onHand !== null"> · {{ p.onHand }} on hand</template>
           </span>
         </p>
+        <div v-if="desk.supplies?.length" class="supplies">
+          <h3>Ink and maintenance</h3>
+          <ul>
+            <li v-for="s in desk.supplies" :key="s.id" :class="['supply', `is-${s.state}`, { none: s.stock !== undefined && s.stock <= 0 }]" :title="s.material ? `${s.material}: ${s.stock} in stock` : 'No material linked in Print Desk'">
+              <span class="tank" :aria-label="`${s.name}: ${s.level}% left`"><span :style="{ height: `${s.level}%` }"></span></span>
+              <span class="sname">{{ s.kind === 'maintenance' ? 'Maint.' : s.name }}</span>
+              <span class="hint">{{ s.level }}%<template v-if="s.stock !== undefined"> · {{ s.stock }}</template></span>
+            </li>
+          </ul>
+          <p v-for="s in desk.supplies.filter((x) => x.state === 'low' || x.state === 'out')" :key="'w' + s.id" :class="s.stock !== undefined && s.stock <= 0 ? 'error' : 'warn'">
+            {{ s.kind === 'maintenance' ? 'Maintenance cartridge' : `${s.name} ink` }} {{ s.kind === 'maintenance' ? (s.state === 'out' ? 'full' : 'nearly full') : s.state === 'out' ? 'empty' : 'low' }}<template v-if="s.stock !== undefined"> - {{ s.stock <= 0 ? `none in stock: order ${s.material}` : `${s.stock} in stock` }}</template>
+          </p>
+        </div>
       </article>
 
       <article class="card">
@@ -313,6 +326,14 @@ h3 { margin: 0 0 .3rem; font-size: .85rem; }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .ok { color: var(--zfy-accent-ink, #0a5a4a); }
 .note { margin: 0; display: flex; gap: .4rem; align-items: center; font-size: .85rem; }
+.supplies ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+.supply { display: flex; flex-direction: column; align-items: center; gap: .15rem; min-width: 2.8rem; font-size: .75rem; }
+.supply .tank { width: 1rem; height: 2.4rem; border: 1px solid var(--zfy-line, #d6dde4); border-radius: 3px; display: flex; align-items: flex-end; overflow: hidden; }
+.supply .tank span { display: block; width: 100%; background: var(--zfy-accent, #0e7c66); }
+.supply.is-low .tank span, .supply.is-out .tank span { background: var(--zfy-warning-ink, #8a5a1e); }
+.supply.none .tank { border-color: var(--zfy-danger, #c6512f); }
+.supply .sname { font-weight: 600; }
+.supplies p { margin: .3rem 0 0; font-size: .85rem; }
 .waiting { margin: 0; display: flex; gap: .5rem; align-items: flex-start; padding: .5rem .7rem; border-radius: 8px; border: 1px solid var(--zfy-warning-ink, #8a5a1e); color: var(--zfy-warning-ink, #8a5a1e); font-size: .88rem; }
 .link { border: 0; background: none; padding: 0; text-decoration: underline; cursor: pointer; color: inherit; font-size: .8rem; }
 .card { border: 1px solid var(--zfy-line, #d6dde4); border-radius: 12px; background: var(--zfy-surface, #fff); padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; }

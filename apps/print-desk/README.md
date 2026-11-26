@@ -167,6 +167,18 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   copies left in the whole run. "Printed" is what the driver has sent to the
   printer. Elsewhere a job shows as sent, without progress.
 
+## Ink and maintenance cartridge
+
+Every five minutes (and at start) Print Desk reads the printer's ink tanks and
+maintenance cartridge (electron/supplies.ts). Windows only says "low ink" and
+the printer's SNMP supplies table gives every level as unknown, but a Canon on
+the network serves its Remote UI's status as `http://<printer>/JS_MDL/model.js`:
+each tank's colour, level in 10% steps and warning, and the cartridge's. The
+printer's address comes from its Windows port. Under Setup → Paper and ink
+stock each can be linked to a Sourcing material; a warning under the toolbar
+then says whether one is in stock, and a tank whose level jumps back up by 40
+points or more was swapped, so one comes off its material.
+
 ## In Zollify
 
 With the Print Desk module switched on for the account (`modules/print-desk`),

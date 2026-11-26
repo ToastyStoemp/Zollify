@@ -12,6 +12,7 @@ export interface PrintDeskConfig {
   hidden?: string[];
   order?: string[];
   paperMaterials?: Record<string, string>;
+  supplyMaterials?: Record<string, string>;
   global?: Record<string, unknown> | null;
   addToStock?: boolean;
   units?: 'cm' | 'mm' | 'in';
@@ -40,6 +41,8 @@ export interface Desk {
   counts: Record<string, number>;
   run: RunItem[];
   paper: Record<string, { needed: number; onHand: number | null }>;
+  /** Ink tanks and the maintenance cartridge: percent left, the printer's warning, and the linked material's stock. */
+  supplies?: { id: string; name: string; kind: 'ink' | 'maintenance'; level: number; state: 'ok' | 'low' | 'out' | 'unknown'; material?: string; stock?: number }[];
   busy?: string;
   error?: string;
   /** What the printer waits for (its driver's prompt), and the copy that waits. */

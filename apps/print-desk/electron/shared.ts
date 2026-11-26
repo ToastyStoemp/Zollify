@@ -60,6 +60,18 @@ export interface CopyProgress {
   base?: number;
 }
 
+/** An ink tank or the maintenance cartridge, as the printer reports it. */
+export interface Supply {
+  /** The colour as Canon names the tank ("R", "PBK"), or "maintenance". */
+  id: string;
+  name: string;
+  kind: 'ink' | 'maintenance';
+  /** Percent left, in the printer's 10% steps. */
+  level: number;
+  /** The printer's own warning: low, out (the cartridge: full), or none. */
+  state: 'ok' | 'low' | 'out' | 'unknown';
+}
+
 export interface Settings {
   server: string;
   /** Path to photocraft-cli (or photocraft-cli.exe). */
@@ -86,6 +98,8 @@ export interface Settings {
   units: Units;
   /** Paper size ("a3", "letter") -> the Zollify material (id) a printed copy of that size uses up. */
   paperMaterials: Record<string, string>;
+  /** Ink tank ("R") or "maintenance" -> the Zollify material (id) a new one comes from. */
+  supplyMaterials: Record<string, string>;
   /** Whether a printer key for Zollify's materials is stored (the key itself stays in the main process). */
   hasPrinterKey: boolean;
   /** Account id -> stock keys of items printed elsewhere (outsourced): out of the fills and the print run. */

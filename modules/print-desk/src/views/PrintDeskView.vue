@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { roleAtLeast } from '@zollify/sdk';
 import { Icon } from '@zollify/ui';
-import { getConfig, getDesks, getRequests, isArtPrint, patchConfig, sendRequest, sizeFromName, stockKey, targetOf, type Desk, type DeskRequest, type PrintDeskConfig } from '../api';
+import { getConfig, getDesks, getRequests, isArtPrint, patchConfig, sendRequest, sizeFromName, stockKey, targetOf, type Desk, type DeskRequest, type FillHow, type PrintDeskConfig } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -25,6 +25,10 @@ const sentId = ref<string | null>(null);
 /** When the desk took it: its reports from before still have the old counts. */
 let takenAt = 0;
 const onlySize = ref('');
+/** Show the prints hidden from the run (printed elsewhere), to bring one back. */
+const showHidden = ref(false);
+/** The fill asked of the desk, until it is done: its result is then told. */
+const fillId = ref<string | null>(null);
 const error = ref('');
 const notice = ref('');
 const busy = ref(false);
@@ -49,6 +53,12 @@ async function refresh(withConfig = false): Promise<void> {
         error.value = `${desk.value?.name ?? 'The desk'} did not take the copies to print: ${sent.result || sent.status}`;
         if (!sendTimer) edited.value = false;
       }
+    }
+    const fill = fillId.value ? r.requests.find((x) => x.id === fillId.value) : undefined;
+    if (fill && fill.status !== 'pending' && fill.status !== 'taken') {
+      fillId.value = null;
+      if (fill.status === 'done') notice.value = fill.result;
+      else error.value = `${desk.value?.name ?? 'The desk'} could not fill: ${fill.result || fill.status}`;
     }
     if (takenAt && !sentId.value && !sendTimer && desk.value && desk.value.updatedAt > takenAt) {
       takenAt = 0;
@@ -99,7 +109,7 @@ const items = computed<Item[]>(() => {
     if (variants.length) for (const v of variants) all.push({ key: stockKey(p.id, v.id), title: p.title, variant: v.name ?? '', size: sizeFromName(v.name ?? '', p.title), inStock: inv.inStock(p.id, v.id) });
     else all.push({ key: stockKey(p.id, ''), title: p.title, variant: '', size: sizeFromName(p.title), inStock: inv.inStock(p.id, null) });
   }
-  const hidden = new Set(config.value.hidden ?? []);
+  const hidden = showHidden.value ? new Set<string>() : new Set(config.value.hidden ?? []);
   const at = new Map((config.value.order ?? []).map((k, i) => [k, i]));
   return all
     .filter((i) => !hidden.has(i.key))
@@ -205,10 +215,44 @@ async function printNow(): Promise<void> {
     busy.value = false;
   }
 }
+/** Paper sizes the desk is short of for what it has queued: the paper fits make sense then. */
+const shortPaper = computed(() => Object.entries(desk.value?.paper ?? {}).filter(([, p]) => p.onHand !== null && p.onHand < p.needed).map(([s]) => s));
+/** Runs one of the desk's own Fill buttons there, for the size picked here or all. */
+async function fillOnDesk(how: FillHow): Promise<void> {
+  const d = desk.value;
+  if (!d) return;
+  busy.value = true;
+  try {
+    // A change still waiting goes first, so the fill starts from it.
+    if (sendTimer) await sendCounts();
+    const r = await sendRequest({ kind: 'fill', deviceId: d.deviceId, how, ...(onlySize.value ? { onlySize: onlySize.value } : {}) });
+    fillId.value = r.request.id;
+    sentId.value = r.request.id;
+    edited.value = true;
+    notice.value = `Asked ${d.name} to fill${onlySize.value ? ` ${label(onlySize.value)}` : ''}: it does within a few seconds.`;
+  } catch (err) {
+    error.value = `Could not ask the desk to fill: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+const hiddenCount = computed(() => (config.value.hidden ?? []).length);
+const isHidden = (key: string): boolean => (config.value.hidden ?? []).includes(key);
+/** Hides a print from the run (printed elsewhere), or brings it back; every desk shares it. */
+async function setHidden(key: string, hide: boolean): Promise<void> {
+  const next = new Set(config.value.hidden ?? []);
+  if (hide) next.add(key);
+  else next.delete(key);
+  if (hide && counts.value[key]) setCount(key, 0);
+  await saveTarget({ hidden: [...next] });
+}
 /** Print requests, and copies to print that did not get through; the ones that did are no news. */
 const shownRequests = computed(() => requests.value.filter((r) => r.kind === 'print' || r.status !== 'done').slice(0, 8));
+const FILL_NAME: Record<FillHow, string> = { 'last-event': 'Fill from last event', target: 'Fill to target', 'smart-fit': 'Smart fit to paper', fit: 'Proportional fit' };
 const requestLine = (r: DeskRequest): string => {
   const copies = Object.values(r.payload.counts ?? {}).reduce((n, c) => n + c, 0);
+  const size = r.payload.onlySize ? ` (${label(r.payload.onlySize)})` : '';
+  if (r.kind === 'fill') return `${FILL_NAME[r.payload.how ?? 'target']}${size}`;
   return r.kind === 'counts' ? `Set counts: ${copies} copies` : `Print ${r.payload.onlySize ? label(r.payload.onlySize) + ' only' : 'everything queued'}`;
 };
 const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for the desk', taken: 'being done', done: 'done', failed: 'failed', refused: 'refused', expired: 'expired' };
@@ -298,6 +342,11 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
         </div>
         <div v-if="canControl" class="actions">
           <button type="button" class="secondary" @click="fillToTarget">Fill to target</button>
+          <button type="button" class="secondary" :disabled="busy || !desk.online || !!fillId" title="The copies the last closed event sold" @click="fillOnDesk('last-event')">Fill from last event</button>
+          <template v-if="shortPaper.length">
+            <button type="button" class="secondary" :disabled="busy || !desk.online || !!fillId" @click="fillOnDesk('smart-fit')">Smart fit to paper</button>
+            <button type="button" class="secondary" :disabled="busy || !desk.online || !!fillId" @click="fillOnDesk('fit')">Proportional fit</button>
+          </template>
           <span class="spacer"></span>
           <button type="button" class="primary" :disabled="busy || !desk.online || !desk.allowRemote || !(onlySize ? shownCopies : totalCopies)" @click="printNow">
             <Icon name="printer" :size="14" /> {{ onlySize ? `Print ${label(onlySize)} only` : 'Print now' }}
@@ -308,13 +357,18 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
         </p>
         <p v-else-if="canControl && !desk.online" class="hint">Print waits for {{ desk.name }} to be online.</p>
         <p class="hint">Targets save as you type and every desk shares them. Copies to print go to {{ desk.name }} by themselves.</p>
+        <p v-if="shortPaper.length" class="hint">Short of paper ({{ shortPaper.map(label).join(', ') }}): the fits share out what is on hand, the smart one to the copies most likely to sell.</p>
+        <label v-if="hiddenCount" class="hint show-hidden"><input v-model="showHidden" type="checkbox" /> Show hidden ({{ hiddenCount }}): printed elsewhere, out of the fills and the run</label>
         <table>
           <thead>
             <tr><th>Print</th><th>In stock</th><th>Target</th><th>To print</th></tr>
           </thead>
           <tbody>
-            <tr v-for="i in shown" :key="i.key">
-              <td>{{ i.title }}<span v-if="i.variant" class="hint variant">{{ i.variant }}</span></td>
+            <tr v-for="i in shown" :key="i.key" :class="{ hidden: isHidden(i.key) }">
+              <td>
+                {{ i.title }}<span v-if="i.variant" class="hint variant">{{ i.variant }}</span>
+                <button v-if="canControl" type="button" class="link hide" :aria-label="`${isHidden(i.key) ? 'Show' : 'Hide'} ${nameOf(i.key)}`" @click="setHidden(i.key, !isHidden(i.key))">{{ isHidden(i.key) ? 'Show' : 'Hide' }}</button>
+              </td>
               <td>{{ i.inStock }}</td>
               <td>
                 <input
@@ -402,6 +456,9 @@ th, td { text-align: left; padding: .35rem .4rem; border-bottom: 1px solid var(-
 th { font-size: .78rem; color: var(--zfy-muted, #5a6472); font-weight: 600; }
 tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--zfy-ink, #1c232b) 4%, transparent); }
 td input { width: 4.5rem; }
+tr.hidden td { opacity: .55; }
+.link.hide { margin-left: .5rem; font-size: .75rem; }
+.show-hidden { display: flex; align-items: center; gap: .4rem; }
 .variant { margin-left: .35rem; }
 .primary, .secondary { display: inline-flex; align-items: center; gap: .35rem; border-radius: 8px; padding: .45rem .9rem; font-weight: 600; font-size: .85rem; min-height: 2.4rem; cursor: pointer; }
 .primary { background: var(--zfy-accent, #0e7c66); color: var(--zfy-on-accent, #fff); border: 0; }

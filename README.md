@@ -616,7 +616,11 @@ two devices changing different ones never overwrite each other; the linked
 files stay on each computer. Owners and admins can change the targets (saved as
 they type), set the copies to print - by hand or filled to target, for one
 paper size or all, sent to the desk by themselves a moment after the last
-change - and ask it to print. A request is taken by one desk, once, and expires after 10
+change - and ask it to print. The desk's own fills run on the desk when asked
+from the page (from the last closed event, and the paper fits when paper
+is short), and prints can be hidden (printed elsewhere) or shown again
+there too. A desk also sends up any shared setting Zollify has none of yet,
+not only when Zollify has no settings at all. A request is taken by one desk, once, and expires after 10
 minutes; printing on request only happens on a desk that has *Print when
 asked from Zollify* switched on under Setup. Nothing pushes: desks and the
 page poll. When the printer waits for someone (a Canon asking for the next

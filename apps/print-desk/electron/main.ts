@@ -109,8 +109,16 @@ void app.whenReady().then(() => {
     const { config, updatedAt } = await zollify.desk<{ config: SharedConfig; updatedAt: number }>('GET', 'config');
     if (!updatedAt) pushShared(store.data);
     else if (!Object.keys(unsent).length) {
+      // Settings Zollify has none of yet (another device saved something first) go up from here,
+      // rather than stay on this desk only.
+      const mine = sharedOf(store.data, account) as Record<string, unknown>;
+      const missing = Object.fromEntries(Object.entries(mine).filter(([k]) => !(k in config)));
       Object.assign(store.data, withShared(store.data, account, config));
       store.save();
+      if (Object.keys(missing).length) {
+        unsent = { ...missing, ...unsent };
+        sharing = sharing.then(sendUnsent);
+      }
     }
     return store.settings();
   }

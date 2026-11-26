@@ -149,6 +149,9 @@ describe('requests', () => {
   it('takes requests from owners and admins only, and only ones it understands', async () => {
     expect((await call('POST', '/requests', { kind: 'print' }, staff)).statusCode).toBe(403);
     expect((await call('POST', '/requests', { kind: 'reboot' })).statusCode).toBe(400);
+    // The desk's own fills, for one size or all.
+    expect((await call('POST', '/requests', { kind: 'fill', how: 'smart-fit', onlySize: 'a3' })).json().request.payload).toEqual({ how: 'smart-fit', onlySize: 'a3' });
+    expect((await call('POST', '/requests', { kind: 'fill', how: 'everything' })).statusCode).toBe(400);
     expect((await call('POST', '/requests', { kind: 'counts', counts: { 'kyoto:a3': -2 } })).statusCode).toBe(400);
   });
 });

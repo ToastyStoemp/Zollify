@@ -405,6 +405,23 @@ panel's background, text and total colours (the app's own by default), with
 a preview over a frame of the first video. A file the device cannot play is skipped;
 MP4 plays everywhere.
 
+*Push notifications* - Android freezes the app in the background, so it can
+not hear a note over its live channel then. Each signed-in Android app
+(5.0 and later, not the Carbon build) registers with Firebase Cloud
+Messaging and gives the server its token; every note the bell gets also
+goes out as a push to the account's phones that would pop it up on screen:
+every note above the low level, and low ones (a sale, *Printer waiting*)
+only to phones that ticked their kind under Settings → This device →
+Notifications. Android shows it with the app frozen or closed, and a tap
+opens its page. In front the app shows notes as before. It needs one
+Firebase project: its `google-services.json` as the repo secret
+`GOOGLE_SERVICES_JSON` (the Android build writes it into the app; without
+it the APKs build without push), and a service account key from the same
+project pasted into Settings → Server admin → Push notifications
+(`FCM_SERVICE_ACCOUNT`). The server signs in to Google with it
+(`server-core/src/push.ts`) and drops tokens Google no longer knows. A
+phone gets pushes only while signed in.
+
 *Webhooks* - Settings → Webhooks posts to a Discord or Slack channel, or as
 signed JSON anywhere: each sale, a daily or weekly summary (in the webhook's
 time zone), and the in-app notifications by category - rentals and setups,

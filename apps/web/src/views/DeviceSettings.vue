@@ -236,11 +236,14 @@ async function toggleKind(kind: string, on: boolean): Promise<void> {
 /** Seconds until the test notification shows; 0 while none is on its way. */
 const testIn = ref(0);
 const TEST_DELAY_S = 10;
+/** How the last test went out: as a push through Firebase, or shown by the app itself. */
+const testVia = ref<'push' | 'app' | null>(null);
 async function sendTest(): Promise<void> {
   testIn.value = TEST_DELAY_S;
+  testVia.value = null;
   const tick = setInterval(() => (testIn.value = Math.max(0, testIn.value - 1)), 1000);
   try {
-    await testNotification(TEST_DELAY_S * 1000);
+    testVia.value = await testNotification(TEST_DELAY_S * 1000);
   } finally {
     clearInterval(tick);
     testIn.value = 0;
@@ -300,6 +303,7 @@ async function sendTest(): Promise<void> {
       <button type="button" :disabled="testIn > 0" @click="sendTest">{{ testIn ? `Test notification in ${testIn} s…` : 'Send a test notification' }}</button>
     </div>
     <p class="hint">Shows in {{ TEST_DELAY_S }} seconds, on this device only: time to lock the screen or switch apps, to see that it still arrives.</p>
+    <p v-if="testVia" class="hint" role="status">{{ testVia === 'push' ? 'Sent as a push through Firebase: it arrives with the app in the background or closed.' : 'Shown by the app itself: push is not set up for this device, so in the background it waits until you open the app.' }}</p>
 
     <SharedTillSettings />
 

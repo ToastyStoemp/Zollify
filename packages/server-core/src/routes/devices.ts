@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
 import { DeviceNotificationsSchema, isTimeZone, type DeviceSummary } from '@zollify/shared';
 import type { JwtClaims } from '../auth';
+import type { Push } from '../push';
 
 /**
  * The account's known devices - backs pickers like "which Carbon terminal
@@ -16,7 +17,10 @@ import type { JwtClaims } from '../auth';
  * again from it is allowed - that simply makes it a device on the account
  * again, with a fresh sign-in.
  */
-export function registerDeviceRoutes(app: FastifyInstance, db: Database.Database): void {
+/** How long a test push waits, matching the app's countdown. */
+export const TEST_PUSH_DELAY_MS = 10_000;
+
+export function registerDeviceRoutes(app: FastifyInstance, db: Database.Database, push?: Push): void {
   app.get('/api/devices', { preHandler: app.authenticate }, async (req): Promise<DeviceSummary[]> => {
     const claims = req.user as JwtClaims;
     return (db
@@ -42,6 +46,31 @@ export function registerDeviceRoutes(app: FastifyInstance, db: Database.Database
     const info = db.prepare('UPDATE devices SET notifyKinds = ?, timeZone = ? WHERE accountId = ? AND id = ?').run(kinds.length ? JSON.stringify(kinds) : null, parsed.data.timeZone, claims.accountId, claims.dev);
     if (!info.changes) return reply.code(404).send({ error: 'Device not found' });
     return { kinds };
+  });
+
+  /** This device's push token (the Android app's, from Firebase), or null to stop pushes to it. */
+  app.put('/api/devices/me/push', { preHandler: app.authenticate }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    if (!claims.dev) return reply.code(400).send({ error: 'This sign-in named no device.' });
+    const token = (req.body as { token?: unknown } | null)?.token;
+    if (token !== null && (typeof token !== 'string' || !/^[\w:.-]{20,4096}$/.test(token))) return reply.code(400).send({ error: 'Not a push token.' });
+    const info = db.prepare('UPDATE devices SET pushToken = ? WHERE accountId = ? AND id = ?').run(token, claims.accountId, claims.dev);
+    if (!info.changes) return reply.code(404).send({ error: 'Device not found' });
+    return { ok: true };
+  });
+
+  /**
+   * A test push to this device only, in a few seconds: time to lock the screen or switch apps,
+   * to see a push arrive while Android keeps the app frozen.
+   */
+  app.post('/api/devices/me/test-push', { preHandler: app.authenticate }, async (req, reply) => {
+    const claims = req.user as JwtClaims;
+    if (!push?.configured()) return reply.code(409).send({ error: 'no_push', message: 'Push is not set up on this server (Server admin → Push notifications).' });
+    const row = db.prepare('SELECT id, pushToken AS token FROM devices WHERE accountId = ? AND id = ?').get(claims.accountId, claims.dev ?? '') as { id: string; token: string | null } | undefined;
+    if (!row?.token) return reply.code(409).send({ error: 'no_token', message: 'This device has not registered for push.' });
+    const device = { id: row.id, token: row.token };
+    setTimeout(() => void push.sendTo(device, { title: 'Test notification', body: 'Push notifications reach this device.', kind: 'test', level: 'normal' }), TEST_PUSH_DELAY_MS).unref();
+    return { ok: true, inMs: TEST_PUSH_DELAY_MS };
   });
 
   /** Remove a device from the account and sign it out. Admins may remove any; a member only one they signed in. */

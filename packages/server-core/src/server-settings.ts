@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { JwtClaims } from './auth';
+import { parseServiceAccount } from './push';
 import { makeSecretBox } from './secretbox';
 
 /**
@@ -60,6 +61,9 @@ export const SERVER_SETTINGS: SettingDef[] = [
   // ── Email ────────────────────────────────────────────────────────────────
   { key: 'SMTP_URL', group: 'Email', label: 'SMTP server', kind: 'secret', editable: true, restart: true, hint: 'Like smtps://user:password@smtp.example.com:465. Without it (and a sender) nothing is emailed; in-app notifications work either way.', check: (v) => (/^smtps?:\/\/\S+$/.test(v) ? null : 'Starts with smtp:// or smtps://.') },
   { key: 'MAIL_FROM', group: 'Email', label: 'Sender', kind: 'text', editable: true, restart: true, hint: 'Like "Zollify <pos@example.com>".', check: (v) => (/@/.test(v) ? null : 'An email address.') },
+
+  // ── Push notifications ───────────────────────────────────────────────────
+  { key: 'FCM_SERVICE_ACCOUNT', group: 'Push notifications', label: 'Firebase service account key', kind: 'multiline', secret: true, editable: true, hint: 'Sends notifications to the Android app even while it is in the background or closed. Firebase console → Project settings → Service accounts → Generate new private key: paste the whole JSON file. The app must be built with the same project\'s google-services.json. Stored encrypted.', check: (v) => (parseServiceAccount(v) ? null : 'Paste the whole JSON key file, from { to }.') },
 
   // ── Card payments ────────────────────────────────────────────────────────
   { key: 'SUMUP_AFFILIATE_KEY', group: 'SumUp', label: 'Affiliate key', kind: 'text', editable: true, hint: "Made once in a SumUp account (Settings → For Developers → Toolkit → Affiliate Keys) for the app id below. Merchants then only sign in with their own SumUp login." },

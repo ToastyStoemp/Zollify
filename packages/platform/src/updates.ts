@@ -14,7 +14,8 @@ import { getServerUrl, isNative } from './native';
 export type Flavor = 'carbon' | 'compat' | 'full';
 
 interface UpdaterPlugin {
-  getCurrentVersion(): Promise<{ versionCode: number; versionName: string; flavor: string }>;
+  /** `push`: built with a Firebase project, so it can register for push (APKs from 5.0 on). */
+  getCurrentVersion(): Promise<{ versionCode: number; versionName: string; flavor: string; push?: boolean }>;
   download(opts: { url: string }): Promise<void>;
   install(): Promise<void>;
   addListener(event: 'updateDownloadProgress', handler: (e: { bytesWritten: number; totalBytes: number }) => void): Promise<unknown>;

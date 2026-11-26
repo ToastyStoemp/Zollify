@@ -68,8 +68,11 @@ export function statusReport(s: DeskStatus): DeskStatus {
   };
 }
 
+/** The desk's Fill buttons, asked for from Zollify. */
+export type FillHow = 'last-event' | 'target' | 'smart-fit' | 'fit';
+
 export interface DeskRequest {
   id: string;
-  kind: 'counts' | 'print';
-  payload: { counts?: Record<string, number>; onlySize?: string };
+  kind: 'counts' | 'print' | 'fill';
+  payload: { counts?: Record<string, number>; onlySize?: string; how?: FillHow };
 }

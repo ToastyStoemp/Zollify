@@ -152,6 +152,8 @@ const RequestBody = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('counts'), deviceId: z.string().max(120).nullable().optional(), counts: z.record(Key, Count) }),
   /** Print what is queued (one paper size when given), as the desk's own Print button does. */
   z.object({ kind: z.literal('print'), deviceId: z.string().max(120).nullable().optional(), onlySize: z.string().max(20).optional() }),
+  /** Fill the counts the way the desk's own Fill buttons do (it has the sales, forecast and paper stock); one size when given. */
+  z.object({ kind: z.literal('fill'), deviceId: z.string().max(120).nullable().optional(), how: z.enum(['last-event', 'target', 'smart-fit', 'fit']), onlySize: z.string().max(20).optional() }),
 ]);
 const Outcome = z.object({ status: z.enum(['done', 'failed', 'refused']), result: z.string().max(500).default('') });
 const Claim = z.object({ deviceId: z.string().min(1).max(120) });

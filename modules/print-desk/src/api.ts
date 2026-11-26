@@ -53,8 +53,8 @@ export interface Desk {
 export interface DeskRequest {
   id: string;
   deviceId: string | null;
-  kind: 'counts' | 'print';
-  payload: { counts?: Record<string, number>; onlySize?: string };
+  kind: 'counts' | 'print' | 'fill';
+  payload: { counts?: Record<string, number>; onlySize?: string; how?: FillHow };
   status: 'pending' | 'taken' | 'done' | 'failed' | 'refused' | 'expired';
   result: string;
   takenBy: string | null;
@@ -67,7 +67,14 @@ export const getConfig = (): Promise<{ config: PrintDeskConfig; updatedAt: numbe
 export const patchConfig = (patch: PrintDeskConfig): Promise<{ config: PrintDeskConfig; updatedAt: number }> => sdk().http.put<{ config: PrintDeskConfig; updatedAt: number }>('config', patch);
 export const getDesks = (): Promise<{ now: number; desks: Desk[] }> => sdk().http.get<{ now: number; desks: Desk[] }>('status');
 export const getRequests = (): Promise<{ requests: DeskRequest[] }> => sdk().http.get<{ requests: DeskRequest[] }>('requests');
-export const sendRequest = (body: { kind: 'counts'; deviceId: string | null; counts: Record<string, number> } | { kind: 'print'; deviceId: string | null; onlySize?: string }): Promise<{ request: DeskRequest }> =>
+/** The desk's Fill buttons, run by the desk itself: it has the sales, forecast and paper stock. */
+export type FillHow = 'last-event' | 'target' | 'smart-fit' | 'fit';
+export const sendRequest = (
+  body:
+    | { kind: 'counts'; deviceId: string | null; counts: Record<string, number> }
+    | { kind: 'print'; deviceId: string | null; onlySize?: string }
+    | { kind: 'fill'; deviceId: string | null; how: FillHow; onlySize?: string },
+): Promise<{ request: DeskRequest }> =>
   sdk().http.post<{ request: DeskRequest }>('requests', body);
 
 /** The stock key Zollify uses: "pid:vid", '' for a product without variants. */

@@ -213,6 +213,20 @@ async function doRequest(r: DeskRequest): Promise<void> {
     notice.value = `Print counts set from another device: ${copiesOf(copies)}.`;
     return answer('done', `Counts set: ${copiesOf(copies)}.`);
   }
+  if (r.kind === 'fill') {
+    if (busy.value) return answer('failed', 'The desk is busy. Try again in a moment.');
+    // One size asked for: the others keep their counts.
+    const size = r.payload.onlySize;
+    const kept = size ? rows.value.filter((row) => printSize(row) !== size).map((row) => [row.key, qty[row.key] ?? 0] as const) : [];
+    notice.value = '';
+    const how = r.payload.how;
+    if (how === 'last-event') await fillFromLastEvent();
+    else if (how === 'target') await fillToTarget();
+    else if (how === 'smart-fit') await smartFitToPaperStock();
+    else if (how === 'fit') fitToPaperStock();
+    for (const [key, n] of kept) qty[key] = n;
+    return error.value ? answer('failed', error.value) : answer('done', notice.value || 'Filled.');
+  }
   if (!settings.value?.allowRemote) return answer('refused', 'Printing on request is off on this desk: switch it on under Setup.');
   if (busy.value || copiesLeft.value !== null) return answer('failed', 'The desk is busy printing. Try again when this run is done.');
   onlySize.value = r.payload.onlySize ?? '';

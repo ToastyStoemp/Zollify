@@ -12,6 +12,18 @@ export interface Stored extends Settings {
   /** Printer key for Zollify's materials, stored like the refresh token. */
   printerKey?: string;
   printerKeyEncrypted?: boolean;
+  /** Jobs in the print queue this desk follows, so a restart picks them up again. */
+  following?: FollowedJob[];
+}
+
+/** A job sent to the printer and followed in the queue; `sent`: copies the driver had sent when last seen. */
+export interface FollowedJob {
+  key: string;
+  printer: string;
+  id: number;
+  copies: number;
+  since: number;
+  sent: number;
 }
 
 export const DEFAULTS: Stored = {

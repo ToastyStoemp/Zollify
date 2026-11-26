@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('printDesk', {
     lastPrint: invoke('photocraft:lastPrint'),
     describeSettings: invoke('photocraft:describeSettings'),
     print: invoke('photocraft:print'),
+    resume: invoke('photocraft:resume'),
     onMonitor: (cb) => {
       const handler = (_e, state) => cb(state);
       ipcRenderer.on('monitor:state', handler);

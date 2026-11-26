@@ -8,7 +8,7 @@ import { decodeDevMode, describeDevMode, type DevModeSummary } from './devmode.j
 import { drawCard, drawSheets, findExe, imageSize, lastPrint, pngSize, print, printers, setCardTexts, sheetPdf } from './photocraft.js';
 import { PRINT_FILE_EXTENSIONS, type CopyProgress, type PrintJob, type PrintResult, type Settings } from './shared.js';
 import { driverOptions, fitDriverPaper, printerCaps } from './printercaps.js';
-import { finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
+import { adoptable, finishedOf, jobOutcome, newJob, progressOf, snapshot, targetPrinter } from './spooler.js';
 import { Store } from './store.js';
 import { listMaterials, sessionRefusal, useMaterial, type MaterialUse, type PaperAccess } from './materials.js';
 import { Zollify, ZollifyError, type LoginInput } from './zollify.js';
@@ -277,6 +277,15 @@ void app.whenReady().then(() => {
   // ── Print queue tracking: jobs we sent, followed in the Windows spooler until they leave it ──
   /** `sent`: pages the driver last reported; `goneAt`: when the job left the queue, while its outcome is looked up. */
   const tracked = new Map<string, { printer: string; id: number; copies: number; since: number; sent: number; goneAt?: number }>();
+  /** Writes the jobs followed to disk when they changed, so a restart picks them up again. */
+  let savedFollowing = JSON.stringify(store.data.following ?? []);
+  const saveFollowing = (): void => {
+    const now = JSON.stringify([...tracked].map(([key, t]) => ({ key, printer: t.printer, id: t.id, copies: t.copies, since: t.since, sent: t.sent })));
+    if (now === savedFollowing) return;
+    savedFollowing = now;
+    store.data.following = JSON.parse(now);
+    store.save();
+  };
   /** How long to wait for Windows to log a job that left the queue before taking it as printed. */
   const LOG_WAIT_MS = 15_000;
   let watcher: ReturnType<typeof setInterval> | undefined;
@@ -310,12 +319,42 @@ void app.whenReady().then(() => {
       }
     } finally {
       polling = false;
+      saveFollowing();
       if (!tracked.size) {
         clearInterval(watcher);
         watcher = undefined;
       }
     }
   }
+
+  /**
+   * After a start: follows again the jobs this desk followed before it closed (one that left the
+   * queue meanwhile gets its outcome from Windows' print log), and takes on jobs still in the
+   * queue that print a file an item links to but that it did not send (an older Print Desk,
+   * PhotoCraft itself). Copies already counted are the base; counting goes on from there.
+   * How many jobs it follows.
+   */
+  ipcMain.handle('photocraft:resume', async (): Promise<number> => {
+    const snap = await snapshot();
+    if (!snap) return 0;
+    for (const f of store.data.following ?? []) {
+      if (tracked.has(f.key)) continue;
+      tracked.set(f.key, { printer: f.printer, id: f.id, copies: f.copies, since: f.since, sent: f.sent });
+      report({ key: f.key, copies: f.copies, printed: f.sent, left: f.copies - f.sent, status: 'Picked up again', done: false, base: f.sent });
+    }
+    const account = zollify.session?.accountId;
+    const following = new Set([...tracked.values()].map((t) => `${t.printer}|${t.id}`));
+    for (const { key, job, copies } of account ? adoptable(snap, store.data.links[account] ?? {}, following) : []) {
+      if (tracked.has(key)) continue;
+      const sent = Math.min(copies, job.pagesPrinted);
+      // ponytail: the job's own submit time is not read; its outcome is looked up over the last day.
+      tracked.set(key, { printer: job.printer, id: job.id, copies, since: Date.now() - 24 * 3600_000, sent });
+      report({ ...progressOf(key, copies, job, snap.printers.find((p) => p.name === job.printer)), base: sent });
+    }
+    saveFollowing();
+    if (tracked.size) watcher ??= setInterval(() => void poll(), 2000);
+    return tracked.size;
+  });
 
   ipcMain.handle('photocraft:print', async (_e, jobs: PrintJob[]): Promise<PrintResult[]> => {
     // One at a time: the printer queue is sequential anyway, and the results stay in order.
@@ -349,6 +388,7 @@ void app.whenReady().then(() => {
         continue;
       }
       tracked.set(job.key, { printer: spooled.printer, id: spooled.id, copies: job.copies, since, sent: Math.min(job.copies, spooled.pagesPrinted) });
+      saveFollowing();
       report(progressOf(job.key, job.copies, spooled, after!.printers.find((p) => p.name === spooled.printer)));
       watcher ??= setInterval(() => void poll(), 2000);
     }

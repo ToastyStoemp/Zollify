@@ -154,6 +154,12 @@ Both build the renderer (Vite) and the main process (tsc) and start Electron.
   the queue, which then counts only the copies the driver had sent. Without a
   log entry within 15 s, all copies count. A print cancelled on the printer
   itself after Windows sent it can't be seen.
+- The jobs followed are kept on disk, so closing Print Desk mid-run loses
+  nothing: on the next start it follows them again from the copies already
+  counted, and a job that finished meanwhile gets its outcome from the print
+  log. It also takes on jobs in the queue it did not send (an older Print
+  Desk, PhotoCraft itself) that print a file an item links to, counting from
+  the copies printed when it finds them, so nothing is counted twice.
 - On Windows, each job is then followed in the print queue (`Win32_PrintJob`,
   every 2 s) until it leaves it. PhotoCraft prints every copy as one page of
   the job, so pages printed is copies done; the row shows a bar, the driver's

@@ -21,6 +21,8 @@ export interface SpoolJob {
   /** The driver's job status ("Printing", "Paused", "Error", ...), '' while just queued. */
   status: string;
   pagesPrinted: number;
+  /** Pages in the job (each a copy); 0 when the driver does not say. */
+  totalPages: number;
 }
 export interface SpoolPrinter {
   name: string;
@@ -47,7 +49,7 @@ const ISSUES: Record<number, string> = {
 };
 
 const SCRIPT = [
-  '$j = @(Get-CimInstance Win32_PrintJob | ForEach-Object { [pscustomobject]@{ name = $_.Name; id = $_.JobId; document = $_.Document; status = $_.JobStatus; pages = $_.PagesPrinted } })',
+  '$j = @(Get-CimInstance Win32_PrintJob | ForEach-Object { [pscustomobject]@{ name = $_.Name; id = $_.JobId; document = $_.Document; status = $_.JobStatus; pages = $_.PagesPrinted; total = $_.TotalPages } })',
   '$p = @(Get-CimInstance Win32_Printer | ForEach-Object { [pscustomobject]@{ name = $_.Name; default = $_.Default; error = $_.DetectedErrorState; offline = $_.WorkOffline } })',
   '[pscustomobject]@{ jobs = $j; printers = $p } | ConvertTo-Json -Compress -Depth 3',
 ].join('; ');
@@ -57,14 +59,14 @@ const list = <T>(v: T | T[] | null | undefined): T[] => (v == null ? [] : Array.
 /** Parses the script's JSON. A job's Name is "<printer>, <job id>". */
 export function parseSnapshot(json: string): Snapshot {
   const raw = JSON.parse(json || '{}') as {
-    jobs?: { name?: string; id?: number; document?: string; status?: string | null; pages?: number | null }[];
+    jobs?: { name?: string; id?: number; document?: string; status?: string | null; pages?: number | null; total?: number | null }[];
     printers?: { name?: string; default?: boolean; error?: number | null; offline?: boolean }[];
   };
   return {
     jobs: list(raw.jobs).map((j) => {
       const name = String(j.name ?? '');
       const comma = name.lastIndexOf(', ');
-      return { printer: comma > 0 ? name.slice(0, comma) : name, id: Number(j.id) || 0, document: String(j.document ?? ''), status: String(j.status ?? ''), pagesPrinted: Number(j.pages) || 0 };
+      return { printer: comma > 0 ? name.slice(0, comma) : name, id: Number(j.id) || 0, document: String(j.document ?? ''), status: String(j.status ?? ''), pagesPrinted: Number(j.pages) || 0, totalPages: Number(j.total) || 0 };
     }),
     printers: list(raw.printers).map((p) => ({
       name: String(p.name ?? ''),
@@ -98,6 +100,29 @@ export function newJob(before: Snapshot, after: Snapshot, printer: string, docum
   return after.jobs
     .filter((j) => same(j.printer, printer) && same(j.document, document) && !old.has(`${j.printer}|${j.id}`))
     .sort((a, b) => b.id - a.id)[0];
+}
+
+/**
+ * Jobs in the queue that Print Desk did not send, or sent before it last closed, printing a file
+ * an item links to: the item, the job, and its copies (its pages). A job whose driver gives no
+ * page count is left out - its copies can't be known. One job per item; `following` are the
+ * jobs already followed ("printer|id").
+ */
+export function adoptable(snap: Snapshot, links: Record<string, { file?: string }>, following: Set<string>): { key: string; job: SpoolJob; copies: number }[] {
+  const byFile = new Map<string, string>();
+  for (const [key, l] of Object.entries(links)) {
+    const name = (l.file ?? '').split(/[\\/]/).pop()?.toLowerCase();
+    if (name && !byFile.has(name)) byFile.set(name, key);
+  }
+  const taken = new Set<string>();
+  const out: { key: string; job: SpoolJob; copies: number }[] = [];
+  for (const job of [...snap.jobs].sort((a, b) => a.id - b.id)) {
+    const key = byFile.get(job.document.toLowerCase());
+    if (!key || taken.has(key) || following.has(`${job.printer}|${job.id}`) || !job.totalPages) continue;
+    taken.add(key);
+    out.push({ key, job, copies: Math.max(job.totalPages, job.pagesPrinted) });
+  }
+  return out;
 }
 
 /** How far a job in the queue is: copies done and left, and what the driver or printer says. */

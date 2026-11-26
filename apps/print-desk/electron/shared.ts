@@ -53,6 +53,11 @@ export interface CopyProgress {
   failed?: boolean;
   /** Cancelled in the queue: `printed` copies came out, the rest did not. */
   cancelled?: boolean;
+  /**
+   * Copies of a job picked up again after a restart that were already counted: by this desk
+   * before it closed, or not by it at all (a job it did not send). Counting starts from here.
+   */
+  base?: number;
 }
 
 export interface Settings {

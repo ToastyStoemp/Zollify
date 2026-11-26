@@ -81,6 +81,8 @@ describe('chained claims', () => {
 
   it('a recount while A runs does not keep its earlier sales reserved', async () => {
     await sell('A', 20);
+    // A count in the same millisecond as a sale takes it as sold after the count: a real recount comes later.
+    await tick();
     await inv.setOnHand(P, '', 80);
     await tick();
     expect(state()).toEqual({ physical: 80, free: 70, A: 'claim:10', B: 'pool:70' });

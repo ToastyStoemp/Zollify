@@ -113,6 +113,8 @@ const Status = z
     waiting: z.string().max(500).optional(),
     /** The copy that waits ("Kyoto A3, copy 2 of 5"). */
     waitingFor: z.string().max(160).optional(),
+    /** The paper to load for it ("A3"): what the notification leads with. */
+    waitingPaper: z.string().max(40).optional(),
   })
   .strict();
 type StatusDoc = z.infer<typeof Status> & { supplyAlerts?: Record<string, string> };
@@ -218,7 +220,8 @@ function routes(ctx: ModuleContext): FastifyPluginAsync {
       // The printer started waiting for someone, or a next copy does: tell the devices that asked.
       if (now.waiting && (now.waiting !== was?.waiting || now.waitingFor !== was?.waitingFor)) {
         ctx.notify(who.accountId, {
-          title: `Printer waiting${now.waitingFor ? `: ${now.waitingFor}` : ''}`,
+          // The paper to load comes first: it is what to fetch before walking over.
+          title: [now.waitingPaper ? `Load ${now.waitingPaper} paper` : 'Printer waiting', now.waitingFor].filter(Boolean).join(now.waitingPaper ? ' - ' : ': '),
           body: `${now.name}: ${now.waiting}`,
           link: '/m/print-desk',
           kind: 'print-desk',

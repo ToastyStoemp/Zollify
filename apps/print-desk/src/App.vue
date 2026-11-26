@@ -158,12 +158,21 @@ async function syncShared(): Promise<void> {
 }
 /** What the printer's status monitor says: the sheet printing, and what it waits for. */
 const monitor = ref<MonitorState | null>(null);
-/** The copy the printer waits on: the item whose file the monitor names, with the sheet it is at. */
+/** The item the printer waits on: the one whose file the monitor names. */
+const waitingRow = computed(() => {
+  const doc = monitor.value?.prompt ? monitor.value.document.toLowerCase() : '';
+  return doc ? rows.value.find((r) => (links.value[r.key]?.file ?? '').split(/[\\/]/).pop()?.toLowerCase() === doc) : undefined;
+});
+/** The paper to load for it ("A3"); none for a custom size, which has no name to give. */
+const waitingPaper = computed(() => {
+  const size = waitingRow.value ? printSize(waitingRow.value) : 'custom';
+  return size === 'custom' ? '' : sizeLabel(size);
+});
+/** The copy the printer waits on, with the sheet it is at. */
 const waitingFor = computed(() => {
   const m = monitor.value;
   if (!m?.prompt) return '';
-  const doc = m.document.toLowerCase();
-  const row = doc ? rows.value.find((r) => (links.value[r.key]?.file ?? '').split(/[\\/]/).pop()?.toLowerCase() === doc) : undefined;
+  const row = waitingRow.value;
   const name = row ? (row.variant ? `${row.title} ${row.variant}` : row.title) : m.document;
   return [name, m.page ? `copy ${m.page.at} of ${m.page.of}` : ''].filter(Boolean).join(', ');
 });
@@ -192,6 +201,7 @@ async function deskTick(): Promise<void> {
         error: error.value,
         waiting: monitor.value?.prompt ?? '',
         waitingFor: waitingFor.value,
+        waitingPaper: waitingPaper.value,
       }),
     );
     // Not awaited: a print request runs as long as the run, and the reports keep going meanwhile.

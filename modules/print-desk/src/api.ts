@@ -48,6 +48,8 @@ export interface Desk {
   /** What the printer waits for (its driver's prompt), and the copy that waits. */
   waiting?: string;
   waitingFor?: string;
+  /** The paper to load for it ("A3"). */
+  waitingPaper?: string;
 }
 
 export interface DeskRequest {

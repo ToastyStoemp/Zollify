@@ -92,6 +92,13 @@ const names = computed(() => new Map(items.value.map((i) => [i.key, i.variant ? 
 const nameOf = (key: string): string => names.value.get(key) ?? key;
 const sizes = computed(() => [...new Set(items.value.map((i) => i.size).filter((s): s is string => !!s))].sort());
 const totalCopies = computed(() => Object.values(counts.value).reduce((n, c) => n + (c || 0), 0));
+/** The items of the size picked above the table ('' every size): what the table, Fill to target and Print now go by. */
+const shown = computed(() => (onlySize.value ? items.value.filter((i) => i.size === onlySize.value) : items.value));
+const shownCopies = computed(() => shown.value.reduce((n, i) => n + (counts.value[i.key] || 0), 0));
+// A size no item has any more goes back to every size.
+watch(sizes, (s) => {
+  if (onlySize.value && !s.includes(onlySize.value)) onlySize.value = '';
+});
 const running = computed(() => desk.value?.run.filter((r) => !r.done) ?? []);
 const finished = computed(() => desk.value?.run.filter((r) => r.done) ?? []);
 const copiesLeft = computed(() => running.value.reduce((n, r) => n + r.left, 0));
@@ -108,7 +115,11 @@ function setCount(key: string, value: number): void {
 }
 /** Counts that bring every item up to its target, from what Zollify says is in stock. */
 function fillToTarget(): void {
-  counts.value = Object.fromEntries(items.value.map((i) => [i.key, Math.max(0, targetOf(config.value, i.key, i.size) - i.inStock)]).filter(([, n]) => (n as number) > 0));
+  // Only the size shown; the other sizes keep their counts.
+  const keys = new Set(shown.value.map((i) => i.key));
+  const kept = Object.entries(counts.value).filter(([k]) => !keys.has(k));
+  const filled = shown.value.map((i) => [i.key, Math.max(0, targetOf(config.value, i.key, i.size) - i.inStock)] as const);
+  counts.value = Object.fromEntries([...kept, ...filled].filter(([, n]) => n > 0));
   edited.value = true;
 }
 function resetCounts(): void {
@@ -251,19 +262,19 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
       <article class="card">
         <div class="desk-head">
           <h2>Copies to print</h2>
-          <span class="hint">{{ totalCopies }} copies{{ edited ? ' · not sent yet' : ` · as ${desk.name} has them` }}</span>
+          <span class="hint">{{ onlySize ? `${shownCopies} of ${totalCopies}` : totalCopies }} copies{{ edited ? ' · not sent yet' : ` · as ${desk.name} has them` }}</span>
+        </div>
+        <div v-if="sizes.length > 1" class="desk-pick" role="group" aria-label="Paper size">
+          <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All sizes</button>
+          <button v-for="s in sizes" :key="s" type="button" class="chip" :aria-pressed="onlySize === s" @click="onlySize = onlySize === s ? '' : s">{{ label(s) }}</button>
         </div>
         <div v-if="canControl" class="actions">
           <button type="button" class="secondary" @click="fillToTarget">Fill to target</button>
           <button v-if="edited" type="button" class="secondary" @click="resetCounts">Back to the desk's counts</button>
           <button type="button" class="primary" :disabled="busy || !edited" @click="sendCounts">Send counts to {{ desk.name }}</button>
           <span class="spacer"></span>
-          <select v-model="onlySize" aria-label="Paper size to print">
-            <option value="">All sizes</option>
-            <option v-for="s in sizes" :key="s" :value="s">{{ label(s) }} only</option>
-          </select>
           <button type="button" class="primary" :disabled="busy || !desk.online || !desk.allowRemote || edited" :title="!desk.allowRemote ? 'Printing on request is off on this desk' : edited ? 'Send the counts first' : ''" @click="printNow">
-            <Icon name="printer" :size="14" /> Print now
+            <Icon name="printer" :size="14" /> {{ onlySize ? `Print ${label(onlySize)} only` : 'Print now' }}
           </button>
         </div>
         <table>
@@ -271,7 +282,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
             <tr><th>Print</th><th>In stock</th><th>Target</th><th>To print</th></tr>
           </thead>
           <tbody>
-            <tr v-for="i in items" :key="i.key">
+            <tr v-for="i in shown" :key="i.key">
               <td>{{ i.title }}<span v-if="i.variant" class="hint variant">{{ i.variant }}</span></td>
               <td>{{ i.inStock }}</td>
               <td>

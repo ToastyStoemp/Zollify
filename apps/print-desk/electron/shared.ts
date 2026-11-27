@@ -72,6 +72,9 @@ export interface Supply {
   state: 'ok' | 'low' | 'out' | 'unknown';
 }
 
+export type { PrintTime } from './printtimes.js';
+import type { PrintTime } from './printtimes.js';
+
 export interface Settings {
   server: string;
   /** Path to photocraft-cli (or photocraft-cli.exe). */
@@ -109,6 +112,8 @@ export interface Settings {
   priceCards: PriceCardSettings;
   /** Print when asked from another device (Zollify's Print Desk module). Off until switched on here; counts are always taken. */
   allowRemote: boolean;
+  /** Account id -> stock key -> how long a sheet of the item takes to print, learned as it prints. */
+  printTimes: Record<string, Record<string, PrintTime>>;
 }
 
 /** Price cards: the themes, each account's cards, how prices read, and where the PSDs go. */

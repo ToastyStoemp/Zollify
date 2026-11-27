@@ -18,6 +18,22 @@ export interface PrintDeskConfig {
   units?: 'cm' | 'mm' | 'in';
 }
 
+/** How long copies take at the desk's sheet times (waits at the printer not counted); '' when none are timed. */
+export function printingTime(copies: { key: string; n: number }[], sheetMs: Record<string, number>): string {
+  let ms = 0;
+  let unknown = 0;
+  for (const c of copies) {
+    if (!c.n) continue;
+    const t = sheetMs[c.key];
+    if (t) ms += t * c.n;
+    else unknown += c.n;
+  }
+  if (!ms) return '';
+  const min = Math.round(ms / 60_000);
+  const time = min < 60 ? `${Math.max(1, min)} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
+  return `${unknown ? 'over' : 'about'} ${time}`;
+}
+
 export interface RunItem {
   key: string;
   copies: number;
@@ -50,6 +66,8 @@ export interface Desk {
   waitingFor?: string;
   /** The paper to load for it ("A3"). */
   waitingPaper?: string;
+  /** Per item, how long a sheet takes to print (ms): its own time, else its size's. */
+  sheetMs?: Record<string, number>;
 }
 
 export interface DeskRequest {

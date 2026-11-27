@@ -7,6 +7,7 @@ import type { Material } from '../electron/materials';
 import type { MonitorState } from '../electron/statusmonitor';
 import type { CatalogRow, CopyProgress, ImageInfo, PrintLink, Printer, Session, Settings, Supply, Theme, Units } from '../electron/shared';
 import { effectiveParams, fitToStock, isPrintFile, moveKey, orderRows, paperName, paperNeeds, paperParam, orientFor, settingsFor, sizeFromName, smartFit, targetFor } from '../electron/shared';
+import { addTime, duration, estimate, sheetTimer, sizeTimes, type PrintTime } from '../electron/printtimes';
 import Icon from './Icon.vue';
 import ItemOverrides from './ItemOverrides.vue';
 import Menu from './Menu.vue';
@@ -96,11 +97,14 @@ onMounted(async () => {
   api.photocraft.onMonitor((state) => {
     const was = monitor.value?.prompt;
     monitor.value = state;
+    void recordSheet(timer.see(state, Date.now()));
     // A new wait goes to Zollify now, not at the next report, so the phone hears it while it matters.
     if (state.prompt && state.prompt !== was) void deskTick();
   });
   api.photocraft.onQueue((p) => {
     progress[p.key] = p;
+    // The job left the queue: its last sheet is out.
+    if (p.done) void recordSheet(timer.stop(Date.now()));
     // A job picked up again: what was counted before is where this desk's counting starts.
     if (p.base !== undefined && counted[p.key] === undefined) {
       counted[p.key] = p.base;
@@ -158,10 +162,49 @@ async function syncShared(): Promise<void> {
 }
 /** What the printer's status monitor says: the sheet printing, and what it waits for. */
 const monitor = ref<MonitorState | null>(null);
-/** The item the printer waits on: the one whose file the monitor names. */
-const waitingRow = computed(() => {
-  const doc = monitor.value?.prompt ? monitor.value.document.toLowerCase() : '';
+/** The item whose linked file is `document` (the name the monitor and the queue give it). */
+const rowOfDocument = (document: string): CatalogRow | undefined => {
+  const doc = document.toLowerCase();
   return doc ? rows.value.find((r) => (links.value[r.key]?.file ?? '').split(/[\\/]/).pop()?.toLowerCase() === doc) : undefined;
+};
+/** The item the printer waits on: the one whose file the monitor names. */
+const waitingRow = computed(() => (monitor.value?.prompt ? rowOfDocument(monitor.value.document) : undefined));
+
+// ── How long prints take: each sheet timed from the status monitor, per item and per paper size ──
+const timer = sheetTimer();
+const printTimes = computed<Record<string, PrintTime>>(() => (session.value ? (settings.value?.printTimes?.[session.value.accountId] ?? {}) : {}));
+const timesBySize = computed(() => {
+  const size = new Map(rows.value.map((r) => [r.key, printSize(r)]));
+  return sizeTimes(printTimes.value, (key) => size.get(key));
+});
+/** How long a sheet of the item takes: its own time, else its size's; null when neither was timed. */
+const sheetTime = (r: CatalogRow): { ms: number; own: boolean } | null => {
+  const own = printTimes.value[r.key];
+  if (own) return { ms: own.ms, own: true };
+  const size = timesBySize.value[printSize(r)];
+  return size ? { ms: size.ms, own: false } : null;
+};
+/** A sheet the printer finished: its item learns the time. */
+async function recordSheet(done: { document: string; ms: number } | null): Promise<void> {
+  const row = done && rowOfDocument(done.document);
+  if (!done || !row || !session.value || !settings.value) return;
+  const all = plain(settings.value.printTimes ?? {});
+  const mine = (all[session.value.accountId] ??= {});
+  mine[row.key] = addTime(mine[row.key], done.ms);
+  settings.value = await api.settings.set({ printTimes: all });
+}
+/** The printing ahead (waits at the printer not counted): what is left of a run, else what Print would send. */
+const timeAhead = computed(() => {
+  const running = Object.values(progress).filter((p) => !p.done && p.left > 0);
+  const copies = running.length
+    ? running.flatMap((p) => {
+        const row = rows.value.find((r) => r.key === p.key);
+        return row ? [{ key: row.key, size: printSize(row), copies: p.left }] : [];
+      })
+    : queued.value.map((r) => ({ key: r.key, size: printSize(r), copies: qty[r.key] ?? 0 }));
+  const e = estimate(copies, printTimes.value, timesBySize.value);
+  if (!e.ms) return '';
+  return `${e.unknown ? 'over ' : 'about '}${duration(e.ms)}${running.length ? ' left' : ''} of printing${e.unknown ? ` (${e.unknown} ${e.unknown === 1 ? 'copy' : 'copies'} not timed yet)` : ''}`;
 });
 /** The paper to load for it ("A3"); none for a custom size, which has no name to give. */
 const waitingPaper = computed(() => {
@@ -202,6 +245,10 @@ async function deskTick(): Promise<void> {
         waiting: monitor.value?.prompt ?? '',
         waitingFor: waitingFor.value,
         waitingPaper: waitingPaper.value,
+        sheetMs: Object.fromEntries(active.value.flatMap((r) => {
+          const t = sheetTime(r);
+          return t ? [[r.key, t.ms]] : [];
+        })),
       }),
     );
     // Not awaited: a print request runs as long as the run, and the reports keep going meanwhile.
@@ -1111,7 +1158,7 @@ async function printAll(): Promise<void> {
         <label role="menuitemcheckbox" :aria-checked="!!settings?.allowRemote" title="Zollify's Print Desk module can always set the print counts; with this on, it can also start printing"><input type="checkbox" :checked="settings?.allowRemote" @change="toggleAllowRemote(($event.target as HTMLInputElement).checked)" /> Print when asked from Zollify</label>
       </Menu>
       <button v-if="hiddenKeys.size" type="button" class="quiet" :aria-pressed="showHidden" @click="showHidden = !showHidden">{{ showHidden ? `Leave out hidden (${hiddenKeys.size})` : `Show hidden (${hiddenKeys.size})` }}</button>
-      <span class="muted">{{ queued.length }} items, {{ totalCopies }} copies</span>
+      <span class="muted" title="Timed from the sheets this desk printed, per item, else per paper size; waits to load a sheet and press OK are not counted">{{ queued.length }} items, {{ totalCopies }} copies{{ timeAhead ? `, ${timeAhead}` : '' }}</span>
       <button type="button" class="primary" :disabled="!!busy || !queued.length" @click="printAll">{{ busy || (onlySize ? `Print ${sizeLabel(onlySize)} only` : 'Print all') }}</button>
     </div>
     <div v-if="Object.keys(needs).length" class="plan" role="group" aria-label="Paper needed">
@@ -1272,6 +1319,7 @@ async function printAll(): Promise<void> {
             </td>
             <td>
               <span v-if="links[row.key] || usesGlobal(row)">{{ paramsFor(row).printer || 'default printer' }}, {{ paperLabel(paramsFor(row).paper) }} {{ paramsFor(row).orientation || '' }}{{ usesGlobal(row) ? (Object.keys(links[row.key]?.overrides ?? {}).length ? ' · global, changed' : ' · global') : '' }}</span>
+              <div v-if="sheetTime(row)" class="muted" :title="sheetTime(row)!.own ? `Mean of the last ${printTimes[row.key]!.n} sheets printed` : 'Not timed yet: the mean of its paper size'">{{ duration(sheetTime(row)!.ms) }} a sheet{{ sheetTime(row)!.own ? '' : ` (${sizeLabel(printSize(row))} average)` }}</div>
             </td>
             <td class="actions-cell">
               <div class="row-actions">

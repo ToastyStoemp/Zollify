@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { roleAtLeast } from '@zollify/sdk';
 import { Icon } from '@zollify/ui';
-import { getConfig, getDesks, getRequests, isArtPrint, patchConfig, sendRequest, sizeFromName, stockKey, targetOf, type Desk, type DeskRequest, type FillHow, type PrintDeskConfig } from '../api';
+import { getConfig, getDesks, getRequests, isArtPrint, patchConfig, printingTime, sendRequest, sizeFromName, stockKey, targetOf, type Desk, type DeskRequest, type FillHow, type PrintDeskConfig } from '../api';
 import { sdk } from '../runtime';
 
 /**
@@ -131,6 +131,9 @@ watch(sizes, (s) => {
 const running = computed(() => desk.value?.run.filter((r) => !r.done) ?? []);
 const finished = computed(() => desk.value?.run.filter((r) => r.done) ?? []);
 const copiesLeft = computed(() => running.value.reduce((n, r) => n + r.left, 0));
+/** Printing time ahead at the desk's own sheet times: of the run, and of the copies to print. */
+const timeLeft = computed(() => printingTime(running.value.map((r) => ({ key: r.key, n: r.left })), desk.value?.sheetMs ?? {}));
+const timeToPrint = computed(() => printingTime(shown.value.map((i) => ({ key: i.key, n: counts.value[i.key] || 0 })), desk.value?.sheetMs ?? {}));
 
 const ago = (t: number): string => {
   const s = Math.max(0, Math.round((Date.now() - t) / 1000));
@@ -292,7 +295,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
         <p v-if="desk.error" class="error">{{ desk.error }}</p>
 
         <div v-if="running.length" class="run">
-          <h3>Printing · {{ copiesLeft }} {{ copiesLeft === 1 ? 'copy' : 'copies' }} left</h3>
+          <h3>Printing · {{ copiesLeft }} {{ copiesLeft === 1 ? 'copy' : 'copies' }} left<template v-if="timeLeft"> · {{ timeLeft }}</template></h3>
           <ul class="list">
             <li v-for="r in running" :key="r.key">
               <span class="name">{{ nameOf(r.key) }}</span>
@@ -334,7 +337,7 @@ const STATUS: Record<DeskRequest['status'], string> = { pending: 'waiting for th
       <article class="card">
         <div class="desk-head">
           <h2>Copies to print</h2>
-          <span class="hint">{{ onlySize ? `${shownCopies} of ${totalCopies}` : totalCopies }} copies{{ edited ? ` · sending to ${desk.name}…` : ` · as ${desk.name} has them` }}</span>
+          <span class="hint">{{ onlySize ? `${shownCopies} of ${totalCopies}` : totalCopies }} copies<template v-if="timeToPrint"> · <span title="At the times the desk measured per print, else per paper size; waits to load a sheet are not counted">{{ timeToPrint }} of printing</span></template>{{ edited ? ` · sending to ${desk.name}…` : ` · as ${desk.name} has them` }}</span>
         </div>
         <div v-if="sizes.length > 1" class="desk-pick" role="group" aria-label="Paper size">
           <button type="button" class="chip" :aria-pressed="!onlySize" @click="onlySize = ''">All sizes</button>

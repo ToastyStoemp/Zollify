@@ -115,6 +115,8 @@ const Status = z
     waitingFor: z.string().max(160).optional(),
     /** The paper to load for it ("A3"): what the notification leads with. */
     waitingPaper: z.string().max(40).optional(),
+    /** Per item, how long a sheet takes to print (ms), as the desk timed it: for the estimates here. */
+    sheetMs: z.record(Key, z.number().int().min(0).max(3_600_000)).optional(),
   })
   .strict();
 type StatusDoc = z.infer<typeof Status> & { supplyAlerts?: Record<string, string> };

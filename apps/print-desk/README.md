@@ -200,7 +200,16 @@ the app syncs with Zollify while signed in (electron/desk.ts, main.ts):
   the printer answers SNMP with plain idle, so it is read from Canon's status
   monitor (electron/statusmonitor.ts): one helper process looks for its prompt
   window (class `CNMSTMN_ERRDLG`, "Starting manual feed printing...") once a
-  second, and reads the sheet the printer is at from the monitor itself.
+  second, and reads the sheet the printer is at from the monitor itself. The
+  notification leads with the paper to load ("Load A3 paper - ...").
+- Print times (electron/printtimes.ts): from the same monitor, each sheet is
+  timed from when the printer goes on by itself (OK pressed, or the page
+  counter moves on) to the next prompt, page or the job's end; the wait for
+  someone to press OK is left out. Each item keeps the mean of its last 20
+  sheets; an item not timed yet takes its paper size's mean. The toolbar shows
+  the printing ahead (of the run, or of what Print would send), each row its
+  time a sheet, and the desk sends the times to Zollify, whose page estimates
+  the copies to print the same way.
 
 ## Price cards
 

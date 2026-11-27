@@ -77,10 +77,10 @@ describe('shared settings', () => {
 
 describe('desks reporting', () => {
   it('lists each desk with what it reported, online while it keeps reporting', async () => {
-    expect((await call('PUT', '/status/desk-1', status())).statusCode).toBe(200);
+    expect((await call('PUT', '/status/desk-1', status({ sheetMs: { 'kyoto:a3': 180_000 } }))).statusCode).toBe(200);
     const { desks } = (await call('GET', '/status')).json();
     expect(desks).toHaveLength(1);
-    expect(desks[0]).toMatchObject({ deviceId: 'desk-1', online: true, name: 'Print Desk', allowRemote: true, counts: { 'kyoto:a3': 3 } });
+    expect(desks[0]).toMatchObject({ deviceId: 'desk-1', online: true, name: 'Print Desk', allowRemote: true, counts: { 'kyoto:a3': 3 }, sheetMs: { 'kyoto:a3': 180_000 } });
     app.zollify.db.prepare('UPDATE print_desk_status SET updatedAt = ? WHERE deviceId = ?').run(Date.now() - 60_000, 'desk-1');
     expect((await call('GET', '/status')).json().desks[0].online).toBe(false);
   });

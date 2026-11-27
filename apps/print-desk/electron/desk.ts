@@ -53,6 +53,8 @@ export interface DeskStatus {
   waitingFor?: string;
   /** The paper to load for it ("A3"), when the desk knows the item. */
   waitingPaper?: string;
+  /** Per item, how long a sheet takes (its own time, else its size's), for Zollify's estimate. */
+  sheetMs?: Record<string, number>;
 }
 const cut = (s: string | undefined, n: number): string | undefined => (s ? s.slice(0, n) : undefined);
 /** A status report within what the server takes: counts over 0, long messages cut short. */
@@ -68,6 +70,7 @@ export function statusReport(s: DeskStatus): DeskStatus {
     ...(s.waiting ? { waiting: cut(s.waiting, 500) } : {}),
     ...(s.waitingFor ? { waitingFor: cut(s.waitingFor, 160) } : {}),
     ...(s.waitingPaper ? { waitingPaper: cut(s.waitingPaper, 40) } : {}),
+    ...(s.sheetMs ? { sheetMs: Object.fromEntries(Object.entries(s.sheetMs).slice(0, 2000).map(([k, ms]) => [k, Math.round(ms)])) } : {}),
   };
 }
 

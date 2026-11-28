@@ -80,6 +80,28 @@ const TILL_DENIED: [RegExp, RegExp][] = [
   [/^(?!GET)/, /^\/api\/m\/wholesale\//],
 ];
 
+/** One path segment as the router reads it; a segment that does not decode is left as it was sent. */
+function decodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
+ * The paths a till request is judged by. The router decodes percent-encoding
+ * before it matches, so `/api/%69nvites` reaches the invites route; judged as
+ * sent, it slipped past the list above. So the list sees the path decoded the
+ * way the router decodes it, and the pattern of the route that actually
+ * matched - whatever the spelling, the route it lands on is what counts.
+ */
+function tillPaths(url: string, routePattern?: string): string[] {
+  const sent = url.split('?')[0]!;
+  const decoded = sent.split('/').map(decodeSegment).join('/');
+  return [...new Set([sent, decoded, ...(routePattern ? [routePattern] : [])])];
+}
+
 /**
  * Checks a verified token against the database on every request: the person
  * must still exist in the token's account (a removed person's token stops at
@@ -87,7 +109,7 @@ const TILL_DENIED: [RegExp, RegExp][] = [
  * one at sign-in, and a till token only works while that person is unlocked
  * on that device. Returns an error, or null with `claims.role` refreshed.
  */
-export function checkClaims(db: Database.Database, claims: JwtClaims, method: string, url: string): { code: number; error: string } | null {
+export function checkClaims(db: Database.Database, claims: JwtClaims, method: string, url: string, routePattern?: string): { code: number; error: string } | null {
   const row = db.prepare('SELECT accountId, role FROM users WHERE id = ?').get(claims.sub) as { accountId: string; role: UserRole } | undefined;
   if (!row || row.accountId !== claims.accountId) return { code: 401, error: 'Not authenticated' };
   claims.role = row.role;
@@ -99,8 +121,7 @@ export function checkClaims(db: Database.Database, claims: JwtClaims, method: st
   if (claims.till !== undefined) {
     const b = db.prepare('SELECT unlockedUntil FROM device_users WHERE accountId = ? AND deviceId = ? AND userId = ?').get(claims.accountId, claims.till, claims.sub) as { unlockedUntil: number } | undefined;
     if (!b || b.unlockedUntil <= Date.now()) return { code: 401, error: 'Not authenticated' };
-    const path = url.split('?')[0]!;
-    if (TILL_DENIED.some(([m, p]) => m.test(method) && p.test(path)))
+    if (tillPaths(url, routePattern).some((path) => TILL_DENIED.some(([m, p]) => m.test(method) && p.test(path))))
       return { code: 403, error: 'Not from a shared till - sign in with your own account for this.' };
   }
   return null;
@@ -886,7 +907,7 @@ export async function authenticate(this: FastifyInstance, req: FastifyRequest, r
   } catch {
     return reply.code(401).send({ error: 'Not authenticated' });
   }
-  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url, req.routeOptions?.url);
   if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
@@ -917,7 +938,7 @@ export async function authenticateApiOrJwt(
   } catch {
     return reply.code(401).send({ error: 'Not authenticated' });
   }
-  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url);
+  const bad = checkClaims(this.db, req.user as JwtClaims, req.method, req.url, req.routeOptions?.url);
   if (bad) return reply.code(bad.code).send({ error: bad.error });
 }
 
@@ -951,7 +972,7 @@ export async function authenticateApiWrite(
     return reply.code(401).send({ error: 'Not authenticated' });
   }
   const claims = req.user as JwtClaims;
-  const bad = checkClaims(this.db, claims, req.method, req.url);
+  const bad = checkClaims(this.db, claims, req.method, req.url, req.routeOptions?.url);
   if (bad) return reply.code(bad.code).send({ error: bad.error });
   if (claims.role === 'member') {
     return reply.code(403).send({ error: 'Catalog writes require an owner/admin or a data:write token' });

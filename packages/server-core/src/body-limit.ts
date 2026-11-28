@@ -15,7 +15,7 @@ async function hasValidCredential(app: FastifyInstance, req: FastifyRequest): Pr
   if (!req.headers.authorization) return false;
   try {
     await req.jwtVerify();
-    return checkClaims(app.db, req.user as JwtClaims, req.method, req.url) === null;
+    return checkClaims(app.db, req.user as JwtClaims, req.method, req.url, req.routeOptions?.url) === null;
   } catch {
     return false;
   }

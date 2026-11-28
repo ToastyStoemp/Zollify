@@ -72,6 +72,12 @@ async function start(): Promise<void> {
   const ready = boot();
   void wireShortcuts(router, ready);
   createApp(App).use(router).mount('#app');
+  // Tells the start check (public/webview-check.js) the app is on screen. It
+  // shows a "did not start" notice when this has not happened by the time the
+  // page has loaded, which only holds while mounting stays synchronous and
+  // ahead of boot - an await above this line would put that notice on healthy
+  // slow devices.
+  window.zollifyStartCheck?.mounted();
   // Tells the content updater this bundle started. It has to come now, not
   // after boot: the plugin rolls a new bundle back unless it hears this
   // within 10 seconds, and boot waits on the network (sign-in, data,

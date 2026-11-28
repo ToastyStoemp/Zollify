@@ -16,5 +16,10 @@ declare module '*.vue' {
   export default component;
 }
 
+/** Set by public/webview-check.js, the classic script that runs before the app; absent when that file did not load. */
+interface Window {
+  zollifyStartCheck?: { mounted(): void };
+}
+
 /** Version + short commit, stamped by vite.config.ts at build time. */
 declare const __ZOLLIFY_VERSION__: string;

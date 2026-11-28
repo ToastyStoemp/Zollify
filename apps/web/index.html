@@ -30,6 +30,15 @@
         }
       }
     </script>
+
+    <!--
+      Says so when this device cannot run the app, instead of a blank screen:
+      a WebView too old for it, or an app that never mounted. A classic script
+      on purpose - it must run where module scripts do not - and a file rather
+      than inline, because the server's Content-Security-Policy allows only
+      the import map above as inline script.
+    -->
+    <script src="/webview-check.js"></script>
   </head>
   <body>
     <div id="app"></div>

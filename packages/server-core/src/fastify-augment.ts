@@ -18,6 +18,8 @@ declare module 'fastify' {
       webhooks: import('./webhooks').Webhooks;
       problems: import('./problems').Problems;
       seedDefaults(accountId: string): void;
+      /** What this server keeps per account and what becomes of it on deletion and wipe. */
+      accountData: import('./account-data').AccountData;
     };
   }
 

@@ -1,8 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type Database from 'better-sqlite3';
-import { rm } from 'node:fs/promises';
 import { ProfileUpdateSchema, VatProfileSchema, cleanArtistUpdate, cleanProfileLinks, type AccountProfile } from '@zollify/shared';
-import { eventFilesDir } from './event-files';
 import { parseProfile, toAuthUser, type JwtClaims, type UserRow } from '../auth';
 
 /**
@@ -31,15 +29,15 @@ export function salesInRetention(db: Database.Database, accountId: string, now =
 export function registerAccountRoutes(
   app: FastifyInstance,
   db: Database.Database,
-  dataDir?: string,
-  /** Runs inside the wipe transaction so modules drop their rows for the account too. */
-  onWipe: (accountId: string) => void = () => {},
+  /** Erases what a wipe erases, in one transaction, and returns how many ops went (account-erasure.ts). */
+  wipeAccount: (accountId: string) => number,
 ): void {
   /**
    * Starts the booth over: every synced op, image and metric row for the
-   * account is dropped and the sync epoch is bumped, so devices that still
-   * hold the old log throw it away on their next pull. Users, devices and the
-   * profile stay - it is the data that is reset, not the account.
+   * account is dropped, with what each module keeps for it, and the sync
+   * epoch is bumped, so devices that still hold the old log throw it away on
+   * their next pull. Users, devices and the profile stay - it is the data
+   * that is reset, not the account. Table by table: account-data.ts.
    */
   app.post('/api/account/wipe', { preHandler: app.authenticate }, async (req, reply) => {
     const claims = req.user as JwtClaims;
@@ -58,17 +56,7 @@ export function registerAccountRoutes(
         sales: inPeriod,
       });
     }
-    const removed = db.transaction((accountId: string) => {
-      const ops = db.prepare('DELETE FROM ops WHERE accountId = ?').run(accountId).changes;
-      db.prepare('DELETE FROM images WHERE accountId = ?').run(accountId);
-      db.prepare('DELETE FROM event_files WHERE accountId = ?').run(accountId);
-      db.prepare('DELETE FROM metrics WHERE accountId = ?').run(accountId);
-      onWipe(accountId);
-      db.prepare('UPDATE accounts SET syncEpoch = syncEpoch + 1 WHERE id = ?').run(accountId);
-      return ops;
-    })(claims.accountId);
-    if (dataDir) await rm(eventFilesDir(dataDir, claims.accountId), { recursive: true, force: true });
-    return { ok: true, removedOps: removed };
+    return { ok: true, removedOps: wipeAccount(claims.accountId) };
   });
 
   app.get('/api/account/profile', { preHandler: app.authenticate }, async (req): Promise<AccountProfile> => {

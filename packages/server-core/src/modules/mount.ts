@@ -7,6 +7,7 @@ import type { ServerOpInput } from '../routes/sync';
 import type { WebhookMessage, WireOp } from '@zollify/shared';
 import type { Webhooks } from '../webhooks';
 import type { ModuleProblems, ProblemInput } from '../problems';
+import type { AccountTable, ServerTable } from '../account-data';
 
 export type Role = 'owner' | 'admin' | 'member';
 
@@ -87,9 +88,21 @@ export interface ServerModule {
    */
   onAccountCreated?(ctx: ModuleServices, e: { accountId: string; userId: string; inviteCode?: string }): void;
   /**
+   * Every table this module keeps rows in per account, and what becomes of
+   * them when the account is deleted or its data wiped: `erase`, or `retain`
+   * with a written reason and period (see account-data.ts). The gateway does
+   * the erasing from this list, for every module, enabled or not. A table
+   * the module creates and does not declare here fails the erasure tests.
+   */
+  accountData?: AccountTable[];
+  /** Tables of this module that belong to the whole server, not to any one account. */
+  serverTables?: ServerTable[];
+  /**
    * An account is being deleted, or its data wiped. Called for every module,
-   * enabled or not, inside the deleting transaction: drop the rows this
-   * module keeps for the account. A throw rolls the whole deletion back.
+   * enabled or not, inside the erasing transaction, before the declared rows
+   * go. Only for what a declaration cannot say - undoing a tie in another
+   * account's rows, say; the module's own rows are `accountData`. A throw
+   * rolls the whole deletion back.
    */
   onAccountDeleted?(db: Database.Database, accountId: string): void;
   /**

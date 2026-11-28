@@ -7,6 +7,9 @@ import cookie from '@fastify/cookie';
 import type Database from 'better-sqlite3';
 
 import { openDb } from './db';
+import { collectAccountData } from './account-data';
+import { createAccountEraser } from './account-erasure';
+import { removeQueuedFiles } from './account-files';
 import { registerAnonymousBodyLimit } from './body-limit';
 import { authenticate, registerAuthRoutes, seedOwner, parseAllowedEvents, type JwtClaims } from './auth';
 import { isEnabled, listForAccount, migrateEntitlements, seedDefaults } from './modules/entitlements';
@@ -224,11 +227,20 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // response, including ones added later.
   registerRefreshCookie(app, { secure: opts.requireHttps });
   configureCaptchaKey(opts.jwtSecret);
-  // Every module drops what it keeps for the account; runs inside the caller's transaction.
-  const forgetAccount = (accountId: string): void => {
-    for (const m of opts.serverModules) m.onAccountDeleted?.(db, accountId);
-  };
-  registerAuthRoutes(app, db, opts.jwtSecret, opts.dataDir, {
+  // Deleting an account and wiping its data both run from what core and every module declared
+  // they keep per account. A declaration nobody could review stops the server here.
+  const accountData = collectAccountData(opts.serverModules);
+  const eraser = createAccountEraser({
+    db,
+    dataDir: opts.dataDir,
+    data: accountData,
+    beforeErase: (accountId) => {
+      for (const m of opts.serverModules) m.onAccountDeleted?.(db, accountId);
+    },
+  });
+  // Files of an erasure that committed just before the last stop.
+  removeQueuedFiles(db, opts.dataDir);
+  registerAuthRoutes(app, db, opts.jwtSecret, {
     // Modules set up accounts their invites created (a store's artist gets "My stores").
     accountCreated: (e) => {
       // Every new business starts with the default modules (the till above all); without
@@ -242,7 +254,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
         }
       }
     },
-    accountDeleted: (accountId) => forgetAccount(accountId),
+    deleteAccount: eraser.deleteAccount,
   });
   registerDeviceLinkRoutes(app, db);
   registerDeviceUserRoutes(app, db, opts.jwtSecret);
@@ -327,7 +339,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
     }
   }, problems);
   registerDeviceRoutes(app, db, push);
-  registerAccountRoutes(app, db, opts.dataDir, forgetAccount);
+  registerAccountRoutes(app, db, eraser.wipeAccount);
   registerNotificationRoutes(app, db);
   registerWebhookRoutes(app, db, webhooks, problems);
   registerProblemRoutes(app, db, problems);
@@ -361,7 +373,7 @@ export async function buildGateway(opts: GatewayOptions): Promise<FastifyInstanc
   // Public halves: no session, resolved by the module from a slug or token.
   mountPublicModules(app, db, opts.serverModules, services);
 
-  app.decorate('zollify', { db, store, webhooks, problems, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
+  app.decorate('zollify', { db, store, webhooks, problems, accountData, seedDefaults: (accountId: string) => seedDefaults(db, accountId, opts.defaultModules) });
 
   /**
    * Liveness probe. Deliberately unauthenticated and free of detail: a load

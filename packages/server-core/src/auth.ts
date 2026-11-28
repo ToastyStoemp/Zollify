@@ -2,8 +2,6 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import argon2 from 'argon2';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   ArtistDetailsSchema,
   VatProfileSchema,
@@ -293,11 +291,14 @@ export interface AuthHooks {
   /** A new account was created with an invite code (not on joining an existing one). */
   /** A new account (not a user joining an existing one). `inviteCode` is set when an invite created it. */
   accountCreated?(e: { accountId: string; userId: string; inviteCode?: string }): void;
-  /** An account is being deleted; runs inside the deleting transaction so modules drop their rows with it. */
-  accountDeleted?(accountId: string): void;
+  /**
+   * Erases the account: every row and file kept for it, in one transaction
+   * (account-erasure.ts). The route only decides who may ask.
+   */
+  deleteAccount(accountId: string): void;
 }
 
-export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, dataDir: string, hooks: AuthHooks = {}): void {
+export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, jwtSecret: string, hooks: AuthHooks): void {
   const box = makeSecretBox(jwtSecret); // encrypts TOTP secrets at rest
   const requireCaptcha = process.env.REQUIRE_CAPTCHA !== '0';
   const has2fa = (u: UserRow): boolean => !!u.totpEnabled;
@@ -772,6 +773,7 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
     db.transaction(() => {
       db.prepare('DELETE FROM refresh_tokens WHERE userId = ?').run(claims.sub);
       db.prepare('DELETE FROM trusted_devices WHERE userId = ?').run(claims.sub);
+      db.prepare('DELETE FROM pin_misses WHERE userId = ?').run(claims.sub);
       db.prepare('DELETE FROM devices WHERE userId = ?').run(claims.sub);
       // Clear FK references to this user before removing it.
       db.prepare('DELETE FROM invites WHERE usedBy = ? OR createdBy = ?').run(claims.sub, claims.sub);
@@ -797,34 +799,8 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database.Database, 
       const second = checkSecondFactor(db, box, me, body.code);
       if (second === 'missing' || second === 'invalid') return reply.code(403).send({ error: 'Authenticator code required.', needs2fa: true });
     }
-    const accountId = claims.accountId;
-    db.transaction(() => {
-      const userIds = (db.prepare('SELECT id FROM users WHERE accountId = ?').all(accountId) as { id: string }[]).map((u) => u.id);
-      const delTokens = db.prepare('DELETE FROM refresh_tokens WHERE userId = ?');
-      const delTrust = db.prepare('DELETE FROM trusted_devices WHERE userId = ?');
-      for (const uid of userIds) {
-        delTokens.run(uid);
-        delTrust.run(uid);
-      }
-      // Invites can reference this account's users via createdBy/usedBy even when
-      // the invite itself is for a new account (accountId NULL) - clear all of them.
-      db.prepare(
-        'DELETE FROM invites WHERE accountId = ? OR createdBy IN (SELECT id FROM users WHERE accountId = ?) OR usedBy IN (SELECT id FROM users WHERE accountId = ?)',
-      ).run(accountId, accountId, accountId);
-      for (const table of ['ops', 'images', 'event_files', 'metrics', 'logs', 'feedback', 'api_tokens', 'devices', 'notifications', 'webhooks']) {
-        db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
-      }
-      hooks.accountDeleted?.(accountId);
-      db.prepare('DELETE FROM users WHERE accountId = ?').run(accountId);
-      db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
-    })();
-    // Full-size images live on disk per account - remove that tree too.
-    try {
-      rmSync(join(dataDir, 'images', accountId), { recursive: true, force: true });
-      rmSync(join(dataDir, 'event-files', accountId), { recursive: true, force: true });
-    } catch {
-      /* best-effort: the DB rows are already gone */
-    }
+    // Which tables and files go is declared in one place (account-data.ts), not listed here.
+    hooks.deleteAccount(claims.accountId);
     return { ok: true };
   });
 

@@ -42,6 +42,8 @@ export {
   type RequestIdentity,
   type Role,
 } from './modules/mount';
+export { erased, accountRows, actionFor, collectAccountData, type AccountData, type AccountTable, type ServerTable, type DataAction, type Retain, type ErasureMode } from './account-data';
+export { accountFootprint, allTables, columnsOf, dataFiles, misfiledServerTables, needlesOf, seedEveryAccountTable, undeclaredTables, type AccountNeedles, type SeedIdentity } from './account-audit';
 export { registerModuleRoutes } from './routes/modules';
 export { appendOps, type ServerOpInput } from './routes/sync';
 export { createMailer, isPlainEmail, type Mailer, type MailMessage } from './mailer';

@@ -8,6 +8,8 @@ import { join } from 'node:path';
  *   DATA_DIR/zollify.db       the database
  *   DATA_DIR/images/<acct>/   full-size product images
  *   DATA_DIR/event-files/<acct>/   files attached to events
+ *   DATA_DIR/logs/<logId>.log      diagnostic logs devices uploaded
+ * What becomes of each when an account is deleted: account-data.ts and account-files.ts.
  */
 
 const MIGRATIONS: string[] = [
@@ -332,6 +334,15 @@ const MIGRATIONS: string[] = [
   // Android keeps it frozen in the background (see push.ts)
   `
   ALTER TABLE devices ADD COLUMN pushToken TEXT;
+  `,
+  // v23 - files an erasure still has to remove from disk: queued inside the
+  // transaction that erases the rows, removed once it has committed, so a crash
+  // in between is finished at the next start (see account-files.ts).
+  `
+  CREATE TABLE file_removals (
+    path     TEXT PRIMARY KEY,
+    queuedAt INTEGER NOT NULL
+  );
   `,
 ];
 

@@ -179,7 +179,10 @@ watch(scope, () => { compareName.value = ''; });
  * scope - comparing to another event can pull in a second event with a
  * different local currency, and each needs its own rate lookups.
  */
+let ratesAsked = 0;
 async function refreshFxRates(): Promise<void> {
+  // The latest ask wins: a slower answer to an earlier one must not replace newer rates.
+  const mine = ++ratesAsked;
   if (mode.value !== 'base' && !compareId.value) return;
   const byCurrency = new Map<string, Set<string>>();
   const collect = (t: Transaction): void => {
@@ -195,7 +198,7 @@ async function refreshFxRates(): Promise<void> {
   const perCurrency = await Promise.all([...byCurrency.entries()].map(async ([cur, dates]) => [cur, await fetchHistoricalRates(cur, baseCurrency.value, [...dates])] as const));
   const merged = new Map<string, number>();
   for (const [cur, rates] of perCurrency) for (const [date, rate] of rates) merged.set(fxKey(date, cur), rate);
-  fxRates.value = merged;
+  if (mine === ratesAsked) fxRates.value = merged;
 }
 watch([scoped, mode, baseCurrency, compareId, allMode], refreshFxRates, { immediate: true });
 

@@ -23,7 +23,7 @@ import {
   startTillLock,
   startRealtime,
 } from '@zollify/platform';
-import { QrCode } from '@zollify/ui';
+import { QrCode, errorText } from '@zollify/ui';
 import { loadEnabledModules } from '../boot';
 import GoogleMark from '../components/GoogleMark.vue';
 
@@ -235,6 +235,25 @@ async function startQr(): Promise<void> {
   }
 }
 
+/**
+ * Finishes a sign-in a poll saw approved, and says whether the app started.
+ * The polls run from a timer, so nothing awaits them: a failure thrown from
+ * here was an unhandled rejection - polling had stopped, the screen kept
+ * waiting, and nothing said why.
+ */
+async function enterAfterPoll(body: unknown): Promise<boolean> {
+  busy.value = true;
+  try {
+    await afterLogin(body);
+    return true;
+  } catch (err) {
+    error.value = errorText(err, 'Signed in, but the app could not start. Try again.');
+    return false;
+  } finally {
+    busy.value = false;
+  }
+}
+
 async function pollQr(): Promise<void> {
   const current = link;
   if (!current) return;
@@ -257,12 +276,8 @@ async function pollQr(): Promise<void> {
 
   if (res.ok && body.status === 'approved') {
     stopQr();
-    busy.value = true;
-    try {
-      await afterLogin(body);
-    } finally {
-      busy.value = false;
-    }
+    // Back to the sign-in form, which shows the error and offers the QR again.
+    if (!(await enterAfterPoll(body))) qrMode.value = false;
     return;
   }
   if (res.ok && body.status === 'pending') {
@@ -383,12 +398,8 @@ async function pollGoogle(extra: Record<string, unknown> = {}): Promise<void> {
   const body = (await res.json().catch(() => ({}))) as { status?: string; email?: string; error?: string };
   if (res.ok && body.status === 'approved') {
     stopGoogle();
-    busy.value = true;
-    try {
-      await afterLogin(body);
-    } finally {
-      busy.value = false;
-    }
+    // 'failed' is the state with the "Try again with Google" button.
+    if (!(await enterAfterPoll(body))) googleState.value = 'failed';
     return;
   }
   if (body.status === 'pending') {

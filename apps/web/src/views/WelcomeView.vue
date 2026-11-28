@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { EMPTY_PROFILE_LINKS, EU_COUNTRIES as EU_COUNTRIES_FOR_SME, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
+import { EMPTY_PROFILE_LINKS, EU_COUNTRIES as EU_COUNTRIES_FOR_SME, countryCodeOf, emptyProfile, fmtDayRange, guessFromDevice, localIsoDay, type PoolListing, isStore, sellsAt, type ArtistDetails, type ProfileLinks, type SalesEvent, type SellsAt } from '@zollify/shared';
 import { allProducts, authFetch, currentAccount, isNative, setActiveEvent, updateProfile, upsertSalesEvent, visibleEvents } from '@zollify/platform';
 import { CountryPicker, DateRangePicker, QrCode } from '@zollify/ui';
 import ArtistForm from '../components/ArtistForm.vue';
@@ -236,7 +236,8 @@ async function saveEvent(): Promise<void> {
   try {
     // A convention weeks away is upcoming, not selling now: the first event used to open
     // the till at once, so a Dane's shop sales were filed against a Stockholm con in November.
-    const today = new Date().toISOString().slice(0, 10);
+    // The seller's own day, not UTC's: late in the evening west of Greenwich UTC is already tomorrow.
+    const today = localIsoDay();
     const onNow = !eventForm.value.dateStart || eventForm.value.dateStart <= today;
     const base = { venue: { country: eventForm.value.country || artist.value.countryOfOrigin || undefined, city: eventForm.value.city.trim() || undefined }, currency: currency.value.trim().toUpperCase() || 'CHF', status: (onNow ? 'active' : 'planned') as SalesEvent['status'], updatedAt: Date.now() };
     const event: SalesEvent = { ...base, id: crypto.randomUUID(), name, dateStart: eventForm.value.dateStart || undefined, dateEnd: eventForm.value.dateEnd || undefined };
@@ -332,7 +333,7 @@ async function addFromPool(l: PoolListing): Promise<void> {
     // Only so the pool stops offering it; the event is added either way.
     await authFetch(`/m/public-events/pool/listings/${encodeURIComponent(l.id)}/adopt`, { method: 'POST', body: JSON.stringify({ eventId: event.id }) }).catch(() => undefined);
     // Only an event already running becomes the till; a planned one waits for its dates.
-    if (!poolAdded.value.length && l.dateStart <= new Date().toISOString().slice(0, 10)) await setActiveEvent(event.id);
+    if (!poolAdded.value.length && l.dateStart <= localIsoDay()) await setActiveEvent(event.id);
     poolAdded.value = [...poolAdded.value, l.name];
     poolResults.value = poolResults.value.filter((x) => x.id !== l.id);
   } catch (err) {

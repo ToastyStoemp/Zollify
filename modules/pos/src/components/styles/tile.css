@@ -1,0 +1,27 @@
+/* One tile of the till's grids: a product, a variant, a type, an artist or a module's action.
+   Shared by the components that draw tiles (each scopes its own copy). */
+.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; min-height: 6rem; padding: .7rem .8rem; text-align: left; border-left: 3px solid var(--zfy-accent, #0e7c66); border-radius: 12px; }
+.tile:active { transform: scale(.98); }
+.tile.dim { opacity: .55; }
+.tile.added { animation: tile-added 1.5s ease-out; }
+@keyframes tile-added {
+  0% { box-shadow: 0 0 0 3px var(--zfy-accent, #0e7c66); background: color-mix(in srgb, var(--zfy-accent, #0e7c66) 18%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
+}
+.tile .head { display: flex; align-items: flex-start; gap: .5rem; width: 100%; }
+.tile .title { font-weight: 600; font-size: .9rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile small { font-size: .7rem; color: var(--zfy-muted, #5a6472); }
+.tile .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: .25rem; font-size: .75rem; gap: .5rem; }
+.tile .foot strong { font-variant-numeric: tabular-nums; }
+.tile.type .foot { color: var(--zfy-muted, #5a6472); }
+.tile.artist { border-left-color: var(--zfy-ink, #1a2230); }
+.count { position: absolute; top: -.4rem; right: -.4rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .78rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); }
+.bundles { display: flex; gap: .3rem; flex-wrap: wrap; padding-top: .1rem; }
+.bundle { font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
+.muted { color: var(--zfy-muted, #5a6472); }
+.warn { color: var(--zfy-warning-ink, #8a5a1e); }
+.bad { color: var(--zfy-danger, #c6512f); }
+@media (prefers-reduced-motion: reduce) { .tile.added { animation: none; } }
+@media (max-width: 860px) {
+  .tile { min-height: 5.5rem; padding: .55rem .6rem; }
+}

@@ -1,0 +1,10 @@
+/* The grid tiles sit in: on the till's floor, and narrower inside a sheet (.inmodal).
+   Shared by the components that lay tiles out (each scopes its own copy). */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .5rem; padding: .75rem 1rem 1.25rem; align-content: start; }
+.grid.inmodal { padding: 0; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+@media (max-width: 860px) {
+  /* On the floor the grid takes the room above the cart bar. */
+  .grid { flex: 1; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }
+  .grid.inmodal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

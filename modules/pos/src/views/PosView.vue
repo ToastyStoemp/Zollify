@@ -48,12 +48,15 @@ import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, v
 import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { tillLinkFrom } from '../lib/till-link';
+import { provideTillTiles } from '../lib/till-tiles';
 import { dismissLateApproval, lateApprovalText, lateApprovals } from '../lib/late-approvals';
 import { singleFlight } from '../lib/single-flight';
 import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
-import ProductThumb from '../components/ProductThumb.vue';
+import CatalogGrid from '../components/CatalogGrid.vue';
+import TypeDrillModal from '../components/TypeDrillModal.vue';
+import VariantPickerModal from '../components/VariantPickerModal.vue';
 import { useBarcodeScanner } from '../composables/useBarcodeScanner';
 import { useCartLines } from '../composables/useCartLines';
 import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
@@ -118,6 +121,7 @@ const { canLock, showTotals, seller, lockTill } = useSeller();
 
 // ── Adding ──────────────────────────────────────────────────────────────────
 const { variantPicker, add, bundleQtys, addBundle } = useAddToCart(products);
+provideTillTiles({ stockLabel, productInCart, productLeft, bundleQtys });
 const { justAddedId, submitSearch } = useScanSubmit({ search, products, toast, add, canLock, seller });
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
@@ -330,58 +334,18 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
         <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
       </div>
 
-      <div v-if="grouped && viewMode === 'artists' && openArtist !== null" class="crumb">
-        <button type="button" class="quiet" @click="openArtist = null"><Icon name="arrow-left" :size="14" /> All artists</button>
-        <strong>{{ openArtistName }}</strong>
-      </div>
-
-      <p v-if="!entries.length && !tillTiles.length" class="empty">{{ search ? 'Nothing matches that search.' : 'No products for sale yet - add some under Products.' }}</p>
-      <div v-else class="grid">
-        <template v-for="e in entries" :key="e.key">
-          <button v-if="'artist' in e" type="button" class="tile type artist" :aria-label="`${e.artist.name}, ${e.artist.products.length} products`" :class="{ dim: e.artist.stock === 0, added: e.artist.products.some((p) => p.id === justAddedId) }" @click="openArtist = e.artist.key">
-            <span v-if="e.artist.inCart" class="count">{{ e.artist.inCart }}</span>
-            <span class="head">
-              <ProductThumb v-if="e.artist.products.find((p) => p.imageId)" :image-id="e.artist.products.find((p) => p.imageId)!.imageId!" :alt="''" :size="36" />
-              <span class="title">{{ e.artist.name }}</span>
-            </span>
-            <small>{{ e.artist.products.length }} product{{ e.artist.products.length === 1 ? '' : 's' }}</small>
-            <span class="foot">
-              <span :class="e.artist.stock === 0 ? 'bad' : 'muted'">{{ e.artist.stock === null ? '' : e.artist.stock === 0 ? 'Out of stock' : `${e.artist.stock} in stock` }}</span>
-              <Icon name="chevron-right" :size="14" />
-            </span>
-          </button>
-          <button v-else-if="'group' in e" type="button" class="tile type" :aria-label="`${e.group.type}, ${e.group.products.length} products`" :style="{ borderLeftColor: typeColor(e.group.type) }" :class="{ dim: e.group.stock === 0, added: e.group.products.some((p) => p.id === justAddedId) }" @click="openType = e.group.type">
-            <span v-if="e.group.inCart" class="count">{{ e.group.inCart }}</span>
-            <span class="title" :style="{ color: typeColor(e.group.type) }">{{ e.group.type }}</span>
-            <small>{{ e.group.products.length }} products</small>
-            <span class="foot">
-              <span :class="e.group.stock === 0 ? 'bad' : 'muted'">{{ e.group.stock === null ? '' : e.group.stock === 0 ? 'Out of stock' : `${e.group.stock} in stock` }}</span>
-              <Icon name="chevron-right" :size="14" />
-            </span>
-          </button>
-          <button v-else type="button" class="tile" :aria-label="e.product.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(e.product.type) }" :class="{ dim: (productLeft(e.product) ?? 1) <= 0, added: e.product.id === justAddedId }" @click="add(e.product.id, null)">
-            <span v-if="productInCart(e.product)" class="count">{{ productInCart(e.product) }}</span>
-            <span class="head">
-              <ProductThumb v-if="e.product.imageId" :image-id="e.product.imageId" :alt="e.product.title" :size="36" />
-              <span class="title">{{ e.product.title || '(untitled)' }}</span>
-            </span>
-            <small v-if="e.product.sku">{{ e.product.sku }}</small>
-            <span v-if="!e.product.variants?.length && bundleQtys(e.product).length" class="bundles">
-              <span v-for="q in bundleQtys(e.product)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(e.product.id, null, q)" @keydown.enter.stop.prevent="addBundle(e.product.id, null, q)" @keydown.space.stop.prevent="addBundle(e.product.id, null, q)">+{{ q }}</span>
-            </span>
-            <span class="foot">
-              <span :class="stockLabel(e.product.id, null).cls">{{ e.product.variants?.length ? `${e.product.variants.length} sizes` : stockLabel(e.product.id, null).text }}</span>
-              <strong>{{ e.product.variants?.length ? fromPrice(e.product) : price(e.product.id, null, e.product.price) }}</strong>
-            </span>
-          </button>
-        </template>
-        <button v-for="a in tillTiles" :key="`action:${a.id}`" type="button" class="tile" :aria-label="a.label" @click="runAction(a)">
-          <span class="head">
-            <Icon :name="a.icon ?? 'plus'" :size="36" />
-            <span class="title">{{ a.label }}</span>
-          </span>
-        </button>
-      </div>
+      <CatalogGrid
+        :entries="entries"
+        :action-tiles="tillTiles"
+        :inside-artist="grouped && viewMode === 'artists' && openArtist !== null ? openArtistName : null"
+        :search="search"
+        :just-added-id="justAddedId"
+        @open-artist="openArtist = $event"
+        @open-type="openType = $event"
+        @add="add($event, null)"
+        @bundle="(pid, q) => addBundle(pid, null, q)"
+        @action="runAction"
+      />
 
       <button v-if="itemCount" type="button" class="primary cartbar" @click="showCartSheet = true">
         <span><Icon name="shopping-cart" :size="16" /> {{ itemCount }} item{{ itemCount !== 1 ? 's' : '' }}</span>
@@ -444,48 +408,8 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
       </footer>
     </aside>
 
-    <!-- ── Type drill-down ───────────────────────────────────────────────── -->
-    <ModalShell v-if="openType" :title="openType" wide @close="openType = null">
-      <div class="grid inmodal">
-        <button v-for="p in typeProducts" :key="p.id" type="button" class="tile" :aria-label="p.title || 'Untitled product'" :style="{ borderLeftColor: typeColor(p.type) }" :class="{ added: p.id === justAddedId }" @click="add(p.id, null)">
-          <span v-if="productInCart(p)" class="count">{{ productInCart(p) }}</span>
-          <span class="head">
-            <ProductThumb v-if="p.imageId" :image-id="p.imageId" :alt="p.title" :size="36" />
-            <span class="title">{{ p.title || '(untitled)' }}</span>
-          </span>
-          <small v-if="p.sku">{{ p.sku }}</small>
-          <span v-if="!p.variants?.length && bundleQtys(p).length" class="bundles">
-            <span v-for="q in bundleQtys(p)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(p.id, null, q)" @keydown.enter.stop.prevent="addBundle(p.id, null, q)" @keydown.space.stop.prevent="addBundle(p.id, null, q)">+{{ q }}</span>
-          </span>
-          <span class="foot">
-            <span :class="stockLabel(p.id, null).cls">{{ p.variants?.length ? `${p.variants.length} sizes` : stockLabel(p.id, null).text }}</span>
-            <strong>{{ p.variants?.length ? fromPrice(p) : price(p.id, null, p.price) }}</strong>
-          </span>
-        </button>
-      </div>
-    </ModalShell>
-
-    <!-- ── Variant picker (stays open for several sizes in a row) ────────── -->
-    <ModalShell v-if="variantPicker" :title="variantPicker.title || 'Choose a variant'" @close="variantPicker = null">
-      <div class="grid inmodal">
-        <button v-for="v in variantPicker.variants ?? []" :key="v.id" type="button" class="tile" :aria-label="v.name || 'Variant'" @click="add(variantPicker!.id, v.id)">
-          <span v-if="inCart(variantPicker.id, v.id)" class="count">{{ inCart(variantPicker.id, v.id) }}</span>
-          <span class="head">
-            <!-- Only the variant's own photo - the product's would misrepresent the variant. -->
-            <ProductThumb v-if="v.imageId" :image-id="v.imageId" :alt="v.name" :size="36" />
-            <span class="title">{{ v.name || '(untitled)' }}</span>
-          </span>
-          <small v-if="v.sku">{{ v.sku }}</small>
-          <span v-if="bundleQtys(variantPicker, v.id).length" class="bundles">
-            <span v-for="q in bundleQtys(variantPicker, v.id)" :key="q" role="button" tabindex="0" class="bundle" @click.stop="addBundle(variantPicker!.id, v.id, q)" @keydown.enter.stop.prevent="addBundle(variantPicker!.id, v.id, q)" @keydown.space.stop.prevent="addBundle(variantPicker!.id, v.id, q)">+{{ q }}</span>
-          </span>
-          <span class="foot">
-            <span :class="stockLabel(variantPicker.id, v.id).cls">{{ stockLabel(variantPicker.id, v.id).text }}</span>
-            <strong>{{ price(variantPicker.id, v.id, v.price ?? variantPicker.price) }}</strong>
-          </span>
-        </button>
-      </div>
-    </ModalShell>
+    <TypeDrillModal v-if="openType" :type="openType" :products="typeProducts" :just-added-id="justAddedId" @add="add($event, null)" @bundle="(pid, q) => addBundle(pid, null, q)" @close="openType = null" />
+    <VariantPickerModal v-if="variantPicker" :product="variantPicker" @add="add(variantPicker!.id, $event)" @bundle="(vid, q) => addBundle(variantPicker!.id, vid, q)" @close="variantPicker = null" />
 
     <!-- ── Barcode scanner ───────────────────────────────────────────────── -->
     <ScannerModal v-if="scannerOpen" :error="scannerError" :info="scannerInfo" :can-switch="cameraDevices.length > 1" :set-video="setScannerVideo" @switch="cycleCamera" @close="closeScanner" />
@@ -654,28 +578,6 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 .last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
 .last .undo { color: var(--zfy-warning-ink, #8a5a1e); }
 .empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1rem; font-size: .9rem; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .5rem; padding: .75rem 1rem 1.25rem; align-content: start; }
-.grid.inmodal { padding: 0; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
-.tile { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; min-height: 6rem; padding: .7rem .8rem; text-align: left; border-left: 3px solid var(--zfy-accent, #0e7c66); border-radius: 12px; }
-.tile:active { transform: scale(.98); }
-.tile.dim { opacity: .55; }
-.tile.added { animation: tile-added 1.5s ease-out; }
-@keyframes tile-added {
-  0% { box-shadow: 0 0 0 3px var(--zfy-accent, #0e7c66); background: color-mix(in srgb, var(--zfy-accent, #0e7c66) 18%, transparent); }
-  100% { box-shadow: 0 0 0 0 transparent; background: transparent; }
-}
-.tile .head { display: flex; align-items: flex-start; gap: .5rem; width: 100%; }
-.tile .title { font-weight: 600; font-size: .9rem; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.tile small { font-size: .7rem; color: var(--zfy-muted, #5a6472); }
-.tile .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: center; width: 100%; padding-top: .25rem; font-size: .75rem; gap: .5rem; }
-.tile .foot strong { font-variant-numeric: tabular-nums; }
-.tile.type .foot { color: var(--zfy-muted, #5a6472); }
-.tile.artist { border-left-color: var(--zfy-ink, #1a2230); }
-.crumb { display: flex; align-items: center; gap: .6rem; margin: 0 0 .5rem; }
-.crumb button { min-height: 2rem; display: inline-flex; align-items: center; gap: .3rem; font-size: .82rem; }
-.count { position: absolute; top: -.4rem; right: -.4rem; min-width: 1.5rem; height: 1.5rem; padding: 0 .4rem; border-radius: 999px; display: grid; place-items: center; font-size: .78rem; font-weight: 700; color: var(--zfy-on-accent, #fff); background: var(--zfy-accent, #0e7c66); }
-.bundles { display: flex; gap: .3rem; flex-wrap: wrap; padding-top: .1rem; }
-.bundle { font-size: .72rem; font-weight: 700; padding: .15rem .5rem; border-radius: 6px; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); }
 .muted { color: var(--zfy-muted, #5a6472); }
 .warn { color: var(--zfy-warning-ink, #8a5a1e); }
 .bad { color: var(--zfy-danger, #c6512f); }
@@ -730,7 +632,7 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 .oncard small { color: var(--zfy-muted, #5a6472); font-size: .75rem; }
 .pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .pulse, .dot.checking, .tile.added { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .pulse, .dot.checking { animation: none; } }
 .chips { display: flex; justify-content: center; gap: .4rem; flex-wrap: wrap; }
 .chip { min-height: 2.2rem; padding: .2rem .8rem; font-weight: 600; }
 .chip.exact { color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); background: var(--zfy-accent-soft, #deeee9); }
@@ -769,7 +671,6 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
   .floor { display: flex; flex-direction: column; }
   /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
   .floor:has(.cartbar) { min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
-  .grid { flex: 1; }
   /* Sticks just above the shell's tab bar, whose height the shell publishes. */
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
@@ -779,8 +680,5 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
   .mode-pick { display: inline-flex; }
   .bar { padding: .5rem .75rem; gap: .5rem; }
   .search { flex: 1; }
-  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .4rem; padding: .6rem .75rem 1rem; }
-  .tile { min-height: 5.5rem; padding: .55rem .6rem; }
-  .grid.inmodal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 </style>

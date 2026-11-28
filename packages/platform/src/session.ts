@@ -369,7 +369,7 @@ function timeoutError(ms: number): TimeoutError {
  * `run` is still waiting on - the abort tells fetch to let go, and the race
  * makes sure nothing waits on it anyway.
  */
-async function withTimeout<T>(ms: number, outer: AbortSignal | null | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
+export async function withTimeout<T>(ms: number, outer: AbortSignal | null | undefined, run: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const ctl = new AbortController();
   const onAbort = (): void => ctl.abort(outer?.reason);
   if (outer) {

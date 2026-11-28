@@ -65,6 +65,7 @@ export {
   isAuthenticated,
   resumeOffline,
   signedInOffline,
+  withTimeout,
   type LoginResult,
 } from './session';
 export { createShellUi, toasts, pendingConfirm, shellConfirm, type Toast, type ConfirmRequest } from './shell-ui';

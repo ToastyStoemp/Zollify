@@ -12,19 +12,9 @@ import {
   deviceId,
   deviceName,
   getApiBase,
-  loadCatalog,
-  loadDiscounts,
-  loadInventory,
-  loadSellLockSettings,
-  loadSalesEvents,
-  loadTransactions,
-  startAutoSync,
-  startAutoEvents,
-  startTillLock,
-  startRealtime,
 } from '@zollify/platform';
 import { QrCode } from '@zollify/ui';
-import { loadEnabledModules } from '../boot';
+import { openSession } from '../boot';
 import GoogleMark from '../components/GoogleMark.vue';
 
 /**
@@ -118,22 +108,14 @@ async function afterLogin(body: unknown): Promise<void> {
       /* no storage */
     }
   }
-  // Whatever this device already has locally - instant, no network.
-  await Promise.all([loadCatalog(), loadSalesEvents(), loadTransactions(), loadDiscounts(), loadInventory(), loadSellLockSettings().catch(() => undefined)]);
   const next = typeof route.query.next === 'string' ? route.query.next : '/home';
-  // Signed in now: go in straight away. Modules download and data syncs in
-  // the background, with a progress card while a first sync runs - rather
-  // than holding the user on "Signing in…" for all of it.
-  const setup = (async () => {
-    // Same order as a cold boot: modules mount before the first pull reloads the stores they read.
-    await loadEnabledModules(router).catch((err) => console.error('[zollify] module boot failed', err));
-    startAutoSync();
-    startRealtime();
-    startAutoEvents();
-    startTillLock({ unlocked: true });
-  })();
+  // Signed in now: go in straight away, on whatever this device already has
+  // locally. Modules download and data syncs in the background, with a
+  // progress card while a first sync runs - rather than holding the user on
+  // "Signing in…" for all of it. Same steps, same order as a cold start.
+  const { ready } = await openSession({ modules: 'server-first', unlocked: true });
   // A module screen (e.g. the till) only exists once its module is loaded.
-  if (next.startsWith('/m/')) await setup;
+  if (next.startsWith('/m/')) await ready;
   await router.replace(next);
 }
 

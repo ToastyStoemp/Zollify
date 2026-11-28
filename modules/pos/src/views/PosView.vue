@@ -54,7 +54,10 @@ import { singleFlight } from '../lib/single-flight';
 import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
+import CartPanel from '../components/CartPanel.vue';
 import CatalogGrid from '../components/CatalogGrid.vue';
+import DiscountModal from '../components/DiscountModal.vue';
+import MiscItemModal from '../components/MiscItemModal.vue';
 import TypeDrillModal from '../components/TypeDrillModal.vue';
 import VariantPickerModal from '../components/VariantPickerModal.vue';
 import { useBarcodeScanner } from '../composables/useBarcodeScanner';
@@ -127,86 +130,13 @@ const { justAddedId, submitSearch } = useScanSubmit({ search, products, toast, a
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
 const { scannerOpen, scannerError, scannerInfo, setScannerVideo, cameraDeviceId, cameraDevices, openScanner, closeScanner, cycleCamera } = useBarcodeScanner({ search, submitSearch, toast });
 
-// ── Cart ────────────────────────────────────────────────────────────────────
+// ── Cart, and the sheets its buttons open ──────────────────────────────────
 const showCartSheet = ref(false);
-const lines = useCartLines();
-
-/**
- * The VAT inside the total, per rate, when the event charges VAT - so a seller
- * sees in the cart what the receipt will say ("incl. 25% VAT EUR 19.60"), not
- * only afterwards. Nothing when the event is exempt or no rate is known. Same
- * arithmetic as the receipt: each line's charged total less its share of the
- * discounts, VAT = gross × rate / (100 + rate), rounded once per rate.
- */
-const cartVat = computed(() => {
-  if (!lines.value.length) return [];
-  const tax = saleTaxFor(cart.eventId, cart.lines.map((l) => l.productId));
-  if (!tax || tax.exempt) return [];
-  const asLines = lines.value.map((l) => ({ pid: l.productId, vid: l.variantId, title: l.name, variantLabel: l.variantLabel ?? null, type: l.type, qty: l.qty, unitPrice: l.chargedUnit, lineTotal: l.chargedTotal }));
-  const shares = allocateDiscounts(asLines, chargeTotals.value);
-  const byRate = new Map<number, number>();
-  asLines.forEach((l, i) => {
-    const rate = tax.rates[i];
-    if (rate == null) return;
-    byRate.set(rate, (byRate.get(rate) ?? 0) + Math.round((l.lineTotal - (shares[i] ?? 0)) * 100));
-  });
-  return [...byRate.entries()]
-    .sort((a, b) => b[0] - a[0])
-    .map(([rate, grossMinor]) => ({ rate, vat: Math.round((grossMinor * rate) / (100 + rate)) / 100 }));
-});
-
-const clearArmed = ref(false);
-let clearTimer: ReturnType<typeof setTimeout> | undefined;
-function tapClear(): void {
-  if (!clearArmed.value) {
-    clearArmed.value = true;
-    clearTimeout(clearTimer);
-    clearTimer = setTimeout(() => (clearArmed.value = false), 3000);
-    return;
-  }
-  clearTimeout(clearTimer);
-  clearArmed.value = false;
-  clear();
-}
-
 const showDiscount = ref(false);
-const discountForm = reactive({ type: 'amount' as 'amount' | 'percent', value: '', name: '' });
-function openDiscount(): void {
-  discountForm.type = cart.custom?.type ?? 'amount';
-  discountForm.value = cart.custom ? String(cart.custom.value) : '';
-  discountForm.name = cart.custom?.name ?? '';
-  showDiscount.value = true;
-}
-function applyDiscount(): void {
-  const value = Number(discountForm.value);
-  if (!Number.isFinite(value) || value <= 0) return toast('Enter a discount value.', 'bad');
-  if (discountForm.type === 'percent' && value > 100) return toast('Percent discount cannot be over 100%.', 'bad');
-  setCustomDiscount({ type: discountForm.type, value, name: discountForm.name.trim() || (discountForm.type === 'percent' ? `${value}% off` : 'Discount') });
-  showDiscount.value = false;
-}
-/** The whole cart for nothing: a 100% discount, which the till then completes with Give away. */
-function giveAwayCart(): void {
-  setCustomDiscount({ type: 'percent', value: 100, name: GIVEN_AWAY_LABEL });
-  showDiscount.value = false;
-}
+const showMisc = ref(false);
 
 // ── What other modules add to the till (a workshop place, say) ─────────────
 const { tillButtons, tillTiles, openAction, runAction } = useTillActions({ search, viewMode, openArtist, activeEvent, currency, toast });
-
-const showMisc = ref(false);
-const miscForm = reactive({ title: '', price: '', qty: '1' });
-function openMisc(): void {
-  Object.assign(miscForm, { title: '', price: '', qty: '1' });
-  showMisc.value = true;
-}
-function addMiscItem(): void {
-  const p = Number(miscForm.price);
-  const qty = Math.max(1, Math.floor(Number(miscForm.qty)) || 1);
-  if (!Number.isFinite(p) || p <= 0) return toast('Enter a price for the item.', 'bad');
-  // Entered in the charge currency; the cart charges it as typed and keeps its base value for the books.
-  addMisc(miscForm.title, p, qty);
-  showMisc.value = false;
-}
 
 // ── Customer display: mirror the cart on the account's other screens ───────
 const display = useCustomerDisplay(activeEvent);
@@ -353,60 +283,18 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
       </button>
     </section>
 
-    <!-- ── Cart ─────────────────────────────────────────────────────────── -->
-    <aside :class="['cart', { sheet: showCartSheet }]">
-      <header>
-        <h2>Cart</h2>
-        <button v-if="itemCount" type="button" :class="['quiet', 'clear', { armed: clearArmed }]" @click="tapClear">{{ clearArmed ? 'Really clear?' : 'Clear' }}</button>
-        <button type="button" class="quiet close" aria-label="Close cart" @click="showCartSheet = false"><Icon name="x" :size="18" /></button>
-      </header>
-
-      <div class="lines">
-        <p v-if="!lines.length" class="empty">Cart is empty</p>
-        <ul v-else>
-          <li v-for="l in lines" :key="l.lineId">
-            <div class="row"><span class="name">{{ l.name }}</span><strong>{{ money(l.chargedTotal) }}</strong></div>
-            <div v-if="l.fixed" class="row qty">
-              <span>× {{ l.qty }}</span>
-              <small>à {{ money(l.chargedUnit) }}</small>
-              <button type="button" class="quiet" :aria-label="`Remove ${l.name}`" @click="setQty(l.lineId, 0)">Remove</button>
-            </div>
-            <div v-else class="row qty">
-              <button type="button" :aria-label="`One fewer ${l.name}`" @click="setQty(l.lineId, l.qty - 1)">−</button>
-              <span>{{ l.qty }}</span>
-              <button type="button" :aria-label="`One more ${l.name}`" @click="setQty(l.lineId, l.qty + 1)">+</button>
-              <small>à {{ money(l.chargedUnit) }}</small>
-            </div>
-          </li>
-        </ul>
-      </div>
-
-      <footer>
-        <div class="sums">
-          <div class="row muted"><span>Subtotal</span><span>{{ money(chargeTotals.subtotal) }}</span></div>
-          <div v-for="r in appliedDiscounts" :key="r.rule.id" class="row good"><span>{{ r.rule.name }}</span><span>− {{ money(r.amount) }}</span></div>
-          <div v-if="cart.custom" class="row good"><span>{{ cart.custom.name }}</span><span>− {{ money(customDiscountCharged) }}</span></div>
-          <div class="row total"><span>Total</span><span>{{ money(total) }}</span></div>
-          <div v-for="r in cartVat" :key="r.rate" class="row muted small"><span>incl. {{ vatRateLabel(r.rate) }} VAT</span><span>{{ money(r.vat) }}</span></div>
-          <div v-if="isConverting" class="row muted small"><span>{{ cart.baseCurrency }} equivalent</span><span>{{ fmtPrice(baseTotal, cart.baseCurrency) }}</span></div>
-          <div v-if="cardInBase" class="row muted small"><span>Card charges</span><span>{{ onCard(total) || 'no rate yet' }}</span></div>
-        </div>
-        <div class="tools">
-          <button type="button" :disabled="!itemCount" @click="openDiscount">{{ cart.custom ? 'Edit discount' : '+ Discount' }}</button>
-          <button type="button" @click="openMisc">+ Misc item</button>
-          <button v-for="a in tillButtons" :key="a.id" type="button" @click="runAction(a)">+ {{ a.label }}</button>
-        </div>
-        <div v-if="givesAway" class="pay">
-          <button type="button" class="free" :disabled="sellBlocked" @click="startPayment(GIVEN_AWAY)">Give away</button>
-        </div>
-        <div v-else class="pay">
-          <button type="button" class="cash" :disabled="!itemCount || sellBlocked" @click="startPayment('cash')">Cash</button>
-          <button type="button" class="card" :disabled="!itemCount || sellBlocked" @click="startPayment('card')">Card</button>
-          <button type="button" class="split" :disabled="!itemCount || sellBlocked" @click="startPayment('split')">Split</button>
-          <button v-for="m in customMethods" :key="m" type="button" class="custom" :disabled="!itemCount || sellBlocked" @click="startPayment(m)">{{ m }}</button>
-        </div>
-      </footer>
-    </aside>
+    <CartPanel
+      :sheet="showCartSheet"
+      :action-buttons="tillButtons"
+      :custom-methods="customMethods"
+      :sell-blocked="sellBlocked"
+      :gives-away="givesAway"
+      @close="showCartSheet = false"
+      @discount="showDiscount = true"
+      @misc="showMisc = true"
+      @action="runAction"
+      @pay="startPayment"
+    />
 
     <TypeDrillModal v-if="openType" :type="openType" :products="typeProducts" :just-added-id="justAddedId" @add="add($event, null)" @bundle="(pid, q) => addBundle(pid, null, q)" @close="openType = null" />
     <VariantPickerModal v-if="variantPicker" :product="variantPicker" @add="add(variantPicker!.id, $event)" @bundle="(vid, q) => addBundle(variantPicker!.id, vid, q)" @close="variantPicker = null" />
@@ -419,41 +307,8 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
       <component :is="openAction.view" :focus="openAction.focus ?? undefined" @close="openAction = null" />
     </ModalShell>
 
-    <!-- ── Misc item ─────────────────────────────────────────────────────── -->
-    <ModalShell v-if="showMisc" title="Misc item" @close="showMisc = false">
-      <p class="hint">Sell something that isn't in the catalogue - a commission, old stock. No stock is tracked and rule discounts don't apply.</p>
-      <div class="form">
-        <input v-model="miscForm.title" type="text" placeholder="Description (e.g. Commission)" />
-        <div class="two">
-          <label><span>Price ({{ currency }})</span><input v-model="miscForm.price" type="number" min="0" step="0.05" inputmode="decimal" /></label>
-          <label><span>Quantity</span><input v-model="miscForm.qty" type="number" min="1" inputmode="numeric" /></label>
-        </div>
-      </div>
-      <template #footer>
-        <div class="actions"><button type="button" @click="showMisc = false">Cancel</button><button type="button" class="primary" @click="addMiscItem">Add to cart</button></div>
-      </template>
-    </ModalShell>
-
-    <!-- ── Cart discount ─────────────────────────────────────────────────── -->
-    <ModalShell v-if="showDiscount" title="Cart discount" @close="showDiscount = false">
-      <div class="form">
-        <div class="seg two">
-          <button type="button" :class="{ active: discountForm.type === 'amount' }" @click="discountForm.type = 'amount'">Amount ({{ currency }})</button>
-          <button type="button" :class="{ active: discountForm.type === 'percent' }" @click="discountForm.type = 'percent'">Percent (%)</button>
-        </div>
-        <input v-model="discountForm.value" type="number" min="0" step="0.05" inputmode="decimal" placeholder="Value" />
-        <input v-model="discountForm.name" type="text" placeholder="Name (optional)" />
-        <button type="button" class="free" @click="giveAwayCart">Give away - 100% off</button>
-      </div>
-      <template #footer>
-        <div class="actions between">
-          <button v-if="cart.custom" type="button" class="danger" @click="setCustomDiscount(null); showDiscount = false">Remove</button>
-          <span class="spacer"></span>
-          <button type="button" @click="showDiscount = false">Cancel</button>
-          <button type="button" class="primary" @click="applyDiscount">Apply</button>
-        </div>
-      </template>
-    </ModalShell>
+    <MiscItemModal v-if="showMisc" @notify="toast" @close="showMisc = false" />
+    <DiscountModal v-if="showDiscount" @notify="toast" @close="showDiscount = false" />
 
     <!-- ── Payment ───────────────────────────────────────────────────────── -->
     <ModalShell v-if="payment.phase !== 'idle'" :title="title" @close="cancelPayment">
@@ -574,7 +429,7 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 .notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
 .notice.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
 .last { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-bottom: 1px solid var(--zfy-line, #d6dde4); }
-.last .spacer, .actions .spacer { flex: 1; }
+.last .spacer { flex: 1; }
 .last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
 .last .undo { color: var(--zfy-warning-ink, #8a5a1e); }
 .empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1rem; font-size: .9rem; }
@@ -585,46 +440,17 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 .strong { font-weight: 600; }
 .cartbar { display: none; }
 
-.cart { display: flex; flex-direction: column; border-left: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; height: calc(100vh - 0px); }
-.cart header { display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); }
-.cart h2 { margin: 0; font-size: 1rem; flex: 1; }
-.cart .clear { min-height: 2.2rem; font-size: .8rem; color: var(--zfy-muted, #5a6472); }
-.cart .clear.armed { color: var(--zfy-danger, #c6512f); font-weight: 600; }
-.cart .close { display: none; }
-.lines { flex: 1; min-height: 0; overflow-y: auto; padding: .6rem; }
-.lines ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-.lines li { background: var(--zfy-bg, #f1f4f6); border-radius: 10px; padding: .55rem .7rem; display: flex; flex-direction: column; gap: .3rem; }
-.row { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: .875rem; }
-.row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.row.qty { justify-content: flex-start; gap: .5rem; }
-.row.qty button { min-height: 2.2rem; min-width: 2.2rem; padding: 0; font-weight: 700; }
-.row.qty span { min-width: 1.5rem; text-align: center; font-variant-numeric: tabular-nums; }
-.row.qty small { margin-left: auto; color: var(--zfy-muted, #5a6472); font-size: .72rem; }
-.cart footer { border-top: 1px solid var(--zfy-line, #d6dde4); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; }
-.sums { display: flex; flex-direction: column; gap: .15rem; font-variant-numeric: tabular-nums; }
-.row.total { font-size: 1.05rem; font-weight: 700; }
-.row.small { font-size: .78rem; }
-.tools { display: flex; gap: .4rem; flex-wrap: wrap; }
-.tools button { flex: 1; min-height: 2.2rem; font-size: .8rem; padding: .2rem .4rem; }
-.pay { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .4rem; }
-.pay .custom { grid-column: 1 / -1; background: var(--zfy-ink, #1a2230); }
-.pay button, .confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
-.pay .cash, .confirm.cash { background: #0e7c66; }
-.pay .card, .confirm.card { background: #2f6fb8; }
-.pay .split, .confirm.split { background: #b8742f; }
-.pay .free, .confirm.free { background: #8a4fb8; }
-.pay .free { grid-column: 1 / -1; }
-.form .free { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; background: #8a4fb8; }
-.pay button:hover:not(:disabled), .confirm:hover:not(:disabled) { filter: brightness(1.08); }
+.confirm { min-height: 2.8rem; font-weight: 700; color: #fff; border: 0; }
+.confirm.cash { background: #0e7c66; }
+.confirm.card { background: #2f6fb8; }
+.confirm.split { background: #b8742f; }
+.confirm.free { background: #8a4fb8; }
+.confirm:hover:not(:disabled) { filter: brightness(1.08); }
 
-.form { display: flex; flex-direction: column; gap: .6rem; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
-.seg.two { display: flex; }
-.seg.two button { flex: 1; min-height: 2.5rem; }
 .field { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; text-align: left; }
 .field .big { font-size: 1.2rem; }
 .actions { display: flex; justify-content: flex-end; gap: .5rem; }
-.actions.between { justify-content: flex-start; }
 .paybody { display: flex; flex-direction: column; gap: .8rem; text-align: center; }
 .paybody p { margin: 0; }
 .amount { font-size: 2rem; font-weight: 800; letter-spacing: -.01em; }
@@ -659,15 +485,6 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
      blank space below a short product list, reachable by scrolling past
      all real content. */
   .pos:not(:has(.cartbar)) { min-height: auto; }
-  .cart { display: none; }
-  .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
-  .cart.sheet .close { display: inline-flex; }
-  /* As a fixed inset:0 overlay this sits completely outside .content's own
-     padding (which already gets the safe-area treatment) - without its own
-     copy, "Cart"/"Clear"/the close button rendered straight under the
-     status bar, confirmed from a phone screenshot showing them behind the
-     clock and battery icons. */
-  .cart.sheet header { padding-top: calc(.75rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); }
   .floor { display: flex; flex-direction: column; }
   /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
   .floor:has(.cartbar) { min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }

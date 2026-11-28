@@ -1,6 +1,6 @@
 import { openCoreDb, type ImageRec } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 
 /**
@@ -75,20 +75,7 @@ export async function processImageFile(file: Blob): Promise<{ full: Blob; thumb:
 export async function saveProductImage(productId: string, file: Blob): Promise<string> {
   const { full, thumb } = await processImageFile(file);
   const rec: ImageRec = { id: uuidv7(), productId, full, thumb, updatedAt: Date.now() };
-  await db().images.put(rec);
-  // The thumbnail is small enough (<20KB) to ride inline in the ops stream, so
-  // other devices get something to show. The full-size blob stays local: it is
-  // large, and pushing it over a convention's connection would starve the sale
-  // ops that actually matter.
-  await queueOp({
-    type: 'image.meta',
-    payload: {
-      imageId: rec.id,
-      productId,
-      updatedAt: rec.updatedAt,
-      thumbB64: await blobToBase64(thumb),
-    },
-  });
+  await storeImage(rec);
   return rec.id;
 }
 
@@ -98,11 +85,23 @@ export async function saveProductImage(productId: string, file: Blob): Promise<s
  * devices receive the thumbnail the same way.
  */
 export async function importProductImage(image: ImageRec): Promise<void> {
-  const rec = toPlain(image);
-  await db().images.put(rec);
-  await queueOp({
-    type: 'image.meta',
-    payload: { imageId: rec.id, productId: rec.productId, updatedAt: rec.updatedAt, thumbB64: await blobToBase64(rec.thumb) },
+  await storeImage(toPlain(image));
+}
+
+/**
+ * Stores an image and queues its thumbnail for the other devices, in one
+ * write. The thumbnail is small enough (<20KB) to ride inline in the ops
+ * stream, so they get something to show. The full-size blob stays local: it
+ * is large, and pushing it over a convention's connection would starve the
+ * sale ops that actually matter.
+ */
+async function storeImage(rec: ImageRec): Promise<void> {
+  const core = db();
+  // Encoded before the write opens: a Dexie transaction commits as soon as it waits on anything but its own tables.
+  const thumbB64 = await blobToBase64(rec.thumb);
+  await transactWithOutbox(core, [core.images], async (enqueue) => {
+    await core.images.put(rec);
+    await enqueue({ type: 'image.meta', payload: { imageId: rec.id, productId: rec.productId, updatedAt: rec.updatedAt, thumbB64 } });
   });
 }
 

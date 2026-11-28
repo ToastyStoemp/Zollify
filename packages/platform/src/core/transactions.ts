@@ -3,7 +3,7 @@ import type { SaleEvent } from '@zollify/sdk';
 import { isReceiptLineLink, type PaymentLeg, type Transaction, type TxItem } from '@zollify/shared';
 import { openCoreDb, type CoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 import { deviceId } from './device';
 import { getProduct } from './catalog';
@@ -207,13 +207,14 @@ export async function recordSale(sale: SaleEvent): Promise<Transaction> {
     ...(testRun ? { testRun } : {}),
   });
 
-  const tx = await db.transaction('rw', db.settings, db.transactions, async () => {
+  // The sale and its op in one write: a sale that is stored but never queued would never sync.
+  const tx = await transactWithOutbox(db, [db.settings, db.transactions], async (enqueue) => {
     const numbered: Transaction = { ...base, receiptNumber: await nextReceiptNumber(db, device, !!testRun) };
     await db.transactions.put(numbered);
+    await enqueue({ type: testRun ? 'tx.test.create' : 'tx.create', payload: numbered });
     return numbered;
   });
   transactions.set(tx.id, tx);
-  await queueOp({ type: testRun ? 'tx.test.create' : 'tx.create', payload: tx });
   return tx;
 }
 
@@ -226,16 +227,19 @@ export async function recordSale(sale: SaleEvent): Promise<Transaction> {
  */
 export async function revertTransaction(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const existing = await db.transactions.get(id);
-  if (!existing) throw new Error('No such transaction.');
-  if (existing.revertedAt) return;
+  // Read, mark and queue in one write: a refund stored here but never queued would stay on this till only.
+  const reverted = await transactWithOutbox(db, [db.transactions], async (enqueue) => {
+    const existing = await db.transactions.get(id);
+    if (!existing) throw new Error('No such transaction.');
+    if (existing.revertedAt) return null;
 
-  const revertedAt = Date.now();
-  const reverted: Transaction = toPlain({ ...existing, revertedAt, revertedBy: crypto.randomUUID() });
-
-  await db.transactions.put(reverted);
-  transactions.set(id, reverted);
-  await queueOp({ type: existing.testRun ? 'tx.test.revert' : 'tx.revert', payload: { id, revertedAt, revertedBy: reverted.revertedBy } });
+    const revertedAt = Date.now();
+    const marked: Transaction = toPlain({ ...existing, revertedAt, revertedBy: crypto.randomUUID() });
+    await db.transactions.put(marked);
+    await enqueue({ type: existing.testRun ? 'tx.test.revert' : 'tx.revert', payload: { id, revertedAt, revertedBy: marked.revertedBy } });
+    return marked;
+  });
+  if (reverted) transactions.set(id, reverted);
 }
 
 /**
@@ -249,10 +253,14 @@ export async function importTransactions(rows: Transaction[]): Promise<number> {
   let added = 0;
   for (const row of rows) {
     const tx = toPlain(row);
-    if (await db.transactions.get(tx.id)) continue;
-    await db.transactions.put(tx);
+    const isNew = await transactWithOutbox(db, [db.transactions], async (enqueue) => {
+      if (await db.transactions.get(tx.id)) return false;
+      await db.transactions.put(tx);
+      await enqueue({ type: tx.testRun ? 'tx.test.create' : 'tx.create', payload: tx });
+      return true;
+    });
+    if (!isNew) continue;
     transactions.set(tx.id, tx);
-    await queueOp({ type: tx.testRun ? 'tx.test.create' : 'tx.create', payload: tx });
     added++;
   }
   return added;

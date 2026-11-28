@@ -2,7 +2,7 @@ import { computed, reactive, ref } from 'vue';
 import { sortEvents, type EventStock, type SalesEvent } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 import { loadDeviceTestMode, testState } from './test-state';
 
@@ -119,37 +119,45 @@ export async function setActiveEvent(id: string | null): Promise<void> {
   const db = openCoreDb(requireAccountId());
   // Device-local, not synced: two registers at the same booth may legitimately
   // be working different events.
-  await db.settings.put({ key: ACTIVE_KEY, value: id });
   // Also published as the account-wide default (see DEFAULT_ACTIVE_KEY) so a
   // fresh device inherits it instead of asking again. A helper account can't
   // write this op at all (server rejects setting.upsert from restricted
   // users - see opWritable in routes/sync.ts); queue it regardless and let
   // the push silently drop for them rather than special-casing it here.
-  await queueOp({
-    type: 'setting.upsert',
-    payload: { key: DEFAULT_ACTIVE_KEY, value: id, updatedAt: Date.now() },
+  await transactWithOutbox(db, [db.settings], async (enqueue) => {
+    await db.settings.put({ key: ACTIVE_KEY, value: id });
+    await enqueue({
+      type: 'setting.upsert',
+      payload: { key: DEFAULT_ACTIVE_KEY, value: id, updatedAt: Date.now() },
+    });
   });
 }
 
 export async function upsertSalesEvent(event: SalesEvent): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const next: SalesEvent = toPlain({ ...event, updatedAt: Date.now() });
-  await db.events.put(next);
+  await transactWithOutbox(db, [db.events], async (enqueue) => {
+    await db.events.put(next);
+    await enqueue({ type: 'event.upsert', payload: next });
+  });
   events.set(next.id, next);
-  await queueOp({ type: 'event.upsert', payload: next });
 }
 
 export async function deleteSalesEvent(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const existing = await db.events.get(id);
-  if (!existing) return;
-  const tombstoned: SalesEvent = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
-  await db.events.put(tombstoned);
+  const deleted = await transactWithOutbox(db, [db.events], async (enqueue) => {
+    const existing = await db.events.get(id);
+    if (!existing) return false;
+    const tombstoned: SalesEvent = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
+    await db.events.put(tombstoned);
+    // The protocol has no event.delete - a tombstoned upsert is the delete,
+    // which is also exactly how the local soft delete already works.
+    await enqueue({ type: 'event.upsert', payload: tombstoned });
+    return true;
+  });
+  if (!deleted) return;
   events.delete(id);
   if (activeId.value === id) await setActiveEvent(null);
-  // The protocol has no event.delete - a tombstoned upsert is the delete,
-  // which is also exactly how the local soft delete already works.
-  await queueOp({ type: 'event.upsert', payload: tombstoned });
 }
 
 export async function replaceSalesEvents(rows: SalesEvent[]): Promise<void> {
@@ -198,8 +206,10 @@ export async function stockForEvent(eventId: string): Promise<EventStock[]> {
 export async function setStock(entry: EventStock): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const next: EventStock = toPlain({ ...entry, variantId: entry.variantId ?? '', updatedAt: Date.now() });
-  await db.eventStock.put(next);
-  await queueOp({ type: 'stock.set', payload: next });
+  await transactWithOutbox(db, [db.eventStock], async (enqueue) => {
+    await db.eventStock.put(next);
+    await enqueue({ type: 'stock.set', payload: next });
+  });
 }
 
 export function resetSalesEventCache(): void {

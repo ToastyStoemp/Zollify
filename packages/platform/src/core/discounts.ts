@@ -3,7 +3,7 @@ import { discountAppliesAt, type DiscountRule } from '@zollify/shared';
 import { activeEventId } from './sales-events';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 
 /**
@@ -58,20 +58,25 @@ export function getDiscount(id: string): DiscountRule | undefined {
 export async function upsertDiscount(rule: DiscountRule): Promise<void> {
   const db = openCoreDb(requireAccountId());
   const next = toPlain({ ...rule, updatedAt: Date.now() }) as DiscountRule;
-  await db.discounts.put(next);
+  await transactWithOutbox(db, [db.discounts], async (enqueue) => {
+    await db.discounts.put(next);
+    await enqueue({ type: 'discount.upsert', payload: next });
+  });
   rules.set(next.id, next);
-  await queueOp({ type: 'discount.upsert', payload: next });
 }
 
 /** Soft delete, for the same reason products are: last-write-wins sync. */
 export async function deleteDiscount(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const existing = await db.discounts.get(id);
-  if (!existing) return;
-  const deletedAt = Date.now();
-  await db.discounts.put(toPlain({ ...existing, deletedAt, updatedAt: deletedAt }));
-  rules.delete(id);
-  await queueOp({ type: 'discount.delete', payload: { id, deletedAt } });
+  const deleted = await transactWithOutbox(db, [db.discounts], async (enqueue) => {
+    const existing = await db.discounts.get(id);
+    if (!existing) return false;
+    const deletedAt = Date.now();
+    await db.discounts.put(toPlain({ ...existing, deletedAt, updatedAt: deletedAt }));
+    await enqueue({ type: 'discount.delete', payload: { id, deletedAt } });
+    return true;
+  });
+  if (deleted) rules.delete(id);
 }
 
 export async function replaceDiscounts(rows: DiscountRule[]): Promise<void> {

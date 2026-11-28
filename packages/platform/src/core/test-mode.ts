@@ -1,7 +1,7 @@
 import type { EventStock, InventoryItem, SalesEvent } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { queueOp, transactWithOutbox } from './outbox';
 import { activeEvent, testEvent, upsertSalesEvent } from './sales-events';
 import { forgetTestTransactions, stockTransactions } from './transactions';
 import { allClaims, clearClaim, countedAt, setClaim, setOnHand, stockKey } from './inventory';
@@ -89,8 +89,11 @@ export async function stopTestMode(): Promise<{ restored: number }> {
 async function endRun(run: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
   testState.endedRuns = new Set([...testState.endedRuns, run]);
-  await db.settings.put({ key: TEST_ENDED_RUNS_KEY, value: [...testState.endedRuns] });
-  await queueOp({ type: 'tx.test.end', payload: { run, at: Date.now() } });
+  const ended = [...testState.endedRuns];
+  await transactWithOutbox(db, [db.settings], async (enqueue) => {
+    await db.settings.put({ key: TEST_ENDED_RUNS_KEY, value: ended });
+    await enqueue({ type: 'tx.test.end', payload: { run, at: Date.now() } });
+  });
 }
 
 /** Real sales of an item since a moment - what a count from then no longer has. */

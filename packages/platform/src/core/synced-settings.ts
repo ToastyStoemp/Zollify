@@ -1,6 +1,6 @@
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 
 /**
@@ -29,8 +29,10 @@ export async function setSyncedSetting(key: string, value: unknown): Promise<voi
   // object/array (a ref's .value) - the structured clone algorithm IndexedDB
   // uses cannot clone a Proxy, so this throws DataCloneError without it.
   const plain = toPlain(value);
-  await db.settings.put({ key, value: plain, updatedAt });
-  await queueOp({ type: 'setting.upsert', payload: { key, value: plain, updatedAt } });
+  await transactWithOutbox(db, [db.settings], async (enqueue) => {
+    await db.settings.put({ key, value: plain, updatedAt });
+    await enqueue({ type: 'setting.upsert', payload: { key, value: plain, updatedAt } });
+  });
 }
 
 /**

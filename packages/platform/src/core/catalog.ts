@@ -2,7 +2,7 @@ import { computed, reactive, ref } from 'vue';
 import type { Product } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 
 /**
@@ -68,9 +68,11 @@ export async function upsertProduct(product: Product): Promise<void> {
   // Plain data before it reaches IndexedDB - a caller may hand us reactive
   // state, and the structured clone algorithm cannot clone a Proxy.
   const next: Product = toPlain({ ...product, updatedAt: Date.now() });
-  await db.products.put(next);
+  await transactWithOutbox(db, [db.products], async (enqueue) => {
+    await db.products.put(next);
+    await enqueue({ type: 'product.upsert', payload: next });
+  });
   products.set(next.id, next);
-  await queueOp({ type: 'product.upsert', payload: next });
 }
 
 /**
@@ -79,12 +81,15 @@ export async function upsertProduct(product: Product): Promise<void> {
  */
 export async function deleteProduct(id: string): Promise<void> {
   const db = openCoreDb(requireAccountId());
-  const existing = await db.products.get(id);
-  if (!existing) return;
-  const tombstoned: Product = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
-  await db.products.put(tombstoned);
-  products.delete(id);
-  await queueOp({ type: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
+  const deleted = await transactWithOutbox(db, [db.products], async (enqueue) => {
+    const existing = await db.products.get(id);
+    if (!existing) return false;
+    const tombstoned: Product = toPlain({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
+    await db.products.put(tombstoned);
+    await enqueue({ type: 'product.delete', payload: { id, deletedAt: tombstoned.deletedAt } });
+    return true;
+  });
+  if (deleted) products.delete(id);
 }
 
 /** Replaces the local catalogue wholesale - used by sync pulls and the importer. */

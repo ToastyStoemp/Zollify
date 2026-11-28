@@ -3,7 +3,7 @@ import type { EventStock, InventoryItem, SalesEvent } from '@zollify/shared';
 import { eventHasEnded, localIsoDay } from '@zollify/shared';
 import { openCoreDb } from './db';
 import { getAccount } from '../session';
-import { queueOp } from './outbox';
+import { transactWithOutbox } from './outbox';
 import { toPlain } from './plain';
 import { stockTransactions } from './transactions';
 import { allProducts } from './catalog';
@@ -108,10 +108,13 @@ export async function setOnHand(
     updatedAt: Date.now(),
   });
   // In test mode, what the count was is kept so ending the run can put it back.
-  await journalStockWrite(db, 'inventory', stockKey(productId, variantId), items.get(stockKey(productId, variantId)), row.updatedAt);
-  await db.inventory.put(row);
+  const before = items.get(stockKey(productId, variantId));
+  await transactWithOutbox(db, [db.inventory, db.settings], async (enqueue) => {
+    await journalStockWrite(db, 'inventory', stockKey(productId, variantId), before, row.updatedAt);
+    await db.inventory.put(row);
+    await enqueue({ type: 'inventory.set', payload: row });
+  });
   items.set(stockKey(productId, variantId), row);
-  await queueOp({ type: 'inventory.set', payload: row });
 }
 
 export async function setClaim(
@@ -134,10 +137,13 @@ export async function setClaim(
     updatedAt: Date.now(),
     ...(carried && carried.qty > 0 && broughtQty > 0 ? { carried: { from: carried.from, qty: Math.min(Math.floor(carried.qty), broughtQty) } } : {}),
   });
-  await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), claims.get(claimKey(eventId, productId, variantId)), row.updatedAt);
-  await db.eventStock.put(row);
+  const before = claims.get(claimKey(eventId, productId, variantId));
+  await transactWithOutbox(db, [db.eventStock, db.settings], async (enqueue) => {
+    await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), before, row.updatedAt);
+    await db.eventStock.put(row);
+    await enqueue({ type: 'stock.set', payload: row });
+  });
   claims.set(claimKey(eventId, productId, variantId), row);
-  await queueOp({ type: 'stock.set', payload: row });
 }
 
 /**
@@ -171,16 +177,19 @@ export async function clearClaim(
   const db = openCoreDb(requireAccountId());
   const key: [string, string, string] = [eventId, productId, variantId ?? ''];
   const now = Date.now();
-  await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), claims.get(claimKey(eventId, productId, variantId)), now);
-  await db.eventStock.delete(key);
-  await rememberClaimCleared(db, key, now);
-  claims.delete(claimKey(eventId, productId, variantId));
-  // Sync carries a tombstone rather than a deletion: the wire protocol has no
-  // stock.delete, and a claim of -1 is unambiguous as "no claim".
-  await queueOp({
-    type: 'stock.set',
-    payload: { eventId, productId, variantId: variantId ?? '', broughtQty: -1, updatedAt: now },
+  const before = claims.get(claimKey(eventId, productId, variantId));
+  await transactWithOutbox(db, [db.eventStock, db.settings], async (enqueue) => {
+    await journalStockWrite(db, 'claims', claimKey(eventId, productId, variantId), before, now);
+    await db.eventStock.delete(key);
+    await rememberClaimCleared(db, key, now);
+    // Sync carries a tombstone rather than a deletion: the wire protocol has no
+    // stock.delete, and a claim of -1 is unambiguous as "no claim".
+    await enqueue({
+      type: 'stock.set',
+      payload: { eventId, productId, variantId: variantId ?? '', broughtQty: -1, updatedAt: now },
+    });
   });
+  claims.delete(claimKey(eventId, productId, variantId));
 }
 
 export async function replaceInventory(rows: InventoryItem[]): Promise<void> {

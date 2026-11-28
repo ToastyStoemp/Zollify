@@ -1,6 +1,7 @@
 import { ref } from 'vue';
+import type { Table } from 'dexie';
 import type { WireOp } from '@zollify/shared';
-import { openCoreDb, type OutboxOp } from './db';
+import { openCoreDb, type CoreDb, type OutboxOp } from './db';
 import { getAccount } from '../session';
 import { deviceId } from './device';
 import { toPlain } from './plain';
@@ -30,22 +31,58 @@ function requireAccountId(): string {
   return account.accountId;
 }
 
-export async function queueOp(op: PendingOp): Promise<void> {
-  const accountId = requireAccountId();
-  const db = openCoreDb(accountId);
-
+/** The outbox row for a change: identity and timing filled in. */
+function outboxRow(op: PendingOp, device: string): OutboxOp {
   const wire: WireOp = {
     // 16-char minimum per the protocol schema; a UUID clears it comfortably and
     // makes the op idempotent, so a retried push de-duplicates server-side
     // rather than double-applying.
     opId: crypto.randomUUID(),
-    deviceId: await deviceId(),
+    deviceId: device,
     ts: Date.now(),
     type: op.type,
     payload: toPlain(op.payload),
   };
+  return { ...wire, synced: 0, userId: getAccount()?.userId } as OutboxOp;
+}
 
-  await db.ops.add({ ...wire, synced: 0, userId: getAccount()?.userId } as OutboxOp);
+/** Queues an op from inside a `transactWithOutbox` write. */
+export type Enqueue = (op: PendingOp) => Promise<void>;
+
+/**
+ * Runs a local write and queues its ops in one Dexie transaction over `tables`
+ * and the outbox, so both land or neither does. Android can kill the WebView
+ * at any moment: a sale stored without its op would sit on this device and
+ * never reach the server.
+ *
+ * The device id is read before the transaction opens, and `write` may await
+ * nothing but Dexie calls on those tables - IndexedDB commits a transaction
+ * as soon as it is left waiting on anything else.
+ */
+export async function transactWithOutbox<T>(db: CoreDb, tables: Table[], write: (enqueue: Enqueue) => Promise<T>): Promise<T> {
+  const device = await deviceId();
+  const enqueue: Enqueue = async (op) => {
+    await db.ops.add(outboxRow(op, device));
+  };
+  // An async function, literally: Dexie only keeps the transaction open across awaits when it is handed one.
+  const result = await db.transaction('rw', [...tables, db.ops], async () => write(enqueue));
+  await refreshPendingCountSafely();
+  return result;
+}
+
+/** The count only drives the sync badge and the push timer: it must never fail a write that has already committed. */
+async function refreshPendingCountSafely(): Promise<void> {
+  try {
+    await refreshPendingCount();
+  } catch (err) {
+    console.warn('[zollify] could not refresh the pending-sync count', err);
+  }
+}
+
+/** Queues an op that has no local write to go with it. A change that also writes a row belongs in `transactWithOutbox`. */
+export async function queueOp(op: PendingOp): Promise<void> {
+  const db = openCoreDb(requireAccountId());
+  await db.ops.add(outboxRow(op, await deviceId()));
   await refreshPendingCount();
 }
 

@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, seesSalesTotals, splitCashPortionAmounts, tillEventCheck } from '@zollify/shared';
+import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -43,8 +43,7 @@ import {
   testMode,
 } from '../cart';
 import { GIVEN_AWAY_LABEL } from '../lib/given-away';
-import { defaultProviderId, getProvider } from '../payments/registry';
-import { testTerminalProvider } from '../payments/test-terminal';
+import { defaultProviderId } from '../payments/registry';
 import { findSearchMatch, typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
 import { allocateDiscounts } from '../discounts';
@@ -56,6 +55,10 @@ import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
+import { useSeller } from '../composables/useSeller';
+import { useTerminal } from '../composables/useTerminal';
+import { useTillEvent } from '../composables/useTillEvent';
+import { useToast } from '../composables/useToast';
 
 /**
  * The till - ZollTool's POS, screen for screen.
@@ -69,47 +72,10 @@ import ProductThumb from '../components/ProductThumb.vue';
 
 const router = useRouter();
 const search = ref('');
-const notice = ref<{ text: string; kind: 'ok' | 'bad' } | null>(null);
-let noticeTimer: ReturnType<typeof setTimeout> | undefined;
-function toast(text: string, kind: 'ok' | 'bad' = 'ok'): void {
-  notice.value = { text, kind };
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => (notice.value = null), 2800);
-}
+const { notice, toast } = useToast();
 
-const activeEvent = computed(() => sdk().data.events.active());
-/** The till still on a convention that already ended: sales would land in its books, currency and VAT. */
-const tillCheck = computed(() => tillEventCheck(activeEvent.value, sdk().data.events.list()));
+const { activeEvent, tillCheck, sellLock, sellBlocked, lockedBy, takerToSell, sellAtTaker, forceSell, sellAtToday } = useTillEvent(toast);
 const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
-/** Sell 🔒: an open event took over this one's leftovers, so ringing up here would sell from its box. */
-const sellLock = computed(() => (activeEvent.value ? sdk().data.events.sellLock(activeEvent.value.id) : null));
-const sellBlocked = computed(() => !!sellLock.value && !sellLock.value.forced);
-const lockedBy = computed(() => sellLock.value?.by.map((e) => e.name).join(', ') ?? '');
-/** The one event that took the leftovers, when this user may sell there (a helper may not see it). */
-const takerToSell = computed(() => {
-  const by = sellLock.value?.by ?? [];
-  if (by.length !== 1) return null;
-  return sdk().data.events.list().some((e) => e.id === by[0]!.id) ? by[0]! : null;
-});
-async function switchTo(id: string): Promise<void> {
-  try {
-    await sdk().data.events.setActive(id);
-  } catch (err) {
-    toast(err instanceof Error ? err.message : String(err), 'bad');
-  }
-}
-async function sellAtTaker(): Promise<void> {
-  if (takerToSell.value) await switchTo(takerToSell.value.id);
-}
-async function forceSell(on: boolean): Promise<void> {
-  const e = activeEvent.value;
-  if (!e) return;
-  try {
-    await sdk().data.events.forceSell(e.id, on);
-  } catch (err) {
-    toast(err instanceof Error ? err.message : String(err), 'bad');
-  }
-}
 /**
  * The cart follows the till's event. A payment already under way finishes on
  * the event it was rung up at; the switch lands as soon as it is done.
@@ -124,38 +90,9 @@ function followTillEvent(): void {
   setCartEvent(activeEvent.value, sdk().account()?.profile.defaultCurrency ?? 'CHF');
   void loadCardFx();
 }
-async function sellAtToday(): Promise<void> {
-  const e = tillCheck.value.runningToday;
-  if (e) await switchTo(e.id);
-}
 const products = computed(() => sdk().data.products.forSale());
-const providerId = ref('manual');
-// Test mode and a test account both take cards on the pretend terminal, whatever is set up.
-const pretendCards = computed(() => testMode.value || sandboxAccount());
-const provider = computed(() => (pretendCards.value ? testTerminalProvider : getProvider(providerId.value as never)));
-const hasTerminal = computed(() => pretendCards.value || providerId.value !== 'manual');
+const { providerId, provider, hasTerminal, terminalConnected, refreshTerminalStatus, tapTerminalState, startStatusPolling } = useTerminal(toast);
 const customMethods = ref<string[]>([]);
-
-// ── Terminal connection indicator: polled while the till is open ────────────
-const terminalConnected = ref<boolean | null>(null); // null = still checking
-const terminalDetail = ref('');
-let statusTimer: ReturnType<typeof setInterval> | undefined;
-async function refreshTerminalStatus(): Promise<void> {
-  if (!hasTerminal.value) return;
-  try {
-    const s = await provider.value.getStatus();
-    terminalConnected.value = s.connected;
-    terminalDetail.value = s.detail ?? '';
-  } catch (err) {
-    terminalConnected.value = false;
-    terminalDetail.value = String(err);
-  }
-}
-function tapTerminalState(): void {
-  void refreshTerminalStatus();
-  const state = terminalConnected.value === true ? 'connected' : terminalConnected.value === false ? 'not connected' : 'checking…';
-  toast(`${provider.value.label}: ${terminalDetail.value || state}`, terminalConnected.value ? 'ok' : 'bad');
-}
 
 onMounted(async () => {
   // Ready before the first sale, so its thank-you screen has the logo at once.
@@ -167,13 +104,9 @@ onMounted(async () => {
   cameraDeviceId.value = (await sdk().config.get<string>('cameraDeviceId')) ?? null;
   followTillEvent();
   void refreshTerminalStatus();
-  statusTimer = setInterval(() => void refreshTerminalStatus(), 5000);
+  startStatusPolling();
 });
-onUnmounted(() => {
-  clearTimeout(noticeTimer);
-  clearInterval(statusTimer);
-  clearInterval(heartbeat);
-});
+onUnmounted(() => clearInterval(heartbeat));
 
 const currency = computed(() => cart.currency);
 const money = (n: number): string => fmtPrice(n, currency.value);
@@ -1072,16 +1005,7 @@ async function cancelPayment(): Promise<void> {
 }
 
 // ── Shared till: who is selling, and handing the till on ──────────────────
-const sellerAccount = ref(sdk().account());
-const offSeller = sdk().onAccountChange((a) => (sellerAccount.value = a));
-onUnmounted(offSeller);
-const canLock = computed(() => sdk().lock?.available() ?? false);
-/** Staff see the day's takings only when the owner allows it. */
-const showTotals = computed(() => seesSalesTotals(sellerAccount.value));
-const seller = computed(() => (sellerAccount.value?.email ?? '').split('@')[0] ?? '');
-function lockTill(): void {
-  void sdk().lock?.lock();
-}
+const { canLock, showTotals, seller, lockTill } = useSeller();
 </script>
 
 <template>

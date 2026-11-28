@@ -676,6 +676,18 @@ serving the built shell. See *Deploying on a VPS* below.
 *Android shell* - `android/`, three flavours, self-update for compat/full via
 `/api/updates/*`; see `.github/workflows/android.yml`.
 
+*Oldest browser* - Chrome or Android System WebView 92. The APK installs from
+Android 7 (minSdk 24), but what runs the app is the device's WebView, and on a
+device without the Play Store that can be far older than the Android version
+suggests. What sets the number is `crypto.randomUUID` (92), which names every
+sale; import maps for runtime modules need 89, and the syntax the build emits
+needs 85. Both Vite builds target `chrome92`, so newer syntax is rewritten
+rather than shipped. A device below the floor - or one where the app fails to
+mount for any other reason - gets a plain notice instead of a blank screen,
+from `apps/web/public/webview-check.js`; keep its `MIN_CHROME` and the two
+build targets in step. `:has()` (105) and `dvh` (108) are used only where the
+page still works without them.
+
 **Not built:**
 
 - **Billing** - deferred. The per-account enabled-modules list is its seam.

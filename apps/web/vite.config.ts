@@ -36,7 +36,11 @@ export default defineConfig({
     },
   },
   build: {
-    target: 'es2022',
+    // The oldest WebView the app runs on, so esbuild rewrites any newer syntax
+    // (class static blocks, say) instead of shipping a parse error to it. The
+    // number is set by what the code calls, not by syntax - see MIN_CHROME in
+    // public/webview-check.js, which tells a device below it why nothing loads.
+    target: 'chrome92',
     sourcemap: true,
     rollupOptions: {
       input: {

@@ -73,7 +73,8 @@ export function moduleViteConfig(dir) {
   return {
     plugins: [vue(), inlineCss(moduleName)],
     build: {
-      target: 'es2022',
+      // Same floor as the shell (apps/web/vite.config.ts): a module runs in the same WebView.
+      target: 'chrome92',
       outDir: resolve(dir, 'dist'),
       emptyOutDir: true,
       // Sourcemaps are published alongside the bundle; they make a failure in a

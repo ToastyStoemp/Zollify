@@ -1,0 +1,8 @@
+/*
+ * While a modal is open Reka sets `pointer-events: none` on <body>, to stop
+ * presses reaching the page behind. Every dialog here has a backdrop that
+ * covers the page already, and the rule would also deaden what Reka does not
+ * know about and must keep working over a dialog: a toast's Undo button, a
+ * module's own full-screen sheet.
+ */
+body { pointer-events: auto !important; }

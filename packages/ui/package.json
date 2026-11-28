@@ -15,7 +15,7 @@
     "test": "vitest run --passWithNoTests",
     "build": "echo \"@zollify/ui is consumed as source\""
   },
-  "dependencies": { "@zollify/shared": "*", "jspdf": "^4.2.1", "html2canvas": "^1.4.1", "qrcode": "^1.5.4" },
-  "peerDependencies": { "vue": "^3.5.0" },
-  "devDependencies": { "vue": "^3.5.0", "vue-tsc": "^2.2.0", "@types/qrcode": "^1.5.6" }
+  "dependencies": { "@zollify/shared": "*", "jspdf": "^4.2.1", "html2canvas": "^1.4.1", "qrcode": "^1.5.4", "reka-ui": "^2.12.0" },
+  "peerDependencies": { "vue": "^3.5.22" },
+  "devDependencies": { "vue": "^3.5.22", "vue-tsc": "^2.2.0", "@types/qrcode": "^1.5.6", "@vitejs/plugin-vue": "^5.2.4", "happy-dom": "^21.0.4" }
 }

@@ -4,7 +4,7 @@ import type { HttpError } from '@zollify/sdk';
 import { addTillPerson, getDeviceAccount, pendingBadge, refreshTillPeople, setOwnPin, tillPeople, tillSettings, unlockTill, unlockWithBadge, type TillPerson } from '@zollify/platform';
 import { isStaffBadge } from '@zollify/shared';
 import { cameraScanSupported, startCameraScan } from '../camera-scan';
-import { Icon } from '@zollify/ui';
+import { DialogHeading, DialogLayer, DialogPanel, Icon } from '@zollify/ui';
 import { signOutAndReload } from '../boot';
 
 /**
@@ -198,11 +198,16 @@ async function saveOwnPin(): Promise<void> {
 </script>
 
 <template>
-  <div class="lock" role="dialog" aria-modal="true" aria-labelledby="lock-title">
-    <div class="panel">
+  <!-- A dialog nobody can dismiss: it only goes when the till unlocks. Being one
+       is what stops an editor left open underneath from holding on to focus,
+       which would leave the sign-in fields here impossible to type in. -->
+  <DialogLayer :dismissable="false">
+  <div class="lock">
+    <DialogPanel>
+    <div class="panel" aria-modal="true" tabindex="-1">
       <header>
         <span class="brand"><img src="/favicon.svg" alt="" class="mark" />{{ device?.accountName }}</span>
-        <h1 id="lock-title"><template v-if="picked">Hi <span class="cap">{{ nameOf(picked) }}</span></template><template v-else-if="pendingBadge">Badge scanned</template><template v-else>Who's at the till?</template></h1>
+        <DialogHeading><h1><template v-if="picked">Hi <span class="cap">{{ nameOf(picked) }}</span></template><template v-else-if="pendingBadge">Badge scanned</template><template v-else>Who's at the till?</template></h1></DialogHeading>
         <p v-if="pendingBadge && !picked" class="hint">Enter your PIN to finish.</p>
       </header>
 
@@ -283,12 +288,15 @@ async function saveOwnPin(): Promise<void> {
         <button type="button" class="quiet link" @click="signOutAndReload()">Sign this device out</button>
       </template>
     </div>
+    </DialogPanel>
   </div>
+  </DialogLayer>
 </template>
 
 <style scoped>
-.lock { position: fixed; inset: 0; z-index: 900; display: grid; place-items: center; padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); background: var(--zfy-bg, #f1f4f6); overflow-y: auto; }
-.panel { width: min(100%, 34rem); display: flex; flex-direction: column; align-items: center; gap: 1.2rem; }
+.lock { position: fixed; inset: 0; z-index: var(--zfy-z-lock, 900); display: grid; place-items: center; padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom)); background: var(--zfy-bg, #f1f4f6); overflow-y: auto; }
+/* Takes focus by script when the till locks; no ring for that. */
+.panel { outline: none; width: min(100%, 34rem); display: flex; flex-direction: column; align-items: center; gap: 1.2rem; }
 header { display: flex; flex-direction: column; align-items: center; gap: .4rem; text-align: center; }
 .brand { display: inline-flex; align-items: center; gap: .45rem; font-size: .85rem; color: var(--zfy-muted, #5a6472); font-weight: 600; }
 .mark { width: 1.4rem; height: 1.4rem; }

@@ -21,6 +21,7 @@ export function token(name: string, fallback?: string): string {
 
 export { Icon, ICON_PATHS } from './icon';
 export { typeColor } from './type-color';
+export { DialogHeading, DialogLayer, DialogPanel, DialogSummary } from './dialog';
 export { default as ModalShell } from './ModalShell.vue';
 export { default as TypeaheadPicker } from './TypeaheadPicker.vue';
 export type { PickerOption } from './picker';

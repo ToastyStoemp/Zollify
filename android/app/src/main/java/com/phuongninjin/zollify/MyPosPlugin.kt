@@ -9,6 +9,7 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -53,20 +54,52 @@ import java.util.UUID
 )
 class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListener {
 
+    private companion object {
+        // Long enough to pick the terminal in the SDK's dialog and confirm the
+        // pairing on it; after that a pairing request is no longer taken as ours.
+        const val PAIRING_WINDOW_MS = 120_000L
+    }
+
     private lateinit var pos: POSHandler
     private var pendingCall: PluginCall? = null
     private var callResolved  = false
     private var termConnected = false   // physical BT link up
     private var termReady     = false   // SDK handshake complete, safe to transact
 
+    // Bluetooth address of the terminal the SDK last connected to; null over
+    // Wi-Fi and until a Bluetooth connect has succeeded. Other Bluetooth devices (a
+    // receipt printer, headphones) come and go without touching a payment.
+    private var terminalAddress: String? = null
+    // elapsedRealtime until which a Bluetooth connect started from this app
+    // may still be pairing; 0 when none is under way.
+    private var pairingUntil = 0L
+
+    private fun usesBluetooth(): Boolean = POSHandler.getConnectionType() == ConnectionType.BLUETOOTH
+
+    /** True for the terminal's own Bluetooth link - never for another device, never over Wi-Fi. */
+    private fun isTerminal(device: BluetoothDevice?): Boolean =
+        usesBluetooth() && device != null && terminalAddress != null && device.address == terminalAddress
+
+    /**
+     * A pairing request is taken as the terminal's only while a Bluetooth
+     * connect the user started here is under way. Which device the user picks
+     * in the SDK's dialog is not known until it has connected, so the window
+     * is the narrowest test there is.
+     */
+    private fun isPairingWithTerminal(): Boolean =
+        usesBluetooth() && SystemClock.elapsedRealtime() < pairingUntil
+
     // ── BroadcastReceivers ────────────────────────────────────────────────────
 
     // Auto-accepts the BLE pairing PIN from the GO2 without showing a system dialog.
     // Without this, the system dialog appears and auto-dismisses in ~5 s → GO2 sees "connection error".
+    // Only for the terminal being connected from this app: any other device's
+    // pairing request is left alone, so the system asks the user as usual.
     private val pairingReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             if (intent.action != BluetoothDevice.ACTION_PAIRING_REQUEST) return
             val device = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            if (!isPairingWithTerminal()) return
             val pin    = intent.getIntExtra("android.bluetooth.device.extra.PAIRING_KEY", 123456)
             device.setPin(pin.toString().toByteArray())
             device.createBond()
@@ -77,6 +110,10 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
     private val disconnectReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             if (intent.action != BluetoothDevice.ACTION_ACL_DISCONNECTED) return
+            // Every Bluetooth device's disconnect arrives here. Only the terminal's
+            // own may fail a payment: failing it for a printer's would report
+            // "failed" while the terminal can still approve the card.
+            if (!isTerminal(intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE))) return
             termConnected = false
             termReady     = false
             // A disconnect mid-payment must not leave the pending call latched -
@@ -167,6 +204,8 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
      * permission SecurityException so the terminal just reports "not connected".
      */
     private fun connectSafely() {
+        // Over Bluetooth, open the window in which a pairing request is the terminal's.
+        pairingUntil = if (usesBluetooth()) SystemClock.elapsedRealtime() + PAIRING_WINDOW_MS else 0L
         activity.runOnUiThread {
             try {
                 pos.connectDevice(activity)
@@ -288,6 +327,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
     // ── ConnectionListener ────────────────────────────────────────────────────
 
     override fun onConnected(device: BluetoothDevice?) {
+        terminalAddress = if (usesBluetooth()) device?.address else null
         termConnected = true
         // termReady is set by POSReadyListener - don't notify yet
     }
@@ -295,6 +335,7 @@ class MyPosPlugin : Plugin(), POSInfoListener, ConnectionListener, POSReadyListe
     // ── POSReadyListener ──────────────────────────────────────────────────────
 
     override fun onPOSReady() {
+        pairingUntil = 0L   // connected and handshaked: pairing is over
         termReady = true
         notifyListeners("terminalStatus", JSObject().apply { put("connected", true) })
     }

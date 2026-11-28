@@ -1,85 +1,41 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import type { Product } from '@zollify/shared';
-import { baseValueOf, cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
-import type { SaleEvent, TillAction } from '@zollify/sdk';
+import { computed, onMounted, reactive, ref } from 'vue';
+import type { SaleEvent } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
-import {
-  addMisc,
-  addModuleLine,
-  findModuleLine,
-  replaceModuleLine,
-  appliedDiscounts,
-  chargeTotals,
-  chargedUnitPrice,
-  customDiscountCharged,
-  localPrice,
-  baseTotal,
-  cardFx,
-  cardInBase,
-  cardSettlement,
-  cart,
-  cancelCheckout,
-  checkout,
-  clear,
-  inCart,
-  isConverting,
-  itemCount,
-  loadCardFx,
-  loadMarketFx,
-  marketFx,
-  setCartEvent,
-  setCustomDiscount,
-  setQty,
-  subtotal,
-  toCharged,
-  total,
-  GIVEN_AWAY,
-  loadTestMode,
-  sandboxAccount,
-  shellTestMode,
-  testMode,
-} from '../cart';
-import { GIVEN_AWAY_LABEL } from '../lib/given-away';
-import { defaultProviderId } from '../payments/registry';
-import { typeColor, visibleTileActions } from '../search';
-import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
-import { allocateDiscounts } from '../discounts';
-import { backfillBranding, screenLogo } from '../lib/branding';
-import { tillLinkFrom } from '../lib/till-link';
-import { provideTillTiles } from '../lib/till-tiles';
-import { dismissLateApproval, lateApprovalText, lateApprovals } from '../lib/late-approvals';
-import { singleFlight } from '../lib/single-flight';
-import { sdk } from '../runtime';
-import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
+import { itemCount, loadTestMode, total } from '../cart';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import CartPanel from '../components/CartPanel.vue';
 import CatalogGrid from '../components/CatalogGrid.vue';
 import DiscountModal from '../components/DiscountModal.vue';
 import MiscItemModal from '../components/MiscItemModal.vue';
 import PaymentModal from '../components/PaymentModal.vue';
+import ScannerModal from '../components/ScannerModal.vue';
+import TillBanners from '../components/TillBanners.vue';
+import TillHeader from '../components/TillHeader.vue';
 import TypeDrillModal from '../components/TypeDrillModal.vue';
 import VariantPickerModal from '../components/VariantPickerModal.vue';
-import { useBarcodeScanner } from '../composables/useBarcodeScanner';
-import { useCartLines } from '../composables/useCartLines';
-import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
-import ScannerModal from '../components/ScannerModal.vue';
-import { useAfterSale } from '../composables/useAfterSale';
 import { useAddToCart } from '../composables/useAddToCart';
+import { useAfterSale } from '../composables/useAfterSale';
+import { useBarcodeScanner } from '../composables/useBarcodeScanner';
+import { useCatalogBrowse } from '../composables/useCatalogBrowse';
 import { useCustomerDisplay } from '../composables/useCustomerDisplay';
 import { useFollowTillEvent } from '../composables/useFollowTillEvent';
 import { useLastSale } from '../composables/useLastSale';
-import { useReceiptPrint } from '../composables/useReceiptPrint';
 import { usePaymentFlow } from '../composables/usePaymentFlow';
+import { useReceiptPrint } from '../composables/useReceiptPrint';
 import { useScanSubmit } from '../composables/useScanSubmit';
 import { useSeller } from '../composables/useSeller';
 import { useStock } from '../composables/useStock';
-import { useTillActions } from '../composables/useTillActions';
 import { useTerminal } from '../composables/useTerminal';
+import { useTillActions } from '../composables/useTillActions';
 import { useTillEvent } from '../composables/useTillEvent';
 import { useTillMoney } from '../composables/useTillMoney';
 import { useToast } from '../composables/useToast';
+import { receiptUrl as receiptUrlFor } from '../lib/after-sale';
+import { backfillBranding } from '../lib/branding';
+import { provideTillTiles } from '../lib/till-tiles';
+import { defaultProviderId } from '../payments/registry';
+import { sdk } from '../runtime';
 
 /**
  * The till - ZollTool's POS, screen for screen.
@@ -89,14 +45,17 @@ import { useToast } from '../composables/useToast';
  * screen: cash counts what was handed over and shows the change, card asks
  * for confirmation (or drives the terminal), split takes both. The last sale
  * can be undone from the counter.
+ *
+ * This file is what the till is made of, top to bottom: each part's state and
+ * rules live in a composable (../composables), each part of the screen in a
+ * component (../components). What is left here is how they meet - above all
+ * finish(), what happens the moment a sale is paid.
  */
 
-const router = useRouter();
 const search = ref('');
 const { notice, toast } = useToast();
 
 const { activeEvent, tillCheck, sellLock, sellBlocked, lockedBy, takerToSell, sellAtTaker, forceSell, sellAtToday } = useTillEvent(toast);
-const fmtDay = (iso: string | null): string => (iso ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '');
 const products = computed(() => sdk().data.products.forSale());
 const { providerId, provider, hasTerminal, terminalConnected, refreshTerminalStatus, tapTerminalState, startStatusPolling } = useTerminal(toast);
 const customMethods = ref<string[]>([]);
@@ -114,7 +73,7 @@ onMounted(async () => {
   startStatusPolling();
 });
 
-const { currency, money, price, fromPrice, onCard, cardRateLabel } = useTillMoney();
+const { currency, money } = useTillMoney();
 
 const { stockLabel, productInCart, productLeft } = useStock(activeEvent);
 
@@ -142,33 +101,17 @@ const { tillButtons, tillTiles, openAction, runAction } = useTillActions({ searc
 // ── Customer display: mirror the cart on the account's other screens ───────
 const display = useCustomerDisplay(activeEvent);
 
-// ── Today ───────────────────────────────────────────────────────────────────
-const today = computed(() => {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  let count = 0;
-  let revenue = 0;
-  // In test mode the till sells into the test event: today is its test sales.
-  const sales = testMode.value && shellTestMode() ? shellTestMode()!.sales() : sdk().data.transactions.recent();
-  for (const tx of sales) {
-    if (tx.revertedAt || tx.timestamp < start.getTime() || (activeEvent.value && tx.eventId !== activeEvent.value.id)) continue;
-    count++;
-    revenue += baseValueOf(tx, tx.baseCurrency ?? tx.currency);
-  }
-  return { count, revenue };
-});
-
 // ── Last sale: undo or reprint without leaving the counter ─────────────────
 const { lastSale, showLastSale, undoLast, receipt } = useLastSale(toast);
 
 // ── Payment ─────────────────────────────────────────────────────────────────
 const pay = usePaymentFlow({ toast, activeEvent, sellBlocked, lockedBy, provider, providerId, hasTerminal, refreshTerminalStatus, onPaid: finish });
-const { payment, cashShortcuts, splitCashShortcuts, change, splitState, confirmDisabled, title, givesAway, sendingLog, logSent, startPayment, connectReader, sendLog, retryCard, completeByHand, confirmPayment, cancelPayment } = pay;
+const { payment, givesAway, startPayment } = pay;
 /** The flow as the payment sheet reads it: refs unwrapped. */
 const paySheet = reactive(pay);
 const { followTillEvent } = useFollowTillEvent(activeEvent, payment, toast);
 
-
+/** A sale went through: close the sheets, say so, tell the customer display, and offer the receipt. */
 function finish(sale: SaleEvent, message: string, test = false): void {
   payment.phase = 'idle';
   showCartSheet.value = false;
@@ -199,74 +142,41 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 <template>
   <div class="pos">
     <section class="floor">
-      <header class="bar">
-        <router-link :to="{ name: 'events' }" class="quiet iconbtn" aria-label="Events"><Icon name="arrow-left" :size="16" /></router-link>
-        <div class="event">
-          <h1 v-if="activeEvent">{{ activeEvent.name }}</h1>
-          <h1 v-else class="warn">No active event</h1>
-          <small v-if="activeEvent && showTotals">Today {{ today.count }} sale{{ today.count === 1 ? '' : 's' }} · {{ fmtPrice(today.revenue, cart.baseCurrency) }}</small>
-          <small v-else-if="activeEvent">{{ atStore ? 'Selling at the store' : 'Selling at this event' }}{{ today.count ? ` · ${today.count} sale${today.count === 1 ? '' : 's'} today` : '' }}</small>
-          <small v-else>Open one under {{ sellsStores ? 'Stores or Events' : 'Events' }} - every sale is filed against one.</small>
-        </div>
-        <router-link v-if="!testMode && sandboxAccount()" :to="{ name: 'settings', query: { panel: 'core.security' } }" class="testmode" title="A test account: cards go to the pretend terminal and nothing here is real money.">TEST ACCOUNT</router-link>
-        <router-link v-if="testMode" :to="{ name: 'settings', query: { panel: 'pos.payments' } }" class="testmode" :title="shellTestMode() ? 'Test mode - sales go to the test event, never to your takings. Tap to switch it off.' : 'Test mode - sales are not recorded. Tap to switch it off under Card terminal.'">{{ shellTestMode() ? 'TEST MODE - test event' : 'TEST MODE - nothing is recorded' }}</router-link>
-        <router-link v-if="activeEvent" :to="{ name: 'history', query: { event: activeEvent.id, from: 'pos' } }" class="quiet iconbtn" aria-label="Sales history"><Icon name="bar-chart" :size="16" /></router-link>
-        <button v-if="canLock" type="button" class="quiet seller" :title="`Selling as ${seller} - tap to lock the till`" :aria-label="`Lock the till (selling as ${seller})`" @click="lockTill"><Icon name="lock" :size="16" /><span class="lock-label">Lock</span><span class="seller-name">{{ seller }}</span></button>
-        <button v-if="hasTerminal" type="button" class="quiet terminal" :title="`${provider.label} - tap to re-check`" @click="tapTerminalState">
-          <Icon name="credit-card" :size="16" /><span :class="['dot', terminalConnected === true ? 'on' : terminalConnected === false ? 'off' : 'checking']"></span>
-        </button>
-        <!-- Narrow screens: the browse modes as one icon beside the terminal (the pills below are hidden there). A native
-             select under the icon, so the device's own picker opens on tap. -->
-        <label class="quiet iconbtn mode-pick" :title="`Showing: ${currentMode.label}`">
-          <Icon :name="currentMode.icon" :size="16" />
-          <select :value="viewMode" :aria-label="`Browse by (showing ${currentMode.label})`" @change="setViewMode(($event.target as HTMLSelectElement).value as ViewMode)">
-            <option v-for="m in viewModes" :key="m.id" :value="m.id">{{ m.label }}</option>
-          </select>
-        </label>
-        <div class="search-group">
-          <input v-model="search" class="search" type="search" placeholder="Search / scan…" aria-label="Search or scan" @keydown.enter.prevent="submitSearch" />
-          <button type="button" class="quiet iconbtn" aria-label="Scan barcode" title="Scan barcode" @click="openScanner"><Icon name="scan" :size="16" /></button>
-        </div>
-        <div class="modes">
-          <button v-for="m in viewModes" :key="m.id" type="button" :class="['pill', { active: viewMode === m.id }]" @click="setViewMode(m.id)">{{ m.label }}</button>
-        </div>
-      </header>
-
-      <div v-if="sellLock && !sellLock.forced" class="stale locked" role="alert">
-        <Icon name="lock" :size="16" />
-        <span><strong>Sell 🔒 {{ activeEvent?.name }}.</strong> {{ lockedBy }} took over what was left here, so sales here would come out of its stock.</span>
-        <button v-if="takerToSell" type="button" class="primary" @click="sellAtTaker">Sell at {{ takerToSell.name }}</button>
-        <span v-else-if="sellLock.by.length === 1" class="hint">Ask an admin for access to {{ sellLock.by[0]!.name }}.</span>
-        <button v-if="sellLock.canForce" type="button" class="danger" @click="forceSell(true)">Force sales</button>
-      </div>
-      <div v-else-if="sellLock?.forced" class="stale" role="status">
-        <Icon name="alert-triangle" :size="16" />
-        <span><strong>Sell 🔒 forced open.</strong> {{ lockedBy }} took this event's leftovers; what you sell here may come out of its stock.</span>
-        <button type="button" @click="forceSell(false)">Lock again</button>
-      </div>
-      <div v-else-if="tillCheck.ended" class="stale" role="alert">
-        <Icon name="alert-triangle" :size="16" />
-        <span><strong>{{ activeEvent?.name }} {{ activeEvent?.status === 'closed' ? 'is closed' : `ended ${fmtDay(tillCheck.endedOn)}` }}.</strong> Sales you ring up now still go to it.</span>
-        <button v-if="tillCheck.runningToday" type="button" class="primary" @click="sellAtToday">Sell at {{ tillCheck.runningToday.name }}</button>
-        <router-link v-else :to="{ name: 'events' }" class="btn">Pick an event</router-link>
-      </div>
-
-      <div v-for="a in lateApprovals" :key="a.id" class="stale locked" role="alert">
-        <Icon name="alert-triangle" :size="16" />
-        <span><strong>{{ lateApprovalText(a) }}</strong></span>
-        <button type="button" class="danger" @click="dismissLateApproval(a.id)">Dealt with</button>
-      </div>
-      <p v-if="notice" :class="['notice', notice.kind]" role="status">{{ notice.text }}</p>
-
-      <div v-if="lastSale" class="last">
-        <Icon name="check" :size="16" />
-        <span>{{ fmtPrice(lastSale.total, lastSale.currency) }} · {{ lastSale.units }} item{{ lastSale.units === 1 ? '' : 's' }}</span>
-        <span class="spacer"></span>
-        <button type="button" class="quiet" @click="receipt"><Icon name="printer" :size="14" /> Receipt</button>
-        <button type="button" class="quiet undo" @click="undoLast"><Icon name="undo" :size="14" /> Undo</button>
-        <button type="button" class="quiet" aria-label="Dismiss" @click="lastSale = null"><Icon name="x" :size="14" /></button>
-      </div>
-
+      <TillHeader
+        v-model:search="search"
+        :event="activeEvent"
+        :show-totals="showTotals"
+        :at-store="atStore"
+        :sells-stores="sellsStores"
+        :can-lock="canLock"
+        :seller="seller"
+        :has-terminal="hasTerminal"
+        :terminal-label="provider.label"
+        :terminal-connected="terminalConnected"
+        :view-modes="viewModes"
+        :view-mode="viewMode"
+        :current-mode="currentMode"
+        @lock="lockTill"
+        @check-terminal="tapTerminalState"
+        @set-mode="setViewMode"
+        @submit="submitSearch"
+        @scan="openScanner"
+      />
+      <TillBanners
+        :event="activeEvent"
+        :sell-lock="sellLock"
+        :locked-by="lockedBy"
+        :taker-to-sell="takerToSell"
+        :till-check="tillCheck"
+        :notice="notice"
+        :last-sale="lastSale"
+        @sell-at-taker="sellAtTaker"
+        @force-sell="forceSell"
+        @sell-at-today="sellAtToday"
+        @receipt="receipt"
+        @undo="undoLast"
+        @dismiss-last-sale="lastSale = null"
+      />
       <CatalogGrid
         :entries="entries"
         :action-tiles="tillTiles"
@@ -302,7 +212,6 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
     <TypeDrillModal v-if="openType" :type="openType" :products="typeProducts" :just-added-id="justAddedId" @add="add($event, null)" @bundle="(pid, q) => addBundle(pid, null, q)" @close="openType = null" />
     <VariantPickerModal v-if="variantPicker" :product="variantPicker" @add="add(variantPicker!.id, $event)" @bundle="(vid, q) => addBundle(variantPicker!.id, vid, q)" @close="variantPicker = null" />
 
-    <!-- ── Barcode scanner ───────────────────────────────────────────────── -->
     <ScannerModal v-if="scannerOpen" :error="scannerError" :info="scannerInfo" :can-switch="cameraDevices.length > 1" :set-video="setScannerVideo" @switch="cycleCamera" @close="closeScanner" />
 
     <!-- ── A screen another module put on the till ───────────────────────── -->
@@ -332,56 +241,13 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
 </template>
 
 <style scoped>
+/* Only the till's frame is styled here: the two columns, the floor, and the cart bar.
+   Everything else is styled in the component that draws it. */
 .pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
-.testmode { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: var(--zfy-danger, #c6512f); border-radius: 999px; padding: .25rem .7rem; text-decoration: none; white-space: nowrap; }
-.stale { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .6rem 1rem 0; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #d99a2b); color: var(--zfy-warning-ink, #8a5a00); font-size: .875rem; }
-.stale span { flex: 1; min-width: 12rem; }
-.stale .btn { text-decoration: none; font-weight: 600; color: inherit; }
-.stale.locked { border-color: var(--zfy-danger, #c6512f); color: var(--zfy-danger, #c6512f); }
-.stale .danger { color: var(--zfy-danger, #c6512f); border-color: currentColor; }
-.bar { display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
-.event { min-width: 0; display: flex; flex-direction: column; }
-.iconbtn { display: inline-flex; align-items: center; min-height: 2rem; padding: .3rem; color: var(--zfy-muted, #5a6472); border-radius: 8px; }
-.iconbtn:hover { background: var(--zfy-bg, #f1f4f6); color: var(--zfy-ink, #1a2230); }
-.terminal { display: inline-flex; align-items: center; gap: .3rem; min-height: 2rem; padding: .3rem .5rem; }
-.dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--zfy-muted, #5a6472); }
-.dot.on { background: var(--zfy-accent, #0e7c66); }
-.dot.off { background: var(--zfy-danger, #c6512f); }
-.dot.checking { animation: pulse 1.4s ease-in-out infinite; }
-.event h1 { margin: 0; font-size: 1rem; color: var(--zfy-accent-ink, #0a5a4a); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.event h1.warn { color: var(--zfy-warning-ink, #8a5a1e); }
-.event small { color: var(--zfy-muted, #5a6472); font-size: .72rem; }
-.seller { display: inline-flex; align-items: center; gap: .3rem; min-height: 2.2rem; padding: .1rem .55rem; font-size: .8rem; font-weight: 600; max-width: 9rem; }
-.seller .lock-label { font-weight: 700; }
-.seller span.seller-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: capitalize; }
-.search-group { display: flex; align-items: center; gap: .2rem; margin-left: auto; max-width: 100%; }
-.search { width: 14rem; max-width: 100%; }
-.modes { display: flex; gap: .3rem; }
-.mode-pick { display: none; position: relative; cursor: pointer; }
-.mode-pick select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 1rem; }
-.pill { min-height: 2rem; padding: .2rem .8rem; border-radius: 999px; font-size: .8rem; }
-.pill.active { background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); border-color: var(--zfy-accent, #0e7c66); }
-.notice { margin: .5rem 1rem 0; padding: .45rem .75rem; border-radius: 8px; font-size: .85rem; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); }
-.notice.bad { background: var(--zfy-signal-soft, #f6e5df); color: var(--zfy-danger, #c6512f); }
-.last { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; font-size: .85rem; color: var(--zfy-accent-ink, #0a5a4a); background: var(--zfy-accent-soft, #deeee9); border-bottom: 1px solid var(--zfy-line, #d6dde4); }
-.last .spacer { flex: 1; }
-.last button { min-height: 1.8rem; padding: .1rem .5rem; font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
-.last .undo { color: var(--zfy-warning-ink, #8a5a1e); }
-.empty, .hint { color: var(--zfy-muted, #5a6472); margin: 0; padding: 1rem; font-size: .9rem; }
-.muted { color: var(--zfy-muted, #5a6472); }
-.warn { color: var(--zfy-warning-ink, #8a5a1e); }
-.bad { color: var(--zfy-danger, #c6512f); }
-.good { color: var(--zfy-accent-ink, #0a5a4a); }
-.strong { font-weight: 600; }
 .cartbar { display: none; }
 
-@keyframes pulse { 50% { opacity: .45; } }
-@media (prefers-reduced-motion: reduce) { .dot.checking { animation: none; } }
-
 @media (max-width: 860px) {
-  /* Narrow: the lock icon alone; the seller stays in the title and label. */
-  .seller .lock-label, .seller .seller-name { display: none; }
   /* Cancels .content's own padding (a bleed-to-edges trick, not new) - the
      bottom value now also cancels the --zfy-bottom-nav clearance .content
      added for pages that don't otherwise account for the fixed tab bar.
@@ -398,7 +264,10 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
      with an empty cart (.cartbar is v-if="itemCount", so it isn't rendered
      at all then). Confirmed live: with an empty cart this left genuinely
      blank space below a short product list, reachable by scrolling past
-     all real content. */
+     all real content.
+     NOTE for whoever merges the :has() -> class change from the other
+     branch: the two :has(.cartbar) rules below are the only ones, and
+     .cartbar is still rendered by this file (not by a child component). */
   .pos:not(:has(.cartbar)) { min-height: auto; }
   .floor { display: flex; flex-direction: column; }
   /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
@@ -406,11 +275,5 @@ const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterS
   /* Sticks just above the shell's tab bar, whose height the shell publishes. */
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }
   .cartbar span { display: inline-flex; align-items: center; gap: .4rem; }
-  .search-group { margin-left: 0; width: 100%; order: 3; }
-  /* Pills fold into one icon beside the terminal state: a row less above the products. */
-  .modes { display: none; }
-  .mode-pick { display: inline-flex; }
-  .bar { padding: .5rem .75rem; gap: .5rem; }
-  .search { flex: 1; }
 }
 </style>

@@ -303,7 +303,7 @@ function exportEdec(): void {
   if (!state.value) return;
   const result = buildEdecXml(state.value);
   if (!result) return toast('No products have sold quantities > 0 yet.');
-  download(result.filename, result.xml, 'application/xml');
+  void download(result.filename, result.xml, 'application/xml');
 }
 
 /** Inline preview, for when a pop-up is blocked or to check before printing. */

@@ -25,14 +25,25 @@
     "build:web": "npm run build -w @zollify/web",
     "android:sync": "npm run build:web && npx cap sync android && node scripts/carbon-plugins.mjs",
     "android:apk": "node scripts/bump-android-version.mjs && npm run android:sync && cd android && gradlew.bat assembleDebug",
-    "android:pack": "node scripts/pack-apk.mjs"
+    "android:pack": "node scripts/pack-apk.mjs",
+    "lint": "eslint .",
+    "lint:strict": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "devDependencies": {
     "@capacitor/cli": "^8.3.4",
+    "@eslint/js": "^10.0.1",
     "archiver": "^7.0.1",
+    "eslint": "^10.16.0",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
     "sharp": "^0.35.5",
     "typescript": "~5.9.0",
-    "vitest": "^5.0.3"
+    "typescript-eslint": "^8.74.0",
+    "vitest": "^5.0.3",
+    "vue-eslint-parser": "^10.4.2"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "^8.3.0",

@@ -1,0 +1,22 @@
+node_modules/
+dist/
+dist-electron/
+build/
+coverage/
+package-lock.json
+
+# Native project: Gradle, Kotlin, and files `npx cap sync` regenerates.
+android/
+
+# Reference material kept verbatim next to the code ported from it.
+modules/customs-ch/legacy/
+modules/customs-de/ihb-reference/
+
+# Server runtime data and stores (published bundles, APKs).
+apps/server/data/
+apps/server/modules-store/
+apps/server/shell-store/
+apps/server/apk/
+apps/server/deploy/
+
+.claude/

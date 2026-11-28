@@ -72,7 +72,7 @@ function looksLikeText(head: Uint8Array): boolean {
 
 /** HTML, SVG and XML all open with a tag (or a doctype/declaration); text that does is never wanted. */
 function looksLikeMarkup(head: Uint8Array): boolean {
-  const start = new TextDecoder().decode(head.subarray(0, 512)).replace(/^﻿/, '').trimStart().toLowerCase();
+  const start = new TextDecoder().decode(head.subarray(0, 512)).replace(/^\uFEFF/, '').trimStart().toLowerCase();
   return start.startsWith('<');
 }
 

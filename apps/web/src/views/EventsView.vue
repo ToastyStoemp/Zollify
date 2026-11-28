@@ -91,7 +91,7 @@ const customsNote = (e: SalesEvent): string => {
 const formCustoms = computed(() => (editKind.value === 'event' && form.country.trim() ? customsGuidance(homeCountry.value, form.country) : null));
 
 // Sort key = the event's date; undated events sort last.
-const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '￿';
+const dateKey = (e: SalesEvent): string => e.dateStart || e.dateEnd || '\uffff';
 const stores = computed(() =>
   visibleEvents.value.filter((e) => isStore(e)).sort((a, b) => Number(a.status === 'closed') - Number(b.status === 'closed') || a.name.localeCompare(b.name)),
 );

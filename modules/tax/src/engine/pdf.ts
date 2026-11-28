@@ -1,5 +1,6 @@
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// Type-only: the libraries themselves load on first use - see host-libs.ts.
+import type { jsPDF } from 'jspdf';
+import { loadPdfLibs } from './host-libs';
 import { monthKey, type Cluster, type Txn } from './types';
 import { sdk } from '../runtime';
 
@@ -8,6 +9,9 @@ import { sdk } from '../runtime';
  * across every cluster in it. Attached to the Lexware voucher as evidence and
  * downloadable on their own. Ported from ZollTax; the layout is the one the
  * bookkeeper already knows.
+ *
+ * Building one is async: the PDF libraries are fetched the first time a report
+ * is asked for, so callers show a busy state and catch a HostLibraryError.
  */
 
 type RGB = [number, number, number];
@@ -92,9 +96,14 @@ function footer(doc: jsPDF, left: string): () => void {
 }
 
 export type ReportMode = 'payments' | 'fees';
+export interface PdfFile {
+  bytes: Uint8Array;
+  filename: string;
+}
 
 /** A cluster's report. Returns the PDF bytes and its file name. */
-export function clusterPdf(c: Cluster, mode: ReportMode): { bytes: Uint8Array; filename: string } {
+export async function clusterPdf(c: Cluster, mode: ReportMode): Promise<PdfFile> {
+  const { jsPDF, autoTable } = await loadPdfLibs();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const isPay = mode === 'payments';
   const accent: RGB = isPay ? [34, 139, 87] : [185, 55, 53];
@@ -159,9 +168,10 @@ export function clusterPdf(c: Cluster, mode: ReportMode): { bytes: Uint8Array; f
 }
 
 /** A month's report across its clusters. */
-export function monthPdf(key: string, all: Cluster[], mode: ReportMode): { bytes: Uint8Array; filename: string } | null {
+export async function monthPdf(key: string, all: Cluster[], mode: ReportMode): Promise<PdfFile | null> {
   const clusters = all.filter((c) => monthKey(c.start) === key);
   if (!clusters.length) return null;
+  const { jsPDF, autoTable } = await loadPdfLibs();
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const isPay = mode === 'payments';
   const accent: RGB = isPay ? [34, 139, 87] : [185, 55, 53];

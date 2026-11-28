@@ -11,7 +11,44 @@ import vue from '@vitejs/plugin-vue';
  * fails at import time with a bare-specifier error, which is easy to misread as
  * a broken bundle.
  */
-export const HOST_EXTERNALS = ['vue', 'dexie', '@zollify/sdk', '@zollify/ui', '@zollify/shared'];
+export const HOST_EXTERNALS = ['vue', 'vue-router', 'dexie', '@zollify/sdk', '@zollify/ui', '@zollify/shared'];
+
+/**
+ * Heavy libraries the shell provides on demand. A module leaves these external
+ * too, but may only reach them with `await import('jspdf')` inside the handler
+ * that needs them - so they are parsed when someone exports a PDF or opens a
+ * spreadsheet, not on every app start. The shell serves one copy to itself and
+ * every module, from its own files, so it works offline.
+ *
+ * Dynamic only, because a shell from before these entries existed has no
+ * import-map line for them: a dynamic import then fails in that one handler,
+ * where it can be caught and explained, while a static import would stop the
+ * whole module from loading. `lazyOnly` below fails the build on a static one.
+ *
+ * The list matches LAZY_HOST_ENTRIES in `apps/web/vite.config.ts`.
+ */
+export const HOST_LAZY_EXTERNALS = ['jspdf', 'jspdf-autotable', 'xlsx'];
+
+const matches = (list, id) => list.includes(id) || list.some((ext) => id.startsWith(`${ext}/`));
+
+/** Fails the build when a bundle statically imports an on-demand host library. */
+function lazyOnly() {
+  return {
+    name: 'zollify:lazy-host-libs',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== 'chunk') continue;
+        const eager = chunk.imports.filter((id) => matches(HOST_LAZY_EXTERNALS, id));
+        if (!eager.length) continue;
+        this.error(
+          `${eager.join(', ')} imported statically - use \`await import()\` in the handler that needs it, ` +
+            'so the module still loads on a shell that does not provide it.',
+        );
+      }
+    },
+  };
+}
 
 /**
  * Folds the module's CSS into its JS bundle.
@@ -71,7 +108,7 @@ function inlineCss(moduleName) {
 export function moduleViteConfig(dir) {
   const moduleName = dir.split(/[\\/]/).pop();
   return {
-    plugins: [vue(), inlineCss(moduleName)],
+    plugins: [vue(), inlineCss(moduleName), lazyOnly()],
     build: {
       target: 'es2022',
       outDir: resolve(dir, 'dist'),
@@ -85,8 +122,7 @@ export function moduleViteConfig(dir) {
         fileName: () => 'bundle.js',
       },
       rollupOptions: {
-        external: (id) =>
-          HOST_EXTERNALS.includes(id) || HOST_EXTERNALS.some((ext) => id.startsWith(`${ext}/`)),
+        external: (id) => matches(HOST_EXTERNALS, id) || matches(HOST_LAZY_EXTERNALS, id),
         output: {
           // One file: the loader fetches exactly one URL per module, so a
           // half-downloaded install cannot leave a module partially present.

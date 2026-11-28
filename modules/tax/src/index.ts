@@ -13,7 +13,7 @@ import { resetState } from './state';
  */
 export default defineModule({
   id: 'tax',
-  version: '0.1.0',
+  version: '0.1.1',
   sdk: '^0.1.0',
   title: 'Tax & books',
   description: 'Payment clustering, myPOS verification, Lexware booking and a per-event ledger.',

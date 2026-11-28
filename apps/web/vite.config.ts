@@ -9,9 +9,18 @@ import { buildStamp } from '../../scripts/build-version.mjs';
  * one chunk between the shell and any runtime module - which is what keeps a
  * single Vue instance across the boundary.
  */
-const HOST_ENTRIES = ['vue', 'dexie', 'sdk', 'ui', 'shared'] as const;
+const HOST_ENTRIES = ['vue', 'vue-router', 'dexie', 'sdk', 'ui', 'shared'] as const;
+
+/**
+ * Heavy libraries a module loads on demand with `await import('jspdf')`, also
+ * published at stable paths for the import map. Nothing in the shell imports
+ * these entries statically, so they are fetched and parsed on first use, never
+ * at startup. The list matches HOST_LAZY_EXTERNALS in scripts/module-vite.mjs.
+ */
+const LAZY_HOST_ENTRIES = ['jspdf', 'jspdf-autotable', 'xlsx'] as const;
+
 const hostInputs = Object.fromEntries(
-  HOST_ENTRIES.map((name) => [`host-${name}`, resolve(__dirname, `src/host/${name}.ts`)]),
+  [...HOST_ENTRIES, ...LAZY_HOST_ENTRIES].map((name) => [`host-${name}`, resolve(__dirname, `src/host/${name}.ts`)]),
 );
 
 /**

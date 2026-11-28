@@ -3,7 +3,7 @@ import { computed, ref } from 'vue';
 import type { Cluster, MatchedEvent } from '../engine/types';
 import { isoDay, monthKey, round2 } from '../engine/types';
 import * as eng from '../engine/clusters';
-import { clusterPdf, download } from '../engine/pdf';
+import { clusterPdf, download, type ReportMode } from '../engine/pdf';
 import { api } from '../api';
 import { bookings, clusters, events, saveWork, status } from '../state';
 import { sdk } from '../runtime';
@@ -145,9 +145,18 @@ async function loadCash(): Promise<void> {
     busy.value = null;
   }
 }
-function pdf(mode: 'payments' | 'fees'): void {
-  const out = clusterPdf(c.value, mode);
-  download(out.bytes, out.filename);
+// The PDF libraries load on the first report, which can take a moment on a
+// slow connection - the button says so rather than looking dead.
+async function pdf(mode: ReportMode): Promise<void> {
+  busy.value = `pdf-${mode}`;
+  try {
+    const out = await clusterPdf(c.value, mode);
+    download(out.bytes, out.filename);
+  } catch (e) {
+    sdk().ui.toast(e instanceof Error ? e.message : String(e), { kind: 'error' });
+  } finally {
+    busy.value = null;
+  }
 }
 </script>
 
@@ -268,8 +277,8 @@ function pdf(mode: 'payments' | 'fees'): void {
       </div>
 
       <div class="row actions">
-        <button type="button" @click="pdf('payments')">{{ c.clusterID }}_P.pdf</button>
-        <button type="button" @click="pdf('fees')">{{ c.clusterID }}_F.pdf</button>
+        <button type="button" :disabled="busy === 'pdf-payments'" @click="pdf('payments')">{{ busy === 'pdf-payments' ? 'Preparing…' : `${c.clusterID}_P.pdf` }}</button>
+        <button type="button" :disabled="busy === 'pdf-fees'" @click="pdf('fees')">{{ busy === 'pdf-fees' ? 'Preparing…' : `${c.clusterID}_F.pdf` }}</button>
         <button type="button" class="quiet" @click="editing ? (editing = false) : startEdit()">{{ editing ? 'Close editor' : 'Edit cluster' }}</button>
       </div>
 

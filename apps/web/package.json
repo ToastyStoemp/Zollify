@@ -1,6 +1,6 @@
 {
   "name": "@zollify/web",
-  "version": "5.5.0",
+  "version": "5.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -43,6 +43,7 @@
     "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "qrcode": "^1.5.4",
     "vue": "^3.5.0",
     "vue-router": "^4.5.0"

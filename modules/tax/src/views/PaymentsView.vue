@@ -4,7 +4,8 @@ import { checkPickedFile } from '@zollify/shared';
 import { monthKey, round2, type Cluster } from '../engine/types';
 import * as eng from '../engine/clusters';
 import { ParseError, fromSourceRow, parseSheet } from '../engine/parse';
-import { clusterPdf, download, monthPdf, toBase64 } from '../engine/pdf';
+import { clusterPdf, download, monthPdf, toBase64, type ReportMode } from '../engine/pdf';
+import { HostLibraryError, loadPdfLibs, loadXlsx } from '../engine/host-libs';
 import { api } from '../api';
 import { bookings, clusters, config, domesticVat, events, loaded, loadWork, clearWork, refreshEvents, refreshStatus, saveWork, status, tidNames } from '../state';
 import { sdk } from '../runtime';
@@ -79,7 +80,7 @@ async function onFile(file: File | undefined): Promise<void> {
   try {
     const problem = await checkPickedFile('spreadsheetImport', file);
     if (problem) throw new ParseError(problem);
-    const XLSX = await import('xlsx');
+    const XLSX = await loadXlsx();
     const isCsv = file.name.toLowerCase().endsWith('.csv');
     const wb = isCsv ? XLSX.read(await file.text(), { type: 'string', raw: true }) : XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
     const sheet = wb.Sheets[wb.SheetNames[0]!]!;
@@ -88,7 +89,7 @@ async function onFile(file: File | undefined): Promise<void> {
     await saveWork(eng.mergeIn(clusters.value, txns));
     notice.value = `Imported ${txns.length} row(s) from a ${format.replace('-', ' ')} file.`;
   } catch (err) {
-    error.value = err instanceof ParseError ? err.message : `Could not read that file: ${err instanceof Error ? err.message : String(err)}`;
+    error.value = err instanceof ParseError || err instanceof HostLibraryError ? err.message : `Could not read that file: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
     busy.value = null;
   }
@@ -206,6 +207,27 @@ async function setAllCash(): Promise<void> {
   notice.value = `Cash set on ${matched.length} cluster(s) - ${fmt(total)} added.`;
 }
 
+/** Lexware's failures carry its name; a PDF library that would not load already says what to do. */
+function bookingError(prefix: string, err: unknown): string {
+  if (err instanceof HostLibraryError) return err.message;
+  return `${prefix}: ${err instanceof Error ? err.message : String(err)}`;
+}
+
+/**
+ * Every voucher carries its report, so without the PDF libraries nothing can
+ * be booked. Asked once before a run of bookings, so that is one clear message
+ * instead of the same failure per cluster.
+ */
+async function pdfLibsReady(): Promise<boolean> {
+  try {
+    await loadPdfLibs();
+    return true;
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+    return false;
+  }
+}
+
 async function book(uid: string): Promise<void> {
   const c = clusters.value.find((x) => x.uid === uid);
   if (!c) return;
@@ -219,12 +241,12 @@ async function book(uid: string): Promise<void> {
   try {
     await api.book({ ...payload, dryRun: true });
     if (!(await sdk().ui.confirm(`Book ${fmt(payload.totalGrossAmount)} as ${payload.voucherNumber} into Lexware?`, 'Book revenue'))) return;
-    const pdf = clusterPdf(c, 'payments');
+    const pdf = await clusterPdf(c, 'payments');
     const res = await api.book({ ...payload, pdfBase64: toBase64(pdf.bytes), filename: pdf.filename, dryRun: false });
     await refreshStatus();
     notice.value = `Booked ${payload.voucherNumber}. ${res.permalink ?? ''}`;
   } catch (err) {
-    error.value = `Lexware: ${err instanceof Error ? err.message : String(err)}`;
+    error.value = bookingError('Lexware', err);
   } finally {
     busy.value = null;
   }
@@ -236,6 +258,10 @@ async function bookAllReady(): Promise<void> {
   const total = round2(ready.reduce((s, c) => s + c.totalPay + (c.cashAmount || 0), 0));
   if (!(await sdk().ui.confirm(`Book ${ready.length} cluster(s) totalling ${fmt(total)} to Lexware? This creates ${ready.length} separate voucher(s).`, 'Book all ready'))) return;
   busy.value = 'book';
+  if (!(await pdfLibsReady())) {
+    busy.value = null;
+    return;
+  }
   let ok = 0;
   const fails: string[] = [];
   for (const c of ready) {
@@ -245,7 +271,7 @@ async function bookAllReady(): Promise<void> {
       continue;
     }
     try {
-      const pdf = clusterPdf(c, 'payments');
+      const pdf = await clusterPdf(c, 'payments');
       await api.book({ ...payload, pdfBase64: toBase64(pdf.bytes), filename: pdf.filename, dryRun: false });
       ok++;
     } catch (err) {
@@ -267,21 +293,31 @@ async function bookFees(key: string): Promise<void> {
   try {
     await api.book({ ...payload, dryRun: true });
     if (!(await sdk().ui.confirm(`Book monthly fees ${fmt(payload.totalGrossAmount)} as ${payload.voucherNumber}?`, 'Book fees'))) return;
-    const pdf = monthPdf(key, clusters.value, 'fees')!;
+    const pdf = (await monthPdf(key, clusters.value, 'fees'))!;
     const res = await api.book({ ...payload, pdfBase64: toBase64(pdf.bytes), filename: pdf.filename, dryRun: false });
     await refreshStatus();
     notice.value = `Fees booked. ${res.permalink ?? ''}`;
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err);
-    error.value = `Lexware fees: ${m}${/category/i.test(m) ? ' - set the fee category under Settings → Integrations.' : ''}`;
+    error.value = `${bookingError('Lexware fees', err)}${/category/i.test(m) ? ' - set the fee category under Settings → Integrations.' : ''}`;
   } finally {
     busy.value = null;
   }
 }
 
-function monthReport(key: string, mode: 'payments' | 'fees'): void {
-  const out = monthPdf(key, clusters.value, mode);
-  if (out) download(out.bytes, out.filename);
+const reportKey = (key: string, mode: ReportMode): string => `report-${key}-${mode}`;
+
+async function monthReport(key: string, mode: ReportMode): Promise<void> {
+  error.value = null;
+  busy.value = reportKey(key, mode);
+  try {
+    const out = await monthPdf(key, clusters.value, mode);
+    if (out) download(out.bytes, out.filename);
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    busy.value = null;
+  }
 }
 </script>
 
@@ -367,8 +403,8 @@ function monthReport(key: string, mode: 'payments' | 'fees'): void {
             <span>Net <strong>{{ fmt(round2(m.pay + m.cash - m.fee)) }}</strong></span>
           </div>
           <div class="mactions">
-            <button type="button" class="quiet" @click="monthReport(m.key, 'payments')">PN_{{ m.key }}_P.pdf</button>
-            <button type="button" class="quiet" @click="monthReport(m.key, 'fees')">PN_{{ m.key }}_F.pdf</button>
+            <button type="button" class="quiet" :disabled="busy === reportKey(m.key, 'payments')" @click="monthReport(m.key, 'payments')">{{ busy === reportKey(m.key, 'payments') ? 'Preparing…' : `PN_${m.key}_P.pdf` }}</button>
+            <button type="button" class="quiet" :disabled="busy === reportKey(m.key, 'fees')" @click="monthReport(m.key, 'fees')">{{ busy === reportKey(m.key, 'fees') ? 'Preparing…' : `PN_${m.key}_F.pdf` }}</button>
             <a v-if="m.feesBooked" class="pill good" :href="`https://app.lexware.de/permalink/vouchers/view/${m.feesBooked.voucherId}`" target="_blank" rel="noopener"><Icon name="check" :size="12" /> Fees booked</a>
             <button v-else-if="canBook && m.fee > 0" type="button" :disabled="busy === 'book'" @click="bookFees(m.key)"><Icon name="send" :size="14" /> {{ busy === 'book' ? 'Booking…' : 'Book fees' }}</button>
           </div>

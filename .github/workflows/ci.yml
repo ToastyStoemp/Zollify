@@ -41,6 +41,35 @@ jobs:
       - name: Build web
         run: npm run build -w @zollify/web
 
+      # After both builds, because it measures their output: the JS index.html
+      # loads at startup and every module's bundle.js, gzipped, against the
+      # budgets in the script. A dependency that lands in the wrong chunk shows
+      # up here rather than as a slow first screen on a tablet at a booth.
+      - name: Check bundle sizes
+        run: node scripts/check-bundle-size.mjs
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Separated from `verify` for the same reason `audit` is: a lint finding
+      # reports as its own failure, and the typecheck, test and build results
+      # are still there to read next to it.
+      #
+      # Fails on errors only. Rules that still have existing hits are warnings
+      # (eslint.config.js); `npm run lint:strict` is the target once they are
+      # burned down.
+      - name: Lint
+        run: npm run lint
+
   audit:
     runs-on: ubuntu-latest
     steps:
@@ -61,3 +90,85 @@ jobs:
       # their access token.
       - name: Audit dependencies
         run: npm audit --audit-level=moderate
+
+  # Whether a pull request touches anything the native Android build reads.
+  # The list mirrors the `paths` filter of android.yml (the release build),
+  # plus the script `android:sync` runs and this workflow itself.
+  #
+  # A job-level decision rather than a workflow `paths` filter, so the workflow
+  # always runs and `android-compile` reports as skipped instead of never
+  # appearing - a check that never appears cannot be made required.
+  native-changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      native: ${{ steps.diff.outputs.native }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE...$HEAD")
+          echo "$changed"
+          if echo "$changed" | grep -qE '^(android/|capacitor\.config\.ts$|package\.json$|package-lock\.json$|scripts/carbon-plugins\.mjs$|scripts/bump-android-version\.mjs$|\.github/workflows/(ci|android)\.yml$)'; then
+            echo "native=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "native=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Compiles the native code of all three flavours on the pull request.
+  # android.yml only runs on push to master, so without this a Kotlin compile
+  # error is first seen when the release build fails after the merge.
+  #
+  # Setup follows android.yml step for step (Java 21, the runner's own Android
+  # SDK, `npm run android:sync` to generate the Capacitor Gradle projects);
+  # only the Gradle task differs. No secrets: a debug variant needs no
+  # keystore, and without google-services.json the build simply skips push.
+  android-compile:
+    needs: native-changes
+    if: needs.native-changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Never writes the Gradle cache from a pull request's default settings
+      # (setup-gradle only saves it on the default branch), but does restore
+      # the one the release build saved.
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+
+      - run: npm ci
+
+      # `npx cap sync` needs the built web app as its webDir and writes the
+      # capacitor-cordova-android-plugins project settings.gradle includes.
+      - name: Build web and sync
+        run: npm run android:sync
+
+      # compile<Flavour>DebugJavaWithJavac depends on the flavour's Kotlin
+      # compile, and on the merged manifest and resources before that - so it
+      # catches Kotlin errors, errors in MainActivity.java and a manifest or
+      # minSdk conflict from a flavour's own SDK, without paying for dexing
+      # and packaging three APKs as assembleDebug would.
+      - name: Compile all flavours
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:compileFullDebugJavaWithJavac :app:compileCompatDebugJavaWithJavac :app:compileCarbonDebugJavaWithJavac --console=plain

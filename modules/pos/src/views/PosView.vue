@@ -58,10 +58,12 @@ import { useBarcodeScanner } from '../composables/useBarcodeScanner';
 import { useCartLines } from '../composables/useCartLines';
 import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
 import ScannerModal from '../components/ScannerModal.vue';
+import { useAfterSale } from '../composables/useAfterSale';
 import { useAddToCart } from '../composables/useAddToCart';
 import { useCustomerDisplay } from '../composables/useCustomerDisplay';
 import { useFollowTillEvent } from '../composables/useFollowTillEvent';
 import { useLastSale } from '../composables/useLastSale';
+import { useReceiptPrint } from '../composables/useReceiptPrint';
 import { usePaymentFlow } from '../composables/usePaymentFlow';
 import { useScanSubmit } from '../composables/useScanSubmit';
 import { useSeller } from '../composables/useSeller';
@@ -252,101 +254,9 @@ function finish(sale: SaleEvent, message: string, test = false): void {
   void autoPrint(sale.saleId);
 }
 
-// ── After the sale: thank-you and receipt QR on this screen ─────────────────
-// Device-local choices (Settings → This device), independent of what any
-// customer display on the account shows.
-const afterSale = ref<{
-  saleId: string;
-  thankYou: boolean;
-  total: string;
-  receiptUrl?: string;
-  logo?: string;
-  /** This device has a printer: the Carbon's built-in one, or a paired Bluetooth printer. */
-  canPrint: boolean;
-  print: PrintState;
-} | null>(null);
-let afterSaleTimer: ReturnType<typeof setTimeout> | undefined;
-function holdAfterSale(ms: number): void {
-  clearTimeout(afterSaleTimer);
-  afterSaleTimer = setTimeout(dismissAfterSale, ms);
-}
-/**
- * The logo as last seen, so the next thank-you screen has it at once. The
- * screen never waits for it: everything else it shows is on the device (the
- * receipt link is made here, before any sync), and a logo that arrives late
- * just appears.
- */
-let knownLogo: string | undefined;
-function refreshLogo(): Promise<string | undefined> {
-  return screenLogo()
-    .catch(() => undefined)
-    .then((l) => (knownLogo = l ?? knownLogo));
-}
-async function showAfterSale(sale: SaleEvent, receiptUrl: string | undefined): Promise<void> {
-  const [prefs, canPrint] = await Promise.all([afterSalePrefs(), printingAvailable().catch(() => false)]);
-  const url = prefs.receiptQr ? receiptUrl : undefined;
-  if (!prefs.thankYou && !url) return;
-  // An auto-print may already be under way by the time this resolves.
-  const print = printing.get(sale.saleId) ?? 'idle';
-  afterSale.value = { saleId: sale.saleId, thankYou: prefs.thankYou, total: fmtPrice(sale.total, sale.currency), receiptUrl: url, logo: knownLogo, canPrint, print };
-  if (!knownLogo) {
-    void refreshLogo().then((l) => {
-      if (l && afterSale.value?.saleId === sale.saleId) afterSale.value.logo = l;
-    });
-  }
-  // Offering to print means waiting for an answer, same as a QR to scan.
-  holdAfterSale(url || canPrint ? 30_000 : 4000);
-}
-async function printFromAfterSale(): Promise<void> {
-  const shown = afterSale.value;
-  if (!shown || shown.print === 'printing') return;
-  // Don't vanish mid-print, and leave a moment to tear the paper off.
-  holdAfterSale(30_000);
-  await printSale(shown.saleId);
-}
-function dismissAfterSale(): void {
-  clearTimeout(afterSaleTimer);
-  afterSale.value = null;
-}
-// The next customer's first item is as good as a tap on "Next sale".
-watch(() => cart.lines.length, (n) => { if (n > 0) dismissAfterSale(); });
-onUnmounted(() => clearTimeout(afterSaleTimer));
-
-/** Prints the receipt on the paired printer when Settings asks for it; never blocks the till. */
-async function autoPrint(saleId: string): Promise<void> {
-  const config = await loadReceiptConfig().catch(() => null);
-  if (!config?.autoPrint || !(await printingAvailable().catch(() => false))) return;
-  await printSale(saleId);
-}
-
-/** Print state per sale, so the thank-you screen can show an auto-print's progress too. */
-const printing = new Map<string, PrintState>();
-function setPrintState(saleId: string, state: PrintState): void {
-  printing.set(saleId, state);
-  if (afterSale.value?.saleId === saleId) afterSale.value.print = state;
-}
-
-/** Prints one sale's receipt on this device's printer; reports trouble as a toast, never throws. */
-async function printSale(saleId: string): Promise<void> {
-  if (printing.get(saleId) === 'printing') return;
-  setPrintState(saleId, 'printing');
-  try {
-    // The row is written by core a tick after the event fires.
-    let tx = sdk().data.transactions.get(saleId);
-    for (let i = 0; !tx && i < 10; i++) {
-      await new Promise((r) => setTimeout(r, 100));
-      tx = sdk().data.transactions.get(saleId);
-    }
-    if (!tx) throw new Error('sale not recorded yet');
-    const result = await printReceipt(await printableReceipt(tx, activeEvent.value?.name ?? '', activeEvent.value?.venue?.country));
-    setPrintState(saleId, result.printed ? 'printed' : 'failed');
-    if (!result.printed) toast(`Receipt: ${result.error ?? 'print failed'}`, 'bad');
-  } catch (err) {
-    setPrintState(saleId, 'failed');
-    toast(`Receipt: ${err instanceof Error ? err.message : String(err)}`, 'bad');
-  }
-}
-
+// ── After the sale: thank-you and receipt QR on this screen, and the receipt on paper ──
+const { autoPrint, printSale, printState } = useReceiptPrint({ activeEvent, toast, onState: (saleId, state) => notePrintState(saleId, state) });
+const { afterSale, refreshLogo, showAfterSale, printFromAfterSale, dismissAfterSale, notePrintState } = useAfterSale({ printSale, printState });
 </script>
 
 <template>

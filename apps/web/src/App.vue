@@ -535,9 +535,11 @@ nav { flex: 1; }
 /* Clears both the app's own bottom tab bar (--zfy-bottom-nav, 0 where it
    doesn't exist) and the phone's own gesture-nav bar underneath that -
    without the safe-area term this sat right on top of the gesture bar even
-   with no tab bar in the way (e.g. on the till). */
+   with no tab bar in the way (e.g. on the till).
+   On the toast layer: with no z-index of its own this sat behind every open
+   dialog, so "Could not save" was never seen by the person saving. */
 .toasts {
-  position: fixed; right: 1rem;
+  position: fixed; right: 1rem; z-index: var(--zfy-z-toast, 100);
   bottom: calc(1rem + var(--zfy-bottom-nav, 0px) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
   display: flex; flex-direction: column; gap: .5rem;
 }

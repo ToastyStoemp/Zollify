@@ -101,7 +101,7 @@ function onBlur(): void {
 .picker { position: relative; }
 .picker input { width: 100%; }
 .picker input.upper { text-transform: uppercase; }
-.menu { position: absolute; left: 0; right: 0; top: 100%; z-index: 40; margin-top: .25rem; max-height: 14rem; overflow-y: auto; border-radius: 10px; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); box-shadow: 0 12px 28px -12px var(--zfy-shadow, rgba(20,26,34,.35)); }
+.menu { position: absolute; left: 0; right: 0; top: 100%; z-index: var(--zfy-z-popover, 40); margin-top: .25rem; max-height: 14rem; overflow-y: auto; border-radius: 10px; background: var(--zfy-surface, #fff); border: 1px solid var(--zfy-line, #d6dde4); box-shadow: 0 12px 28px -12px var(--zfy-shadow, rgba(20,26,34,.35)); }
 .menu button { display: flex; align-items: center; gap: .5rem; width: 100%; min-height: 2.1rem; padding: .3rem .7rem; text-align: left; border: 0; border-radius: 0; background: none; font-size: .875rem; color: var(--zfy-ink, #1a2230); }
 .menu button:hover, .menu button.focus { background: var(--zfy-bg, #f1f4f6); }
 .code { flex: 0 0 2.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .75rem; color: var(--zfy-accent-ink, #0a5a4a); }

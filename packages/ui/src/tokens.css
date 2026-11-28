@@ -43,6 +43,25 @@
   /* ── Type ─────────────────────────────────────────────── */
   --zfy-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
+  /* ── Layers ───────────────────────────────────────────────
+   * Who covers whom, bottom to top. A new overlay picks a layer here rather
+   * than a number of its own - a toast with no layer sat behind every dialog.
+   * The gaps are room for the ad-hoc values that predate the scale.
+   *   nav      the shell's own chrome: top bar, bottom tabs, their menus
+   *   modal    ModalShell - an editor or a picker sheet over the page
+   *   popover  a dropdown opened from inside a modal (TypeaheadPicker)
+   *   confirm  the one shared "are you sure?" - asked from inside a modal
+   *   overlay  a full-screen takeover: customer display, after-sale screen
+   *   toast    "Saved", "Could not save" - must be readable over all of the above
+   *   lock     the till lock: covers everything, toasts included            */
+  --zfy-z-nav: 10;
+  --zfy-z-modal: 30;
+  --zfy-z-popover: 40;
+  --zfy-z-confirm: 50;
+  --zfy-z-overlay: 70;
+  --zfy-z-toast: 100;
+  --zfy-z-lock: 900;
+
   color-scheme: light;
 }
 

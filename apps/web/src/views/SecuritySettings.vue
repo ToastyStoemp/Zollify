@@ -286,6 +286,13 @@ onMounted(async () => {
       </p>
       <button v-if="!showDanger" type="button" class="danger" @click="showDanger = true">{{ isAdmin ? 'Delete account & all data…' : 'Delete my login…' }}</button>
       <form v-else class="form" @submit.prevent="confirmDelete">
+        <!-- The server's copy of the books goes with the account; keeping them is the business's own duty. -->
+        <div v-if="isAdmin" class="notice">
+          <p><strong>Save your records first.</strong> Deleting removes your sales and bookkeeping records from Zollify for good - we cannot bring them back.</p>
+          <p>Most countries have a business keep its sales records for years after the sale (often 7 to 10). That duty stays with you after the account is gone.</p>
+          <p>Export a backup with all sales, and save anything you keep in other pages - invoices, the expense ledger - from those pages.</p>
+          <router-link :to="{ name: 'settings', query: { panel: 'core.data' } }" class="btn"><Icon name="download" :size="14" /> Open Backup &amp; restore</router-link>
+        </div>
         <p class="hint">Confirm your password and type <code>DELETE</code> to proceed.</p>
         <input v-model="password" type="password" autocomplete="current-password" placeholder="Your password" aria-label="Password" />
         <input v-if="isAdmin && twofaEnabled" v-model="deleteCode" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="Authenticator code" aria-label="Authenticator code" />
@@ -321,6 +328,8 @@ h3 { margin: 0; font-size: .95rem; }
 .main em { font-style: normal; font-weight: 500; font-size: .66rem; margin-left: .35rem; padding: .05rem .35rem; border-radius: 4px; background: var(--zfy-accent-soft, #deeee9); color: var(--zfy-accent-ink, #0a5a4a); vertical-align: middle; }
 .main small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .form { display: flex; flex-direction: column; gap: .5rem; width: 100%; max-width: 22rem; }
+.notice { display: flex; flex-direction: column; gap: .45rem; align-items: flex-start; padding: .7rem .8rem; border-radius: 8px; background: var(--zfy-bg, #f1f4f6); font-size: .85rem; }
+.notice p { margin: 0; }
 .signout { align-self: flex-start; }
 .btn { display: inline-flex; align-items: center; gap: .35rem; min-height: 2.5rem; padding: .45rem .95rem; border-radius: 8px; border: 1px solid var(--zfy-line, #d6dde4); background: var(--zfy-surface, #fff); color: inherit; text-decoration: none; font-weight: 500; font-size: .875rem; }
 .btn:hover { background: var(--zfy-surface-2, #e9edf1); }

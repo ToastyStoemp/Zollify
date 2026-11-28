@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, isStore, round2, splitCashPortionAmounts } from '@zollify/shared';
+import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, round2, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
@@ -55,9 +55,12 @@ import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
+import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
 import { useSeller } from '../composables/useSeller';
+import { useStock } from '../composables/useStock';
 import { useTerminal } from '../composables/useTerminal';
 import { useTillEvent } from '../composables/useTillEvent';
+import { useTillMoney } from '../composables/useTillMoney';
 import { useToast } from '../composables/useToast';
 
 /**
@@ -108,164 +111,11 @@ onMounted(async () => {
 });
 onUnmounted(() => clearInterval(heartbeat));
 
-const currency = computed(() => cart.currency);
-const money = (n: number): string => fmtPrice(n, currency.value);
-const price = (pid: string, vid: string | null, base: number): string => money(localPrice(pid, vid, base));
+const { currency, money, price, fromPrice, onCard, cardRateLabel } = useTillMoney();
 
-/** "32.15 EUR on the card" for a local amount, when cards are charged in the base currency. */
-function onCard(localAmount: number): string {
-  const s = cardSettlement(localAmount);
-  return s ? fmtPrice(s.amount, s.currency) : '';
-}
-const cardRateLabel = computed(() => {
-  if (!cardFx.rate) return '';
-  const age = Date.now() - cardFx.at > 86_400_000 ? ` · rate from ${new Date(cardFx.at).toLocaleDateString()}` : '';
-  return `1 ${cart.baseCurrency} = ${cardFx.rate.toFixed(4)} ${cart.currency}${age}`;
-});
+const { stockLabel, productInCart, productLeft } = useStock(activeEvent);
 
-// ── Stock ───────────────────────────────────────────────────────────────────
-const availability = computed(() => {
-  const event = activeEvent.value;
-  if (!event) return new Map<string, number>();
-  const inv = sdk().data.inventory;
-  // An item never counted and not claimed has no known stock: no figure rather
-  // than "3 over stock" for every sale of it.
-  return new Map(
-    inv
-      .availability(event.id)
-      .filter((r) => r.source === 'claim' || inv.counted(r.productId, r.variantId))
-      .map((r) => [`${r.productId}:${r.variantId}`, r.available]),
-  );
-});
-function remaining(pid: string, vid: string | null): number | null {
-  if (!activeEvent.value) return null;
-  const left = availability.value.get(`${pid}:${vid ?? ''}`);
-  return left === undefined ? null : left - inCart(pid, vid);
-}
-function stockLabel(pid: string, vid: string | null): { text: string; cls: string } {
-  const left = remaining(pid, vid);
-  if (left === null) return { text: '', cls: '' };
-  if (left < 0) return { text: `${-left} over stock`, cls: 'bad' };
-  if (left === 0) return { text: 'Out of stock', cls: 'bad' };
-  if (left <= 3) return { text: `${left} left`, cls: 'warn' };
-  return { text: `${left} in stock`, cls: 'muted' };
-}
-const productInCart = (p: Product): number => (p.variants?.length ? p.variants.reduce((s, v) => s + inCart(p.id, v.id), 0) : inCart(p.id, null));
-/** Units still sellable across a product's sizes; null when no event is active. */
-function productLeft(p: Product): number | null {
-  if (!activeEvent.value) return null;
-  const keys = p.variants?.length ? p.variants.map((v) => v.id) : [null];
-  return keys.reduce((s, vid) => s + Math.max(0, remaining(p.id, vid) ?? 0), 0);
-}
-
-// ── Browsing: by artist, by type, or flat ───────────────────────────────────
-// A store's till sells many artists' work, so it opens by artist; a booth's
-// till sells one artist's and opens by type. Each remembers its own choice.
-type ViewMode = 'flat' | 'grouped' | 'artists';
-const VIEW_KEY = 'zollify.pos.view';
-const STORE_VIEW_KEY = 'zollify.pos.view.store';
-const readMode = (key: string): ViewMode | null => {
-  try {
-    const v = localStorage.getItem(key);
-    return v === 'flat' || v === 'grouped' || v === 'artists' ? v : null;
-  } catch {
-    return null;
-  }
-};
-const boothMode = ref<ViewMode>(readMode(VIEW_KEY) === 'flat' ? 'flat' : 'grouped');
-const storeMode = ref<ViewMode>(readMode(STORE_VIEW_KEY) ?? 'artists');
-const atStore = computed(() => isStore(activeEvent.value));
-/** Whether this business runs stores at all: decides where "open one" points. */
-const sellsStores = computed(() => Boolean(sdk().account()?.profile.sells?.stores) || sdk().data.events.list().some((e) => isStore(e) && !e.deletedAt));
-/** Artists only mean something when the catalogue has their work in it. */
-const hasArtists = computed(() => products.value.some((p) => p.consignorId));
-const viewMode = computed<ViewMode>(() => {
-  const mode = atStore.value ? storeMode.value : boothMode.value;
-  return mode === 'artists' && !hasArtists.value ? 'grouped' : mode;
-});
-/** The browse modes on offer, for the pills (wide) and the single picker (narrow). */
-const viewModes = computed<{ id: ViewMode; label: string; icon: string }[]>(() => [
-  ...(atStore.value && hasArtists.value ? [{ id: 'artists' as ViewMode, label: 'Artists', icon: 'users' }] : []),
-  { id: 'flat' as ViewMode, label: 'All', icon: 'package' },
-  { id: 'grouped' as ViewMode, label: 'Types', icon: 'layers' },
-]);
-const currentMode = computed(() => viewModes.value.find((m) => m.id === viewMode.value) ?? viewModes.value[0]!);
-function setViewMode(mode: ViewMode): void {
-  if (atStore.value) storeMode.value = mode;
-  else boothMode.value = mode;
-  openArtist.value = null;
-  try {
-    localStorage.setItem(atStore.value ? STORE_VIEW_KEY : VIEW_KEY, mode);
-  } catch {
-    /* no storage */
-  }
-}
-
-/** The artist being browsed, by consignor id; '' = the store's own items. */
-const openArtist = ref<string | null>(null);
-watch(() => activeEvent.value?.id, () => (openArtist.value = null));
-const artistKey = (p: Product): string => p.consignorId ?? '';
-interface ArtistGroup {
-  key: string;
-  name: string;
-  products: Product[];
-  stock: number | null;
-  inCart: number;
-}
-const artistGroups = computed<ArtistGroup[]>(() => {
-  const map = new Map<string, Product[]>();
-  for (const p of products.value) (map.get(artistKey(p)) ?? map.set(artistKey(p), []).get(artistKey(p))!).push(p);
-  const own = sdk().account()?.accountName || 'Our own';
-  return [...map.entries()]
-    .map(([key, list]) => ({
-      key,
-      name: key ? (list.find((p) => p.consignorName)?.consignorName ?? 'Artist') : own,
-      products: list,
-      stock: activeEvent.value ? list.reduce((s, p) => s + (productLeft(p) ?? 0), 0) : null,
-      inCart: list.reduce((s, p) => s + productInCart(p), 0),
-    }))
-    .sort((a, b) => Number(!a.key) - Number(!b.key) || a.name.localeCompare(b.name));
-});
-const openArtistName = computed(() => artistGroups.value.find((g) => g.key === openArtist.value)?.name ?? '');
-/** What the type grouping works on: one artist's items while browsing by artist. */
-const scoped = computed(() => (viewMode.value === 'artists' && openArtist.value !== null ? products.value.filter((p) => artistKey(p) === openArtist.value) : products.value));
-
-const filtered = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  if (!q) return products.value;
-  return products.value.filter((p) =>
-    [p.title, p.sku, p.type, ...(p.variants ?? []).flatMap((v) => [v.name, v.sku])].filter(Boolean).join(' ').toLowerCase().includes(q),
-  );
-});
-/** Searching always shows flat results; grouping is for browsing. */
-const grouped = computed(() => viewMode.value !== 'flat' && !search.value.trim());
-
-interface TypeGroup {
-  type: string;
-  products: Product[];
-  stock: number | null;
-  inCart: number;
-}
-const typeGroups = computed<TypeGroup[]>(() => {
-  const map = new Map<string, Product[]>();
-  for (const p of scoped.value) (map.get(p.type || '(no type)') ?? map.set(p.type || '(no type)', []).get(p.type || '(no type)')!).push(p);
-  return [...map.entries()].map(([type, list]) => ({
-    type,
-    products: list,
-    stock: activeEvent.value ? list.reduce((s, p) => s + (productLeft(p) ?? 0), 0) : null,
-    inCart: list.reduce((s, p) => s + productInCart(p), 0),
-  }));
-});
-type Entry = { key: string; product: Product } | { key: string; group: TypeGroup } | { key: string; artist: ArtistGroup };
-const entries = computed<Entry[]>(() => {
-  if (!grouped.value) return filtered.value.map((p) => ({ key: p.id, product: p }));
-  if (viewMode.value === 'artists' && openArtist.value === null && artistGroups.value.length > 1) {
-    return artistGroups.value.map((g) => ({ key: `a:${g.key}`, artist: g }));
-  }
-  return typeGroups.value.map((g) => (g.products.length === 1 ? { key: g.products[0]!.id, product: g.products[0]! } : { key: `t:${g.type}`, group: g }));
-});
-const openType = ref<string | null>(null);
-const typeProducts = computed(() => (openType.value === null ? [] : scoped.value.filter((p) => (p.type || '(no type)') === openType.value)));
+const { atStore, sellsStores, viewMode, viewModes, currentMode, setViewMode, openArtist, openArtistName, grouped, entries, openType, typeProducts } = useCatalogBrowse({ search, products, activeEvent, productLeft, productInCart });
 
 // A short beep via WebAudio rather than an audio file - no asset to ship,
 // and it needs no user gesture beyond the one already opening the search/scan
@@ -532,8 +382,6 @@ function bundleQtys(p: Product, vid: string | null = null): number[] {
 function addBundle(pid: string, vid: string | null, qty: number): void {
   for (let i = 0; i < qty; i++) add(pid, vid);
 }
-
-const fromPrice = (p: Product): string => `from ${money(Math.min(...(p.variants ?? []).map((v) => localPrice(p.id, v.id, v.price ?? p.price))))}`;
 
 // ── Cart ────────────────────────────────────────────────────────────────────
 const showCartSheet = ref(false);

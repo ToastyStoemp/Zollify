@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { MergeSource, Product, ProductMerge, Variant } from '@zollify/shared';
 import { HS_CODES, checkPickedFile, crossesCustomsBorder, csvCell, fmtPrice, localIsoDay } from '@zollify/shared';
-import { CountryPicker, Icon, ModalShell, TypeaheadPicker, typeColor } from '@zollify/ui';
+import { CountryPicker, Icon, ModalShell, TypeaheadPicker, ZButton, errorText, typeColor, useAsyncAction } from '@zollify/ui';
 import { contributions } from '../boot';
 import {
   activeEventId,
@@ -205,16 +205,30 @@ async function runMerge(): Promise<void> {
 
 // ── Reorder: the global sortOrder drives the till grid ──────────────────────
 const reordering = ref(false);
-async function move(pid: string, dir: -1 | 1): Promise<void> {
+/** The catalogue with one product moved a place up or down, or null when it is already at that end. */
+function reordered(pid: string, dir: -1 | 1): Product[] | null {
   const list = [...allProducts.value];
   const i = list.findIndex((p) => p.id === pid);
   const j = i + dir;
-  if (i < 0 || j < 0 || j >= list.length) return;
+  if (i < 0 || j < 0 || j >= list.length) return null;
   const [moved] = list.splice(i, 1);
   list.splice(j, 0, moved!);
-  // Renumber; only products whose position changed are written.
-  for (let k = 0; k < list.length; k++) if (list[k]!.sortOrder !== k) await upsertProduct({ ...list[k]!, sortOrder: k });
+  return list;
 }
+/** Renumbers to match the list; only products whose position changed are written. */
+async function writeOrder(list: Product[]): Promise<void> {
+  for (const [k, p] of list.entries()) if (p.sortOrder !== k) await upsertProduct({ ...p, sortOrder: k });
+}
+// One move at a time: a second tap while the first was still writing started
+// a second renumbering from a half-written list, and the two interleaved.
+const moving = useAsyncAction(
+  async (pid: string, dir: -1 | 1) => {
+    const list = reordered(pid, dir);
+    if (list) await writeOrder(list);
+  },
+  { fallback: 'Could not save the new order.', onError: (message) => (error.value = message) },
+);
+const move = moving.run;
 
 const OWN_STOCK = 'Own stock';
 /** Grouped by type, matching the till - or by artist, with the store's own stock as one group. */
@@ -498,7 +512,7 @@ async function save(): Promise<void> {
     }
     editing.value = false;
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Could not save that product.';
+    error.value = errorText(err, 'Could not save that product.');
   }
 }
 
@@ -627,8 +641,8 @@ async function remove(product: Product): Promise<void> {
         <li v-for="(p, i) in allProducts" :key="p.id">
           <ProductThumb :image-id="p.imageId" :alt="p.title" :size="32" />
           <span class="main"><span class="title">{{ p.title || '(untitled)' }}</span><small v-if="p.type" :style="{ color: typeColor(p.type) }">{{ p.type }}</small></span>
-          <button type="button" class="quiet" :disabled="i === 0" aria-label="Move up" @click="move(p.id, -1)"><Icon name="arrow-up" :size="14" /></button>
-          <button type="button" class="quiet" :disabled="i === allProducts.length - 1" aria-label="Move down" @click="move(p.id, 1)"><Icon name="arrow-down" :size="14" /></button>
+          <button type="button" class="quiet" :disabled="i === 0" :aria-busy="moving.busy.value || undefined" aria-label="Move up" @click="move(p.id, -1)"><Icon name="arrow-up" :size="14" /></button>
+          <button type="button" class="quiet" :disabled="i === allProducts.length - 1" :aria-busy="moving.busy.value || undefined" aria-label="Move down" @click="move(p.id, 1)"><Icon name="arrow-down" :size="14" /></button>
         </li>
       </ul>
     </ModalShell>
@@ -748,7 +762,7 @@ async function remove(product: Product): Promise<void> {
           <button v-if="existing" type="button" class="quiet" @click="duplicate(existing)"><Icon name="copy" :size="14" /> Duplicate</button>
           <span class="spacer"></span>
           <button type="button" @click="editing = false">Cancel</button>
-          <button type="button" class="primary" @click="save">Save</button>
+          <ZButton variant="primary" :action="save">Save</ZButton>
         </div>
       </template>
     </ModalShell>

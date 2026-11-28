@@ -7,7 +7,7 @@ import BoothLayoutModal from './BoothLayoutModal.vue';
 import EventNotesModal from './EventNotesModal.vue';
 import EventSeriesModal from '../components/EventSeriesModal.vue';
 import StoreSetupWizard from '../components/StoreSetupWizard.vue';
-import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell } from '@zollify/ui';
+import { CountryPicker, CurrencyPicker, DateRangePicker, Icon, ModalShell, ZButton, errorText } from '@zollify/ui';
 import {
   autoEventSettings,
   loadAutoEventSettings,
@@ -149,25 +149,30 @@ function pill(e: SalesEvent): { cls: string; label: string } {
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
+/** Runs the work and shows what went wrong. Never rejects, so it is the outermost call only - work that depends on other work awaits that work itself, not a guard around it. */
 async function guard(work: () => Promise<void>): Promise<void> {
   error.value = null;
   try {
     await work();
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'Something went wrong.';
+    error.value = errorText(err);
   }
 }
-const activate = (e: SalesEvent) =>
-  guard(async () => {
-    if (e.status !== 'active') {
-      if (!canEdit.value) throw new Error('Only an owner or admin can open this event.');
-      await upsertSalesEvent({ ...e, status: 'active' });
-    }
-    await setActiveEvent(e.id);
-  });
+/** Puts the event on the till, opening it first if need be. Throws when it cannot. */
+async function putOnTill(e: SalesEvent): Promise<void> {
+  if (e.status !== 'active') {
+    if (!canEdit.value) throw new Error('Only an owner or admin can open this event.');
+    await upsertSalesEvent({ ...e, status: 'active' });
+  }
+  await setActiveEvent(e.id);
+}
+const activate = (e: SalesEvent) => guard(() => putOnTill(e));
+// The till opens only once the event is on it: a failure here used to be
+// swallowed by a nested guard, and the seller landed on the till selling
+// into the wrong event with the error left behind on this page.
 const sell = (e: SalesEvent) =>
   guard(async () => {
-    await activate(e);
+    await putOnTill(e);
     if (hasRoute('pos:index')) await router.push({ name: 'pos:index' });
   });
 async function close(e: SalesEvent): Promise<void> {
@@ -550,7 +555,7 @@ async function save(): Promise<void> {
       else for (const row of claimsForEvent(form.copyStockFrom)) await setClaim(event.id, row.productId, row.variantId, row.broughtQty);
     }
     editing.value = false;
-    if (!existing && !activeEventId.value) await activate(event);
+    if (!existing && !activeEventId.value) await putOnTill(event);
   });
 }
 </script>
@@ -757,7 +762,7 @@ async function save(): Promise<void> {
       <template #footer>
         <div class="footer">
           <button type="button" @click="editing = false">Cancel</button>
-          <button type="button" class="primary" :disabled="!form.name.trim()" @click="save">{{ editId ? 'Save' : 'Create' }}</button>
+          <ZButton variant="primary" :disabled="!form.name.trim()" :action="save">{{ editId ? 'Save' : 'Create' }}</ZButton>
         </div>
       </template>
     </ModalShell>

@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import type { DiscountRule } from '@zollify/shared';
 import { fmtPrice } from '@zollify/shared';
-import { Icon, ModalShell, typeColor } from '@zollify/ui';
+import { Icon, ModalShell, ZButton, errorText, typeColor } from '@zollify/ui';
 import {
   allDiscounts,
   allProducts,
@@ -187,7 +187,7 @@ async function save(): Promise<void> {
     await upsertDiscount(rule);
     editing.value = false;
   } catch (err) {
-    fail(err instanceof Error ? err.message : 'Could not save that rule.');
+    fail(errorText(err, 'Could not save that rule.'));
   }
 }
 function fail(message: string): void {
@@ -357,7 +357,7 @@ const removable = (d: DiscountRule): boolean => !d.managedBy || d.managedBy === 
           <button v-if="editId" type="button" class="danger" @click="remove(allDiscounts.find((d) => d.id === editId)!)">Remove</button>
           <span class="spacer"></span>
           <button type="button" @click="editing = false">Cancel</button>
-          <button type="button" class="primary" @click="save">Save</button>
+          <ZButton variant="primary" :action="save">Save</ZButton>
         </div>
       </template>
     </ModalShell>

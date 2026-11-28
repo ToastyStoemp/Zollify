@@ -55,12 +55,16 @@ import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintStat
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
 import { useBarcodeScanner } from '../composables/useBarcodeScanner';
+import { useCartLines } from '../composables/useCartLines';
 import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
 import ScannerModal from '../components/ScannerModal.vue';
 import { useAddToCart } from '../composables/useAddToCart';
+import { useCustomerDisplay } from '../composables/useCustomerDisplay';
+import { useLastSale } from '../composables/useLastSale';
 import { useScanSubmit } from '../composables/useScanSubmit';
 import { useSeller } from '../composables/useSeller';
 import { useStock } from '../composables/useStock';
+import { useTillActions } from '../composables/useTillActions';
 import { useTerminal } from '../composables/useTerminal';
 import { useTillEvent } from '../composables/useTillEvent';
 import { useTillMoney } from '../composables/useTillMoney';
@@ -112,7 +116,6 @@ onMounted(async () => {
   void refreshTerminalStatus();
   startStatusPolling();
 });
-onUnmounted(() => clearInterval(heartbeat));
 
 const { currency, money, price, fromPrice, onCard, cardRateLabel } = useTillMoney();
 
@@ -132,12 +135,7 @@ const { scannerOpen, scannerError, scannerInfo, setScannerVideo, cameraDeviceId,
 
 // ── Cart ────────────────────────────────────────────────────────────────────
 const showCartSheet = ref(false);
-const lines = computed(() =>
-  cart.lines.map((l) => {
-    const chargedUnit = chargedUnitPrice(l);
-    return { ...l, chargedUnit, chargedTotal: round2(chargedUnit * l.qty) };
-  }),
-);
+const lines = useCartLines();
 
 /**
  * The VAT inside the total, per rate, when the event charges VAT - so a seller
@@ -199,42 +197,7 @@ function giveAwayCart(): void {
 }
 
 // ── What other modules add to the till (a workshop place, say) ─────────────
-const tillActions = computed(() => sdk().till.actions());
-const tillButtons = computed(() => tillActions.value.filter((a) => !a.tile));
-const tillTiles = computed(() => visibleTileActions(tillActions.value, search.value, viewMode.value === 'artists' && openArtist.value !== null));
-const openAction = shallowRef<{ action: TillAction; view: Component; focus: string | null } | null>(null);
-function runAction(action: TillAction, focus: string | null = null): void {
-  openAction.value = { action, view: defineAsyncComponent(action.component as () => Promise<Component>), focus };
-}
-// A link naming one of these actions (see lib/till-link) opens it once, then
-// drops the query so a reload or Back does not open it again.
-const route = useRoute();
-watch(
-  [() => route.query, tillActions],
-  ([query, actions]) => {
-    const link = tillLinkFrom(query, actions);
-    if (!link) return;
-    runAction(link.action, link.focus);
-    const { action: _a, focus: _f, ...rest } = query;
-    void router.replace({ query: rest });
-  },
-  { immediate: true },
-);
-const offTill = sdk().till.onAddLine((line) => {
-  if (!activeEvent.value) {
-    toast('Pick an active event first (Events).', 'bad');
-    return false;
-  }
-  return addModuleLine(line);
-});
-const offTillLines = sdk().till.onLineAccess({ find: findModuleLine, replace: replaceModuleLine });
-// What the sale comes to, for a module pricing a reward (loyalty) against it.
-const offTillTotal = sdk().till.onTotal?.(() => ({ total: total.value, currency: currency.value }));
-onUnmounted(() => {
-  offTill();
-  offTillLines();
-  offTillTotal?.();
-});
+const { tillButtons, tillTiles, openAction, runAction } = useTillActions({ search, viewMode, openArtist, activeEvent, currency, toast });
 
 const showMisc = ref(false);
 const miscForm = reactive({ title: '', price: '', qty: '1' });
@@ -252,39 +215,7 @@ function addMiscItem(): void {
 }
 
 // ── Customer display: mirror the cart on the account's other screens ───────
-let publishTimer: ReturnType<typeof setTimeout> | undefined;
-function publish(paid?: { total: number; receiptUrl?: string }): void {
-  sdk().display.publish({
-    deviceName: '',
-    eventName: activeEvent.value?.name ?? '',
-    currency: currency.value,
-    lines: paid ? [] : lines.value.map((l) => ({ title: l.name, variantLabel: l.variantLabel ?? undefined, qty: l.qty, lineTotal: l.chargedTotal })),
-    discounts: paid
-      ? []
-      : [...appliedDiscounts.value.map((r) => ({ name: r.rule.name, amount: r.amount })), ...(cart.custom && customDiscountCharged.value > 0 ? [{ name: cart.custom.name, amount: customDiscountCharged.value }] : [])],
-    total: paid ? paid.total : total.value,
-    paid,
-    ts: Date.now(),
-  });
-}
-watch(
-  () => [cart.lines.map((l) => `${l.lineId}:${l.qty}`).join(','), cart.custom?.value, total.value],
-  () => {
-    clearTimeout(publishTimer);
-    publishTimer = setTimeout(() => {
-      // Don't clobber the post-sale thank-you with the emptied cart.
-      if (Date.now() < thankYouUntil && !cart.lines.length) return;
-      publish();
-    }, 150);
-  },
-);
-// Sends are fire-and-forget; a heartbeat re-publishes so a dropped frame self-heals within one interval.
-let thankYouUntil = 0;
-const heartbeat = setInterval(() => {
-  if (Date.now() < thankYouUntil) return;
-  publish();
-}, 15_000);
-onUnmounted(() => clearTimeout(publishTimer));
+const display = useCustomerDisplay(activeEvent);
 
 // ── Today ───────────────────────────────────────────────────────────────────
 const today = computed(() => {
@@ -303,17 +234,7 @@ const today = computed(() => {
 });
 
 // ── Last sale: undo or reprint without leaving the counter ─────────────────
-const lastSale = ref<{ id: string; total: number; currency: string; units: number } | null>(null);
-let lastSaleTimer: ReturnType<typeof setTimeout> | undefined;
-async function undoLast(): Promise<void> {
-  if (!lastSale.value) return;
-  await sdk().data.transactions.revert(lastSale.value.id);
-  lastSale.value = null;
-  toast('Sale reverted - stock restored');
-}
-function receipt(): void {
-  if (lastSale.value) void router.push({ name: 'pos:receipt', params: { saleId: lastSale.value.id } });
-}
+const { lastSale, showLastSale, undoLast, receipt } = useLastSale(toast);
 
 // ── Payment ─────────────────────────────────────────────────────────────────
 type Phase = 'idle' | 'confirm' | 'terminal' | 'failed' | 'needsLogin';
@@ -476,25 +397,18 @@ function finish(sale: SaleEvent, message: string, test = false): void {
   if (test) {
     // Nothing was recorded: no sale bar, no receipt link (the sale is not on the server), no paper.
     toast(`${message} - TEST, not recorded`);
-    thankYouUntil = Date.now() + 6000;
-    publish({ total: sale.total });
+    display.showPaid({ total: sale.total }, 6000);
     void showAfterSale(sale, undefined);
     return;
   }
-  // The transaction row lands a tick later; the sale itself has all the bar needs.
-  lastSale.value = { id: sale.saleId, total: sale.total, currency: sale.currency, units: sale.lines.reduce((s, l) => s + l.qty, 0) };
-  // The bar answers "did that go through?"; after that it is in the way of
-  // the next customer. Undo and the receipt stay reachable from History.
-  clearTimeout(lastSaleTimer);
-  lastSaleTimer = setTimeout(() => { lastSale.value = null; }, 8000);
+  showLastSale(sale);
   toast(message);
-  clearTimeout(publishTimer);
+  display.cancelPending();
   // Every display gets the link; each decides from its own settings whether
   // to show it. It only travels the account's own live channel.
   const receiptUrl = receiptUrlFor(sale.receiptToken);
   // Hold the paid state long enough for a customer to scan the code.
-  thankYouUntil = Date.now() + (receiptUrl ? 30_000 : 6000);
-  publish({ total: sale.total, receiptUrl });
+  display.showPaid({ total: sale.total, receiptUrl }, receiptUrl ? 30_000 : 6000);
   void showAfterSale(sale, receiptUrl);
   void autoPrint(sale.saleId);
 }

@@ -42,7 +42,7 @@ const artistKey = (p: Product): string => p.consignorId ?? '';
 export interface CatalogBrowseDeps {
   search: Ref<string>;
   products: Readonly<Ref<Product[]>>;
-  activeEvent: Readonly<Ref<SalesEvent | null | undefined>>;
+  activeEvent: Readonly<Ref<SalesEvent | null>>;
   productLeft: (p: Product) => number | null;
   productInCart: (p: Product) => number;
 }

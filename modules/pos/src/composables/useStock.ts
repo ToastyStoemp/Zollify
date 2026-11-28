@@ -4,7 +4,7 @@ import { inCart } from '../cart';
 import { sdk } from '../runtime';
 
 /** What is left to sell at the till's event, less what is already in the cart. */
-export function useStock(activeEvent: Readonly<Ref<SalesEvent | null | undefined>>) {
+export function useStock(activeEvent: Readonly<Ref<SalesEvent | null>>) {
   const availability = computed(() => {
     const event = activeEvent.value;
     if (!event) return new Map<string, number>();

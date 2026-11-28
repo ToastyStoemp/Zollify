@@ -13,7 +13,7 @@ export interface TillActionsDeps {
   search: Ref<string>;
   viewMode: Readonly<Ref<ViewMode>>;
   openArtist: Readonly<Ref<string | null>>;
-  activeEvent: Readonly<Ref<SalesEvent | null | undefined>>;
+  activeEvent: Readonly<Ref<SalesEvent | null>>;
   currency: Readonly<Ref<string>>;
   toast: Toast;
 }

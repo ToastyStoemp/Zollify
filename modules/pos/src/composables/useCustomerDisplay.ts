@@ -6,7 +6,7 @@ import { useCartLines } from './useCartLines';
 import { useTillMoney } from './useTillMoney';
 
 /** Customer display: mirrors the cart on the account's other screens, and holds the "paid" state after a sale. */
-export function useCustomerDisplay(activeEvent: Readonly<Ref<SalesEvent | null | undefined>>) {
+export function useCustomerDisplay(activeEvent: Readonly<Ref<SalesEvent | null>>) {
   const { currency } = useTillMoney();
   const lines = useCartLines();
   let publishTimer: ReturnType<typeof setTimeout> | undefined;

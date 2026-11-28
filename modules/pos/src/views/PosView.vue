@@ -2,11 +2,10 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, reactive, ref, shallowRef, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { Product } from '@zollify/shared';
-import { baseValueOf, cashShortcutAmounts, fmtPrice, isStaffBadge, round2, splitCashPortionAmounts } from '@zollify/shared';
+import { baseValueOf, cashShortcutAmounts, fmtPrice, round2, splitCashPortionAmounts } from '@zollify/shared';
 import type { SaleEvent, TillAction } from '@zollify/sdk';
 import { Icon, ModalShell } from '@zollify/ui';
 import {
-  addLine,
   addMisc,
   addModuleLine,
   findModuleLine,
@@ -44,7 +43,7 @@ import {
 } from '../cart';
 import { GIVEN_AWAY_LABEL } from '../lib/given-away';
 import { defaultProviderId } from '../payments/registry';
-import { findSearchMatch, typeColor, visibleTileActions } from '../search';
+import { typeColor, visibleTileActions } from '../search';
 import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, vatRateLabel } from '../receipt';
 import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
@@ -56,6 +55,8 @@ import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintStat
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
 import ProductThumb from '../components/ProductThumb.vue';
 import { useCatalogBrowse, type ViewMode } from '../composables/useCatalogBrowse';
+import { useAddToCart } from '../composables/useAddToCart';
+import { useScanSubmit } from '../composables/useScanSubmit';
 import { useSeller } from '../composables/useSeller';
 import { useStock } from '../composables/useStock';
 import { useTerminal } from '../composables/useTerminal';
@@ -117,86 +118,12 @@ const { stockLabel, productInCart, productLeft } = useStock(activeEvent);
 
 const { atStore, sellsStores, viewMode, viewModes, currentMode, setViewMode, openArtist, openArtistName, grouped, entries, openType, typeProducts } = useCatalogBrowse({ search, products, activeEvent, productLeft, productInCart });
 
-// A short beep via WebAudio rather than an audio file - no asset to ship,
-// and it needs no user gesture beyond the one already opening the search/scan
-// flow. Best-effort: some browsers block audio outside a user gesture, and
-// this must never block or fail the actual add.
-function beep(): void {
-  try {
-    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.15);
-    osc.onended = () => void ctx.close();
-  } catch {
-    // best-effort feedback only
-  }
-}
+// ── Shared till: who is selling, and handing the till on ──────────────────
+const { canLock, showTotals, seller, lockTill } = useSeller();
 
-const justAddedId = ref<string | null>(null);
-let justAddedTimer: ReturnType<typeof setTimeout> | undefined;
-
-function submitSearch(): void {
-  // A staff badge, from a handheld scanner or the camera: hand the till over.
-  if (isStaffBadge(search.value) && canLock.value) {
-    const code = search.value.trim();
-    search.value = '';
-    void sdk()
-      .lock.badge(code)
-      .then(() => toast(`Selling as ${seller.value}.`, 'ok'))
-      .catch((err: unknown) => toast(err instanceof Error ? err.message : 'That badge was not accepted.', 'bad'));
-    return;
-  }
-  const match = findSearchMatch(products.value, search.value);
-  if (!match) {
-    const code = search.value.trim();
-    // A code-like miss may be an item another module can make available
-    // (an artist's label scanned at a store); words are just a failed search.
-    if (!code || /\s/.test(code)) return toast('No product found for that search.', 'bad');
-    void lookupUnknown(code);
-    return;
-  }
-  if ('ambiguous' in match) return toast(`${match.count} matches - keep typing to narrow it down.`, 'bad');
-  added(match.productId, match.variantId, `Added ${match.label}`);
-}
-
-function added(productId: string, variantId: string | null, message: string): void {
-  add(productId, variantId);
-  toast(message);
-  search.value = '';
-  navigator.vibrate?.(80);
-  beep();
-  justAddedId.value = productId;
-  clearTimeout(justAddedTimer);
-  justAddedTimer = setTimeout(() => (justAddedId.value = null), 1500);
-}
-
-/**
- * Asks the modules about a code the catalogue does not know. What one makes
- * available reaches this device with the next sync (the server rings it), so
- * wait a few seconds for it before adding.
- */
-async function lookupUnknown(code: string): Promise<void> {
-  const found = await sdk().till.lookup(code);
-  if (!found) return toast('No product found for that code.', 'bad');
-  if ('handled' in found) {
-    // A module took the code itself - a loyalty card attached to the sale, say.
-    toast(found.message ?? 'Done.');
-    search.value = '';
-    beep();
-    return;
-  }
-  for (let i = 0; i < 40 && !products.value.some((p) => p.id === found.productId); i++) await new Promise((r) => setTimeout(r, 250));
-  if (!products.value.some((p) => p.id === found.productId)) return toast(`${found.message ?? 'Found it.'} It is not on this till yet - try again in a moment.`, 'bad');
-  added(found.productId, found.variantId, found.message ?? 'Added');
-}
+// ── Adding ──────────────────────────────────────────────────────────────────
+const { variantPicker, add, bundleQtys, addBundle } = useAddToCart(products);
+const { justAddedId, submitSearch } = useScanSubmit({ search, products, toast, add, canLock, seller });
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────
 // Native BarcodeDetector rather than a bundled decoder library: our own
@@ -341,47 +268,6 @@ function closeScanner(): void {
   scannerStream = null;
 }
 onUnmounted(closeScanner);
-
-// ── Adding ──────────────────────────────────────────────────────────────────
-const variantPicker = ref<Product | null>(null);
-
-function add(pid: string, vid: string | null): void {
-  const p = products.value.find((x) => x.id === pid);
-  if (!p) return;
-  const variants = p.variants ?? [];
-  if (variants.length && !vid) {
-    variantPicker.value = p;
-    return;
-  }
-  const v = vid ? variants.find((x) => x.id === vid) : undefined;
-  addLine({
-    productId: p.id,
-    variantId: v?.id ?? null,
-    variantLabel: v?.name ?? null,
-    sku: v?.sku ?? p.sku ?? null,
-    name: v ? `${p.title} · ${v.name}` : p.title,
-    qty: 1,
-    unitPrice: v?.price ?? p.price,
-    // Set at checkout from the event's VAT; p.vatRate is the Swiss import rate.
-    taxRate: null,
-    type: p.type,
-  });
-}
-
-/** Tier quantities of tiered rules on this product drive the "+3 / +5" chips. */
-function bundleQtys(p: Product, vid: string | null = null): number[] {
-  const qtys = new Set<number>();
-  for (const rule of sdk().data.discounts.active()) {
-    if (rule.type !== 'tiered' || !rule.tiers?.length || rule.hideQuickAdd) continue;
-    const matches = rule.productIds.includes(p.id) || (!!p.type && (rule.productTypes ?? []).includes(p.type)) || (vid !== null && rule.variantIds.includes(`${p.id}:${vid}`));
-    if (!matches) continue;
-    for (const t of rule.tiers) if (t.qty > 1) qtys.add(t.qty);
-  }
-  return [...qtys].sort((a, b) => a - b).slice(0, 3);
-}
-function addBundle(pid: string, vid: string | null, qty: number): void {
-  for (let i = 0; i < qty; i++) add(pid, vid);
-}
 
 // ── Cart ────────────────────────────────────────────────────────────────────
 const showCartSheet = ref(false);
@@ -851,9 +737,6 @@ async function cancelPayment(): Promise<void> {
   await cancelCheckout();
   payment.phase = 'idle';
 }
-
-// ── Shared till: who is selling, and handing the till on ──────────────────
-const { canLock, showTotals, seller, lockTill } = useSeller();
 </script>
 
 <template>

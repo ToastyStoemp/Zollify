@@ -22,7 +22,7 @@ import {
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { closeModuleDb, openModuleDb } from './module-db';
-import { authFetch, getAccount, onAccountChange } from './session';
+import { authFetch, getAccount, getApiBase, onAccountChange } from './session';
 import { canLockTill, lockTill, switchByBadge } from './till-lock';
 import {
   allProducts,
@@ -100,19 +100,45 @@ function makeLogger(moduleId: string): Logger {
   };
 }
 
+/** Stands in for the page's origin when the API base is a bare path; only the resolved path is compared. */
+const RESOLVE_ORIGIN = 'http://zollify.invalid';
+/** A `.` or `..` segment with a dot written as `%2e`: nothing honest writes one, and parsers treat it as the real thing. */
+const ENCODED_DOT_SEGMENT = /^(\.|%2e){1,2}$/i;
+const isEncodedDotSegment = (segment: string): boolean => segment.includes('%') && ENCODED_DOT_SEGMENT.test(segment);
+
 /**
- * Requests are rooted at the module's own namespace, so a module cannot call
- * another module's server routes by crafting a path. Leading slashes and `..`
- * segments are stripped rather than trusted.
+ * The path a module's request goes to, under `/m/<moduleId>/` and nowhere
+ * else. A module's requests carry the user's token, so a path that climbs out
+ * of its namespace could reach any route the user can - the account wipe
+ * included.
+ *
+ * Filtering `..` out of the text is not enough: the URL parser also folds
+ * `%2e%2e`, backslashes and stray tabs into dot segments. So the URL is built
+ * and resolved exactly as fetch will resolve it, and refused unless it still
+ * lies under the module's root; the resolved form is what gets sent.
  */
-function makeHttp(moduleId: string): HttpClient {
-  const url = (path: string): string => {
-    const clean = path
-      .split('/')
-      .filter((seg) => seg !== '' && seg !== '.' && seg !== '..')
-      .join('/');
-    return `/m/${moduleId}${clean ? `/${clean}` : ''}`;
+export function moduleRequestPath(moduleId: string, path: string): string {
+  const refuse = (): never => {
+    throw new Error(`Module "${moduleId}" may only call its own server routes, not "${path}".`);
   };
+  const route = path.split(/[?#]/, 1)[0]!;
+  // Refused outright, wherever they would lead: a backslash is a slash to the URL parser.
+  if (route.includes('\\') || route.split('/').some(isEncodedDotSegment)) refuse();
+
+  const apiRoot = new URL(`${getApiBase()}/`, RESOLVE_ORIGIN);
+  const moduleRoot = `${apiRoot.pathname}m/${moduleId}`;
+  const resolved = new URL(`${getApiBase()}/m/${moduleId}/${path.replace(/^\/+/, '')}`, RESOLVE_ORIGIN);
+  const inside = resolved.origin === apiRoot.origin && resolved.pathname.startsWith(`${moduleRoot}/`);
+  if (!inside) refuse();
+
+  // Relative to the API base again, which authFetch puts back in front. Empty
+  // segments and a trailing slash go, as they always have here.
+  const tidy = resolved.pathname.slice(apiRoot.pathname.length - 1).replace(/\/{2,}/g, '/').replace(/\/$/, '');
+  return `${tidy}${resolved.search}`;
+}
+
+function makeHttp(moduleId: string): HttpClient {
+  const url = (path: string): string => moduleRequestPath(moduleId, path);
 
   const body = (value: unknown): string | undefined =>
     value === undefined ? undefined : JSON.stringify(value);

@@ -5,7 +5,7 @@ import { countryCodeOf, fmtPrice, printableLink, receiptDateTime, receiptFooterL
 import { CarbonPayment, ThermalPrinter, hasNativePlugin } from './native/plugins';
 import { rasterizeReceipt } from './lib/receipt-raster';
 import { lineLinkQrs, receiptQrPng, saleLineLinks } from './lib/after-sale';
-import { accountLogo, serverBranding, serverSocials } from './lib/branding';
+import { accountBranding, accountLogo, receiptSocials } from './lib/branding';
 import { sdk } from './runtime';
 import { GIVEN_AWAY, GIVEN_AWAY_LABEL } from './lib/given-away';
 
@@ -379,7 +379,7 @@ export function buildReceiptLines(
  * Never blocks or fails a print.
  */
 async function printedLinkLines(): Promise<string[]> {
-  const socials = await serverSocials();
+  const socials = await receiptSocials(PRINT_WAIT_MS);
   if (!socials?.showOnPrint) return [];
   // The links are the business profile's, which this device already holds; the server's copy covers a profile it has not synced yet.
   const links = sdk().account()?.profile.links ?? socials;
@@ -399,7 +399,7 @@ export async function printableReceipt(tx: Transaction, eventName: string, event
     // A cancelled sale's link only says so; no point printing it.
     config.printQr && !tx.revertedAt ? receiptQrPng(tx.receiptToken) : Promise.resolve(undefined),
     (config.logoB64 ? Promise.resolve(config.logoB64) : sharedPrintLogo()).then((b) => (b ? sizePrintLogo(b, size) : b)),
-    config.footerText ? Promise.resolve(null) : serverBranding(),
+    config.footerText ? Promise.resolve(null) : accountBranding(PRINT_WAIT_MS),
     printedLinkLines(),
     lineLinkQrs(saleLineLinks(tx)),
   ]);
@@ -442,8 +442,8 @@ function pngBlob(b64: string): Blob {
 
 /** The account's logo as last flattened for the printer, with the logo it was made from. */
 const SHARED_PRINT_LOGO_KEY = 'receipt.serverPrintLogoCache';
-/** How long a print may wait for the account's logo when the device has no copy yet. */
-const PRINT_LOGO_WAIT_MS = 2500;
+/** How long a print may wait for the account's logo, footer and links when the device has no copy of them yet. */
+const PRINT_WAIT_MS = 2500;
 
 /**
  * The account's logo, flattened onto white for the printer. Comes from the
@@ -452,7 +452,7 @@ const PRINT_LOGO_WAIT_MS = 2500;
  */
 async function sharedPrintLogo(): Promise<string | undefined> {
   try {
-    const src = await accountLogo(PRINT_LOGO_WAIT_MS);
+    const src = await accountLogo(PRINT_WAIT_MS);
     if (!src) return undefined;
     const kept = await getSetting<{ src: string; print: string }>(SHARED_PRINT_LOGO_KEY);
     if (kept?.src === src && kept.print) return kept.print;

@@ -1,5 +1,6 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
+import { refreshReceiptCopies } from './lib/branding';
 import { listenForRemotePayments } from './payments/satellite';
 import { allProviders, onActiveProviderChanged, defaultProviderId, setActiveProvider } from './payments/registry';
 
@@ -17,7 +18,7 @@ import { allProviders, onActiveProviderChanged, defaultProviderId, setActiveProv
  */
 export default defineModule({
   id: 'pos',
-  version: '0.1.14',
+  version: '0.1.15',
   sdk: '^0.1.0',
   title: 'POS',
   description: 'Cart, checkout and receipts, with pluggable payment terminals.',
@@ -81,6 +82,10 @@ export default defineModule({
       const fallback = defaultProviderId();
       if (fallback !== 'manual') await setActiveProvider(fallback);
     });
+
+    // Receipt branding set on another device: fetched while this one is online, so the till has it when it is not.
+    void refreshReceiptCopies();
+    sdk.events.on('sync:completed', () => void refreshReceiptCopies());
 
     sdk.log.info('pos module ready');
   },

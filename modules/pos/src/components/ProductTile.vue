@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Product, Variant } from '@zollify/shared';
 import { inCart } from '../cart';
-import { useTillMoney } from '../composables/useTillMoney';
 import { useTillTiles } from '../lib/till-tiles';
 import { typeColor } from '../search';
 import ProductThumb from './ProductThumb.vue';
@@ -22,8 +21,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ add: []; bundle: [qty: number] }>();
 
-const { stockLabel, productInCart, productLeft, bundleQtys } = useTillTiles();
-const { price, fromPrice } = useTillMoney();
+const { stockLabel, productInCart, productLeft, bundleQtys, price, fromPrice } = useTillTiles();
 
 const vid = (): string | null => props.variant?.id ?? null;
 const hasVariants = (): boolean => !props.variant && !!props.product.variants?.length;

@@ -73,7 +73,7 @@ onMounted(async () => {
   startStatusPolling();
 });
 
-const { currency, money } = useTillMoney();
+const { currency, money, price, fromPrice } = useTillMoney();
 
 const { stockLabel, productInCart, productLeft } = useStock(activeEvent);
 
@@ -84,7 +84,7 @@ const { canLock, showTotals, seller, lockTill } = useSeller();
 
 // ── Adding ──────────────────────────────────────────────────────────────────
 const { variantPicker, add, bundleQtys, addBundle } = useAddToCart(products);
-provideTillTiles({ stockLabel, productInCart, productLeft, bundleQtys });
+provideTillTiles({ stockLabel, productInCart, productLeft, bundleQtys, price, fromPrice });
 const { justAddedId, submitSearch } = useScanSubmit({ search, products, toast, add, canLock, seller });
 
 // ── Barcode scanner (camera) ─────────────────────────────────────────────────

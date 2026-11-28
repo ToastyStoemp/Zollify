@@ -15,7 +15,7 @@ import { openCoreDb, type OutboxOp } from './db';
 import { isStaffOp } from '@zollify/shared';
 import { authFetchAs, deviceFetch, getAccount, getDeviceAccount, personSession } from '../session';
 import { deviceFlavor, deviceId, deviceName } from './device';
-import { markSynced, pendingCount, refreshPendingCount, unsyncedOps } from './outbox';
+import { markSynced, pendingCount, pruneOutboxInBackground, refreshPendingCount, unsyncedOps } from './outbox';
 import { loadCatalog } from './catalog';
 import { loadSalesEvents } from './sales-events';
 import { loadTransactions, removeTestRows } from './transactions';
@@ -556,6 +556,7 @@ export async function syncNow(): Promise<SyncResult> {
         ]);
       }
       await refreshPendingCount();
+      pruneOutboxInBackground();
 
       lastSyncAt.value = Date.now();
       syncState.value = 'idle';

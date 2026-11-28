@@ -85,15 +85,24 @@ export async function evictModule(moduleId: string): Promise<void> {
 
 /**
  * Removes superseded versions of a module, keeping the one named. Called after
- * a successful boot, never during one: pruning while a version is running is
- * how you lose the ability to roll back.
+ * that version has loaded, never before: until then an older copy may be the
+ * only one this device can start from. For the same reason nothing is removed
+ * unless the version to keep is itself in the cache.
  */
 export async function pruneOldVersions(moduleId: string, keepVersion: string): Promise<number> {
   const keep = bundleKey(moduleId, keepVersion);
-  const stale = await db.bundles.where('moduleId').equals(moduleId).toArray();
-  const doomed = stale.filter((b) => b.key !== keep).map((b) => b.key);
-  if (doomed.length) await db.bundles.bulkDelete(doomed);
-  return doomed.length;
+  return db.transaction('rw', db.bundles, async () => {
+    const keys = await db.bundles.where('moduleId').equals(moduleId).primaryKeys();
+    if (!keys.includes(keep)) return 0;
+    const doomed = keys.filter((key) => key !== keep);
+    if (doomed.length) await db.bundles.bulkDelete(doomed);
+    return doomed.length;
+  });
+}
+
+/** The same, off to the side: old bundles only cost space, and clearing them must never fail a module load. */
+export function pruneOldVersionsInBackground(moduleId: string, keepVersion: string): void {
+  void pruneOldVersions(moduleId, keepVersion).catch((err) => console.warn(`[zollify] could not clear old bundles of ${moduleId}`, err));
 }
 
 export async function listCached(): Promise<CachedBundle[]> {

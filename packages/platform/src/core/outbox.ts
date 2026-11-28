@@ -128,3 +128,30 @@ export async function pruneSynced(olderThanMs = 7 * 24 * 3600 * 1000): Promise<n
   if (doomed.length) await db.ops.bulkDelete(doomed as number[]);
   return doomed.length;
 }
+
+/** When the outbox was last pruned. Under `core.`, so it stays on this device (see synced-settings.ts). */
+const PRUNED_AT_KEY = 'core.outboxPrunedAt';
+const PRUNE_EVERY_MS = 24 * 3600 * 1000;
+
+/**
+ * Prunes the outbox at most once a day. Acknowledged ops keep their full
+ * payloads - whole sales, base64 thumbnails - and a till that never drops
+ * them gets slower with every event it works.
+ */
+export async function pruneSyncedWhenDue(now = Date.now()): Promise<number> {
+  const db = openCoreDb(requireAccountId());
+  const last = (await db.settings.get(PRUNED_AT_KEY))?.value;
+  if (typeof last === 'number' && now - last < PRUNE_EVERY_MS) return 0;
+  const removed = await pruneSynced();
+  await db.settings.put({ key: PRUNED_AT_KEY, value: now });
+  return removed;
+}
+
+/** Housekeeping after a sync, off to the side: it must never hold up or fail a sync, let alone a sale. */
+export function pruneOutboxInBackground(): void {
+  void pruneSyncedWhenDue().catch((err) => {
+    // Signed out while it ran: the database closed under it, and the next sync after sign-in tries again.
+    if ((err as { name?: string } | null)?.name === 'DatabaseClosedError') return;
+    console.warn('[zollify] could not prune the outbox', err);
+  });
+}

@@ -8,7 +8,7 @@ import {
 import type { ContributionRegistry } from './contributions';
 import type { PlatformEventBus } from './events';
 import { createModuleHost, type ModuleHost } from './sdk-host';
-import { getCached, putCached, verifyCached } from './module-cache';
+import { getCached, pruneOldVersionsInBackground, putCached, verifyCached } from './module-cache';
 
 /** What the registry advertises for one module. */
 export interface ModuleDescriptor {
@@ -312,7 +312,12 @@ export class RemoteResolver implements ModuleResolver {
 
   async resolve(descriptor: ModuleDescriptor): Promise<ModuleDefinition> {
     const code = (await this.cachedCode(descriptor)) ?? (await this.download(descriptor));
-    return asDefinition(await this.importModule(code), descriptor.moduleId);
+    const definition = asDefinition(await this.importModule(code), descriptor.moduleId);
+    // This version is cached, verified and has just run: the ones it replaced
+    // can go. Not before - a version that will not load must not cost the
+    // device the copies it could still fall back to.
+    pruneOldVersionsInBackground(descriptor.moduleId, descriptor.version);
+    return definition;
   }
 
   /**

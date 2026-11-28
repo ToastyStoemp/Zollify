@@ -269,6 +269,40 @@ describe('sync', () => {
     expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toBe(`/sync/pull?since=4&device=${await device.deviceId()}`);
   });
 
+  it('keeps pulling past pages a restricted user may read nothing of, to the ops behind them', async () => {
+    // A helper's pages can filter down to nothing while the catalogue lies
+    // further on; jumping to latestSeq there would lose it for good.
+    const op = (seq: number, id: string) => ({ opId: id.repeat(16), deviceId: 'other', ts: 1, serverSeq: seq, type: 'product.upsert', payload: product(id, `P${seq}`, 1000 + seq) });
+    pullResponses = [
+      { ops: [], latestSeq: 1200, scannedTo: 500 },
+      { ops: [], latestSeq: 1200, scannedTo: 1000 },
+      { ops: [op(1100, 'k')], latestSeq: 1200, scannedTo: 1200 },
+    ];
+
+    await sync.syncNow();
+
+    const pulls = calls.filter((c) => c.path.startsWith('/sync/pull')).map((c) => c.path);
+    expect(pulls).toEqual(['/sync/pull?since=0', '/sync/pull?since=500', '/sync/pull?since=1000']);
+    expect(catalog.getProduct('k')?.title).toBe('P1100');
+    calls.length = 0;
+    await sync.syncNow();
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toMatch(/^\/sync\/pull\?since=1200&device=/);
+  });
+
+  it('stops, without skipping ahead, when a page does not move the scan forward', async () => {
+    pullResponses = [
+      { ops: [], latestSeq: 900, scannedTo: 500 },
+      { ops: [], latestSeq: 900, scannedTo: 500 },
+    ];
+
+    await sync.syncNow();
+
+    expect(calls.filter((c) => c.path.startsWith('/sync/pull'))).toHaveLength(2);
+    calls.length = 0;
+    await sync.syncNow();
+    expect(calls.find((c) => c.path.startsWith('/sync/pull'))?.path).toMatch(/^\/sync\/pull\?since=500&device=/);
+  });
+
   it('discards local data and re-pulls when the server epoch changes', async () => {
     pullResponses = [{ ops: [], latestSeq: 5, epoch: 1 }];
     await sync.syncNow();

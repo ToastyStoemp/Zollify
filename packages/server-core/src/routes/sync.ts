@@ -235,14 +235,18 @@ export function registerSyncRoutes(
       payload: JSON.parse(r.payload),
     }));
     // Server-enforced isolation: a restricted user only receives the catalog +
-    // their one event's data. Safe with the client cursor, which advances toward
-    // latestSeq and treats a filtered-empty page as "caught up".
+    // their events' data. A page can filter down to nothing while readable ops
+    // still lie further on, which is why the response says how far it looked.
     const allowed = restrictionFor(claims.sub);
     if (allowed) ops = ops.filter((op) => opReadable(claims.accountId, allowed, op));
 
     const latestSeq = (maxSeq.get(claims.accountId) as { m: number }).m;
     const epoch = (getEpoch.get(claims.accountId) as { syncEpoch?: number } | undefined)?.syncEpoch ?? 0;
-    const response: PullResponse = { ops, latestSeq, epoch, ...(skipDevice && rows.length < limit ? { caughtUp: true } : {}) };
+    // A short page means the select ran off the end of the log; a full one
+    // only vouches for the rows it read, whatever the filter left of them.
+    const reachedTail = rows.length < limit;
+    const scannedTo = reachedTail ? latestSeq : rows[rows.length - 1]!.seq;
+    const response: PullResponse = { ops, latestSeq, epoch, scannedTo, ...(skipDevice && reachedTail ? { caughtUp: true } : {}) };
     return sendJson(req.headers['accept-encoding'], reply, response);
   });
 }

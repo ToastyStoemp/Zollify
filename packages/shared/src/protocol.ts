@@ -100,6 +100,14 @@ export interface PullResponse {
    * where the newest ops may all be its own and so never appear in a page.
    */
   caughtUp?: boolean;
+  /**
+   * How far through the log the server looked to build this page: every op up
+   * to this seq is either in `ops` or not for this caller (its own, or outside
+   * what a restricted user may read). The client moves its cursor here and
+   * keeps pulling until it reaches `latestSeq`, so a page that filtered down
+   * to nothing is not mistaken for the end of the log. Absent on older servers.
+   */
+  scannedTo?: number;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

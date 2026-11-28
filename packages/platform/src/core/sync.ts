@@ -421,10 +421,23 @@ async function push(): Promise<number> {
 }
 
 /**
+ * How far the server looked to build a page. An older server does not say, so
+ * it is worked out the old way: the last op of the page, or the tail when the
+ * page is empty or marked caught up.
+ */
+function scannedTo(page: PullResponse): number {
+  if (typeof page.scannedTo === 'number') return page.scannedTo;
+  if (!page.ops.length || page.caughtUp) return page.latestSeq;
+  return page.ops[page.ops.length - 1]!.serverSeq;
+}
+
+/**
  * Applies pages of ops until the server's tail is reached. The server pages
- * at 500, so the cursor moves to the last op actually applied - never to the
- * server's latestSeq, which would silently skip everything between the end
- * of one page and the tail of the log.
+ * at 500, so the cursor moves to where the server says it looked - never
+ * straight to latestSeq, which would silently skip everything between the end
+ * of one page and the tail of the log. A page can be empty and still not be
+ * the end: a restricted user's page may hold nothing they are allowed to read
+ * while products and prices they do need lie further on.
  */
 async function drain(first: PullResponse, since: number, query: string): Promise<{ applied: number; cursor: number }> {
   let page = first;
@@ -437,15 +450,12 @@ async function drain(first: PullResponse, since: number, query: string): Promise
   if (track) syncProgress.value = { done: 0, total };
   try {
     for (;;) {
-      if (!page.ops.length || page.caughtUp) {
-        if (page.ops.length) applied += await applyOps(page.ops);
-        // Caught up, or a page filtered empty (a restricted user, or nothing
-        // but this device's own ops): the tail is where we stand either way.
-        cursor = Math.max(cursor, page.latestSeq);
-        break;
-      }
       applied += await applyOps(page.ops);
-      cursor = page.ops[page.ops.length - 1]!.serverSeq;
+      const reached = scannedTo(page);
+      // A page that gets nowhere would be asked for again forever: stop here
+      // and let the next sync try, rather than guess at the tail.
+      if (reached <= cursor) break;
+      cursor = reached;
       if (track) syncProgress.value = { done: Math.min(total, cursor - since), total };
       if (cursor >= page.latestSeq) break;
       await writeCursor(cursor, page.epoch ?? 0);

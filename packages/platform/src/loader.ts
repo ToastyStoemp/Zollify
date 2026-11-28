@@ -311,25 +311,34 @@ export class RemoteResolver implements ModuleResolver {
   ) {}
 
   async resolve(descriptor: ModuleDescriptor): Promise<ModuleDefinition> {
-    let entry = await getCached(descriptor.moduleId, descriptor.version);
+    const code = (await this.cachedCode(descriptor)) ?? (await this.download(descriptor));
+    return asDefinition(await this.importModule(code), descriptor.moduleId);
+  }
 
-    if (entry && !(await verifyCached(entry))) {
-      // Stored bytes no longer match the published hash - treat as absent and
-      // re-fetch rather than executing something we can't vouch for.
-      entry = undefined;
-    }
+  /**
+   * The cached bundle, when it is the one the manifest names. A copy that no
+   * longer matches the manifest's hash is treated as absent, so it is fetched
+   * again rather than run. Offline the manifest is the device's last copy of
+   * the server's answer, which names the hash this bundle was stored under.
+   */
+  private async cachedCode(descriptor: ModuleDescriptor): Promise<string | undefined> {
+    const entry = await getCached(descriptor.moduleId, descriptor.version);
+    if (!entry) return undefined;
+    if (await verifyCached(entry, descriptor.integrity)) return entry.code;
+    console.warn(`[zollify] cached bundle of ${descriptor.moduleId}@${descriptor.version} does not match the manifest - fetching it again`);
+    return undefined;
+  }
 
-    if (!entry) {
-      const code = await this.fetchBundle(descriptor.url);
-      entry = await putCached({
-        moduleId: descriptor.moduleId,
-        version: descriptor.version,
-        code,
-        integrity: descriptor.integrity,
-      });
-    }
-
-    return asDefinition(await this.importModule(entry.code), descriptor.moduleId);
+  /** Fetches the bundle. putCached checks it against the manifest's hash and throws before anything is stored or run. */
+  private async download(descriptor: ModuleDescriptor): Promise<string> {
+    const code = await this.fetchBundle(descriptor.url);
+    const entry = await putCached({
+      moduleId: descriptor.moduleId,
+      version: descriptor.version,
+      code,
+      integrity: descriptor.integrity,
+    });
+    return entry.code;
   }
 }
 

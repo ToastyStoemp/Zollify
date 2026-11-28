@@ -65,9 +65,17 @@ export async function putCached(entry: Omit<CachedBundle, 'key' | 'cachedAt'>): 
   return row;
 }
 
-/** Re-verifies a cached bundle before it is executed, in case storage was tampered with. */
-export async function verifyCached(entry: CachedBundle): Promise<boolean> {
-  return (await sha256Hex(entry.code)) === entry.integrity.toLowerCase();
+/**
+ * Re-verifies a cached bundle before it is executed. The hash stored beside
+ * the code only shows the two still agree - whoever can rewrite one can
+ * rewrite the other - so when the manifest names a hash (`expected`), the code
+ * must match that as well. It also catches a bundle republished under the
+ * same version: the cached copy is then no longer the one the server means.
+ */
+export async function verifyCached(entry: CachedBundle, expected?: string): Promise<boolean> {
+  const actual = await sha256Hex(entry.code);
+  if (actual !== entry.integrity.toLowerCase()) return false;
+  return !expected || actual === expected.toLowerCase();
 }
 
 /** Drops every cached version of a module - used on uninstall. */

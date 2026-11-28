@@ -26,6 +26,7 @@ import { claimClearedAt, loadInventory, rememberClaimCleared } from './inventory
 import { loadSellLockSettings } from './sell-lock';
 import { base64ToBlob } from './images';
 import { logDiagnostic } from './diagnostics';
+import { isSyncedSettingKey } from './synced-settings';
 
 /**
  * Offline-first sync.
@@ -336,6 +337,13 @@ async function applyOne(db: ReturnType<typeof openCoreDb>, op: ServerOp): Promis
       // helper without access to the event it names is protected at
       // read time, in loadSalesEvents()'s visibleEvents check, not here.
       const incoming = op.payload as { key: string; value: unknown; updatedAt?: number };
+      // Device-local rows (this device's id, cursor, receipt counter) share
+      // the table. No device should send one; if one arrives it is dropped,
+      // never written over this device's own.
+      if (!isSyncedSettingKey(incoming.key)) {
+        console.warn(`[zollify] ignored a synced setting for the device-local key "${String(incoming.key)}" (from device ${op.deviceId})`);
+        return 0;
+      }
       const existing = await db.settings.get(incoming.key);
       if (!existing || (incoming.updatedAt ?? 0) >= (existing.updatedAt ?? 0)) {
         await db.settings.put(incoming);

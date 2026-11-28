@@ -7,8 +7,39 @@ import { toPlain } from './plain';
  * Generic account-wide key/value, synced via the same 'setting.upsert' op
  * sales-events.ts uses for the default active event (see DEFAULT_ACTIVE_KEY
  * there). Exposed to modules as sdk.data.settings - see createModuleHost in
- * sdk-host.ts for the per-module key scoping.
+ * sdk-host.ts.
+ *
+ * The settings table also holds rows that belong to this device alone: its
+ * id and name, the sync cursor, the receipt counter, test-mode state. Those
+ * must never travel - a device that took another's receipt counter or cursor
+ * off the wire would number receipts twice or stop pulling. So a key is
+ * checked both when it is set here and when it arrives in a pull.
  */
+
+/** The only `core.` keys that sync; every other `core.` row is this device's own. */
+const SYNCED_CORE_KEYS = new Set([
+  // The account's default active event (DEFAULT_ACTIVE_KEY in sales-events.ts).
+  'core.defaultActiveEventId',
+  // Where the booth configurator lives (CONFIGURATOR_KEY in booth-layout.ts).
+  'core.cubeConfiguratorUrl',
+]);
+
+/** Namespaces core keeps for itself: `core.` syncs by the list above, `sync.` is bookkeeping and never does. */
+const CORE_PREFIX = 'core.';
+const SYNC_STATE_PREFIX = 'sync.';
+
+/**
+ * Whether a settings key is one that travels between devices. Modules name
+ * their own keys, so anything outside core's namespaces syncs; inside them
+ * only the listed keys do, so a new device-local `core.` row is safe by
+ * default.
+ */
+export function isSyncedSettingKey(key: unknown): key is string {
+  if (typeof key !== 'string' || !key) return false;
+  if (key.startsWith(SYNC_STATE_PREFIX)) return false;
+  if (key.startsWith(CORE_PREFIX)) return SYNCED_CORE_KEYS.has(key);
+  return true;
+}
 
 function requireAccountId(): string {
   const account = getAccount();
@@ -23,6 +54,7 @@ export async function getSyncedSetting<T>(key: string): Promise<T | undefined> {
 }
 
 export async function setSyncedSetting(key: string, value: unknown): Promise<void> {
+  if (!isSyncedSettingKey(key)) throw new Error(`"${key}" is a device-local setting and cannot be synced.`);
   const db = openCoreDb(requireAccountId());
   const updatedAt = Date.now();
   // A module's caller almost always hands over a live Vue reactive

@@ -1076,7 +1076,7 @@ function lockTill(): void {
 </script>
 
 <template>
-  <div class="pos">
+  <div class="pos" :class="{ 'has-cartbar': itemCount }">
     <section class="floor">
       <header class="bar">
         <router-link :to="{ name: 'events' }" class="quiet iconbtn" aria-label="Events"><Icon name="arrow-left" :size="16" /></router-link>
@@ -1438,7 +1438,7 @@ function lockTill(): void {
 </template>
 
 <style scoped>
-.pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100dvh - 3rem); margin: -1.5rem; }
+.pos { display: grid; grid-template-columns: 1fr 20rem; gap: 0; min-height: calc(100vh - 3rem); min-height: calc(100dvh - 3rem); margin: -1.5rem; }
 .floor { display: flex; flex-direction: column; min-width: 0; }
 .testmode { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #fff; background: var(--zfy-danger, #c6512f); border-radius: 999px; padding: .25rem .7rem; text-decoration: none; white-space: nowrap; }
 .stale { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin: .6rem 1rem 0; padding: .6rem .8rem; border-radius: 10px; border: 1px solid var(--zfy-warning, #d99a2b); color: var(--zfy-warning-ink, #8a5a00); font-size: .875rem; }
@@ -1582,7 +1582,9 @@ function lockTill(): void {
      at all then). Confirmed live: with an empty cart this left genuinely
      blank space below a short product list, reachable by scrolling past
      all real content. */
-  .pos:not(:has(.cartbar)) { min-height: auto; }
+  /* has-cartbar is a class set in the template rather than :has(.cartbar): a
+     WebView older than Chrome 105 drops a whole rule that uses :has(). */
+  .pos:not(.has-cartbar) { min-height: auto; }
   .cart { display: none; }
   .cart.sheet { display: flex; position: fixed; inset: 0; z-index: 25; height: auto; border-left: 0; }
   .cart.sheet .close { display: inline-flex; }
@@ -1593,8 +1595,8 @@ function lockTill(): void {
      clock and battery icons. */
   .cart.sheet header { padding-top: calc(.75rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); }
   .floor { display: flex; flex-direction: column; }
-  /* Same gating as .pos above and for the same reason - only .floor:has(.cartbar) needs the forced height. */
-  .floor:has(.cartbar) { min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
+  /* Same gating as .pos above and for the same reason - only the floor of a .pos with a cart bar needs the forced height. */
+  .has-cartbar > .floor { min-height: calc(100vh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); min-height: calc(100dvh - 3.1rem - var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) - var(--zfy-bottom-nav, 0px)); }
   .grid { flex: 1; }
   /* Sticks just above the shell's tab bar, whose height the shell publishes. */
   .cartbar { display: flex; justify-content: space-between; margin: auto 1rem .75rem; min-height: 3rem; font-size: 1rem; position: sticky; bottom: calc(var(--zfy-bottom-nav, 0px) + .5rem); z-index: 3; box-shadow: 0 8px 24px -10px var(--zfy-shadow, rgba(20,26,34,.4)); }

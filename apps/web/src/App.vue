@@ -407,9 +407,9 @@ const fmtAgo = (ms: number): string => {
 </template>
 
 <style scoped>
-.splash { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; color: var(--zfy-muted); }
+.splash { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .5rem; color: var(--zfy-muted); }
 .splash .brand { font-size: 1.6rem; color: var(--zfy-ink); }
-.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100dvh; }
+.shell { display: grid; grid-template-columns: 15rem 1fr; min-height: 100vh; min-height: 100dvh; }
 .shell--bare { grid-template-columns: 1fr; }
 .shell--bare .content { padding: 0; display: grid; }
 .shell--bare .content > .welcome { padding: 1.5rem; width: 100%; }

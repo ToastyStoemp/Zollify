@@ -80,7 +80,7 @@ const when = (t: number) => new Date(t).toLocaleString(undefined, { day: '2-digi
     <article v-if="loaded" class="card">
       <h2>Recent payments</h2>
       <p v-if="!payments.length" class="hint">Nothing waiting. Payments the phone sees on business cards show here.</p>
-      <ul v-else class="rows">
+      <ul v-else class="rows payments">
         <li v-for="p in payments" :key="p.id">
           <span class="who"><strong>{{ p.merchant || 'Card payment' }}</strong><small>{{ when(p.at) }}<template v-if="p.last4"> · •••• {{ p.last4 }}</template><template v-if="p.addedExpenseId"> · added to an event</template></small></span>
           <strong>{{ fmtPrice(p.amount, p.currency) }}</strong>
@@ -100,7 +100,7 @@ const when = (t: number) => new Date(t).toLocaleString(undefined, { day: '2-digi
 h2 { margin: 0; font-size: 1.05rem; }
 .rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
 .rows li { display: grid; grid-template-columns: minmax(7rem, auto) auto 1fr auto; gap: .5rem; align-items: center; font-size: .9rem; }
-.rows li:has(> button.quiet) { grid-template-columns: 1fr auto auto; }
+.rows.payments li { grid-template-columns: 1fr auto auto; }
 .who { display: flex; flex-direction: column; min-width: 0; }
 .who small { color: var(--zfy-muted, #5a6472); font-size: .74rem; }
 .who strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -188,7 +188,7 @@ function printQr(): void {
           <button type="button" class="quiet" @click="giveOrTake(-1)">Take</button>
         </div>
         <ul class="ledger">
-          <li v-for="l in open.ledger" :key="l.id">
+          <li v-for="l in open.ledger" :key="l.id" :class="{ editing: editing?.id === l.id }">
             <template v-if="editing?.id === l.id">
               <form class="editrow" @submit.prevent="saveEntry">
                 <input v-model="editing.amount" type="number" step="1" aria-label="Amount" />
@@ -246,7 +246,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .adjust input { min-width: 0; }
 .ledger { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .875rem; }
 .ledger li { display: grid; grid-template-columns: auto 1fr auto auto; gap: .6rem; align-items: center; }
-.ledger li:has(> form) { grid-template-columns: 1fr; }
+.ledger li.editing { grid-template-columns: 1fr; }
 .editrow { display: grid; grid-template-columns: 5rem minmax(0, 1fr) auto auto; gap: .4rem; align-items: center; }
 .rowacts { display: flex; gap: .2rem; }
 .rowacts .quiet { min-height: 1.8rem; padding: 0 .4rem; font-size: .78rem; }

@@ -553,6 +553,7 @@ async function register(): Promise<void> {
 .login {
   display: grid; place-items: center; padding: 1rem;
   /* Centred in the viewport, clear of the status and gesture bars in the app. */
+  min-height: 100vh;
   min-height: 100dvh;
   padding-top: calc(1rem + var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));
   padding-bottom: calc(1rem + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));

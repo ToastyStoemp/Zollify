@@ -2,6 +2,17 @@ import { defineComponent, h, inject, provide, type InjectionKey, type PropType }
 import { DialogContent, DialogDescription, DialogOverlay, DialogRoot, DialogTitle } from 'reka-ui';
 import './dialog.css';
 
+// Reka calls Object.hasOwn (Chrome 93) every time a dialog opens, and the app
+// runs from WebView 92: without this, every dialog - the till lock among them -
+// would throw on exactly the oldest devices the app supports.
+if (typeof Object.hasOwn !== 'function') {
+  Object.defineProperty(Object, 'hasOwn', {
+    configurable: true,
+    writable: true,
+    value: (object: object, key: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(object, key),
+  });
+}
+
 /**
  * The behaviour every modal dialog shares, with no looks of its own: focus
  * moves in and stays in, Escape closes it wherever focus is, the page behind

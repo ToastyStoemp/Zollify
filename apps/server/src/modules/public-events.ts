@@ -17,6 +17,7 @@ import {
   type PublicEventsConfig,
 } from '@zollify/shared';
 import {
+  erased,
   isEnabled,
   reduceDiscounts,
   reduceEvents,
@@ -27,7 +28,7 @@ import {
   type PublicModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
-import { migrateEventPool, poolOnOps, registerEventPool } from './event-pool';
+import { EVENT_POOL_ACCOUNT_TABLES, EVENT_POOL_SERVER_TABLES, migrateEventPool, poolOnOps, registerEventPool, withdrawFromPool } from './event-pool';
 
 /**
  * Public events - the server half.
@@ -592,9 +593,14 @@ export const publicEventsServerModule: ServerModule = {
   id: 'public-events',
   minRole: 'admin',
   migrate,
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['public_events_config', 'public_events_overlay', 'event_pool_contribs', 'event_pool_adopted', 'event_pool_flags', 'event_pool_actions', 'event_pool_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('public_events_config', 'The public events page: its address (slug) and layout', 'merchant'),
+    erased('public_events_overlay', 'What the public page adds to each event (text, links)', 'merchant'),
+    ...EVENT_POOL_ACCOUNT_TABLES,
+  ],
+  serverTables: EVENT_POOL_SERVER_TABLES,
+  // A shared listing mirrors a contribution: it is rewritten or removed with it, not left for the next restart.
+  onAccountDeleted: withdrawFromPool,
   onOps: poolOnOps,
 
   /** Authenticated: the booth's own settings and a preview of what visitors see. */

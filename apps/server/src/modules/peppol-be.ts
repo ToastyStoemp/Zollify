@@ -21,7 +21,7 @@ import {
   type ArtistDetails,
   type Transaction,
 } from '@zollify/shared';
-import { makeSecretBox, parseProfile, reduceMerges, reduceTransactions, reportProblem, resolveProblem, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { erased, makeSecretBox, parseProfile, reduceMerges, reduceTransactions, reportProblem, resolveProblem, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ACCESS_POINTS, AccessPointSchema, sendViaAccessPoint, type AccessPointConfig } from './peppol-access-points';
 
 /** A Belgian invoice is dated by the Belgian calendar, whatever the server's clock zone. */
@@ -134,9 +134,12 @@ export function peppolServerModule(jwtSecret: string): ServerModule {
     id: PEPPOL_MODULE_ID,
     minRole: 'admin',
     migrate,
-    onAccountDeleted: (db, accountId) => {
-      for (const t of ['peppol_settings', 'peppol_customers', 'peppol_documents', 'peppol_counters']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    },
+    accountData: [
+      erased('peppol_settings', 'E-invoicing settings and the encrypted access-point credentials', 'merchant'),
+      erased('peppol_customers', 'Business customers invoiced over Peppol: name, address, VAT number', 'customers (business contacts)'),
+      erased('peppol_documents', 'Issued e-invoices and credit notes, with their UBL XML', 'merchant, customers (business contacts)'),
+      erased('peppol_counters', 'The next invoice number per series', 'none'),
+    ],
 
     routes: (ctx: ModuleContext) => async (app) => {
       const { db } = ctx;

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
-import type { ModuleContext, ServerModule } from '@zollify/server-core';
+import { erased, type ModuleContext, type ServerModule } from '@zollify/server-core';
 
 /**
  * Print Desk - the server half. Print Desk is the desktop app at the printer (apps/print-desk);
@@ -307,7 +307,9 @@ export const printDeskServerModule: ServerModule = {
   minRole: 'member',
   migrate,
   routes,
-  onAccountDeleted(db, accountId) {
-    for (const table of ['print_desk_config', 'print_desk_status', 'print_desk_requests']) db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('print_desk_config', 'Print desk settings', 'none'),
+    erased('print_desk_status', 'What each print desk last reported (printer, paper, queue)', 'none'),
+    erased('print_desk_requests', 'Print jobs sent to a desk, with who sent and who took them', 'staff'),
+  ],
 };

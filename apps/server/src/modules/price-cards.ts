@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { CURRENCIES, priceRows } from '@zollify/shared';
-import { reduceDiscounts, reduceProducts, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
+import { erased, reduceDiscounts, reduceProducts, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
 
 /**
  * Price cards - the server half, ported from ZollPriceCards.
@@ -53,9 +53,7 @@ export const priceCardsServerModule: ServerModule = {
   id: 'price-cards',
   minRole: 'admin',
   migrate,
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['price_cards_tokens']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [erased('price_cards_tokens', 'The hashed token of the price-card design plugin', 'none')],
 
   routes: (ctx: ModuleContext) => async (app) => {
     /** Mints a fresh plugin token for the account, replacing any earlier one. */

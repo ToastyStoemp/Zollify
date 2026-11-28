@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { EconomicSettingsSchema, dayJournal, isTimeZone, localDay, type DayJournal, type EconomicSettings, type Transaction } from '@zollify/shared';
-import { makeSecretBox, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { erased, makeSecretBox, reduceMerges, reduceTransactions, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { consignorRows, parseDoc } from './consignment';
 
 /**
@@ -113,9 +113,10 @@ export function economicServerModule(jwtSecret: string, fixedAppSecret?: string)
     id: ECONOMIC_MODULE_ID,
     minRole: 'admin',
     migrate,
-    onAccountDeleted: (db, accountId) => {
-      for (const t of ['economic_settings', 'economic_bookings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    },
+    accountData: [
+      erased('economic_settings', 'e-conomic connection: account mapping and the encrypted grant token', 'none'),
+      erased('economic_bookings', 'Which days were booked to e-conomic: voucher number and total', 'none'),
+    ],
 
     routes: (ctx: ModuleContext) => async (app) => {
       const { db } = ctx;

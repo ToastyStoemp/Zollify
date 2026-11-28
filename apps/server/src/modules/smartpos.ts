@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { isSandbox, reasonOf, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
+import { erased, isSandbox, reasonOf, reportProblem, resolveProblem, type AccountTable, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
 
 /**
  * Nexi SmartPOS (Nets SmartPOS N950 in Denmark): card payments on the
@@ -151,6 +151,18 @@ export interface PaymentDetail {
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
+
+/**
+ * As with SumUp: the payment rows are the terminal's side of a sale - here with the card's brand,
+ * last four digits and approval code, never the full number. The sale is in the op log and the
+ * merchant's backup; Nexi keeps the payment record.
+ */
+export const SMARTPOS_ACCOUNT_TABLES: AccountTable[] = [
+  erased('smartpos_links', 'The linked Nexi SmartPOS business', 'merchant'),
+  erased('smartpos_apps', "The booth's own SmartPOS app credentials, encrypted", 'merchant'),
+  erased('smartpos_states', 'One-time codes of a SmartPOS link in progress (minutes-lived)', 'none'),
+  erased('smartpos_payments', 'Card payments sent to a SmartPOS terminal: reference, amount, outcome, card brand and last four digits', 'customers (card brand, last four digits)'),
+];
 
 export function migrateSmartpos(db: Database.Database): void {
   db.exec(`

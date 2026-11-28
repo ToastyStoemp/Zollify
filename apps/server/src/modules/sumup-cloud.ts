@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { isSandbox, reportProblem, resolveProblem, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
+import { erased, isSandbox, reportProblem, resolveProblem, type AccountTable, type ModuleContext, type PublicModuleContext, type SecretBox } from '@zollify/server-core';
 
 /**
  * SumUp Solo over SumUp's Cloud API: the till sends the amount to the server,
@@ -84,7 +84,16 @@ export function migrateSumupCloud(db: Database.Database): void {
   `);
 }
 
-export const SUMUP_TABLES = ['sumup_links', 'sumup_states', 'sumup_payments'];
+/**
+ * The payment rows are the terminal's side of a sale - reference, amount, how it ended, never a
+ * card. The sale itself is in the op log and goes into the merchant's backup; SumUp keeps the
+ * payment record.
+ */
+export const SUMUP_ACCOUNT_TABLES: AccountTable[] = [
+  erased('sumup_links', 'The linked SumUp merchant and its encrypted tokens', 'merchant'),
+  erased('sumup_states', 'One-time codes of a SumUp link in progress (minutes-lived)', 'none'),
+  erased('sumup_payments', 'Card payments sent to a SumUp reader: reference, amount, outcome', 'none'),
+];
 
 interface Tokens {
   access: string;

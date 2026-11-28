@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import { base64BodyLimit, maxBytesFor } from '@zollify/shared';
-import { checkQuota, decodeUpload, sendRefusal, type ModuleContext, type ServerModule } from '@zollify/server-core';
-import { USAGE_TABLES, followProductCosts, forgetMaterialUse, migrateUsage, registerPrinterApi, registerUsage, usageSnapshot } from './sourcing-usage';
+import { checkQuota, decodeUpload, erased, sendRefusal, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { USAGE_ACCOUNT_TABLES, followProductCosts, forgetMaterialUse, migrateUsage, registerPrinterApi, registerUsage, usageSnapshot } from './sourcing-usage';
 
 /**
  * Sourcing - the server half, ported from ZollSource.
@@ -66,9 +66,11 @@ export const sourcingServerModule: ServerModule = {
     migrate(db);
     migrateUsage(db);
   },
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['sourcing_docs', 'sourcing_files', ...USAGE_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('sourcing_docs', 'Suppliers, materials, orders and dossiers', 'merchant; supplier contacts'),
+    erased('sourcing_files', 'Files in a dossier - proofs, quotes (the bytes are in the row)', 'merchant; supplier contacts'),
+    ...USAGE_ACCOUNT_TABLES,
+  ],
 
   /** The printing app logging the paper it used, with a printer key (see sourcing-usage.ts). */
   publicRoutes: (ctx) => async (app) => registerPrinterApi(app, ctx),

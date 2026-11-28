@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
-import { makeSecretBox, type ModuleContext, type ServerModule } from '@zollify/server-core';
+import { erased, makeSecretBox, type ModuleContext, type ServerModule } from '@zollify/server-core';
 import { ShopifyClient } from './shopify';
 import { matchCatalogs } from './match';
 import type { SavedMatches, ShopProduct, ZtProduct } from './types';
@@ -75,9 +75,10 @@ export function shopifyServerModule(jwtSecret: string): ServerModule {
     // Connecting a storefront and rewriting its prices is an owner's decision.
     minRole: 'owner',
     migrate,
-    onAccountDeleted: (db, accountId) => {
-      for (const t of ['shopify_connections', 'shopify_matches']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    },
+    accountData: [
+      erased('shopify_connections', 'The connected Shopify shop and its encrypted access token', 'merchant'),
+      erased('shopify_matches', 'Which product matches which Shopify product', 'none'),
+    ],
 
     routes: (ctx: ModuleContext) => async (app) => {
       const connectionFor = (accountId: string): { client: ShopifyClient; shop: string } | null => {

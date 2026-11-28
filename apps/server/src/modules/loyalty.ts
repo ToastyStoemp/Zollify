@@ -27,6 +27,7 @@ import {
   reportProblem,
   resolveProblem,
   verifyChallenge,
+  erased,
   type ModuleContext,
   type ModuleServices,
   type PublicModuleContext,
@@ -432,9 +433,12 @@ export function loyaltyServerModule(jwtSecret: string): ServerModule {
     // Staff read a card at the till; the programme, the members and Google's key are the admins'.
     minRole: 'member',
     migrate,
-    onAccountDeleted(db, accountId) {
-      for (const t of ['loyalty_settings', 'loyalty_google', 'loyalty_members', 'loyalty_ledger']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    },
+    accountData: [
+      erased('loyalty_settings', 'The loyalty programme and the token of its public join page', 'merchant'),
+      erased('loyalty_google', "Google Wallet issuer and the booth's encrypted service-account key", 'merchant'),
+      erased('loyalty_members', 'Loyalty members: card code, email, name', 'customers'),
+      erased('loyalty_ledger', 'Points earned and spent per member, with the sale and the staff member', 'customers, staff'),
+    ],
 
     // Sales as they sync: a member's sale earns, a reverted one gives back. Test sales (test mode) earn nothing - no real card is stamped by a rehearsal.
     onOps: (svc, accountId, ops) => {

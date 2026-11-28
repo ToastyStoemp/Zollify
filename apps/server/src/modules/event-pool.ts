@@ -11,7 +11,7 @@ import {
   poolKey,
   type PoolListing,
 } from '@zollify/shared';
-import { isSandbox, reduceEvents, type ModuleContext, type ModuleServices } from '@zollify/server-core';
+import { erased, isSandbox, reduceEvents, type AccountTable, type ModuleContext, type ModuleServices, type ServerTable } from '@zollify/server-core';
 
 /**
  * The shared event pool - the server half. Part of public-events: both publish
@@ -39,6 +39,19 @@ const MAX_CONTRIBUTIONS = 200;
 const RECENT_DAYS = 30;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+
+/** What the pool keeps per account; all of it goes with the account, and with a wipe (the events it mirrors are gone). */
+export const EVENT_POOL_ACCOUNT_TABLES: AccountTable[] = [
+  erased('event_pool_settings', 'Whether the account shares its events with the pool', 'none'),
+  erased('event_pool_contribs', 'The event facts the account shared (name, venue, dates)', 'merchant (a venue can be a home address)'),
+  erased('event_pool_adopted', 'Which shared listings the account added to its own events', 'none'),
+  erased('event_pool_flags', 'Listings the account reported, with its note', 'merchant (free text)'),
+  erased('event_pool_actions', 'Timestamps for the per-account rate limits', 'none'),
+];
+
+export const EVENT_POOL_SERVER_TABLES: ServerTable[] = [
+  { table: 'event_pool_listings', holds: 'The shared event listings every account can add from', reason: 'Carries no account; a listing is rewritten or removed when its contributors leave (withdrawFromPool)' },
+];
 
 export function migrateEventPool(db: Database.Database): void {
   db.exec(`
@@ -217,6 +230,16 @@ function refreshListing(db: Database.Database, listingId: string): void {
     `UPDATE event_pool_listings SET name = ?, edition = ?, venueName = ?, street = ?, postcode = ?, city = ?, country = ?,
        dateStart = ?, dateEnd = ?, url = ?, description = ?, updatedAt = ? WHERE id = ?`,
   ).run(f.name, f.edition, f.venueName, f.street, f.postcode, f.city, f.country, f.dateStart, f.dateEnd, f.url, f.description, first.updatedAt, listingId);
+}
+
+/**
+ * The account is being deleted or wiped: its contributions leave the pool now, and every listing
+ * they fed is rewritten from whoever still shares it - or removed when nobody does.
+ */
+export function withdrawFromPool(db: Database.Database, accountId: string): void {
+  const fed = db.prepare('SELECT DISTINCT listingId FROM event_pool_contribs WHERE accountId = ?').all(accountId) as { listingId: string }[];
+  db.prepare('DELETE FROM event_pool_contribs WHERE accountId = ?').run(accountId);
+  for (const { listingId } of fed) refreshListing(db, listingId);
 }
 
 /**

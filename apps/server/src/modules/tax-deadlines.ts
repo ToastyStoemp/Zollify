@@ -13,7 +13,7 @@ import {
   type ReminderDue,
   type TaxDeadlineSettings,
 } from '@zollify/shared';
-import { isEnabled, reasonOf, reportProblem, resolveProblem, type ModuleContext, type ModuleServices, type ServerModule } from '@zollify/server-core';
+import { erased, isEnabled, reasonOf, reportProblem, resolveProblem, type ModuleContext, type ModuleServices, type ServerModule } from '@zollify/server-core';
 
 /**
  * Tax deadlines - the server half. Keeps each account's tax profile, which
@@ -223,7 +223,9 @@ export const taxDeadlinesServerModule: ServerModule = {
   minRole: 'admin',
   migrate,
   routes,
-  onAccountDeleted(db, accountId) {
-    for (const table of ['tax_deadline_settings', 'tax_deadline_done', 'tax_deadline_sent']) db.prepare(`DELETE FROM ${table} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('tax_deadline_settings', 'Which tax deadlines the account follows and how it is reminded', 'merchant'),
+    erased('tax_deadline_done', 'Deadlines ticked off, and by whom', 'staff'),
+    erased('tax_deadline_sent', 'Which reminders already went out', 'none'),
+  ],
 };

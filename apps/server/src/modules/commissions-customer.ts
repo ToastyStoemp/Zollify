@@ -23,7 +23,7 @@ import {
   type Commission,
   type CommissionSettings,
 } from '@zollify/shared';
-import { addStorageSource, checkQuota, decodeUpload, issueChallenge, reportProblem, sendRefusal, verifyChallenge, type ModuleContext, type ModuleServices, type PublicModuleContext } from '@zollify/server-core';
+import { addStorageSource, checkQuota, decodeUpload, erased, issueChallenge, reportProblem, sendRefusal, verifyChallenge, type AccountTable, type ServerTable, type ModuleContext, type ModuleServices, type PublicModuleContext } from '@zollify/server-core';
 import { POW_SOLVER_JS } from './pow-client';
 
 /**
@@ -98,9 +98,16 @@ export function migrateCustomerSide(db: Database.Database): void {
   }
 }
 
-export function deleteCustomerSide(db: Database.Database, accountId: string): void {
-  for (const t of ['commission_files', 'commission_push', 'commission_request_pages']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-}
+/** What the customer's side keeps per account; it goes with the account, and with a wipe like the commissions it belongs to. */
+export const CUSTOMER_SIDE_ACCOUNT_TABLES: AccountTable[] = [
+  erased('commission_files', "Reference pictures a customer sent with a brief (the bytes are in the row)", 'customers'),
+  erased('commission_push', "Customers' browser push subscriptions for updates on their commission", 'customers'),
+  erased('commission_request_pages', 'The token of the public page where a commission is requested', 'none'),
+];
+
+export const CUSTOMER_SIDE_SERVER_TABLES: ServerTable[] = [
+  { table: 'commission_push_keys', holds: "The server's own web-push (VAPID) key pair", reason: 'One key pair for the whole server' },
+];
 
 /** Erasing a customer's details: their pictures and devices go too. */
 export function eraseCustomerFiles(db: Database.Database, accountId: string, commissionId: string): void {

@@ -15,7 +15,7 @@ import {
   type TradeDetails,
   type WholesaleOrder,
 } from '@zollify/shared';
-import type { ModuleContext, ServerModule } from '@zollify/server-core';
+import { erased, type ModuleContext, type ServerModule } from '@zollify/server-core';
 
 /**
  * Wholesale - the server half: what each product is to the trade, the
@@ -110,9 +110,11 @@ export const wholesaleServerModule: ServerModule = {
   // Prices to the trade, customers and orders are the account holder's business.
   minRole: 'admin',
   migrate,
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['wholesale_products', 'wholesale_customers', 'wholesale_orders']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('wholesale_products', 'Trade prices and terms per product', 'none'),
+    erased('wholesale_customers', 'Trade customers: shop name, contact, address, VAT number', 'customers (business contacts)'),
+    erased('wholesale_orders', 'Trade orders, numbered, with the customer and the lines', 'customers (business contacts)'),
+  ],
 
   routes: (ctx: ModuleContext) => async (app) => {
     const { db } = ctx;

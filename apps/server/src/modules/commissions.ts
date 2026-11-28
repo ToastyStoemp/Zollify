@@ -31,9 +31,9 @@ import {
   type PublicCommission,
   type Transaction,
 } from '@zollify/shared';
-import { isEnabled, reduceTransactions, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
+import { erased, isEnabled, reduceTransactions, type ModuleContext, type PublicModuleContext, type ServerModule } from '@zollify/server-core';
 import { renderCommission, renderNotFound } from './commissions-page';
-import { deleteCustomerSide, eraseCustomerFiles, migrateCustomerSide, picturesOf, pushCount, pushUpdate, registerCustomerSide, registerOwnerSide, testSubject, type CommissionDeps } from './commissions-customer';
+import { CUSTOMER_SIDE_ACCOUNT_TABLES, CUSTOMER_SIDE_SERVER_TABLES, eraseCustomerFiles, migrateCustomerSide, picturesOf, pushCount, pushUpdate, registerCustomerSide, registerOwnerSide, testSubject, type CommissionDeps } from './commissions-customer';
 
 /**
  * Commissions - the server half.
@@ -532,10 +532,13 @@ export const commissionsServerModule: ServerModule = {
   // Settings, link replacement and erasure are admin-only below.
   minRole: 'member',
   migrate,
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['commissions', 'commission_customers', 'commissions_settings']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    deleteCustomerSide(db, accountId);
-  },
+  accountData: [
+    erased('commissions', 'Commissions: the brief, price, status and the customer it is for', 'customers'),
+    erased('commission_customers', 'Returning commission customers: name, email, phone', 'customers'),
+    erased('commissions_settings', 'How the booth takes commissions', 'merchant'),
+    ...CUSTOMER_SIDE_ACCOUNT_TABLES,
+  ],
+  serverTables: CUSTOMER_SIDE_SERVER_TABLES,
   // Test data cleared (test mode): the test commissions go with the test sales.
   onOps: (svc, accountId, ops) => {
     if (ops.some((o) => o.type === 'tx.test.clear')) clearTestCommissions(svc.db, accountId);

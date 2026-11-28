@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { currentUnitCost, recipeCost, type CostedMaterial, type Product, type RecipeUse } from '@zollify/shared';
-import { reduceProducts, type ModuleContext, type ModuleServices, type PublicModuleContext } from '@zollify/server-core';
+import { erased, reduceProducts, type AccountTable, type ModuleContext, type ModuleServices, type PublicModuleContext } from '@zollify/server-core';
 
 /**
  * Materials on hand - paper, ink, packaging used up by printing at home.
@@ -79,7 +79,11 @@ export function migrateUsage(db: Database.Database): void {
   `);
 }
 
-export const USAGE_TABLES = ['sourcing_material_use', 'sourcing_keys', 'sourcing_settings'];
+export const USAGE_ACCOUNT_TABLES: AccountTable[] = [
+  erased('sourcing_material_use', 'How much of each material was used, and when', 'none'),
+  erased('sourcing_keys', 'Hashed keys the printing app logs usage with', 'none'),
+  erased('sourcing_settings', 'Material usage settings', 'none'),
+];
 
 interface MaterialDoc {
   id: string;

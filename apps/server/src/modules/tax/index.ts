@@ -14,6 +14,7 @@ import {
   reportProblem,
   resolveProblem,
   sendRefusal,
+  erased,
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
@@ -239,9 +240,15 @@ export function taxServerModule(jwtSecret: string): ServerModule {
     // Staff only get to add an expense (see STAFF_ROUTES); the books are the admins'.
     minRole: 'member',
     migrate,
-    onAccountDeleted: (db, accountId) => {
-      for (const t of ['tax_config', 'tax_cache', 'tax_expenses', 'tax_bookings', 'tax_ai_usage']) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-    },
+    accountData: [
+      erased('tax_config', 'Bookkeeping settings and the encrypted keys of connected services', 'merchant'),
+      erased('tax_cache', 'Cached answers from connected services', 'none'),
+      erased('tax_expenses', 'The expense ledger: vendor, amount, note and the invoice file itself', 'merchant, staff (who added it); vendors named on invoices'),
+      erased('tax_bookings', 'Which vouchers were booked to the accounting system', 'none'),
+      erased('tax_ai_usage', "The day's count of invoice-reading calls", 'none'),
+      erased('tax_cards', 'Payment cards seen on the phone: last four digits and a label', 'merchant, staff'),
+      erased('tax_card_payments', 'Card payments seen on the phone: merchant paid, amount, last four digits', 'merchant, staff'),
+    ],
 
     // An event closing, with the automatic per diems on, gets its per diem.
     onOps: (svc, accountId, ops) => {

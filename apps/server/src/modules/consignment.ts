@@ -34,6 +34,8 @@ import {
   reduceMerges,
   reduceProducts,
   reduceTransactions,
+  erased,
+  type AccountTable,
   type ModuleContext,
   type ServerModule,
 } from '@zollify/server-core';
@@ -119,20 +121,35 @@ export interface ConsignorRow {
 }
 
 /** Every table the consignment modules keep per account (store side and artist side share them). */
-const CONSIGNMENT_TABLES = [
-  'consignors',
-  'consignment_payouts',
-  'consignment_planner',
-  'consignment_signups',
-  'consignment_public',
-  'consignment_shares',
-  'consignment_pricing',
-  'consignment_shared_images',
-  'consignment_shipments',
-  'consignment_stock_log',
-  'consignment_fees',
-  'consignment_settings',
-  'consignment_reports_sent',
+const CONSIGNMENT_TABLES: AccountTable[] = [
+  erased('consignors', 'The artists a store sells for: name, contact, VAT number, bank details, terms', 'artists (consignors)'),
+  erased('consignment_payouts', 'Payouts made to artists', 'artists (consignors)'),
+  erased('consignment_planner', 'Shelf plan, workshops and setups per artist', 'artists (consignors)'),
+  erased('consignment_signups', 'People signed up for a workshop on the public page: name, email', 'customers (workshop visitors)'),
+  erased('consignment_public', 'The token of the public workshop page', 'none'),
+  erased('consignment_shares', "Which of an artist's products a store may sell", 'none'),
+  erased('consignment_pricing', 'Price agreements per artist', 'none'),
+  erased('consignment_shared_images', 'Which product images are shared with a store', 'none'),
+  erased('consignment_shipments', 'Stock an artist sent to a store', 'artists (consignors)'),
+  erased('consignment_stock_log', 'Stock movements per artist', 'none'),
+  erased('consignment_fees', 'Fees a store charged an artist', 'artists (consignors)'),
+  erased('consignment_settings', "The store's books settings: time zone, invoice prefix, accounts", 'merchant'),
+  erased('consignment_reports_sent', 'Which period reports were already emailed', 'none'),
+  {
+    table: 'consignment_invoices',
+    holds: 'Invoices issued to artists: numbered from a gap-free sequence per year and never rewritten',
+    personal: 'artists (consignors): name, VAT number',
+    // With the account gone nobody can read them: the store takes its invoices along before it deletes.
+    onDelete: 'erase',
+    // A wipe never removed these. Kept on purpose now: a store that goes on must not hand out an
+    // invoice number twice, and an issued invoice is a bookkeeping record the backup does not carry.
+    onWipe: {
+      retain: {
+        reason: 'Issued invoices are bookkeeping records and their numbers must stay unique and gap-free for a store that continues; the backup export does not include them',
+        period: 'the bookkeeping retention period (10 years is the longest in the EU countries served), or until the account is deleted',
+      },
+    },
+  },
 ];
 /** Rent is charged by the store's calendar day (its books time zone). */
 const today = (db: Database.Database, accountId: string): string => localDay(Date.now(), booksSettings(db, accountId).timeZone);
@@ -259,8 +276,8 @@ export const consignmentServerModule: ServerModule = {
     migrateStock(db);
     migrateBooks(db);
   },
+  accountData: CONSIGNMENT_TABLES,
   onAccountDeleted: (db, accountId) => {
-    for (const t of CONSIGNMENT_TABLES) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
     // Stores that had this account as a linked (or invited) artist keep the consignor, unlinked.
     db.prepare('UPDATE consignors SET linkedAccountId = NULL WHERE linkedAccountId = ?').run(accountId);
     db.prepare('UPDATE consignors SET offerAccountId = NULL WHERE offerAccountId = ?').run(accountId);

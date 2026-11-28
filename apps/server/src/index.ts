@@ -2,26 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { EOL } from 'node:os';
 import { join, resolve } from 'node:path';
-import { buildGateway, loadDotEnv, type ServerModule } from '@zollify/server-core';
-import { shopifyServerModule } from './modules/shopify-sync';
-import { sourcingServerModule } from './modules/sourcing';
-import { publicEventsServerModule } from './modules/public-events';
-import { commissionsServerModule } from './modules/commissions';
-import { priceCardsServerModule } from './modules/price-cards';
-import { taxServerModule } from './modules/tax/index';
-import { receiptsServerModule } from './modules/receipts';
-import { consignmentArtistServerModule, consignmentServerModule } from './modules/consignment';
-import { peppolServerModule } from './modules/peppol-be';
-import { economicServerModule } from './modules/economic';
-import { taxDeadlinesServerModule } from './modules/tax-deadlines';
-import { wholesaleServerModule } from './modules/wholesale';
-import { loyaltyServerModule } from './modules/loyalty';
-import { printDeskServerModule } from './modules/print-desk';
+import { buildGateway, loadDotEnv } from '@zollify/server-core';
+import { serverModules } from './server-modules';
 
 loadDotEnv();
 
 /**
- * Server module halves are compiled into this deploy (assembled in main()).
+ * Server module halves are compiled into this deploy (listed in server-modules.ts).
  *
  * Unlike client modules, these are not loaded at runtime: they run in a
  * privileged process holding the database and every tenant's integration keys,
@@ -71,26 +58,6 @@ async function main(): Promise<void> {
   const shellStoreDir = resolve(process.env.ZOLLIFY_SHELL_STORE ?? './shell-store');
   const jwtSecret = process.env.ZOLLIFY_JWT_SECRET || persistentSecret(dataDir);
 
-  // Shopify derives its credential-encryption key from the same secret, so it
-  // is constructed here rather than importing config of its own.
-  const serverModules: ServerModule[] = [
-    taxServerModule(jwtSecret),
-    sourcingServerModule,
-    publicEventsServerModule,
-    priceCardsServerModule,
-    shopifyServerModule(jwtSecret),
-    receiptsServerModule(jwtSecret),
-    consignmentServerModule,
-    consignmentArtistServerModule,
-    commissionsServerModule,
-    peppolServerModule(jwtSecret),
-    economicServerModule(jwtSecret),
-    taxDeadlinesServerModule,
-    wholesaleServerModule,
-    loyaltyServerModule(jwtSecret),
-    printDeskServerModule,
-  ];
-
   const app = await buildGateway({
     dataDir,
     moduleStoreDir,
@@ -99,7 +66,7 @@ async function main(): Promise<void> {
     shellStoreDir,
     deployDir: process.env.ZOLLIFY_DEPLOY_DIR ? resolve(process.env.ZOLLIFY_DEPLOY_DIR) : undefined,
     jwtSecret,
-    serverModules,
+    serverModules: serverModules(jwtSecret),
     defaultModules: DEFAULT_MODULES,
     allowedOrigins: (process.env.ZOLLIFY_ALLOWED_ORIGINS ?? '')
       .split(',')

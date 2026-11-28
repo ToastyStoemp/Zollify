@@ -26,6 +26,7 @@ import {
 } from '@zollify/shared';
 import {
   decodeUpload,
+  erased,
   issueChallenge,
   makeSecretBox,
   parseProfile,
@@ -37,8 +38,8 @@ import {
 } from '@zollify/server-core';
 import { POW_SOLVER_JS } from './pow-client';
 import { nextPublicEvents } from './public-events';
-import { migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
-import { SUMUP_TABLES, migrateSumupCloud, registerSumupCloud, registerSumupCloudPublic, sumupLinks } from './sumup-cloud';
+import { SMARTPOS_ACCOUNT_TABLES, migrateSmartpos, registerSmartpos, registerSmartposPublic, smartposApps } from './smartpos';
+import { SUMUP_ACCOUNT_TABLES, migrateSumupCloud, registerSumupCloud, registerSumupCloudPublic, sumupLinks } from './sumup-cloud';
 
 /**
  * Online receipts - the server half of the POS module's receipt QR code.
@@ -606,9 +607,12 @@ export const receiptsServerModule = (jwtSecret: string, box = makeSecretBox(jwtS
     migrateSmartpos(db);
     migrateSumupCloud(db);
   },
-  onAccountDeleted: (db, accountId) => {
-    for (const t of ['pos_branding', 'pos_receipt_socials', 'smartpos_apps', 'smartpos_links', 'smartpos_payments', 'smartpos_states', ...SUMUP_TABLES]) db.prepare(`DELETE FROM ${t} WHERE accountId = ?`).run(accountId);
-  },
+  accountData: [
+    erased('pos_branding', 'Receipt logo and footer', 'merchant'),
+    erased('pos_receipt_socials', 'Social links printed on receipts', 'merchant'),
+    ...SMARTPOS_ACCOUNT_TABLES,
+    ...SUMUP_ACCOUNT_TABLES,
+  ],
 
   /** Signed in: the booth's receipt branding, read by every device, set by owners and admins. */
   routes: (ctx: ModuleContext) => async (app) => {

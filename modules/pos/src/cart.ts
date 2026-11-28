@@ -6,7 +6,7 @@ import { round2, toLocalPrice } from '@zollify/shared';
 import { getProvider } from './payments/registry';
 import { testTerminalProvider } from './payments/test-terminal';
 import type { PaymentProvider, PaymentResult } from './payments/provider';
-import { logDiagnostic } from './lib/diagnostics';
+import { reportLateApproval } from './lib/late-approvals';
 import { sdk } from './runtime';
 import { mintReceiptToken, saleTaxFor } from './lib/after-sale';
 import {
@@ -32,6 +32,11 @@ export interface CartLine extends SaleLine {
   fixed?: boolean;
   /** That module's key for the line, so the same thing is never added twice. */
   key?: string;
+  /**
+   * A price the seller typed in the charge currency (a misc item). Charged as
+   * typed: converting it to base and back loses cents (25 at 11.3 -> 24.97).
+   */
+  typed?: { unitPrice: number; currency: string };
 }
 
 interface CartState {
@@ -213,6 +218,15 @@ export function localPrice(productId: string, variantId: string | null, basePric
   return override != null ? override : toCharged(basePrice);
 }
 
+/**
+ * What one unit of a cart line is charged. A price typed in the charge
+ * currency stands as typed for as long as the cart still charges in it.
+ */
+export function chargedUnitPrice(line: Pick<CartLine, 'productId' | 'variantId' | 'unitPrice' | 'typed'>): number {
+  if (line.typed && isConverting.value && line.typed.currency === cart.currency) return line.typed.unitPrice;
+  return localPrice(line.productId, line.variantId, line.unitPrice);
+}
+
 function localTierTotal(ruleId: string, index: number | string, baseTotal: number): number {
   const override = cart.tierOverrides[`${ruleId}:${index}`];
   return override != null ? override : toCharged(baseTotal);
@@ -265,9 +279,9 @@ export const totals = computed(() =>
  * Prices lands exactly at checkout instead of drifting through rounding.
  */
 const chargeLines = computed<DiscountCartLine[]>(() =>
-  discountLines.value.map((l) => {
-    const unitPrice = localPrice(l.pid, l.vid, l.unitPrice);
-    return { ...l, unitPrice, lineTotal: (Math.round(unitPrice * 100) * l.qty) / 100 };
+  cart.lines.map((line, i) => {
+    const unitPrice = chargedUnitPrice(line);
+    return { ...discountLines.value[i]!, unitPrice, lineTotal: (Math.round(unitPrice * 100) * line.qty) / 100 };
   }),
 );
 const localRules = computed(() =>
@@ -391,8 +405,14 @@ export function inCart(productId: string, variantId: string | null = null): numb
   return cart.lines.filter((l) => l.productId === productId && (l.variantId ?? null) === variantId).reduce((n, l) => n + l.qty, 0);
 }
 
-/** A one-off item that is not in the catalogue: no stock, no rule discounts. */
-export function addMisc(title: string, unitPrice: number, qty: number): void {
+/**
+ * A one-off item that is not in the catalogue: no stock, no rule discounts.
+ * `price` is what the seller typed, in the charge currency. The books get its
+ * base-currency value; the customer is charged the typed figure itself.
+ */
+export function addMisc(title: string, price: number, qty: number): void {
+  const converting = isConverting.value && cart.exchangeRate !== null;
+  const unitPrice = round2(converting ? price / cart.exchangeRate! : price);
   cart.lines.push({
     lineId: `l${++lineSeq}`,
     productId: `misc:${crypto.randomUUID()}`,
@@ -404,6 +424,7 @@ export function addMisc(title: string, unitPrice: number, qty: number): void {
     unitPrice,
     lineTotal: (Math.round(unitPrice * 100) * qty) / 100,
     taxRate: null,
+    ...(converting ? { typed: { unitPrice: round2(price), currency: cart.currency } } : {}),
   });
 }
 
@@ -501,15 +522,16 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       // In test mode, and in a test account, every card goes to the pretend terminal, whatever is configured.
       const provider = testMode.value || sandboxAccount() ? testTerminalProvider : getProvider(pay.terminal.providerId as never);
       activeProvider = provider;
+      const request = onCardSettled
+        ? { amount: onCardSettled.amount, currency: onCardSettled.currency, reference: saleId }
+        : { amount: onCard, currency: cart.currency, reference: saleId };
       const result = await provider
-        .startPayment(
-          onCardSettled
-            ? { amount: onCardSettled.amount, currency: onCardSettled.currency, reference: saleId }
-            : { amount: onCard, currency: cart.currency, reference: saleId },
-        )
+        .startPayment(request)
         .catch((err: unknown): PaymentResult => ({ approved: false, provider: provider.id, error: err instanceof Error ? err.message : String(err) }));
       if (thisAttempt !== attempt) {
-        if (result.approved) logDiagnostic(`Terminal approved sale ${saleId} after the seller cancelled it - not recorded (txRef=${result.txRef ?? '-'})`);
+        // The card was charged for a sale the seller already gave up on. It is
+        // not recorded (a retry may be running), so the seller must be told.
+        if (result.approved) void reportLateApproval({ terminal: provider.label, amount: request.amount, currency: request.currency, txRef: result.txRef });
         return { approved: false, cancelled: true, error: 'Cancelled' };
       }
       if (!result.approved) return { approved: false, error: result.error ?? 'The payment was declined.' };
@@ -545,7 +567,7 @@ export async function checkout(saleId: string, pay: CheckoutPayment): Promise<Ch
       exchangeRate: cart.exchangeRate ?? undefined,
       ...(isConverting.value && marketRateNow() ? { marketRate: marketRateNow()! } : {}),
       // Each line carries the VAT rate actually applied (null when exempt or unknown).
-      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
+      lines: priced.map(({ lineId: _l, variantLabel: _vl, type: _t, fixed: _f, key: _k, typed: _ty, ...line }, i) => ({ ...line, taxRate: tax?.rates[i] ?? null })),
       ...(tax ? { tax } : {}),
       // Minted for every sale, whether or not a QR is shown: a receipt can
       // still be handed over later from the sale's receipt screen.

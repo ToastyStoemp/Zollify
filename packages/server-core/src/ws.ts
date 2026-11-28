@@ -8,6 +8,7 @@ import type {
   DisplaySubscribeMessage,
   NotificationMessage,
   NudgeMessage,
+  PaymentCancelMessage,
   PaymentResultMessage,
   PaymentTriggerMessage,
   ShellUpdateMessage,
@@ -16,7 +17,11 @@ import { checkClaims, type JwtClaims } from './auth';
 import { touchDevice } from './db';
 import { parseDevice } from './session-info';
 
-type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
+type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage | PaymentCancelMessage;
+// Only these are relayed between devices; anything else a client sends is ignored.
+const PAYMENT_TYPES: ReadonlySet<string> = new Set<PaymentMessage['type']>(['payment.trigger', 'payment.result', 'payment.cancel']);
+const isPaymentMessage = (msg: { type?: string; to?: unknown; requestId?: unknown } | null): msg is PaymentMessage =>
+  !!msg && PAYMENT_TYPES.has(msg.type ?? '') && typeof msg.to === 'string' && typeof msg.requestId === 'string';
 
 /**
  * WebSocket is a doorbell only: after a push, every *other* connected device
@@ -202,7 +207,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
         return;
       }
       // Registers push ephemeral customer-display cart snapshots and the
-      // remote-payment trigger/result handshake; everything else is ignored
+      // remote-payment trigger/result/cancel handshake; everything else is ignored
       // (sync data always travels over HTTP).
       try {
         const msg = JSON.parse(String(raw)) as DisplayCartMessage | PaymentMessage | DisplaySubscribeMessage;
@@ -210,11 +215,7 @@ export async function registerWs(app: FastifyInstance, rooms: Rooms, db: Databas
           rooms.setDisplay(claims.accountId, member, msg.on === true);
         } else if (msg?.type === 'display.cart' && msg.cart && typeof msg.cart === 'object') {
           rooms.relayDisplayCart(claims.accountId, deviceId ?? 'unknown', msg.cart);
-        } else if (
-          (msg?.type === 'payment.trigger' || msg?.type === 'payment.result') &&
-          typeof msg.to === 'string' &&
-          typeof msg.requestId === 'string'
-        ) {
+        } else if (isPaymentMessage(msg)) {
           rooms.relayToDevice(claims.accountId, deviceId ?? 'unknown', msg);
         }
       } catch {

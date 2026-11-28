@@ -6,6 +6,7 @@ import type {
   DisplaySubscribeMessage,
   NotificationMessage,
   NudgeMessage,
+  PaymentCancelMessage,
   PaymentResultMessage,
   PaymentTriggerMessage,
   ShellUpdateMessage,
@@ -23,11 +24,16 @@ import { loadNotifications, resetNotifications, startPush } from './notification
  * the polling interval.
  */
 
-export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage;
+export type PaymentMessage = PaymentTriggerMessage | PaymentResultMessage | PaymentCancelMessage;
+// Listed, not matched by prefix: a payment message this shell does not know
+// is dropped here rather than handed to a module that cannot read it.
+const PAYMENT_TYPES: ReadonlySet<string> = new Set<PaymentMessage['type']>(['payment.trigger', 'payment.result', 'payment.cancel']);
+const isPaymentMessage = (msg: Incoming | null | undefined): msg is PaymentMessage =>
+  !!msg && PAYMENT_TYPES.has(msg.type) && typeof (msg as PaymentMessage).requestId === 'string';
 type Incoming = NudgeMessage | NotificationMessage | ShellUpdateMessage | DisplayCartMessage | PaymentMessage | DisplayListenersMessage;
 
 const paymentListeners = new Set<(msg: PaymentMessage) => void>();
-/** Point-to-point payment trigger/result messages addressed to this device. */
+/** Point-to-point payment trigger/result/cancel messages addressed to this device. */
 export function onPaymentMessage(handler: (msg: PaymentMessage) => void): () => void {
   paymentListeners.add(handler);
   return () => paymentListeners.delete(handler);
@@ -119,7 +125,7 @@ async function connect(): Promise<void> {
     else if (msg?.type === 'notification') void loadNotifications(true);
     else if (msg?.type === 'display.cart' && msg.from && msg.cart && typeof msg.cart === 'object') {
       displayCarts[msg.from] = { ...msg.cart, deviceId: msg.from, receivedAt: Date.now() };
-    } else if ((msg?.type === 'payment.trigger' || msg?.type === 'payment.result') && typeof msg.requestId === 'string') {
+    } else if (isPaymentMessage(msg)) {
       for (const h of paymentListeners) h(msg);
     }
   };
@@ -181,7 +187,7 @@ export function setDisplaySubscribed(on: boolean): void {
   socket.send(JSON.stringify(msg));
 }
 
-/** Sends a payment trigger or result to one named device. Best effort; nothing is stored. */
+/** Sends a payment trigger, result or cancel to one named device. Best effort; nothing is stored. */
 export function sendPaymentMessage(msg: PaymentMessage): boolean {
   if (!socket || socket.readyState !== socket.OPEN) return false;
   socket.send(JSON.stringify(msg));

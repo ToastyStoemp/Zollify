@@ -1,6 +1,6 @@
 import type { Component } from 'vue';
 import type Dexie from 'dexie';
-import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
+import type { AccountProfile, CardSettlement, DeviceSummary, DiscountRule, DisplayCart, EventStock, PaymentCancelMessage, PaymentResultMessage, PaymentTriggerMessage, Product, SaleTax, SalesEvent, Transaction } from '@zollify/shared';
 
 /**
  * Roles carried forward from ZollTool unchanged. A `member` with
@@ -655,8 +655,8 @@ export interface Sdk {
     deviceId(): Promise<string>;
     /** Every device that has signed in to this account - the possible targets. */
     devices(): Promise<DeviceSummary[]>;
-    sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage): boolean;
-    onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage) => void): Unsubscribe;
+    sendPayment(msg: PaymentTriggerMessage | PaymentResultMessage | PaymentCancelMessage): boolean;
+    onPayment(handler: (msg: PaymentTriggerMessage | PaymentResultMessage | PaymentCancelMessage) => void): Unsubscribe;
   };
 
   /**

@@ -371,6 +371,21 @@ export interface PaymentResultMessage {
   error?: string;
 }
 
+/**
+ * The register gave up on a payment it triggered (Cancel, retry, no answer in
+ * time). The Carbon may already be past the point of stopping, so this is a
+ * request, not a guarantee: the payment.result still comes back either way.
+ * A device or server that predates this message ignores it.
+ */
+export interface PaymentCancelMessage {
+  type: 'payment.cancel';
+  /** Stamped by the server from the sender's own deviceId. */
+  from?: string;
+  /** Target Carbon's deviceId. */
+  to: string;
+  requestId: string;
+}
+
 // ── Admin (owner-only) ───────────────────────────────────────────────────────
 
 export interface AdminOverview {

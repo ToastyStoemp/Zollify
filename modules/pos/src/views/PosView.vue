@@ -13,6 +13,7 @@ import {
   replaceModuleLine,
   appliedDiscounts,
   chargeTotals,
+  chargedUnitPrice,
   customDiscountCharged,
   localPrice,
   baseTotal,
@@ -49,6 +50,8 @@ import { loadReceiptConfig, printReceipt, printableReceipt, printingAvailable, v
 import { allocateDiscounts } from '../discounts';
 import { backfillBranding, screenLogo } from '../lib/branding';
 import { tillLinkFrom } from '../lib/till-link';
+import { dismissLateApproval, lateApprovalText, lateApprovals } from '../lib/late-approvals';
+import { singleFlight } from '../lib/single-flight';
 import { sdk } from '../runtime';
 import { afterSalePrefs, receiptUrl as receiptUrlFor, saleTaxFor, type PrintState } from '../lib/after-sale';
 import AfterSaleOverlay from '../components/AfterSaleOverlay.vue';
@@ -603,7 +606,7 @@ const fromPrice = (p: Product): string => `from ${money(Math.min(...(p.variants 
 const showCartSheet = ref(false);
 const lines = computed(() =>
   cart.lines.map((l) => {
-    const chargedUnit = localPrice(l.productId, l.variantId, l.unitPrice);
+    const chargedUnit = chargedUnitPrice(l);
     return { ...l, chargedUnit, chargedTotal: round2(chargedUnit * l.qty) };
   }),
 );
@@ -715,8 +718,8 @@ function addMiscItem(): void {
   const p = Number(miscForm.price);
   const qty = Math.max(1, Math.floor(Number(miscForm.qty)) || 1);
   if (!Number.isFinite(p) || p <= 0) return toast('Enter a price for the item.', 'bad');
-  // Entered in the charge currency; the cart keeps base-currency lines.
-  addMisc(miscForm.title, round2(isConverting.value && cart.exchangeRate ? p / cart.exchangeRate : p), qty);
+  // Entered in the charge currency; the cart charges it as typed and keeps its base value for the books.
+  addMisc(miscForm.title, p, qty);
   showMisc.value = false;
 }
 
@@ -818,6 +821,8 @@ const title = computed(() => ({ cash: 'Cash payment', card: 'Card payment', spli
 const givesAway = computed(() => itemCount.value > 0 && Math.abs(total.value) < 0.005);
 
 function startPayment(method: string): void {
+  // A card payment is already on its way to the terminal (see cardStart).
+  if (cardStart.busy) return;
   if (!itemCount.value) return;
   if (!activeEvent.value) return toast('Pick an active event first (Events).', 'bad');
   if (sellBlocked.value) return toast(`Sell 🔒 - ${lockedBy.value} took this event's leftovers.`, 'bad');
@@ -833,7 +838,7 @@ function startPayment(method: string): void {
   // The day's rate recorded with the sale: kept fresh through a long day too.
   if (isConverting.value && Date.now() - marketFx.at > 3_600_000) void loadMarketFx();
   if (method === 'card' && hasTerminal.value) {
-    void beginCardPayment();
+    cardStart.run();
     return;
   }
   payment.phase = 'confirm';
@@ -852,6 +857,10 @@ async function beginCardPayment(): Promise<void> {
   payment.phase = 'terminal';
   void runTerminal();
 }
+// The sign-in check takes a moment and the pay buttons stay on screen for it.
+// A second tap in that gap would send a second request to the terminal, which
+// refuses it, and the screen would say "failed" over a payment still running.
+const cardStart = singleFlight(beginCardPayment);
 async function connectReader(): Promise<void> {
   const p = provider.value;
   if (!p.configure) return;
@@ -1130,6 +1139,11 @@ function lockTill(): void {
         <router-link v-else :to="{ name: 'events' }" class="btn">Pick an event</router-link>
       </div>
 
+      <div v-for="a in lateApprovals" :key="a.id" class="stale locked" role="alert">
+        <Icon name="alert-triangle" :size="16" />
+        <span><strong>{{ lateApprovalText(a) }}</strong></span>
+        <button type="button" class="danger" @click="dismissLateApproval(a.id)">Dealt with</button>
+      </div>
       <p v-if="notice" :class="['notice', notice.kind]" role="status">{{ notice.text }}</p>
 
       <div v-if="lastSale" class="last">

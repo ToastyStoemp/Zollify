@@ -1,6 +1,7 @@
 import { defineModule, type Sdk } from '@zollify/sdk';
 import { clearSdk, setSdk } from './runtime';
 import { listenForRemotePayments } from './payments/satellite';
+import { loadLateApprovals } from './lib/late-approvals';
 import { allProviders, onActiveProviderChanged, defaultProviderId, setActiveProvider } from './payments/registry';
 
 /**
@@ -65,6 +66,9 @@ export default defineModule({
       minRole: 'admin',
       order: 100,
     });
+
+    // A card charged without a sale stays on the till's screen across reloads until someone deals with it.
+    void loadLateApprovals().catch(() => undefined);
 
     // A Carbon answers remote payment triggers from any screen; the subscription is released with the module.
     listenForRemotePayments();
